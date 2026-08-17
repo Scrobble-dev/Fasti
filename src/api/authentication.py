@@ -28,6 +28,16 @@ _INTEGRATION_SCOPE_RULES = {
         "GET": "progress:read",
         "HEAD": "progress:read",
     },
+    "api_watchlist": {
+        "GET": "watchlist:read",
+        "HEAD": "watchlist:read",
+        "PUT": "watchlist:write",
+        "DELETE": "watchlist:write",
+    },
+    "api_watchlist_changes": {
+        "GET": "watchlist:read",
+        "HEAD": "watchlist:read",
+    },
 }
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
 _CLIENT_ID_DIGEST_LENGTH = 24
