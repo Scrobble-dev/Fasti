@@ -2,7 +2,6 @@ import json
 import logging
 from http import HTTPStatus as HTTP  # noqa: N814
 
-from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
 from django.http import JsonResponse
 from django.template.response import ContentNotRenderedError, TemplateResponse
