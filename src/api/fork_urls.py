@@ -4,6 +4,7 @@ from django.urls import re_path
 
 from . import (
     fork_views,
+    fork_views_capabilities,
     fork_views_discover,
     fork_views_integrations,
     fork_views_lists,
@@ -17,6 +18,7 @@ from . import (
     fork_views_statistics,
     fork_views_tracking,
     fork_views_users,
+    fork_views_watched,
 )
 
 urlpatterns = [
@@ -311,6 +313,11 @@ urlpatterns = [
         name="api_export_template",
     ),
     re_path(
+        r"^integrations/capabilities/?$",
+        fork_views_capabilities.IntegrationCapabilitiesView.as_view(),
+        name="api_integration_capabilities",
+    ),
+    re_path(
         r"^playback/progress/?$",
         fork_views_playback.PlaybackProgressView.as_view(),
         name="api_playback_progress",
@@ -329,6 +336,11 @@ urlpatterns = [
         r"^watchlist/changes/?$",
         fork_views_saved_media.SavedMediaChangesView.as_view(),
         name="api_watchlist_changes",
+    ),
+    re_path(
+        r"^watched/?$",
+        fork_views_watched.WatchedStateView.as_view(),
+        name="api_watched_state",
     ),
     re_path(
         r"^scrobble/?$",
