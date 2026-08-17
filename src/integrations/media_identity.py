@@ -35,10 +35,11 @@ class ExternalIdentityError(ValueError):
 def normalize_external_ids(raw_ids) -> dict[str, str]:
     """Normalize bounded provider IDs without accepting nested or guessed identity."""
     if not isinstance(raw_ids, dict):
+        message = "ids must be an object with at least one supported provider identifier."
         raise ExternalIdentityError(
             "missing_media_identity",
             "ids",
-            "ids must be an object with at least one supported provider identifier.",
+            message,
         )
 
     normalized = {}
@@ -47,31 +48,37 @@ def normalize_external_ids(raw_ids) -> dict[str, str]:
         if value is None or value == "":
             continue
         if isinstance(value, bool) or not isinstance(value, (str, int)):
+            message = f"ids.{namespace} must be a string or integer."
             raise ExternalIdentityError(
                 "invalid_media_identity",
                 f"ids.{namespace}",
-                f"ids.{namespace} must be a string or integer.",
+                message,
             )
         value = str(value).strip()
         if not value:
+            message = f"ids.{namespace} must not be empty."
             raise ExternalIdentityError(
                 "invalid_media_identity",
                 f"ids.{namespace}",
-                f"ids.{namespace} must not be empty.",
+                message,
             )
         if len(value) > MAX_EXTERNAL_ID_LENGTH:
+            message = (
+                f"ids.{namespace} must be {MAX_EXTERNAL_ID_LENGTH} characters or fewer."
+            )
             raise ExternalIdentityError(
                 "invalid_media_identity",
                 f"ids.{namespace}",
-                f"ids.{namespace} must be {MAX_EXTERNAL_ID_LENGTH} characters or fewer.",
+                message,
             )
         normalized[namespace] = value
 
     if not normalized:
+        message = "ids must contain at least one supported provider identifier."
         raise ExternalIdentityError(
             "missing_media_identity",
             "ids",
-            "ids must contain at least one supported provider identifier.",
+            message,
         )
     return normalized
 
