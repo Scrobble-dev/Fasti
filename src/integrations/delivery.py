@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_IDEMPOTENCY_KEY_LENGTH = 128
 _RESERVED_RESPONSE_STATUS = 0
+_ASCII_VISIBLE_MIN = 0x21
+_ASCII_VISIBLE_MAX = 0x7E
 
 
 def calculate_payload_digest(payload: Any) -> str:
@@ -82,7 +84,10 @@ def _validate_client_event_id(client_event_id: str):
             f"Idempotency-Key must be {_MAX_IDEMPOTENCY_KEY_LENGTH} characters or fewer.",
             HTTP.BAD_REQUEST,
         )
-    if any(ord(char) < 0x21 or ord(char) > 0x7E for char in client_event_id):
+    if any(
+        ord(char) < _ASCII_VISIBLE_MIN or ord(char) > _ASCII_VISIBLE_MAX
+        for char in client_event_id
+    ):
         return _error_response(
             "invalid",
             "invalid_idempotency_key",
