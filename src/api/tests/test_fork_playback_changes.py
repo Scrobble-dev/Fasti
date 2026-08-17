@@ -7,6 +7,8 @@ from integrations.models import IntegrationToken
 
 from .base import FloppyApiTestCase
 
+_CLIENT_ID_DIGEST_LENGTH = 24
+
 
 class PlaybackProgressChangesTests(FloppyApiTestCase):
     """Verify snapshot checkpoints and ordered movie/episode progress changes."""
@@ -159,13 +161,15 @@ class PlaybackProgressChangesTests(FloppyApiTestCase):
             scopes=["progress:read", "progress:write"],
         )
         headers = {"HTTP_X_API_KEY": raw_token}
+        client_id = f"token:{token.token_digest[:_CLIENT_ID_DIGEST_LENGTH]}"
         checkpoint = self.call_api(
             "get",
             "api_playback_progress_changes",
             headers=headers,
         )
         self.assertEqual(checkpoint.status_code, HTTP.OK)
-        self.assertEqual(checkpoint.data["client_id"], f"token-{token.pk}")
+        self.assertEqual(checkpoint.data["client_id"], client_id)
+        self.assertNotIn(str(token.pk), checkpoint.data["client_id"])
 
         write = self._put_movie_progress(240, headers=headers)
         self.assertEqual(write.status_code, HTTP.OK)
@@ -176,7 +180,7 @@ class PlaybackProgressChangesTests(FloppyApiTestCase):
             headers=headers,
         )
         self.assertEqual(delta.status_code, HTTP.OK)
-        self.assertEqual(delta.data["results"][0]["source_client_id"], f"token-{token.pk}")
+        self.assertEqual(delta.data["results"][0]["source_client_id"], client_id)
 
     def test_missing_progress_read_scope_is_denied(self):
         """A token without progress:read cannot consume the change feed."""
