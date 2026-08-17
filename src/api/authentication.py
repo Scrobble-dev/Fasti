@@ -38,6 +38,10 @@ _INTEGRATION_SCOPE_RULES = {
         "GET": "watchlist:read",
         "HEAD": "watchlist:read",
     },
+    "api_watched_state": {
+        "GET": "watched:read",
+        "HEAD": "watched:read",
+    },
 }
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
 _CLIENT_ID_DIGEST_LENGTH = 24
