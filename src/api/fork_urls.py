@@ -10,6 +10,7 @@ from . import (
     fork_views_metadata,
     fork_views_music,
     fork_views_playback,
+    fork_views_playback_changes,
     fork_views_podcast,
     fork_views_scrobble,
     fork_views_statistics,
@@ -312,6 +313,11 @@ urlpatterns = [
         r"^playback/progress/?$",
         fork_views_playback.PlaybackProgressView.as_view(),
         name="api_playback_progress",
+    ),
+    re_path(
+        r"^playback/progress/changes/?$",
+        fork_views_playback_changes.PlaybackProgressChangesView.as_view(),
+        name="api_playback_progress_changes",
     ),
     re_path(
         r"^scrobble/?$",

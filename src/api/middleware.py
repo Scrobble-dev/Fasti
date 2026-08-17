@@ -6,6 +6,11 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.http import JsonResponse
 from django.template.response import ContentNotRenderedError, TemplateResponse
 
+from app.playback_context import (
+    reset_playback_source_client_id,
+    set_playback_source_client_id,
+)
+
 logger = logging.getLogger(__name__)
 
 _SENSITIVE_ERROR_KEYS = {
@@ -23,22 +28,26 @@ class ApiJsonErrorMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):  # noqa: D102
-        response = self.get_response(request)
-        path = self._get_request_path(request)
+        context_token = set_playback_source_client_id("")
+        try:
+            response = self.get_response(request)
+            path = self._get_request_path(request)
 
-        if path.startswith("/api/") and response is not None:
-            response = self._handle_template_response(response, path)
-            status = getattr(response, "status_code", HTTP.OK)
-            content_type = self._get_content_type(response)
-
-            if status >= HTTP.BAD_REQUEST and "application/json" in content_type:
-                response = self._sanitize_json_error_response(response, status, path)
+            if path.startswith("/api/") and response is not None:
+                response = self._handle_template_response(response, path)
+                status = getattr(response, "status_code", HTTP.OK)
                 content_type = self._get_content_type(response)
 
-            if self._should_convert_to_json(status, content_type):
-                return self._build_json_error_response(status)
+                if status >= HTTP.BAD_REQUEST and "application/json" in content_type:
+                    response = self._sanitize_json_error_response(response, status, path)
+                    content_type = self._get_content_type(response)
 
-        return response
+                if self._should_convert_to_json(status, content_type):
+                    return self._build_json_error_response(status)
+
+            return response
+        finally:
+            reset_playback_source_client_id(context_token)
 
     def _get_request_path(self, request):
         """Safely extract the request path."""

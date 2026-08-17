@@ -9,6 +9,7 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import BasePermission
 
+from app.playback_context import set_playback_source_client_id
 from integrations.models import IntegrationToken
 from users.models import User
 
@@ -22,6 +23,10 @@ _INTEGRATION_SCOPE_RULES = {
         "HEAD": "progress:read",
         "PUT": "progress:write",
         "DELETE": "progress:write",
+    },
+    "api_playback_progress_changes": {
+        "GET": "progress:read",
+        "HEAD": "progress:read",
     },
 }
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
@@ -84,6 +89,8 @@ def authenticate_token(raw_token: str, request=None, required_scope=None):
             raise AuthenticationFailed(msg)
 
         _record_token_use(integration_token)
+        if request is not None:
+            set_playback_source_client_id(f"token-{integration_token.pk}")
         return (integration_token.user, integration_token)
 
     try:
@@ -91,6 +98,8 @@ def authenticate_token(raw_token: str, request=None, required_scope=None):
     except User.DoesNotExist:
         msg = "Invalid token"
         raise AuthenticationFailed(msg) from None
+    if request is not None:
+        set_playback_source_client_id("legacy")
     return (user, None)
 
 
