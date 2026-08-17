@@ -3,7 +3,15 @@ from http import HTTPStatus as HTTP  # noqa: N814
 
 from django.utils import timezone
 
-from app.models import Episode, Item, MediaTypes, Movie, PlaybackProgress, Sources, Status
+from app.models import (
+    Episode,
+    Item,
+    MediaTypes,
+    Movie,
+    PlaybackProgress,
+    Sources,
+    Status,
+)
 from integrations.models import IntegrationToken
 
 from .base import FloppyApiTestCase
