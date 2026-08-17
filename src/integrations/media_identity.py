@@ -32,15 +32,16 @@ class ExternalIdentityError(ValueError):
     message: str
 
 
+def _identity_error(code: str, param: str, message: str) -> ExternalIdentityError:
+    """Build one stable validation error without repeating raise-site plumbing."""
+    return ExternalIdentityError(code, param, message)
+
+
 def normalize_external_ids(raw_ids) -> dict[str, str]:
     """Normalize bounded provider IDs without accepting nested or guessed identity."""
     if not isinstance(raw_ids, dict):
         message = "ids must be an object with at least one supported provider identifier."
-        raise ExternalIdentityError(
-            "missing_media_identity",
-            "ids",
-            message,
-        )
+        raise _identity_error("missing_media_identity", "ids", message)
 
     normalized = {}
     for namespace in EXTERNAL_ID_FIELDS:
@@ -49,7 +50,7 @@ def normalize_external_ids(raw_ids) -> dict[str, str]:
             continue
         if isinstance(value, bool) or not isinstance(value, (str, int)):
             message = f"ids.{namespace} must be a string or integer."
-            raise ExternalIdentityError(
+            raise _identity_error(
                 "invalid_media_identity",
                 f"ids.{namespace}",
                 message,
@@ -57,7 +58,7 @@ def normalize_external_ids(raw_ids) -> dict[str, str]:
         value = str(value).strip()
         if not value:
             message = f"ids.{namespace} must not be empty."
-            raise ExternalIdentityError(
+            raise _identity_error(
                 "invalid_media_identity",
                 f"ids.{namespace}",
                 message,
@@ -66,7 +67,7 @@ def normalize_external_ids(raw_ids) -> dict[str, str]:
             message = (
                 f"ids.{namespace} must be {MAX_EXTERNAL_ID_LENGTH} characters or fewer."
             )
-            raise ExternalIdentityError(
+            raise _identity_error(
                 "invalid_media_identity",
                 f"ids.{namespace}",
                 message,
@@ -75,11 +76,7 @@ def normalize_external_ids(raw_ids) -> dict[str, str]:
 
     if not normalized:
         message = "ids must contain at least one supported provider identifier."
-        raise ExternalIdentityError(
-            "missing_media_identity",
-            "ids",
-            message,
-        )
+        raise _identity_error("missing_media_identity", "ids", message)
     return normalized
 
 
