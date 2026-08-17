@@ -290,7 +290,11 @@ class IntegrationTest(StaticLiveServerTestCase):
             modal.locator('input[name="end_date"]'),
             f"{fixed_date.isoformat()}T12:00",
         )
-        self.page.get_by_role("button", name="Add", exact=True).click()
+        with self.page.expect_request(
+            lambda request: request.method == "POST" and "/episode_save" in request.url,
+        ) as save_request:
+            self.page.get_by_role("button", name="Add", exact=True).click()
+        save_request.value.response()
 
         expect(self.page.get_by_role("main")).to_contain_text(
             f"Ended: {fixed_date.strftime(datetime_format)}",
@@ -311,7 +315,11 @@ class IntegrationTest(StaticLiveServerTestCase):
             first_watch_operation_id,
         )
         self.set_date_input(modal.locator('input[name="end_date"]'), f"{today}T12:00")
-        self.page.get_by_role("button", name="Add", exact=True).click()
+        with self.page.expect_request(
+            lambda request: request.method == "POST" and "/episode_save" in request.url,
+        ) as save_request:
+            self.page.get_by_role("button", name="Add", exact=True).click()
+        save_request.value.response()
         expect(self.page.get_by_role("main")).to_contain_text(f"Ended: {today}")
 
     def test_tv_completed(self):
@@ -429,7 +437,7 @@ class IntegrationTest(StaticLiveServerTestCase):
         self,
         mock_get_metadata,
     ):
-        """Shared modal close should survive split flows and release-date use."""
+        """Date picker shortcuts support release dates and clearing both dates."""
         mock_get_metadata.return_value = {
             "media_id": "238",
             "title": "Test Movie",
@@ -496,6 +504,7 @@ class IntegrationTest(StaticLiveServerTestCase):
         self.page.get_by_role("button", name="More tracking actions").click()
         self.page.get_by_role("button", name="Add new entry").click()
         expect(create_modal).to_be_visible()
+        self.page.set_viewport_size({"width": 375, "height": 812})
 
         end_date_input = create_modal.locator('input[name="end_date"]')
         end_time_segment = "14:25"
@@ -506,6 +515,9 @@ class IntegrationTest(StaticLiveServerTestCase):
             "dialog",
             name="End date picker",
         )
+        expect(
+            end_date_picker.get_by_role("button", name="None", exact=True),
+        ).to_be_visible()
         time_selects = end_date_picker.locator("select")
         time_selects.nth(0).select_option("14")
         time_selects.nth(1).select_option("25")
@@ -518,8 +530,28 @@ class IntegrationTest(StaticLiveServerTestCase):
         ).strftime("%Y-%m-%dT%H:%M")
         expect(start_date_input).to_have_value(expected_start_date)
 
-        create_modal.locator("button[type='button']").first.click()
+        end_date_picker.get_by_role("button", name="None", exact=True).click()
+        expect(end_date_input).to_have_value("")
+
+        create_modal.get_by_role("button", name="Start date picker").click()
+        start_date_picker = create_modal.get_by_role(
+            "dialog",
+            name="Start date picker",
+        )
+        start_date_picker.get_by_role("button", name="None", exact=True).click()
+        expect(start_date_input).to_have_value("")
+
+        with self.page.expect_request(
+            lambda request: request.method == "POST" and "/media_save" in request.url,
+        ) as save_request:
+            create_modal.get_by_role("button", name="Add", exact=True).click()
+        save_request.value.response()
         expect(self.page.locator("[data-track-modal-root]:visible")).to_have_count(0)
+
+        new_movie = Movie.objects.filter(item=item, user=self.user).order_by("-id").first()
+        self.assertIsNotNone(new_movie)
+        self.assertIsNone(new_movie.start_date)
+        self.assertIsNone(new_movie.end_date)
 
         self.page.get_by_role("button", name="Completed", exact=True).click()
         edit_modal = self.page.locator("[data-track-modal-root]:visible").first
@@ -598,3 +630,102 @@ class IntegrationTest(StaticLiveServerTestCase):
         expect(start_date_input).to_have_value(
             (end_dt - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M"),
         )
+
+    def test_statistics_status_composition_legend_scrolls_without_page_overflow(self):
+        """Status legend scrolls inside its card at responsive widths."""
+        statuses = (
+            Status.COMPLETED.value,
+            Status.IN_PROGRESS.value,
+            Status.PLANNING.value,
+            Status.PAUSED.value,
+            Status.DROPPED.value,
+        )
+        for index, status in enumerate(statuses):
+            item = Item.objects.create(
+                media_id=f"status-layout-{index}",
+                source=Sources.MANUAL.value,
+                media_type=MediaTypes.MOVIE.value,
+                title=f"Status layout {index}",
+            )
+            Movie.objects.create(
+                item=item,
+                user=self.user,
+                status=status,
+                progress=1 if status == Status.COMPLETED.value else 0,
+            )
+
+        self.page.set_viewport_size({"width": 1024, "height": 774})
+        self.page.goto(
+            self.live_server_url
+            + reverse("statistics")
+            + "?start-date=all&end-date=all&compare=none",
+        )
+
+        legend = self.page.locator("#statusCompositionLegend")
+        expect(legend).to_be_visible()
+        expect(legend.locator(":scope > div")).to_have_count(5)
+
+        layout = legend.evaluate(
+            """element => ({
+                overflowX: getComputedStyle(element).overflowX,
+                overflowY: getComputedStyle(element).overflowY,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+            })""",
+        )
+        self.assertEqual(layout["overflowX"], "auto")
+        self.assertEqual(layout["overflowY"], "hidden")
+        self.assertGreater(layout["scrollWidth"], layout["clientWidth"])
+
+        page_layout = self.page.evaluate(
+            """() => ({
+                viewportWidth: window.innerWidth,
+                documentWidth: document.documentElement.scrollWidth,
+                bodyWidth: document.body.scrollWidth,
+                chartWidth: document.getElementById("statusCompositionChart")
+                    ?.getBoundingClientRect().width,
+            })""",
+        )
+        self.assertLessEqual(page_layout["documentWidth"], page_layout["viewportWidth"])
+        self.assertLessEqual(page_layout["bodyWidth"], page_layout["viewportWidth"])
+        self.assertEqual(page_layout["chartWidth"], 150)
+
+        self.page.get_by_role("button", name="All media", exact=True).click()
+        self.page.get_by_role("button", name="Movies", exact=True).click()
+        expect(self.page.locator("#statusCompositionSubtitle")).to_have_text(
+            "Movie status breakdown.",
+        )
+        filtered_layout = legend.evaluate(
+            """element => ({
+                overflowX: getComputedStyle(element).overflowX,
+                overflowY: getComputedStyle(element).overflowY,
+                clientWidth: element.clientWidth,
+                scrollWidth: element.scrollWidth,
+            })""",
+        )
+        self.assertEqual(filtered_layout["overflowX"], "auto")
+        self.assertEqual(filtered_layout["overflowY"], "hidden")
+        self.assertGreater(filtered_layout["scrollWidth"], filtered_layout["clientWidth"])
+
+        self.page.set_viewport_size({"width": 390, "height": 774})
+        mobile_layout = self.page.evaluate(
+            """() => ({
+                viewportWidth: window.innerWidth,
+                documentWidth: document.documentElement.scrollWidth,
+                bodyWidth: document.body.scrollWidth,
+            })""",
+        )
+        self.assertLessEqual(mobile_layout["documentWidth"], mobile_layout["viewportWidth"])
+        self.assertLessEqual(mobile_layout["bodyWidth"], mobile_layout["viewportWidth"])
+
+        self.page.set_viewport_size({"width": 1440, "height": 774})
+        desktop_layout = self.page.evaluate(
+            """() => ({
+                viewportWidth: window.innerWidth,
+                documentWidth: document.documentElement.scrollWidth,
+                chartWidth: document.getElementById("statusCompositionChart")
+                    ?.getBoundingClientRect().width,
+            })""",
+        )
+        self.assertLessEqual(desktop_layout["documentWidth"], desktop_layout["viewportWidth"])
+        self.assertEqual(desktop_layout["chartWidth"], 150)

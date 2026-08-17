@@ -303,6 +303,8 @@ Models/migrations and divergent UI normally require manual adaptation. Provider 
 - `docs/agents/pocketcasts_workflow.md`: Pocket Casts import/schedule workflow details.
 - `docs/agents/migration_sync_playbook.md`: hard-gate flow for adapting accepted upstream migration outcomes to Floppy's current graph.
 - `docs/agents/view_authentication.md`: guide for view authentication and declaring public route exemptions.
+- `docs/architecture/log-redaction.md`: the log boundary contract — where credentials are removed, what the rules match, and what they do not cover.
+- `docs/architecture/theming.md`: the theme resolution contract and the six theme states any colour change must hold.
 
 
 ## Local Commands
@@ -339,6 +341,11 @@ Run tests through `scripts/test.sh`, in this priority order:
 
 Notes:
 - Quick confidence: `uv run --no-sync ruff check src`
+- Deployment confidence: `uv run --no-sync python src/manage.py floppy_preflight` — paths,
+  settings, database, migrations and Redis in one pass. Reads only, so it is safe against a
+  running instance. Add `--json` for a machine-readable report. This is the fastest way to tell
+  a broken environment from a broken change, and it is what a bug report should carry when
+  Floppy will not start.
 - Migration sync confidence: `uv run --no-sync python src/manage.py check_migration_hygiene --strict`
 - Migration upgrade replay: `scripts/replay_upgrade_matrix.sh --from-tag <previous_release_tag> --to-ref latest --db sqlite,postgres --with-drift-scenarios`
 - Tag vocabulary: `slow` and `network` are the exclusion tags used by the fast
@@ -368,5 +375,6 @@ Notes:
 
 ## Security / Safety Notes
 - `.env` contains secrets and API keys; do not commit it.
+- A process-wide log record factory redacts credentials before any handler writes them (`src/app/log_safety.py`, installed by `src/config/__init__.py`). Do not move the installation later in the start sequence, and do not widen its `except` clause: both faults are silent. See `docs/architecture/log-redaction.md`.
 - Docker entrypoint runs migrations and changes ownership inside the container (`entrypoint.sh`).
 - Docker compose stores data in `./db`; local dev SQLite lives under `src/db/`.
