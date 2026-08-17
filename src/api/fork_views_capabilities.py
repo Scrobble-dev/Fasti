@@ -7,6 +7,10 @@ from rest_framework import views as drf_views
 from rest_framework.response import Response
 
 from integrations.media_identity import EXTERNAL_ID_FIELDS
+from integrations.scopes import (
+    INTEGRATION_SCOPE_DESCRIPTIONS,
+    NUVIO_RECOMMENDED_SCOPES,
+)
 
 _CONTRACT_VERSION = "1"
 _CURSOR_TTL_SECONDS = 30 * 24 * 60 * 60
@@ -38,10 +42,19 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     "methods": ["bearer", "x-api-key"],
                     "scoped_credentials": True,
                     "legacy_account_token_compatible": True,
+                    "available_scopes": INTEGRATION_SCOPE_DESCRIPTIONS,
+                    "recommended_nuvio_scopes": list(NUVIO_RECOMMENDED_SCOPES),
+                    "token_management": {
+                        "path": "/api/v1/integration-tokens/",
+                        "session_only": True,
+                        "secret_shown_once": True,
+                        "revocation_preserves_record": True,
+                    },
                 },
                 "identity": {
                     "namespaces": list(EXTERNAL_ID_FIELDS),
                     "authoritative_title_matching": False,
+                    "all_supplied_ids_must_agree": True,
                 },
                 "resources": {
                     "scrobble": {
@@ -73,8 +86,10 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                             "scope": "progress:read",
                             "cursor_ttl_seconds": _CURSOR_TTL_SECONDS,
                             "page_max": _CHANGE_PAGE_MAX,
+                            "media_types": ["movie", "episode"],
                         },
-                        "media_types": ["movie", "episode", "podcast"],
+                        "media_types": ["movie", "episode"],
+                        "snapshot_only_media_types": ["podcast"],
                     },
                     "saved_media": {
                         "snapshot": {
@@ -126,6 +141,7 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     "checkpoint_then_snapshot_then_delta": True,
                     "delete_requires_explicit_event": True,
                     "cache_miss_is_delete": False,
+                    "offline_reconnect_requires_snapshot_on_expired_cursor": True,
                 },
             }
         )
