@@ -123,6 +123,7 @@ SpecialModels = [
     "DiscoverRowCache",
     "DeletedMedia",
     "PlaybackProgress",
+    "PlaybackProgressChange",
 ]
 for model in app_models:
     if (
