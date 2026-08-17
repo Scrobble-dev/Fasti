@@ -243,9 +243,10 @@ class ScrobbleView(drf_views.APIView):
             }
             try:
                 GenericScrobbleProcessor().process_payload(payload, request.user)
-            except Exception as e:
+            except Exception:
+                logger.exception("Failed to process generic scrobble payload.")
                 return Response(
-                    {"detail": "Could not resolve media.", "errors": str(e)},
+                    {"detail": "Could not resolve media."},
                     status=HTTP.NOT_FOUND,
                 )
 
