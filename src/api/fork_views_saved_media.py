@@ -38,6 +38,7 @@ _DIRECT_SOURCES = {
     "tvdb": Sources.TVDB.value,
     "mal": Sources.MAL.value,
 }
+_MAX_EXTERNAL_ID_LENGTH = 500
 _CURSOR_VERSION = 1
 _CURSOR_RESOURCE = "saved_media"
 _CURSOR_SALT = "api.saved-media-changes"
@@ -65,12 +66,12 @@ _WRITE_SCHEMA = {
         "ids": {
             "type": "object",
             "properties": {
-                "tmdb": {"type": "string", "nullable": True},
-                "imdb": {"type": "string", "nullable": True},
-                "tvdb": {"type": "string", "nullable": True},
-                "mal": {"type": "string", "nullable": True},
-                "anilist": {"type": "string", "nullable": True},
-                "kitsu": {"type": "string", "nullable": True},
+                namespace: {
+                    "type": "string",
+                    "nullable": True,
+                    "maxLength": _MAX_EXTERNAL_ID_LENGTH,
+                }
+                for namespace in _EXTERNAL_ID_FIELDS
             },
         },
     },
@@ -80,7 +81,6 @@ _CHANGE_SCHEMA = {
     "properties": {
         "sequence_id": {"type": "integer"},
         "operation": {"type": "string", "enum": ["add", "remove"]},
-        "item_id": {"type": "integer"},
         "media_type": {"type": "string"},
         "source": {"type": "string"},
         "media_id": {"type": "string"},
@@ -112,7 +112,7 @@ def _item_ids(item: Item) -> dict[str, str]:
     stored = item.provider_external_ids or {}
     for namespace, field in _EXTERNAL_ID_FIELDS.items():
         value = stored.get(field)
-        if isinstance(value, (str, int)) and str(value):
+        if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value):
             result[namespace] = str(value)
     for namespace, source in _DIRECT_SOURCES.items():
         if item.source == source and item.media_id:
@@ -120,44 +120,77 @@ def _item_ids(item: Item) -> dict[str, str]:
     return result
 
 
-def _validate_identity(data):
-    """Return a public error when saved-media identity is incomplete."""
+def _parse_identity(data):
+    """Return normalized exact media identity or a stable public error."""
     media_type = data.get("media_type") if isinstance(data, dict) else None
     if media_type not in _SUPPORTED_MEDIA_TYPES:
-        return _public_error(
+        return None, None, _public_error(
             "unsupported_media_type",
             f"media_type must be one of: {', '.join(_SUPPORTED_MEDIA_TYPES)}.",
             HTTP.BAD_REQUEST,
             param="media_type",
         )
-    ids = data.get("ids") or {}
-    if not isinstance(ids, dict) or not any(ids.get(key) for key in _EXTERNAL_ID_FIELDS):
-        return _public_error(
+
+    raw_ids = data.get("ids") if isinstance(data, dict) else None
+    if not isinstance(raw_ids, dict):
+        return None, None, _public_error(
+            "missing_media_identity",
+            "ids must be an object with at least one supported provider identifier.",
+            HTTP.BAD_REQUEST,
+            param="ids",
+        )
+
+    normalized = {}
+    for namespace in _EXTERNAL_ID_FIELDS:
+        value = raw_ids.get(namespace)
+        if value is None or value == "":
+            continue
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            return None, None, _public_error(
+                "invalid_media_identity",
+                f"ids.{namespace} must be a string or integer.",
+                HTTP.BAD_REQUEST,
+                param=f"ids.{namespace}",
+            )
+        value = str(value).strip()
+        if not value:
+            return None, None, _public_error(
+                "invalid_media_identity",
+                f"ids.{namespace} must not be empty.",
+                HTTP.BAD_REQUEST,
+                param=f"ids.{namespace}",
+            )
+        if len(value) > _MAX_EXTERNAL_ID_LENGTH:
+            return None, None, _public_error(
+                "invalid_media_identity",
+                f"ids.{namespace} must be {_MAX_EXTERNAL_ID_LENGTH} characters or fewer.",
+                HTTP.BAD_REQUEST,
+                param=f"ids.{namespace}",
+            )
+        normalized[namespace] = value
+
+    if not normalized:
+        return None, None, _public_error(
             "missing_media_identity",
             "ids must contain at least one supported provider identifier.",
             HTTP.BAD_REQUEST,
             param="ids",
         )
-    return None
+    return media_type, normalized, None
 
 
 def _find_existing_item(media_type: str, ids: dict) -> Item | None:
     """Resolve exact persisted aliases without title matching."""
     queryset = Item.objects.filter(media_type=media_type)
     identity_filter = Q()
-    has_filter = False
     for namespace, field in _EXTERNAL_ID_FIELDS.items():
         value = ids.get(namespace)
-        if value is None or value == "":
+        if value is None:
             continue
-        value = str(value)
         identity_filter |= Q(**{f"provider_external_ids__{field}": value})
         source = _DIRECT_SOURCES.get(namespace)
         if source:
             identity_filter |= Q(source=source, media_id=value)
-        has_filter = True
-    if not has_filter:
-        return None
     return queryset.filter(identity_filter).order_by("id").first()
 
 
@@ -174,7 +207,7 @@ def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool) -> It
         return ensure_item_metadata(
             user,
             MediaTypes.ANIME.value,
-            str(mal_id),
+            mal_id,
             Sources.MAL.value,
         ).item
 
@@ -305,7 +338,6 @@ def _serialize_change(change: SavedMediaChange) -> dict:
     return {
         "sequence_id": change.sequence_id,
         "operation": change.operation,
-        "item_id": change.item_id,
         "media_type": change.media_type,
         "source": change.source,
         "media_id": change.media_id,
@@ -346,11 +378,9 @@ class SavedMediaView(drf_views.APIView):
         """Add one explicit saved-media membership."""
 
         def _execute():
-            error = _validate_identity(request.data)
+            media_type, ids, error = _parse_identity(request.data)
             if error:
                 return error
-            media_type = request.data["media_type"]
-            ids = request.data.get("ids") or {}
             try:
                 item = _resolve_saved_item(request.user, media_type, ids, create=True)
             except Exception:
@@ -388,11 +418,9 @@ class SavedMediaView(drf_views.APIView):
         """Remove one explicit saved-media membership."""
 
         def _execute():
-            error = _validate_identity(request.data)
+            media_type, ids, error = _parse_identity(request.data)
             if error:
                 return error
-            media_type = request.data["media_type"]
-            ids = request.data.get("ids") or {}
             try:
                 item = _resolve_saved_item(request.user, media_type, ids, create=False)
             except Exception:
