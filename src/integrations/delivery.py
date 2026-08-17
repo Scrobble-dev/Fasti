@@ -19,6 +19,7 @@ _MAX_IDEMPOTENCY_KEY_LENGTH = 128
 _RESERVED_RESPONSE_STATUS = 0
 _ASCII_VISIBLE_MIN = 0x21
 _ASCII_VISIBLE_MAX = 0x7E
+_MAX_RECEIPT_RESERVATION_ATTEMPTS = 2
 
 
 def calculate_payload_digest(payload: Any) -> str:
@@ -128,6 +129,84 @@ def _receipt_result(receipt, digest: str, client_event_id: str):
     return (Response(replay_body, status=receipt.response_status_code), True)
 
 
+def _receipt_belongs_to_client(receipt, token: IntegrationToken | None) -> bool:
+    """Return True when a receipt belongs to the authenticated client."""
+    expected_token_id = token.pk if token is not None else None
+    return receipt.token_id == expected_token_id
+
+
+def _client_receipt_id(client_event_id: str, token: IntegrationToken | None) -> str:
+    """Return the fallback storage key for a client whose public key collides."""
+    namespace = f"token-{token.pk}" if token is not None else "legacy"
+    return f"{namespace}:{client_event_id}"
+
+
+def _find_receipt_or_slot(user, client_event_id: str, token: IntegrationToken | None):
+    """Return this client's receipt, or a compatible free storage key.
+
+    Receipts written before client namespacing used the public key directly. Keep
+    reading those rows. Only use the server-derived fallback key when another
+    authenticated client for the same user already owns the public key.
+    """
+    public_receipt = IntegrationEventReceipt.objects.filter(
+        user=user,
+        client_event_id=client_event_id,
+    ).first()
+    if public_receipt is not None and _receipt_belongs_to_client(public_receipt, token):
+        return public_receipt, client_event_id
+
+    namespaced_id = _client_receipt_id(client_event_id, token)
+    namespaced_receipt = IntegrationEventReceipt.objects.filter(
+        user=user,
+        client_event_id=namespaced_id,
+    ).first()
+    if namespaced_receipt is not None and _receipt_belongs_to_client(namespaced_receipt, token):
+        return namespaced_receipt, namespaced_id
+
+    if public_receipt is None:
+        return None, client_event_id
+    return None, namespaced_id
+
+
+def _reserve_receipt(
+    user,
+    client_event_id: str,
+    digest: str,
+    token: IntegrationToken | None,
+):
+    """Reserve one client delivery key, retrying only for a namespace collision."""
+    receipt, storage_id = _find_receipt_or_slot(user, client_event_id, token)
+    if receipt is not None:
+        return receipt, False
+
+    for _attempt in range(_MAX_RECEIPT_RESERVATION_ATTEMPTS):
+        try:
+            with transaction.atomic():
+                receipt = IntegrationEventReceipt.objects.create(
+                    user=user,
+                    token=token,
+                    client_event_id=storage_id,
+                    payload_digest=digest,
+                    response_status_code=_RESERVED_RESPONSE_STATUS,
+                    response_body={},
+                )
+            return receipt, True
+        except IntegrityError:
+            receipt, next_storage_id = _find_receipt_or_slot(
+                user,
+                client_event_id,
+                token,
+            )
+            if receipt is not None:
+                return receipt, False
+            if next_storage_id == storage_id:
+                raise
+            storage_id = next_storage_id
+
+    msg = "Could not reserve an idempotency receipt after a concurrent collision."
+    raise IntegrityError(msg)
+
+
 def get_or_record_receipt(
     user: Any,
     client_event_id: str,
@@ -149,31 +228,13 @@ def get_or_record_receipt(
         return (validation_error, False)
 
     digest = calculate_payload_digest(payload)
-
-    receipt = IntegrationEventReceipt.objects.filter(
-        user=user,
-        client_event_id=client_event_id,
-    ).first()
-    if receipt is not None:
-        return _receipt_result(receipt, digest, client_event_id)
-
-    try:
-        with transaction.atomic():
-            receipt = IntegrationEventReceipt.objects.create(
-                user=user,
-                token=token,
-                client_event_id=client_event_id,
-                payload_digest=digest,
-                response_status_code=_RESERVED_RESPONSE_STATUS,
-                response_body={},
-            )
-    except IntegrityError:
-        receipt = IntegrationEventReceipt.objects.filter(
-            user=user,
-            client_event_id=client_event_id,
-        ).first()
-        if receipt is None:
-            raise
+    receipt, created = _reserve_receipt(
+        user,
+        client_event_id,
+        digest,
+        token,
+    )
+    if not created:
         return _receipt_result(receipt, digest, client_event_id)
 
     # Keep provider/network work outside the reservation transaction. If execution
