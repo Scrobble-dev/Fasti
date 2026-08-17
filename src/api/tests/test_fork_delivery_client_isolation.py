@@ -9,6 +9,8 @@ from integrations.models import IntegrationEventReceipt, IntegrationToken
 
 from .base import FloppyApiTestCase
 
+_CLIENT_NAMESPACE_DIGEST_LENGTH = 24
+
 
 class DeliveryClientIsolationTests(FloppyApiTestCase):
     """Verify one user's integrations do not share idempotency state."""
@@ -60,8 +62,12 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
         self.assertEqual(receipts[0].token, token_one)
         self.assertEqual(
             receipts[1].client_event_id,
-            f"token-{token_two.pk}:shared-event",
+            (
+                f"token-{token_two.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:"
+                "shared-event"
+            ),
         )
+        self.assertNotIn(f"token-{token_two.pk}:", receipts[1].client_event_id)
         self.assertEqual(receipts[1].token, token_two)
 
         first_replay_execute = MagicMock()
@@ -128,7 +134,10 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
         self.assertTrue(
             IntegrationEventReceipt.objects.filter(
                 user=self.user1,
-                client_event_id=f"token-{token.pk}:shared-legacy-event",
+                client_event_id=(
+                    f"token-{token.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:"
+                    "shared-legacy-event"
+                ),
                 token=token,
             ).exists()
         )
