@@ -6,6 +6,7 @@ from . import (
     fork_views,
     fork_views_capabilities,
     fork_views_discover,
+    fork_views_integration_tokens,
     fork_views_integrations,
     fork_views_lists,
     fork_views_metadata,
@@ -311,6 +312,16 @@ urlpatterns = [
         r"^export/template/?$",
         fork_views_integrations.ExportTemplateView.as_view(),
         name="api_export_template",
+    ),
+    re_path(
+        r"^integration-tokens/?$",
+        fork_views_integration_tokens.IntegrationTokenManagementView.as_view(),
+        name="api_integration_tokens",
+    ),
+    re_path(
+        r"^integration-tokens/(?P<token_id>\d+)/?$",
+        fork_views_integration_tokens.IntegrationTokenDetailView.as_view(),
+        name="api_integration_token_detail",
     ),
     re_path(
         r"^integrations/capabilities/?$",
