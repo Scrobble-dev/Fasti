@@ -1,15 +1,24 @@
+import json
 import logging
 from http import HTTPStatus as HTTP  # noqa: N814
 
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.http import JsonResponse
 from django.template.response import ContentNotRenderedError, TemplateResponse
 
 logger = logging.getLogger(__name__)
 
+_SENSITIVE_ERROR_KEYS = {
+    "debug_html_snippet",
+    "exception",
+    "stack",
+    "traceback",
+}
+
 
 class ApiJsonErrorMiddleware:
-    """Convert HTML error responses for API paths into JSON responses."""
+    """Convert API failures to stable JSON and remove raw exception details."""
 
     def __init__(self, get_response):  # noqa: D107
         self.get_response = get_response
@@ -23,8 +32,12 @@ class ApiJsonErrorMiddleware:
             status = getattr(response, "status_code", HTTP.OK)
             content_type = self._get_content_type(response)
 
+            if status >= HTTP.BAD_REQUEST and "application/json" in content_type:
+                response = self._sanitize_json_error_response(response, status, path)
+                content_type = self._get_content_type(response)
+
             if self._should_convert_to_json(status, content_type):
-                return self._build_json_error_response(response, status)
+                return self._build_json_error_response(status)
 
         return response
 
@@ -73,42 +86,56 @@ class ApiJsonErrorMiddleware:
             not content_type or "html" in content_type.lower()
         )
 
-    def _build_json_error_response(self, response, status):
-        """Build JSON error response."""
+    def _sanitize_json_error_response(self, response, status, path):
+        """Remove raw exception strings from rendered JSON error payloads."""
+        try:
+            payload = json.loads(response.content.decode("utf-8"))
+        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+            return response
+
+        if not isinstance(payload, dict):
+            return response
+
+        removed = False
+        errors = payload.get("errors")
+        if isinstance(errors, str):
+            payload.pop("errors", None)
+            removed = True
+
+        for key in _SENSITIVE_ERROR_KEYS:
+            if key in payload:
+                payload.pop(key, None)
+                removed = True
+
+        if not removed:
+            return response
+
+        logger.warning("Suppressed raw API error details for %s", path)
+        if hasattr(response, "data"):
+            response.data = payload
+        response.content = json.dumps(payload, cls=DjangoJSONEncoder).encode("utf-8")
+        response["Content-Length"] = str(len(response.content))
+        response.status_code = status
+        return response
+
+    def _build_json_error_response(self, status):
+        """Build a stable JSON error response without debug internals."""
         try:
             detail = HTTP(status).phrase
         except ValueError:
             detail = "Unknown status"
 
-        payload = {"detail": detail}
-
-        if settings.DEBUG and hasattr(response, "content"):
-            detail = self._extract_debug_detail(response)
-            if detail:
-                payload["debug_html_snippet"] = detail[:2000]
-
-        return JsonResponse(payload, status=status)
-
-    def _extract_debug_detail(self, response):
-        """Extract debug detail from response content."""
-        try:
-            return response.content.decode(errors="ignore")
-        except Exception:
-            return None
+        return JsonResponse({"detail": detail}, status=status)
 
     def process_exception(self, request, exception):
-        """Intercept unhandled exceptions for API paths and return JSON.
-
-        This prevents Django from rendering the HTML technical 500 page
-        (when DEBUG=True) for API calls.
-        """
+        """Intercept unhandled API exceptions without exposing their text."""
         path = self._get_request_path(request)
 
         if not path.startswith("/api/"):
             return None
 
         logger.exception("Unhandled exception during API request: %s", path)
-
-        detail = str(exception) if settings.DEBUG else "Internal server error."
-
-        return JsonResponse({"detail": detail}, status=HTTP.INTERNAL_SERVER_ERROR)
+        return JsonResponse(
+            {"detail": "Internal server error."},
+            status=HTTP.INTERNAL_SERVER_ERROR,
+        )
