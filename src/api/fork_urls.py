@@ -6,6 +6,7 @@ from . import (
     fork_views,
     fork_views_capabilities,
     fork_views_discover,
+    fork_views_integration_diagnostics,
     fork_views_integration_tokens,
     fork_views_integrations,
     fork_views_lists,
@@ -327,6 +328,11 @@ urlpatterns = [
         r"^integrations/capabilities/?$",
         fork_views_capabilities.IntegrationCapabilitiesView.as_view(),
         name="api_integration_capabilities",
+    ),
+    re_path(
+        r"^integrations/diagnostics/?$",
+        fork_views_integration_diagnostics.IntegrationDiagnosticsView.as_view(),
+        name="api_integration_diagnostics",
     ),
     re_path(
         r"^playback/progress/?$",
