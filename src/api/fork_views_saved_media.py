@@ -179,19 +179,28 @@ def _parse_identity(data):
     return media_type, normalized, None
 
 
+def _identity_filter(namespace: str, value: str) -> Q:
+    """Return the exact alias predicate for one provider identifier."""
+    field = _EXTERNAL_ID_FIELDS[namespace]
+    predicate = Q(**{f"provider_external_ids__{field}": value})
+    source = _DIRECT_SOURCES.get(namespace)
+    if source:
+        predicate |= Q(source=source, media_id=value)
+    return predicate
+
+
+def _item_matches_ids(item: Item, ids: dict[str, str]) -> bool:
+    """Return True only when every supplied identifier matches one Item."""
+    actual_ids = _item_ids(item)
+    return all(actual_ids.get(namespace) == value for namespace, value in ids.items())
+
+
 def _find_existing_item(media_type: str, ids: dict) -> Item | None:
-    """Resolve exact persisted aliases without title matching."""
+    """Resolve one Item only when all supplied exact aliases agree."""
     queryset = Item.objects.filter(media_type=media_type)
-    identity_filter = Q()
-    for namespace, field in _EXTERNAL_ID_FIELDS.items():
-        value = ids.get(namespace)
-        if value is None:
-            continue
-        identity_filter |= Q(**{f"provider_external_ids__{field}": value})
-        source = _DIRECT_SOURCES.get(namespace)
-        if source:
-            identity_filter |= Q(source=source, media_id=value)
-    return queryset.filter(identity_filter).order_by("id").first()
+    for namespace, value in ids.items():
+        queryset = queryset.filter(_identity_filter(namespace, value))
+    return queryset.order_by("id").first()
 
 
 def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool) -> Item | None:
@@ -204,22 +213,24 @@ def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool) -> It
         mal_id = ids.get("mal")
         if not mal_id:
             return None
-        return ensure_item_metadata(
+        hydrated = ensure_item_metadata(
             user,
             MediaTypes.ANIME.value,
             mal_id,
             Sources.MAL.value,
         ).item
+        return hydrated if _item_matches_ids(hydrated, ids) else None
 
     tmdb_id = resolve_show_tmdb_id(media_type, ids)
     if not tmdb_id:
         return None
-    return ensure_item_metadata(
+    hydrated = ensure_item_metadata(
         user,
         media_type,
         str(tmdb_id),
         Sources.TMDB.value,
     ).item
+    return hydrated if _item_matches_ids(hydrated, ids) else None
 
 
 def _serialize_membership(membership: SavedMediaMembership) -> dict:
