@@ -190,7 +190,6 @@ def _reserve_receipt(
                     response_status_code=_RESERVED_RESPONSE_STATUS,
                     response_body={},
                 )
-            return receipt, True
         except IntegrityError:
             receipt, next_storage_id = _find_receipt_or_slot(
                 user,
@@ -202,6 +201,8 @@ def _reserve_receipt(
             if next_storage_id == storage_id:
                 raise
             storage_id = next_storage_id
+        else:
+            return receipt, True
 
     msg = "Could not reserve an idempotency receipt after a concurrent collision."
     raise IntegrityError(msg)
