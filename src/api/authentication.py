@@ -1,7 +1,10 @@
 """Authentication classes for API requests."""
 
 import hashlib
+from datetime import timedelta
 
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import BasePermission
@@ -10,8 +13,50 @@ from integrations.models import IntegrationToken
 from users.models import User
 
 
-def authenticate_token(raw_token: str):
-    """Authenticate raw token against IntegrationToken or fallback to User.token."""
+_INTEGRATION_SCOPE_RULES = {
+    "api_scrobble": {
+        "POST": "scrobble:write",
+    },
+    "api_playback_progress": {
+        "GET": "progress:read",
+        "HEAD": "progress:read",
+        "PUT": "progress:write",
+        "DELETE": "progress:write",
+    },
+}
+_LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
+
+
+def _scope_for_request(request):
+    """Return (declared, scope) for an IntegrationToken request."""
+    if request is None:
+        return True, None
+
+    resolver_match = getattr(request, "resolver_match", None)
+    url_name = getattr(resolver_match, "url_name", None)
+    method_scopes = _INTEGRATION_SCOPE_RULES.get(url_name)
+    if method_scopes is None:
+        return False, None
+
+    method = request.method.upper()
+    if method == "OPTIONS":
+        return True, None
+
+    scope = method_scopes.get(method)
+    return scope is not None, scope
+
+
+def _record_token_use(integration_token):
+    """Update last-used metadata at most once per interval."""
+    now = timezone.now()
+    cutoff = now - _LAST_USED_WRITE_INTERVAL
+    IntegrationToken.objects.filter(pk=integration_token.pk).filter(
+        Q(last_used_at__isnull=True) | Q(last_used_at__lt=cutoff)
+    ).update(last_used_at=now)
+
+
+def authenticate_token(raw_token: str, request=None, required_scope=None):
+    """Authenticate an integration token or fall back to the legacy user token."""
     if not raw_token:
         msg = "Invalid token"
         raise AuthenticationFailed(msg)
@@ -27,6 +72,18 @@ def authenticate_token(raw_token: str):
         if not integration_token.is_valid():
             msg = "Invalid token"
             raise AuthenticationFailed(msg)
+
+        if required_scope is None:
+            declared, required_scope = _scope_for_request(request)
+            if not declared:
+                msg = "Integration token is not permitted for this endpoint"
+                raise AuthenticationFailed(msg)
+
+        if required_scope and not integration_token.has_scope(required_scope):
+            msg = "Integration token does not have the required scope"
+            raise AuthenticationFailed(msg)
+
+        _record_token_use(integration_token)
         return (integration_token.user, integration_token)
 
     try:
@@ -51,7 +108,7 @@ class BearerAuthentication(BaseAuthentication):
         if len(parts) != 2 or parts[0].lower() not in self.keywords:  # noqa: PLR2004
             return None
         token = parts[1]
-        return authenticate_token(token)
+        return authenticate_token(token, request=request)
 
 
 class ListenBrainzTokenAuthentication(BaseAuthentication):
@@ -81,7 +138,11 @@ class ListenBrainzTokenAuthentication(BaseAuthentication):
         if len(parts) != 2 or parts[0].lower() != self.keyword.lower():  # noqa: PLR2004
             return None
         token = parts[1]
-        return authenticate_token(token)
+        return authenticate_token(
+            token,
+            request=request,
+            required_scope="scrobble:write",
+        )
 
 
 class APIKeyAuthentication(BaseAuthentication):
@@ -92,13 +153,14 @@ class APIKeyAuthentication(BaseAuthentication):
         auth = request.headers.get("X-API-Key")
         if not auth:
             return None
-        return authenticate_token(auth.strip())
+        return authenticate_token(auth.strip(), request=request)
 
 
 class HasScope(BasePermission):
     """Permission class to check whether request.auth grants a required scope.
 
     Legacy tokens (request.auth is None) have full access to all scopes.
+    Integration tokens fail closed when a view does not declare a scope.
     """
 
     required_scope = None
@@ -117,7 +179,6 @@ class HasScope(BasePermission):
         if hasattr(request.auth, "has_scope"):
             scope = getattr(view, "required_scope", self.required_scope)
             if not scope:
-                return True
+                return False
             return request.auth.has_scope(scope)
         return False
-
