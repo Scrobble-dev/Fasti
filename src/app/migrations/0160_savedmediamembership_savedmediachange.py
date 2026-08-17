@@ -45,6 +45,7 @@ class Migration(migrations.Migration):
                 ),
             ],
             options={
+                "ordering": ["-updated_at", "-id"],
                 "indexes": [
                     models.Index(
                         fields=["user", "-updated_at"],
