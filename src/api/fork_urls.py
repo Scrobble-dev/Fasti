@@ -12,6 +12,7 @@ from . import (
     fork_views_playback,
     fork_views_playback_changes,
     fork_views_podcast,
+    fork_views_saved_media,
     fork_views_scrobble,
     fork_views_statistics,
     fork_views_tracking,
@@ -318,6 +319,16 @@ urlpatterns = [
         r"^playback/progress/changes/?$",
         fork_views_playback_changes.PlaybackProgressChangesView.as_view(),
         name="api_playback_progress_changes",
+    ),
+    re_path(
+        r"^watchlist/?$",
+        fork_views_saved_media.SavedMediaView.as_view(),
+        name="api_watchlist",
+    ),
+    re_path(
+        r"^watchlist/changes/?$",
+        fork_views_saved_media.SavedMediaChangesView.as_view(),
+        name="api_watchlist_changes",
     ),
     re_path(
         r"^scrobble/?$",
