@@ -30,6 +30,7 @@ _INTEGRATION_SCOPE_RULES = {
     },
 }
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
+_CLIENT_ID_DIGEST_LENGTH = 24
 
 
 def _scope_for_request(request):
@@ -58,6 +59,11 @@ def _record_token_use(integration_token):
     IntegrationToken.objects.filter(pk=integration_token.pk).filter(
         Q(last_used_at__isnull=True) | Q(last_used_at__lt=cutoff)
     ).update(last_used_at=now)
+
+
+def _integration_client_id(integration_token: IntegrationToken) -> str:
+    """Return a stable opaque identifier that is safe to expose as an origin."""
+    return f"token:{integration_token.token_digest[:_CLIENT_ID_DIGEST_LENGTH]}"
 
 
 def authenticate_token(raw_token: str, request=None, required_scope=None):
@@ -90,7 +96,7 @@ def authenticate_token(raw_token: str, request=None, required_scope=None):
 
         _record_token_use(integration_token)
         if request is not None:
-            set_playback_source_client_id(f"token-{integration_token.pk}")
+            set_playback_source_client_id(_integration_client_id(integration_token))
         return (integration_token.user, integration_token)
 
     try:
