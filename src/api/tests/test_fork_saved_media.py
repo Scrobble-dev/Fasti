@@ -67,7 +67,12 @@ class SavedMediaSyncTests(FloppyApiTestCase):
         item, payload = self._movie_payload()
         tracked = Movie.objects.filter(user=self.user1, item=item).first()
         self.assertEqual(
-            self.call_api("put", "api_watchlist", payload=payload, headers=self.auth_headers).status_code,
+            self.call_api(
+                "put",
+                "api_watchlist",
+                payload=payload,
+                headers=self.auth_headers,
+            ).status_code,
             HTTP.CREATED,
         )
 
@@ -117,10 +122,10 @@ class SavedMediaSyncTests(FloppyApiTestCase):
             [row["operation"] for row in delta.data["results"]],
             ["add", "remove"],
         )
-        self.assertEqual(
-            [row["item_id"] for row in delta.data["results"]],
-            [item.id, item.id],
+        self.assertTrue(
+            all(row["media_id"] == str(item.media_id) for row in delta.data["results"])
         )
+        self.assertTrue(all("item_id" not in row for row in delta.data["results"]))
         sequences = [row["sequence_id"] for row in delta.data["results"]]
         self.assertEqual(sequences, sorted(sequences))
 
@@ -147,12 +152,53 @@ class SavedMediaSyncTests(FloppyApiTestCase):
             1,
         )
 
+    def test_remove_is_idempotent(self):
+        """Repeating an explicit remove does not append a second tombstone."""
+        item, payload = self._movie_payload()
+        self.assertEqual(
+            self.call_api(
+                "put",
+                "api_watchlist",
+                payload=payload,
+                headers=self.auth_headers,
+            ).status_code,
+            HTTP.CREATED,
+        )
+
+        first = self.call_api(
+            "delete",
+            "api_watchlist",
+            payload=payload,
+            headers=self.auth_headers,
+        )
+        second = self.call_api(
+            "delete",
+            "api_watchlist",
+            payload=payload,
+            headers=self.auth_headers,
+        )
+
+        self.assertEqual(first.status_code, HTTP.NO_CONTENT)
+        self.assertEqual(second.status_code, HTTP.NO_CONTENT)
+        self.assertEqual(
+            SavedMediaChange.objects.filter(
+                user=self.user1,
+                item_id=item.id,
+                operation=SavedMediaChange.Operation.REMOVE,
+            ).count(),
+            1,
+        )
+
     def test_title_only_payload_is_rejected(self):
         """Saved-media writes require a supported exact provider identity."""
         response = self.call_api(
             "put",
             "api_watchlist",
-            payload={"media_type": "movie", "title": "A title is not identity", "ids": {}},
+            payload={
+                "media_type": "movie",
+                "title": "A title is not identity",
+                "ids": {},
+            },
             headers=self.auth_headers,
         )
 
@@ -160,11 +206,40 @@ class SavedMediaSyncTests(FloppyApiTestCase):
         self.assertEqual(response.data["error"]["code"], "missing_media_identity")
         self.assertFalse(SavedMediaMembership.objects.filter(user=self.user1).exists())
 
+    def test_nested_provider_identifier_is_rejected(self):
+        """Untrusted JSON cannot turn a provider ID into a nested object query value."""
+        response = self.call_api(
+            "put",
+            "api_watchlist",
+            payload={"media_type": "movie", "ids": {"tmdb": {"id": "701"}}},
+            headers=self.auth_headers,
+        )
+
+        self.assertEqual(response.status_code, HTTP.BAD_REQUEST)
+        self.assertEqual(response.data["error"]["code"], "invalid_media_identity")
+
+    def test_oversized_provider_identifier_is_rejected(self):
+        """Provider identities are bounded before database or network resolution."""
+        response = self.call_api(
+            "put",
+            "api_watchlist",
+            payload={"media_type": "movie", "ids": {"tmdb": "1" * 501}},
+            headers=self.auth_headers,
+        )
+
+        self.assertEqual(response.status_code, HTTP.BAD_REQUEST)
+        self.assertEqual(response.data["error"]["code"], "invalid_media_identity")
+
     def test_snapshot_is_user_scoped(self):
         """A saved item never appears in another user's snapshot."""
         _item, payload = self._movie_payload()
         self.assertEqual(
-            self.call_api("put", "api_watchlist", payload=payload, headers=self.auth_headers).status_code,
+            self.call_api(
+                "put",
+                "api_watchlist",
+                payload=payload,
+                headers=self.auth_headers,
+            ).status_code,
             HTTP.CREATED,
         )
 
@@ -188,6 +263,57 @@ class SavedMediaSyncTests(FloppyApiTestCase):
         )
         self.assertEqual(response.status_code, HTTP.BAD_REQUEST)
         self.assertEqual(response.data["error"]["code"], "invalid_cursor")
+
+    def test_tampered_cursor_is_rejected(self):
+        """A caller cannot edit a saved-media cursor and continue polling."""
+        cursor = self._checkpoint()
+        response = self.call_api(
+            "get",
+            "api_watchlist_changes",
+            params={"cursor": f"{cursor}x"},
+            headers=self.auth_headers,
+        )
+        self.assertEqual(response.status_code, HTTP.BAD_REQUEST)
+        self.assertEqual(response.data["error"]["code"], "invalid_cursor")
+
+    def test_snapshot_race_is_closed_by_checkpoint_then_delta(self):
+        """A save during snapshot transfer appears after the captured checkpoint."""
+        _item, payload = self._movie_payload()
+        cursor = self._checkpoint()
+        self.assertEqual(
+            self.call_api(
+                "put",
+                "api_watchlist",
+                payload=payload,
+                headers=self.auth_headers,
+            ).status_code,
+            HTTP.CREATED,
+        )
+
+        snapshot = self.call_api("get", "api_watchlist", headers=self.auth_headers)
+        self.assertEqual(snapshot.status_code, HTTP.OK)
+        self.assertEqual(len(snapshot.data["results"]), 1)
+
+        delta = self.call_api(
+            "get",
+            "api_watchlist_changes",
+            params={"cursor": cursor},
+            headers=self.auth_headers,
+        )
+        self.assertEqual(delta.status_code, HTTP.OK)
+        self.assertEqual([row["operation"] for row in delta.data["results"]], ["add"])
+
+    def test_change_page_limit_is_bounded(self):
+        """Clients cannot request an unbounded saved-media change page."""
+        cursor = self._checkpoint()
+        response = self.call_api(
+            "get",
+            "api_watchlist_changes",
+            params={"cursor": cursor, "limit": 101},
+            headers=self.auth_headers,
+        )
+        self.assertEqual(response.status_code, HTTP.BAD_REQUEST)
+        self.assertEqual(response.data["error"]["code"], "invalid_limit")
 
     def test_watchlist_scopes_are_enforced(self):
         """Read and write watchlist scopes remain independent."""
