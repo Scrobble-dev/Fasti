@@ -39,6 +39,7 @@ class SavedMediaMembership(models.Model):
     class Meta:
         """Model options for saved-media membership."""
 
+        ordering = ["-updated_at", "-id"]
         constraints = [
             UniqueConstraint(
                 fields=["user", "item"],
