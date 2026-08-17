@@ -5,15 +5,23 @@ from http import HTTPStatus as HTTP  # noqa: N814
 from django.core import signing
 from django.core.signing import BadSignature, SignatureExpired
 from django.db import transaction
-from django.db.models import Q
 from drf_spectacular.utils import extend_schema
 from rest_framework import views as drf_views
 from rest_framework.response import Response
 
-from app.models import Item, MediaTypes, SavedMediaChange, SavedMediaMembership, Sources
+from app.models import MediaTypes, SavedMediaChange, SavedMediaMembership, Sources
 from app.playback_context import get_playback_source_client_id
 from app.services.tracking_hydration import ensure_item_metadata
 from integrations.delivery import get_or_record_receipt
+from integrations.media_identity import (
+    EXTERNAL_ID_FIELDS,
+    MAX_EXTERNAL_ID_LENGTH,
+    ExternalIdentityError,
+    find_item_by_exact_ids,
+    item_external_ids,
+    item_matches_ids,
+    normalize_external_ids,
+)
 from integrations.models import IntegrationToken
 
 from .fork_views_playback import resolve_show_tmdb_id
@@ -24,21 +32,6 @@ _SUPPORTED_MEDIA_TYPES = (
     MediaTypes.TV.value,
     MediaTypes.ANIME.value,
 )
-_EXTERNAL_ID_FIELDS = {
-    "tmdb": "tmdb_id",
-    "imdb": "imdb_id",
-    "tvdb": "tvdb_id",
-    "mal": "mal_id",
-    "anilist": "anilist_id",
-    "kitsu": "kitsu_id",
-}
-_DIRECT_SOURCES = {
-    "tmdb": Sources.TMDB.value,
-    "imdb": Sources.IMDB.value,
-    "tvdb": Sources.TVDB.value,
-    "mal": Sources.MAL.value,
-}
-_MAX_EXTERNAL_ID_LENGTH = 500
 _CURSOR_VERSION = 1
 _CURSOR_RESOURCE = "saved_media"
 _CURSOR_SALT = "api.saved-media-changes"
@@ -69,24 +62,11 @@ _WRITE_SCHEMA = {
                 namespace: {
                     "type": "string",
                     "nullable": True,
-                    "maxLength": _MAX_EXTERNAL_ID_LENGTH,
+                    "maxLength": MAX_EXTERNAL_ID_LENGTH,
                 }
-                for namespace in _EXTERNAL_ID_FIELDS
+                for namespace in EXTERNAL_ID_FIELDS
             },
         },
-    },
-}
-_CHANGE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "sequence_id": {"type": "integer"},
-        "operation": {"type": "string", "enum": ["add", "remove"]},
-        "media_type": {"type": "string"},
-        "source": {"type": "string"},
-        "media_id": {"type": "string"},
-        "ids": {"type": "object"},
-        "source_client_id": {"type": "string"},
-        "created_at": {"type": "string", "format": "date-time"},
     },
 }
 
@@ -106,20 +86,6 @@ def _public_error(code: str, message: str, status: int, *, param: str | None = N
     )
 
 
-def _item_ids(item: Item) -> dict[str, str]:
-    """Return exact external IDs in the public integration vocabulary."""
-    result = {}
-    stored = item.provider_external_ids or {}
-    for namespace, field in _EXTERNAL_ID_FIELDS.items():
-        value = stored.get(field)
-        if isinstance(value, (str, int)) and not isinstance(value, bool) and str(value):
-            result[namespace] = str(value)
-    for namespace, source in _DIRECT_SOURCES.items():
-        if item.source == source and item.media_id:
-            result.setdefault(namespace, str(item.media_id))
-    return result
-
-
 def _parse_identity(data):
     """Return normalized exact media identity or a stable public error."""
     media_type = data.get("media_type") if isinstance(data, dict) else None
@@ -130,82 +96,21 @@ def _parse_identity(data):
             HTTP.BAD_REQUEST,
             param="media_type",
         )
-
-    raw_ids = data.get("ids") if isinstance(data, dict) else None
-    if not isinstance(raw_ids, dict):
+    try:
+        ids = normalize_external_ids(data.get("ids"))
+    except ExternalIdentityError as error:
         return None, None, _public_error(
-            "missing_media_identity",
-            "ids must be an object with at least one supported provider identifier.",
+            error.code,
+            error.message,
             HTTP.BAD_REQUEST,
-            param="ids",
+            param=error.param,
         )
-
-    normalized = {}
-    for namespace in _EXTERNAL_ID_FIELDS:
-        value = raw_ids.get(namespace)
-        if value is None or value == "":
-            continue
-        if isinstance(value, bool) or not isinstance(value, (str, int)):
-            return None, None, _public_error(
-                "invalid_media_identity",
-                f"ids.{namespace} must be a string or integer.",
-                HTTP.BAD_REQUEST,
-                param=f"ids.{namespace}",
-            )
-        value = str(value).strip()
-        if not value:
-            return None, None, _public_error(
-                "invalid_media_identity",
-                f"ids.{namespace} must not be empty.",
-                HTTP.BAD_REQUEST,
-                param=f"ids.{namespace}",
-            )
-        if len(value) > _MAX_EXTERNAL_ID_LENGTH:
-            return None, None, _public_error(
-                "invalid_media_identity",
-                f"ids.{namespace} must be {_MAX_EXTERNAL_ID_LENGTH} characters or fewer.",
-                HTTP.BAD_REQUEST,
-                param=f"ids.{namespace}",
-            )
-        normalized[namespace] = value
-
-    if not normalized:
-        return None, None, _public_error(
-            "missing_media_identity",
-            "ids must contain at least one supported provider identifier.",
-            HTTP.BAD_REQUEST,
-            param="ids",
-        )
-    return media_type, normalized, None
+    return media_type, ids, None
 
 
-def _identity_filter(namespace: str, value: str) -> Q:
-    """Return the exact alias predicate for one provider identifier."""
-    field = _EXTERNAL_ID_FIELDS[namespace]
-    predicate = Q(**{f"provider_external_ids__{field}": value})
-    source = _DIRECT_SOURCES.get(namespace)
-    if source:
-        predicate |= Q(source=source, media_id=value)
-    return predicate
-
-
-def _item_matches_ids(item: Item, ids: dict[str, str]) -> bool:
-    """Return True only when every supplied identifier matches one Item."""
-    actual_ids = _item_ids(item)
-    return all(actual_ids.get(namespace) == value for namespace, value in ids.items())
-
-
-def _find_existing_item(media_type: str, ids: dict) -> Item | None:
-    """Resolve one Item only when all supplied exact aliases agree."""
-    queryset = Item.objects.filter(media_type=media_type)
-    for namespace, value in ids.items():
-        queryset = queryset.filter(_identity_filter(namespace, value))
-    return queryset.order_by("id").first()
-
-
-def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool) -> Item | None:
+def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool):
     """Resolve one exact saved-media identity, creating metadata only when safe."""
-    existing = _find_existing_item(media_type, ids)
+    existing = find_item_by_exact_ids(media_type, ids)
     if existing is not None or not create:
         return existing
 
@@ -219,7 +124,7 @@ def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool) -> It
             mal_id,
             Sources.MAL.value,
         ).item
-        return hydrated if _item_matches_ids(hydrated, ids) else None
+        return hydrated if item_matches_ids(hydrated, ids) else None
 
     tmdb_id = resolve_show_tmdb_id(media_type, ids)
     if not tmdb_id:
@@ -230,7 +135,7 @@ def _resolve_saved_item(user, media_type: str, ids: dict, *, create: bool) -> It
         str(tmdb_id),
         Sources.TMDB.value,
     ).item
-    return hydrated if _item_matches_ids(hydrated, ids) else None
+    return hydrated if item_matches_ids(hydrated, ids) else None
 
 
 def _serialize_membership(membership: SavedMediaMembership) -> dict:
@@ -240,7 +145,7 @@ def _serialize_membership(membership: SavedMediaMembership) -> dict:
         "media_type": item.media_type,
         "source": item.source,
         "media_id": str(item.media_id),
-        "ids": _item_ids(item),
+        "ids": item_external_ids(item),
         "title": item.title,
         "saved_at": membership.created_at,
         "updated_at": membership.updated_at,
