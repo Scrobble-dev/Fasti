@@ -67,6 +67,7 @@ from app.models.podcast import (
     PodcastShow,
     PodcastShowTracker,
 )
+from app.models.saved_media import SavedMediaChange, SavedMediaMembership
 from app.models.tombstone import DeletedMedia
 from app.models.tv import (
     TV,
@@ -129,6 +130,8 @@ __all__ = [
     "PodcastShow",
     "PodcastShowTracker",
     "ProviderMetadataStatus",
+    "SavedMediaChange",
+    "SavedMediaMembership",
     "Season",
     "Sources",
     "Status",
