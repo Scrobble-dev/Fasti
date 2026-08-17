@@ -20,6 +20,7 @@ _RESERVED_RESPONSE_STATUS = 0
 _ASCII_VISIBLE_MIN = 0x21
 _ASCII_VISIBLE_MAX = 0x7E
 _MAX_RECEIPT_RESERVATION_ATTEMPTS = 2
+_CLIENT_NAMESPACE_DIGEST_LENGTH = 24
 
 
 def calculate_payload_digest(payload: Any) -> str:
@@ -137,7 +138,10 @@ def _receipt_belongs_to_client(receipt, token: IntegrationToken | None) -> bool:
 
 def _client_receipt_id(client_event_id: str, token: IntegrationToken | None) -> str:
     """Return the fallback storage key for a client whose public key collides."""
-    namespace = f"token-{token.pk}" if token is not None else "legacy"
+    if token is None:
+        namespace = "legacy"
+    else:
+        namespace = f"token-{token.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}"
     return f"{namespace}:{client_event_id}"
 
 
