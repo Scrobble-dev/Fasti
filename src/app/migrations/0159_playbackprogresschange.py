@@ -8,7 +8,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("app", "0157_rewrite_old_img_none_placeholder_after_widening"),
+        ("app", "0158_podcast_end_date_inferred"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
