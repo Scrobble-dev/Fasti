@@ -18,6 +18,11 @@ class FloppyOIDCAdapter(DefaultOIDCAdapter):
 
     def validate_resource_uris(self, *, uris: list[str], **kwargs) -> None:
         """Restrict RFC 8707 resource indicators to this Floppy origin."""
+        # Preserve allauth's built-in validation before applying Floppy's narrower
+        # same-origin rule. This prevents a local adapter from accidentally
+        # weakening upstream syntax or protocol checks as allauth evolves.
+        super().validate_resource_uris(uris=uris, **kwargs)
+
         issuer = urlparse(self.get_issuer())
         for uri in uris:
             resource = urlparse(uri)
