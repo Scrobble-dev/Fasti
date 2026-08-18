@@ -85,8 +85,11 @@
 
   const renderToken = (token) => {
     const card = document.createElement("li");
+    card.dataset.tokenId = String(token.id);
+    card.tabIndex = -1;
     card.className =
-      "rounded-md border border-[var(--color-border)] bg-[var(--color-surface-dim)] p-4";
+      "rounded-md border border-[var(--color-border)] bg-[var(--color-surface-dim)] p-4 " +
+      "focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
     const header = document.createElement("div");
     header.className = "flex flex-wrap items-start justify-between gap-3";
@@ -127,8 +130,10 @@
           const payload = await response.json().catch(() => ({}));
           throw new Error(apiMessage(payload, "Could not revoke this token."));
         }
-        setStatus(`${token.name} was revoked.`);
-        await loadTokens();
+        await loadTokens({
+          focusTokenId: token.id,
+          statusMessage: `${token.name} was revoked.`,
+        });
       } catch (err) {
         revoke.disabled = false;
         setError(err.message || "Could not revoke this token.");
@@ -167,7 +172,7 @@
     return card;
   };
 
-  const loadTokens = async () => {
+  const loadTokens = async ({ focusTokenId = null, statusMessage = "" } = {}) => {
     loadingState.hidden = false;
     setError("");
     try {
@@ -181,10 +186,18 @@
       tokenList.replaceChildren(...(payload.results || []).map(renderToken));
       emptyState.hidden = (payload.results || []).length !== 0;
       setStatus(
-        (payload.results || []).length
-          ? `${payload.results.length} scoped token${payload.results.length === 1 ? "" : "s"} loaded.`
-          : "No scoped tokens are configured."
+        statusMessage ||
+          ((payload.results || []).length
+            ? `${payload.results.length} scoped token${payload.results.length === 1 ? "" : "s"} loaded.`
+            : "No scoped tokens are configured.")
       );
+
+      if (focusTokenId !== null) {
+        const focusTarget = tokenList.querySelector(
+          `[data-token-id="${String(focusTokenId)}"]`
+        );
+        focusTarget?.focus();
+      }
     } catch (err) {
       tokenList.replaceChildren();
       emptyState.hidden = true;
@@ -246,9 +259,10 @@
       secretTitle.textContent = `${payload.name} is ready`;
       secretPanel.hidden = false;
       secretPanel.focus();
-      setStatus("Token created. Copy the secret now; Floppy will not show it again.");
       form.reset();
-      await loadTokens();
+      await loadTokens({
+        statusMessage: "Token created. Copy the secret now; Floppy will not show it again.",
+      });
     } catch (err) {
       setError(err.message || "Could not create this token.");
       setStatus("Token creation needs attention.");
