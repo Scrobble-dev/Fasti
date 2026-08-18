@@ -29,7 +29,7 @@ class SnapshotCursorError(ValueError):
     code = "invalid_snapshot_cursor"
 
 
-class SnapshotCursorExpired(SnapshotCursorError):
+class SnapshotCursorExpired(SnapshotCursorError):  # noqa: N818
     """Raised when a stable snapshot cursor is older than the supported window."""
 
     code = "snapshot_cursor_expired"
@@ -68,11 +68,7 @@ def decode_snapshot_cursor(
     client_id: str,
 ) -> SnapshotCursorState:
     """Validate a stable snapshot cursor and return its immutable state."""
-    if (
-        not isinstance(cursor, str)
-        or not cursor
-        or len(cursor) > CURSOR_MAX_LENGTH
-    ):
+    if not isinstance(cursor, str) or not cursor or len(cursor) > CURSOR_MAX_LENGTH:
         raise SnapshotCursorError
 
     try:
