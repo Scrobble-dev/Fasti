@@ -11,13 +11,13 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.response import Response
 
 from app.models import (
-    Episode,
-    Movie,
+    MediaTypes,
     PlaybackProgress,
     PlaybackProgressChange,
     SavedMediaChange,
     SavedMediaMembership,
-    Status,
+    WatchedState,
+    WatchedStateChange,
 )
 from integrations.models import IntegrationEventReceipt, IntegrationToken
 
@@ -73,26 +73,14 @@ class IntegrationDiagnosticsView(drf_views.APIView):
 
         progress_changes = PlaybackProgressChange.objects.filter(user=request.user)
         saved_changes = SavedMediaChange.objects.filter(user=request.user)
-        watched_movies = (
-            Movie.objects.filter(user=request.user)
-            .filter(
-                Q(status=Status.COMPLETED.value)
-                | Q(end_date__isnull=False)
-                | Q(plays__isnull=False)
-            )
-            .distinct()
-            .count()
-        )
-        watched_episodes = (
-            Episode.objects.filter(
-                related_season__user=request.user,
-                status=Status.COMPLETED.value,
-                item__isnull=False,
-            )
-            .values("item_id")
-            .distinct()
-            .count()
-        )
+        watched_changes = WatchedStateChange.objects.filter(user=request.user)
+        watched_states = WatchedState.objects.filter(user=request.user, watched=True)
+        watched_movies = watched_states.filter(
+            item__media_type=MediaTypes.MOVIE.value
+        ).count()
+        watched_episodes = watched_states.filter(
+            item__media_type=MediaTypes.EPISODE.value
+        ).count()
 
         recovery = []
         if incomplete_receipts:
@@ -134,8 +122,10 @@ class IntegrationDiagnosticsView(drf_views.APIView):
                         **_latest_change(saved_changes),
                     },
                     "watched_state": {
+                        "current_count": watched_movies + watched_episodes,
                         "movie_count": watched_movies,
                         "episode_count": watched_episodes,
+                        **_latest_change(watched_changes),
                     },
                     "external_client_sync": {
                         "state": "not_reported",
@@ -149,7 +139,9 @@ class IntegrationDiagnosticsView(drf_views.APIView):
                         "diagnostics_require_external_network": False,
                         "existing_identity_progress_writes_require_external_network": False,
                         "existing_identity_saved_media_writes_require_external_network": False,
+                        "existing_identity_watched_state_writes_require_external_network": False,
                         "new_unresolved_saved_media_may_require_metadata_resolution": True,
+                        "new_unresolved_watched_state_may_require_metadata_resolution": True,
                     },
                     "recovery": recovery,
                 },
