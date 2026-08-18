@@ -11,7 +11,7 @@ from rest_framework.permissions import BasePermission
 
 from app.playback_context import set_playback_source_client_id
 from integrations.models import IntegrationToken
-from integrations.scopes import INTEGRATION_SCOPE_RULES
+from integrations.scopes import required_scope_for_route
 from users.models import User
 
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
@@ -25,16 +25,7 @@ def _scope_for_request(request):
 
     resolver_match = getattr(request, "resolver_match", None)
     url_name = getattr(resolver_match, "url_name", None)
-    method_scopes = INTEGRATION_SCOPE_RULES.get(url_name)
-    if method_scopes is None:
-        return False, None
-
-    method = request.method.upper()
-    if method == "OPTIONS":
-        return True, None
-
-    scope = method_scopes.get(method)
-    return scope is not None, scope
+    return required_scope_for_route(url_name, request.method)
 
 
 def _record_token_use(integration_token):
