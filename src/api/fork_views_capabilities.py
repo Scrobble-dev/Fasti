@@ -11,10 +11,14 @@ from integrations.scopes import (
     INTEGRATION_SCOPE_DESCRIPTIONS,
     NUVIO_RECOMMENDED_SCOPES,
 )
+from integrations.sync_policy import (
+    CHANGE_PAGE_MAX,
+    CHANGE_RETENTION_DAYS,
+    CURSOR_MAX_AGE_SECONDS,
+    CURSOR_VERSION,
+)
 
 _CONTRACT_VERSION = "1"
-_CURSOR_TTL_SECONDS = 30 * 24 * 60 * 60
-_CHANGE_PAGE_MAX = 100
 
 
 class IntegrationCapabilitiesView(drf_views.APIView):
@@ -78,8 +82,11 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                             "path": "/api/v1/playback/progress/changes/",
                             "method": "GET",
                             "scope": "progress:read",
-                            "cursor_ttl_seconds": _CURSOR_TTL_SECONDS,
-                            "page_max": _CHANGE_PAGE_MAX,
+                            "cursor_version": CURSOR_VERSION,
+                            "client_bound_cursor": True,
+                            "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                            "change_retention_days": CHANGE_RETENTION_DAYS,
+                            "page_max": CHANGE_PAGE_MAX,
                             "media_types": ["movie", "episode"],
                         },
                         "media_types": ["movie", "episode"],
@@ -105,8 +112,11 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                             "path": "/api/v1/watchlist/changes/",
                             "method": "GET",
                             "scope": "watchlist:read",
-                            "cursor_ttl_seconds": _CURSOR_TTL_SECONDS,
-                            "page_max": _CHANGE_PAGE_MAX,
+                            "cursor_version": CURSOR_VERSION,
+                            "client_bound_cursor": True,
+                            "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                            "change_retention_days": CHANGE_RETENTION_DAYS,
+                            "page_max": CHANGE_PAGE_MAX,
                         },
                         "media_types": ["movie", "tv", "anime"],
                     },
@@ -133,6 +143,10 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                 },
                 "sync": {
                     "checkpoint_then_snapshot_then_delta": True,
+                    "cursor_version": CURSOR_VERSION,
+                    "cursor_bound_to_authenticated_client": True,
+                    "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                    "change_retention_days": CHANGE_RETENTION_DAYS,
                     "delete_requires_explicit_event": True,
                     "cache_miss_is_delete": False,
                     "offline_reconnect_requires_snapshot_on_expired_cursor": True,
