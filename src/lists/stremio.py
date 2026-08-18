@@ -9,17 +9,22 @@ from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.views.decorators.http import require_GET
 
-from app.models import Item, MediaTypes, Sources
+from app.models import Item, Sources
+from integrations.content_classification import (
+    ExternalContentClass,
+    floppy_catalog_content_type,
+    floppy_catalog_media_types,
+)
 from integrations.media_identity import item_external_ids
 from lists.models import CustomList, CustomListItem
 
 _CATALOG_PAGE_SIZE = 100
 _MAX_SKIP = 1_000_000
 _MAX_CONTENT_ID_LENGTH = 500
-_STREMIO_TYPES = {
-    "movie": (MediaTypes.MOVIE.value,),
-    "series": (MediaTypes.TV.value, MediaTypes.ANIME.value),
-}
+_CATALOG_CLASSES = (
+    ExternalContentClass.MOVIE,
+    ExternalContentClass.SERIES,
+)
 _DIRECT_STREMIO_SOURCES = {
     Sources.IMDB.value,
     Sources.TMDB.value,
@@ -48,15 +53,6 @@ def _public_list(list_reference):
     return custom_list
 
 
-def _stremio_type(item):
-    """Return the Stremio content type for one supported stored Item."""
-    if item.media_type == MediaTypes.MOVIE.value:
-        return "movie"
-    if item.media_type in {MediaTypes.TV.value, MediaTypes.ANIME.value}:
-        return "series"
-    return None
-
-
 def _content_id(item):
     """Return one exact Stremio/Nuvio-compatible identifier without guessing."""
     ids = item_external_ids(item)
@@ -82,7 +78,7 @@ def _has_exact_identity_filter():
 
 def _catalog_queryset(custom_list, stremio_type):
     """Return a deterministic, bounded-slice-ready queryset for one catalog type."""
-    media_types = _STREMIO_TYPES.get(stremio_type)
+    media_types = floppy_catalog_media_types(stremio_type)
     if not media_types:
         return CustomListItem.objects.none()
     return (
@@ -98,7 +94,7 @@ def _catalog_queryset(custom_list, stremio_type):
 
 def _eligible_count(custom_list, stremio_type):
     """Return all stored items for a supported catalog type, including unresolved rows."""
-    media_types = _STREMIO_TYPES.get(stremio_type)
+    media_types = floppy_catalog_media_types(stremio_type)
     if not media_types:
         return 0
     return CustomListItem.objects.filter(
@@ -127,13 +123,13 @@ def _parse_skip(request, extra_args=""):
 def _meta_preview(item):
     """Serialize only public display fields required by catalog consumers."""
     content_id = _content_id(item)
-    content_type = _stremio_type(item)
-    if not content_id or not content_type:
+    content_class = floppy_catalog_content_type(item.media_type)
+    if not content_id or content_class is None:
         return None
 
     meta = {
         "id": content_id,
-        "type": content_type,
+        "type": content_class.value,
         "name": item.title,
     }
     image = str(item.image or "").strip()
@@ -160,7 +156,7 @@ def _parse_content_id(content_id):
 def _matching_list_item(custom_list, stremio_type, content_id):
     """Resolve an exact catalog ID inside the selected public list only."""
     parsed = _parse_content_id(content_id)
-    media_types = _STREMIO_TYPES.get(stremio_type)
+    media_types = floppy_catalog_media_types(stremio_type)
     if parsed is None or not media_types:
         return None
     namespace, value = parsed
@@ -193,8 +189,9 @@ def manifest(request, list_reference):
     custom_list = _public_list(list_reference)
     available_types = []
     catalogs = []
-    for stremio_type in _STREMIO_TYPES:
-        if _eligible_count(custom_list, stremio_type):
+    for content_class in _CATALOG_CLASSES:
+        stremio_type = content_class.value
+        if _catalog_queryset(custom_list, stremio_type).exists():
             available_types.append(stremio_type)
             catalogs.append(
                 {
@@ -228,7 +225,10 @@ def manifest(request, list_reference):
 def catalog(request, list_reference, media_type, catalog_id, extra_args=""):
     """Return one deterministic page from a public Floppy list."""
     custom_list = _public_list(list_reference)
-    if catalog_id != f"floppy-list-{custom_list.pk}" or media_type not in _STREMIO_TYPES:
+    if (
+        catalog_id != f"floppy-list-{custom_list.pk}"
+        or not floppy_catalog_media_types(media_type)
+    ):
         _not_found("Catalog not found")
 
     skip = _parse_skip(request, extra_args)
