@@ -279,8 +279,11 @@ class SavedMediaView(drf_views.APIView):
         if error:
             return error
         rows = SavedMediaMembership.objects.filter(user=request.user).select_related("item")
-        entries = [_serialize_membership(row) for row in rows]
-        return Response(paginate_data(request, entries, limit, offset), status=HTTP.OK)
+        payload = paginate_data(request, rows, limit, offset, total=rows.count())
+        payload["results"] = [
+            _serialize_membership(row) for row in payload["results"]
+        ]
+        return Response(payload, status=HTTP.OK)
 
     @extend_schema(
         description=(
