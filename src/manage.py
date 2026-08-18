@@ -12,7 +12,7 @@ def main():
     if "test" in sys.argv:
         os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.test_settings")
     else:
-        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.platform_settings")
 
     execute_from_command_line(sys.argv)
 
