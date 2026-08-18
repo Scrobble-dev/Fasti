@@ -44,12 +44,6 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     "legacy_account_token_compatible": True,
                     "available_scopes": INTEGRATION_SCOPE_DESCRIPTIONS,
                     "recommended_nuvio_scopes": list(NUVIO_RECOMMENDED_SCOPES),
-                    "token_management": {
-                        "path": "/api/v1/integration-tokens/",
-                        "session_only": True,
-                        "secret_shown_once": True,
-                        "revocation_preserves_record": True,
-                    },
                 },
                 "identity": {
                     "namespaces": list(EXTERNAL_ID_FIELDS),
