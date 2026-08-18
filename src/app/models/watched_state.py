@@ -6,10 +6,10 @@ from django.db.models import Count, Max, UniqueConstraint
 from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import receiver
 
+from app.models.choices import MediaTypes, Status
 from app.models.item import Item
 from app.models.media import Movie, MoviePlay
 from app.models.tv import Episode
-from app.models.utils import MediaTypes, Status
 from app.playback_context import get_playback_source_client_id
 
 _PROVIDER_ID_FIELDS = {
