@@ -24,6 +24,10 @@ _INTEGRATION_SCOPE_RULES = {
         "PUT": "progress:write",
         "DELETE": "progress:write",
     },
+    "api_playback_progress_snapshot": {
+        "GET": "progress:read",
+        "HEAD": "progress:read",
+    },
     "api_playback_progress_changes": {
         "GET": "progress:read",
         "HEAD": "progress:read",
@@ -33,6 +37,10 @@ _INTEGRATION_SCOPE_RULES = {
         "HEAD": "watchlist:read",
         "PUT": "watchlist:write",
         "DELETE": "watchlist:write",
+    },
+    "api_watchlist_snapshot": {
+        "GET": "watchlist:read",
+        "HEAD": "watchlist:read",
     },
     "api_watchlist_changes": {
         "GET": "watchlist:read",
