@@ -86,3 +86,32 @@ INTEGRATION_SCOPE_RULES = {
         "HEAD": "watched:read",
     },
 }
+
+
+def required_scope_for_route(url_name: str | None, method: str | None) -> tuple[bool, str | None]:
+    """Return whether a route is declared and its required integration scope."""
+    if not url_name:
+        return False, None
+
+    method_scopes = INTEGRATION_SCOPE_RULES.get(url_name)
+    if method_scopes is None:
+        return False, None
+
+    normalized_method = (method or "").upper()
+    if normalized_method == "OPTIONS":
+        return True, None
+
+    scope = method_scopes.get(normalized_method)
+    return scope is not None, scope
+
+
+def normalize_requested_scopes(raw_scopes) -> tuple[list[str] | None, str | None]:
+    """Normalize an explicit scope list and return the first unsupported scope."""
+    if not isinstance(raw_scopes, list) or not raw_scopes:
+        return None, None
+    if any(not isinstance(scope, str) for scope in raw_scopes):
+        return None, None
+
+    scopes = list(dict.fromkeys(raw_scopes))
+    unsupported = sorted(set(scopes) - INTEGRATION_SCOPES)
+    return scopes, unsupported[0] if unsupported else None
