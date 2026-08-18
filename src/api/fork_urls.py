@@ -22,6 +22,7 @@ from . import (
     fork_views_tracking,
     fork_views_users,
     fork_views_watched,
+    fork_views_watched_changes,
 )
 
 urlpatterns = [
@@ -369,6 +370,16 @@ urlpatterns = [
         r"^watched/?$",
         fork_views_watched.WatchedStateView.as_view(),
         name="api_watched_state",
+    ),
+    re_path(
+        r"^watched/snapshot/?$",
+        fork_views_integration_snapshots.WatchedStateSnapshotView.as_view(),
+        name="api_watched_state_snapshot",
+    ),
+    re_path(
+        r"^watched/changes/?$",
+        fork_views_watched_changes.WatchedStateChangesView.as_view(),
+        name="api_watched_state_changes",
     ),
     re_path(
         r"^scrobble/?$",
