@@ -127,5 +127,7 @@ class IntegrationDiagnosticsTests(FloppyApiTestCase):
         self.assertEqual(payload["external_client_sync"]["state"], "not_reported")
         self.assertFalse(payload["offline"]["diagnostics_require_external_network"])
         self.assertFalse(
-            payload["offline"]["existing_identity_progress_writes_require_external_network"]
+            payload["offline"][
+                "existing_identity_progress_writes_require_external_network"
+            ]
         )
