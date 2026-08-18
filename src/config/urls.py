@@ -76,10 +76,11 @@ urlpatterns = [
     ),
 ]
 
-# Build the accounts URLs
+# Build the accounts URLs. Keep Floppy's curated account surface while exposing
+# allauth's supported reauthentication flow for sensitive account actions.
 account_patterns = [
     # see allauth/account/urls.py
-    # login, logout, signup, account_inactive
+    # login, logout, signup, account_inactive, reauthenticate
     path("login/", allauth_account_views.login, name="account_login"),
     path("logout/", allauth_account_views.logout, name="account_logout"),
     path("signup/", CustomSignupView.as_view(), name="account_signup"),
@@ -87,6 +88,11 @@ account_patterns = [
         "account_inactive/",
         allauth_account_views.account_inactive,
         name="account_inactive",
+    ),
+    path(
+        "reauthenticate/",
+        allauth_account_views.reauthenticate,
+        name="account_reauthenticate",
     ),
     # social account base urls, see allauth/socialaccount/urls.py
     path(
