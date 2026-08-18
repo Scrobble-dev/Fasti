@@ -150,21 +150,53 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     },
                     "watched_state": {
                         "snapshot": {
+                            "path": "/api/v1/watched/snapshot/",
+                            "method": "GET",
+                            "scope": "watched:read",
+                            "cursor_version": SNAPSHOT_CURSOR_VERSION,
+                            "client_bound_cursor": True,
+                            "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                            "page_max": SNAPSHOT_PAGE_MAX,
+                            "pagination": "stable_keyset",
+                            "authoritative_when_complete": True,
+                            "media_types": ["movie", "episode"],
+                        },
+                        "compatibility_snapshot": {
                             "path": "/api/v1/watched/",
                             "method": "GET",
                             "scope": "watched:read",
+                            "pagination": "offset",
                             "media_type_required": True,
                         },
-                        "completion_write": {
+                        "write": {
+                            "path": "/api/v1/watched/",
+                            "method": "PUT",
+                            "scope": "watched:write",
+                            "mutates_viewing_history": False,
+                        },
+                        "clear": {
+                            "path": "/api/v1/watched/",
+                            "method": "DELETE",
+                            "scope": "watched:write",
+                            "semantic": "set_current_state_unwatched",
+                            "mutates_viewing_history": False,
+                        },
+                        "changes": {
+                            "path": "/api/v1/watched/changes/",
+                            "method": "GET",
+                            "scope": "watched:read",
+                            "cursor_version": CURSOR_VERSION,
+                            "client_bound_cursor": True,
+                            "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                            "change_retention_days": CHANGE_RETENTION_DAYS,
+                            "page_max": CHANGE_PAGE_MAX,
+                            "explicit_unwatched_events": True,
+                        },
+                        "occurrence_write": {
                             "via": "scrobble",
                             "path": "/api/v1/scrobble/",
                             "scope": "scrobble:write",
                         },
-                        "delete": None,
-                        "delete_reason": (
-                            "A generic watched-state delete is not exposed because Floppy "
-                            "preserves viewing occurrences and does not delete unrelated history."
-                        ),
                         "media_types": ["movie", "episode"],
                         "watched_at_nullable": True,
                     },
@@ -180,6 +212,7 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     "delete_requires_explicit_event": True,
                     "cache_miss_is_delete": False,
                     "offline_reconnect_requires_snapshot_on_expired_cursor": True,
+                    "viewing_history_is_separate_from_current_watched_state": True,
                 },
             }
         )
