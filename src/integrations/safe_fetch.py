@@ -9,15 +9,21 @@ import socket
 import ssl
 import time
 from dataclasses import dataclass
-from typing import Any
-from urllib.parse import urljoin, urlsplit
+from typing import Any, NoReturn
+from urllib.parse import quote, urljoin, urlsplit
 
 _MAX_URL_LENGTH = 2048
+_MAX_HOST_LENGTH = 253
+_MAX_PORT = 65_535
+_HTTPS_PORT = 443
 _MAX_REDIRECTS = 3
 _MAX_BODY_BYTES = 1_048_576
 _MAX_JSON_DEPTH = 32
 _MAX_JSON_NODES = 20_000
 _DEFAULT_TIMEOUT_SECONDS = 5.0
+_MAX_TIMEOUT_SECONDS = 30.0
+_HTTP_SUCCESS_MIN = 200
+_HTTP_SUCCESS_MAX = 300
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _JSON_CONTENT_TYPES = {"application/json", "text/json"}
 
@@ -30,6 +36,7 @@ class SafeFetchError(Exception):
     message: str
 
     def __str__(self) -> str:
+        """Return only the stable redacted public message."""
         return self.message
 
 
@@ -52,8 +59,9 @@ class _Target:
     origin: str
 
 
-def _error(code: str, message: str) -> SafeFetchError:
-    return SafeFetchError(code=code, message=message)
+def _fail(code: str, message: str) -> NoReturn:
+    """Raise one stable error without retaining low-level or secret-bearing details."""
+    raise SafeFetchError(code=code, message=message) from None
 
 
 def safe_origin(raw_url: str) -> str:
@@ -62,40 +70,62 @@ def safe_origin(raw_url: str) -> str:
     return target.origin
 
 
+def _ascii_hostname(host: str) -> str:
+    """Return one normalized ASCII hostname or IP literal."""
+    if "%" in host:
+        _fail("invalid_url", "Remote hostname contains an unsupported zone identifier.")
+    if ":" in host:
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            _fail("invalid_url", "Remote hostname is invalid.")
+        return host.lower()
+    try:
+        return host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        _fail("invalid_url", "Remote hostname is invalid.")
+
+
 def _parse_target(raw_url: str) -> _Target:
     """Parse one HTTPS target while rejecting credential-bearing or ambiguous URLs."""
     if not isinstance(raw_url, str):
-        raise _error("invalid_url", "Remote URL must be a string.")
+        _fail("invalid_url", "Remote URL must be a string.")
     raw_url = raw_url.strip()
     if not raw_url or len(raw_url) > _MAX_URL_LENGTH:
-        raise _error("invalid_url", "Remote URL is empty or too long.")
+        _fail("invalid_url", "Remote URL is empty or too long.")
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in raw_url):
+        _fail("invalid_url", "Remote URL contains control characters.")
 
     try:
         parsed = urlsplit(raw_url)
         port = parsed.port
-    except ValueError as exc:
-        raise _error("invalid_url", "Remote URL is invalid.") from exc
+    except ValueError:
+        _fail("invalid_url", "Remote URL is invalid.")
 
     if parsed.scheme.lower() != "https":
-        raise _error("unsupported_scheme", "Remote integrations must use HTTPS.")
+        _fail("unsupported_scheme", "Remote integrations must use HTTPS.")
     if parsed.username is not None or parsed.password is not None:
-        raise _error("credentials_in_url", "Remote URLs must not contain credentials.")
+        _fail("credentials_in_url", "Remote URLs must not contain credentials.")
     host = (parsed.hostname or "").strip().rstrip(".")
     if not host:
-        raise _error("invalid_url", "Remote URL must include a hostname.")
-    if len(host) > 253:
-        raise _error("invalid_url", "Remote hostname is too long.")
+        _fail("invalid_url", "Remote URL must include a hostname.")
+    host = _ascii_hostname(host)
+    if len(host) > _MAX_HOST_LENGTH:
+        _fail("invalid_url", "Remote hostname is too long.")
 
-    port = port or 443
-    if port < 1 or port > 65535:
-        raise _error("invalid_url", "Remote URL port is invalid.")
+    port = port or _HTTPS_PORT
+    if port < 1 or port > _MAX_PORT:
+        _fail("invalid_url", "Remote URL port is invalid.")
 
-    path = parsed.path or "/"
+    path = quote(parsed.path or "/", safe="/%:@!$&'()*+,;=-._~")
     request_target = path
     if parsed.query:
-        request_target = f"{path}?{parsed.query}"
+        query = quote(parsed.query, safe="=&%:@!$'()*+,;/?-._~")
+        request_target = f"{path}?{query}"
     display_host = f"[{host}]" if ":" in host else host
-    origin = f"https://{display_host}" + (f":{port}" if port != 443 else "")
+    origin = f"https://{display_host}" + (
+        f":{port}" if port != _HTTPS_PORT else ""
+    )
     return _Target(
         scheme="https",
         host=host,
@@ -123,8 +153,8 @@ def _resolve_public_addresses(host: str, port: int) -> tuple[str, ...]:
             family=socket.AF_UNSPEC,
             type=socket.SOCK_STREAM,
         )
-    except OSError as exc:
-        raise _error("dns_failure", "Remote hostname could not be resolved.") from exc
+    except OSError:
+        _fail("dns_failure", "Remote hostname could not be resolved.")
 
     addresses = []
     for answer in answers:
@@ -132,9 +162,9 @@ def _resolve_public_addresses(host: str, port: int) -> tuple[str, ...]:
         if address not in addresses:
             addresses.append(address)
     if not addresses:
-        raise _error("dns_failure", "Remote hostname did not resolve to an address.")
+        _fail("dns_failure", "Remote hostname did not resolve to an address.")
     if any(not _is_public_address(address) for address in addresses):
-        raise _error(
+        _fail(
             "blocked_destination",
             "Remote hostname resolves to a non-public network address.",
         )
@@ -143,7 +173,11 @@ def _resolve_public_addresses(host: str, port: int) -> tuple[str, ...]:
 
 def _host_header(target: _Target) -> str:
     display_host = f"[{target.host}]" if ":" in target.host else target.host
-    return display_host if target.port == 443 else f"{display_host}:{target.port}"
+    return (
+        display_host
+        if target.port == _HTTPS_PORT
+        else f"{display_host}:{target.port}"
+    )
 
 
 def _read_bounded(response: http.client.HTTPResponse) -> bytes:
@@ -151,19 +185,20 @@ def _read_bounded(response: http.client.HTTPResponse) -> bytes:
     length = response.getheader("Content-Length")
     if length:
         try:
-            if int(length) > _MAX_BODY_BYTES:
-                raise _error("response_too_large", "Remote response exceeds the size limit.")
+            parsed_length = int(length)
         except ValueError:
-            raise _error("invalid_response", "Remote response has an invalid content length.") from None
+            _fail("invalid_response", "Remote response has an invalid content length.")
+        if parsed_length > _MAX_BODY_BYTES:
+            _fail("response_too_large", "Remote response exceeds the size limit.")
     encoding = (response.getheader("Content-Encoding") or "identity").strip().lower()
     if encoding not in {"", "identity"}:
-        raise _error(
+        _fail(
             "unsupported_content_encoding",
             "Compressed remote responses are not accepted by this integration boundary.",
         )
     body = response.read(_MAX_BODY_BYTES + 1)
     if len(body) > _MAX_BODY_BYTES:
-        raise _error("response_too_large", "Remote response exceeds the size limit.")
+        _fail("response_too_large", "Remote response exceeds the size limit.")
     return body
 
 
@@ -190,11 +225,12 @@ def _fetch_once(target: _Target, address: str, timeout: float):
         response = http.client.HTTPResponse(tls_socket)
         response.begin()
         body = _read_bounded(response)
-        return response.status, dict(response.getheaders()), body
+        headers = {key.lower(): value for key, value in response.getheaders()}
+        return response.status, headers, body
     except SafeFetchError:
         raise
-    except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
-        raise _error("connection_failed", "Remote request failed.") from exc
+    except (OSError, ssl.SSLError, http.client.HTTPException):
+        _fail("connection_failed", "Remote request failed.")
     finally:
         if tls_socket is not None:
             tls_socket.close()
@@ -209,10 +245,13 @@ def fetch_bytes(
     max_redirects: int = _MAX_REDIRECTS,
 ) -> SafeFetchResult:
     """Fetch one bounded HTTPS resource without DNS-rebinding or credential forwarding."""
-    if timeout_seconds <= 0 or timeout_seconds > 30:
-        raise _error("invalid_timeout", "Remote timeout is outside the allowed range.")
+    if timeout_seconds <= 0 or timeout_seconds > _MAX_TIMEOUT_SECONDS:
+        _fail("invalid_timeout", "Remote timeout is outside the allowed range.")
     if max_redirects < 0 or max_redirects > _MAX_REDIRECTS:
-        raise _error("invalid_redirect_limit", "Remote redirect limit is outside the allowed range.")
+        _fail(
+            "invalid_redirect_limit",
+            "Remote redirect limit is outside the allowed range.",
+        )
 
     deadline = time.monotonic() + timeout_seconds
     current_url = raw_url
@@ -221,7 +260,7 @@ def fetch_bytes(
         addresses = _resolve_public_addresses(target.host, target.port)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise _error("request_timeout", "Remote request exceeded the time limit.")
+            _fail("request_timeout", "Remote request exceeded the time limit.")
         status, headers, body = _fetch_once(
             target,
             addresses[0],
@@ -229,15 +268,24 @@ def fetch_bytes(
         )
         if status in _REDIRECT_STATUSES:
             if redirect_count >= max_redirects:
-                raise _error("too_many_redirects", "Remote request exceeded the redirect limit.")
-            location = headers.get("Location") or headers.get("location")
+                _fail(
+                    "too_many_redirects",
+                    "Remote request exceeded the redirect limit.",
+                )
+            location = headers.get("location")
             if not location:
-                raise _error("invalid_redirect", "Remote redirect did not include a location.")
+                _fail(
+                    "invalid_redirect",
+                    "Remote redirect did not include a location.",
+                )
             current_url = urljoin(current_url, location)
             continue
-        if status < 200 or status >= 300:
-            raise _error("remote_http_error", "Remote server returned an unsuccessful status.")
-        content_type = (headers.get("Content-Type") or headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+        if status < _HTTP_SUCCESS_MIN or status >= _HTTP_SUCCESS_MAX:
+            _fail(
+                "remote_http_error",
+                "Remote server returned an unsuccessful status.",
+            )
+        content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
         return SafeFetchResult(
             status_code=status,
             content_type=content_type,
@@ -245,7 +293,7 @@ def fetch_bytes(
             origin=target.origin,
         )
 
-    raise _error("too_many_redirects", "Remote request exceeded the redirect limit.")
+    _fail("too_many_redirects", "Remote request exceeded the redirect limit.")
 
 
 def _validate_json_complexity(value: Any) -> None:
@@ -256,9 +304,9 @@ def _validate_json_complexity(value: Any) -> None:
         current, depth = stack.pop()
         nodes += 1
         if nodes > _MAX_JSON_NODES:
-            raise _error("json_too_complex", "Remote JSON contains too many values.")
+            _fail("json_too_complex", "Remote JSON contains too many values.")
         if depth > _MAX_JSON_DEPTH:
-            raise _error("json_too_deep", "Remote JSON is nested too deeply.")
+            _fail("json_too_deep", "Remote JSON is nested too deeply.")
         if isinstance(current, dict):
             stack.extend((child, depth + 1) for child in current.values())
         elif isinstance(current, list):
@@ -274,10 +322,10 @@ def fetch_json(
     result = fetch_bytes(raw_url, timeout_seconds=timeout_seconds)
     content_type = result.content_type
     if content_type not in _JSON_CONTENT_TYPES and not content_type.endswith("+json"):
-        raise _error("invalid_content_type", "Remote response is not JSON.")
+        _fail("invalid_content_type", "Remote response is not JSON.")
     try:
         payload = json.loads(result.body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise _error("invalid_json", "Remote response contains invalid JSON.") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        _fail("invalid_json", "Remote response contains invalid JSON.")
     _validate_json_complexity(payload)
     return payload, result
