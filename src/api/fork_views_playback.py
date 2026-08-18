@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.services.tracking_hydration import ensure_item_metadata
 from integrations.delivery import get_or_record_receipt
+from integrations.media_identity import MAX_EXTERNAL_ID_LENGTH, item_external_ids
 from integrations.models import IntegrationToken
 
 from .helpers import paginate_data, parse_limit_offset, try_parse_datetime_input
@@ -38,69 +39,155 @@ MEDIA_TYPES = (
     MediaTypes.PODCAST.value,
 )
 _VIDEO_MEDIA_TYPES = (MediaTypes.MOVIE.value, MediaTypes.EPISODE.value)
+_SHOW_MEDIA_TYPES = (MediaTypes.TV.value, MediaTypes.ANIME.value)
 _EXTERNAL_ID_KEYS = {"tmdb": "tmdb_id", "imdb": "imdb_id", "tvdb": "tvdb_id"}
 _PODCAST_COMPLETED_STATUS = 3  # playingStatus from the podcast provider APIs
+_MAX_POSITIVE_INTEGER = 2_147_483_647
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _coerce_position(value):
-    """Return a non-negative int, or raise ValueError."""
+    """Return a portable non-negative PositiveIntegerField value."""
+    if isinstance(value, bool):
+        msg = "must be an integer"
+        raise TypeError(msg)
     position = int(value)
-    if position < 0:
-        msg = "must be >= 0"
+    if position < 0 or position > _MAX_POSITIVE_INTEGER:
+        msg = f"must be between 0 and {_MAX_POSITIVE_INTEGER}"
         raise ValueError(msg)
     return position
 
 
+def _coerce_episode_coordinate(value, *, allow_zero):
+    """Return a bounded episode coordinate or raise ValueError/TypeError."""
+    if isinstance(value, bool):
+        msg = "must be an integer"
+        raise TypeError(msg)
+    number = int(value)
+    minimum = 0 if allow_zero else 1
+    if number < minimum or number > _MAX_POSITIVE_INTEGER:
+        msg = f"must be between {minimum} and {_MAX_POSITIVE_INTEGER}"
+        raise ValueError(msg)
+    return number
+
+
+def _normalize_identifier_value(value):
+    """Return one bounded provider identifier or None when malformed."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    normalized = str(value).strip()
+    if not normalized or len(normalized) > MAX_EXTERNAL_ID_LENGTH:
+        return None
+    return normalized
+
+
+def _normalize_identifiers(raw_ids, keys):
+    """Normalize known identifiers while rejecting malformed supplied values."""
+    if not isinstance(raw_ids, dict):
+        return None
+
+    normalized = {}
+    for key in keys:
+        value = raw_ids.get(key)
+        if value is None or value == "":
+            continue
+        normalized_value = _normalize_identifier_value(value)
+        if normalized_value is None:
+            return None
+        normalized[key] = normalized_value
+    return normalized
+
+
 def _external_ids(item):
-    """Map an Item's resolved external ids back to the API's `ids` vocabulary."""
-    stored = item.provider_external_ids or {}
+    """Map an Item's exact identifiers back to the playback API vocabulary."""
+    if item is None:
+        return {}
+    exact_ids = item_external_ids(item)
+    return {key: value for key, value in exact_ids.items() if key in _EXTERNAL_ID_KEYS}
+
+
+def _local_alias_candidates(media_type, namespace, value):
+    """Return locally persisted TMDB ids for one exact external alias."""
+    field = _EXTERNAL_ID_KEYS[namespace]
+    queryset = Item.objects.filter(
+        source=Sources.TMDB.value,
+        **{f"provider_external_ids__{field}": value},
+    )
+    if media_type == MediaTypes.MOVIE.value:
+        queryset = queryset.filter(media_type=MediaTypes.MOVIE.value)
+    else:
+        queryset = queryset.filter(media_type__in=_SHOW_MEDIA_TYPES)
+
     return {
-        key: str(stored[field])
-        for key, field in _EXTERNAL_ID_KEYS.items()
-        if stored.get(field)
+        str(media_id)
+        for media_id in queryset.values_list("media_id", flat=True).distinct()[:2]
     }
 
 
-def resolve_show_tmdb_id(media_type, ids):
-    """Resolve an `ids` object to a TMDB movie/show id, or None.
-
-    Tries the ids we've already persisted before falling back to a single
-    network `find()` — unlike the live-playback card this feeds a durable
-    write, so it must not guess.
-    """
-    if ids.get("tmdb"):
-        return str(ids["tmdb"])
-
-    for key in ("imdb", "tvdb"):
-        if not ids.get(key):
-            continue
-        known = (
-            Item.objects.filter(
-                source=Sources.TMDB.value,
-                **{f"provider_external_ids__{_EXTERNAL_ID_KEYS[key]}": str(ids[key])},
-            )
-            .order_by("id")
-            .first()
-        )
-        if known:
-            return known.media_id
-
-    ext_id = ids.get("imdb") or ids.get("tvdb")
-    if not ext_id:
-        return None
-    ext_type = "imdb_id" if ids.get("imdb") else "tvdb_id"
-    find_response = app.providers.tmdb.find(ext_id, ext_type)
+def _remote_alias_candidates(media_type, namespace, value):
+    """Resolve one exact external alias through TMDB without choosing among conflicts."""
+    ext_type = f"{namespace}_id"
+    find_response = app.providers.tmdb.find(value, ext_type)
+    if not isinstance(find_response, dict):
+        return set()
 
     if media_type == MediaTypes.MOVIE.value:
-        results = find_response.get("movie_results") or []
-        return str(results[0]["id"]) if results else None
+        return {
+            str(result["id"])
+            for result in find_response.get("movie_results") or []
+            if isinstance(result, dict) and result.get("id") is not None
+        }
 
-    episode_results = find_response.get("tv_episode_results") or []
-    if episode_results:
-        return str(episode_results[0]["show_id"])
-    tv_results = find_response.get("tv_results") or []
-    return str(tv_results[0]["id"]) if tv_results else None
+    candidates = {
+        str(result["show_id"])
+        for result in find_response.get("tv_episode_results") or []
+        if isinstance(result, dict) and result.get("show_id") is not None
+    }
+    candidates.update(
+        str(result["id"])
+        for result in find_response.get("tv_results") or []
+        if isinstance(result, dict) and result.get("id") is not None
+    )
+    return candidates
+
+
+def _resolve_alias_tmdb_id(media_type, namespace, value):
+    """Return one exact TMDB id for an alias, preferring the local identity graph."""
+    local_candidates = _local_alias_candidates(media_type, namespace, value)
+    if len(local_candidates) == 1:
+        return next(iter(local_candidates))
+    if len(local_candidates) > 1:
+        return None
+
+    remote_candidates = _remote_alias_candidates(media_type, namespace, value)
+    if len(remote_candidates) == 1:
+        return next(iter(remote_candidates))
+    return None
+
+
+def resolve_show_tmdb_id(media_type, ids):
+    """Return one TMDB movie/show id only when every supplied exact id agrees."""
+    normalized = _normalize_identifiers(ids, _EXTERNAL_ID_KEYS)
+    if not normalized:
+        return None
+
+    resolved_ids = []
+    tmdb_id = normalized.get("tmdb")
+    if tmdb_id:
+        resolved_ids.append(tmdb_id)
+
+    for namespace in ("imdb", "tvdb"):
+        value = normalized.get(namespace)
+        if not value:
+            continue
+        resolved = _resolve_alias_tmdb_id(media_type, namespace, value)
+        if resolved is None:
+            return None
+        resolved_ids.append(resolved)
+
+    if not resolved_ids or len(set(resolved_ids)) != 1:
+        return None
+    return resolved_ids[0]
 
 
 def _find_existing_item(media_type, tmdb_id, season_number, episode_number):
@@ -176,7 +263,7 @@ def upsert_playback_progress(
     """Store playback progress while serializing updates for one item.
 
     The optional preservation flags are used by webhook events whose payload
-    intentionally omits one field.  The row lock keeps those field-specific
+    intentionally omits one field. The row lock keeps those field-specific
     updates from becoming a stale read-modify-write race.
     """
     position = 0 if position_seconds is None else position_seconds
@@ -226,7 +313,7 @@ def _show_item_map(items):
         return {}
 
     shows = Item.objects.filter(
-        media_type__in=(MediaTypes.TV.value, MediaTypes.ANIME.value),
+        media_type__in=_SHOW_MEDIA_TYPES,
         media_id__in=[media_id for _, media_id in episode_media_ids],
     ).order_by("id")
     return {(show.source, show.media_id): show for show in shows}
@@ -340,33 +427,68 @@ def _parse_list_filters(request):
 
 def _identifier_error(data, media_type):
     """Return a 400 Response if the media identifiers are unusable, else None."""
-    ids = data.get("ids") or {}
+    raw_ids = data.get("ids")
+    if not isinstance(raw_ids, dict):
+        return Response(
+            {"detail": "'ids' must be an object."},
+            status=HTTP.BAD_REQUEST,
+        )
+
     if media_type == MediaTypes.PODCAST.value:
-        if not ids.get("episode_uuid"):
+        normalized = _normalize_identifiers(raw_ids, ("episode_uuid",))
+        if normalized is None or not normalized.get("episode_uuid"):
             return Response(
-                {"detail": "'ids' must include 'episode_uuid' for podcasts."},
+                {
+                    "detail": (
+                        "'ids.episode_uuid' must be a non-empty string or integer "
+                        f"of at most {MAX_EXTERNAL_ID_LENGTH} characters."
+                    )
+                },
                 status=HTTP.BAD_REQUEST,
             )
         return None
 
-    if not any(ids.get(key) for key in _EXTERNAL_ID_KEYS):
+    normalized = _normalize_identifiers(raw_ids, _EXTERNAL_ID_KEYS)
+    if normalized is None:
+        return Response(
+            {
+                "detail": (
+                    "Movie and episode identifiers must be strings or integers "
+                    f"of at most {MAX_EXTERNAL_ID_LENGTH} characters."
+                )
+            },
+            status=HTTP.BAD_REQUEST,
+        )
+    if not normalized:
         return Response(
             {"detail": "'ids' must include at least one of tmdb/imdb/tvdb."},
             status=HTTP.BAD_REQUEST,
         )
 
-    if media_type == MediaTypes.EPISODE.value and (
-        data.get("season_number") is None or data.get("episode_number") is None
-    ):
-        return Response(
-            {
-                "detail": (
-                    "'season_number' and 'episode_number' are required "
-                    "for media_type 'episode'."
-                ),
-            },
-            status=HTTP.BAD_REQUEST,
-        )
+    if media_type == MediaTypes.EPISODE.value:
+        if data.get("season_number") is None or data.get("episode_number") is None:
+            return Response(
+                {
+                    "detail": (
+                        "'season_number' and 'episode_number' are required "
+                        "for media_type 'episode'."
+                    ),
+                },
+                status=HTTP.BAD_REQUEST,
+            )
+        try:
+            _coerce_episode_coordinate(data.get("season_number"), allow_zero=True)
+            _coerce_episode_coordinate(data.get("episode_number"), allow_zero=False)
+        except (TypeError, ValueError):
+            return Response(
+                {
+                    "detail": (
+                        "'season_number' must be an integer >= 0 and "
+                        "'episode_number' must be an integer >= 1."
+                    )
+                },
+                status=HTTP.BAD_REQUEST,
+            )
 
     return None
 
@@ -393,15 +515,37 @@ def _seconds_error(data, *, require_position):
             _coerce_position(value)
         except (TypeError, ValueError):
             return Response(
-                {"detail": f"'{field}' must be an integer >= 0."},
+                {
+                    "detail": (
+                        f"'{field}' must be an integer between 0 and "
+                        f"{_MAX_POSITIVE_INTEGER}."
+                    )
+                },
                 status=HTTP.BAD_REQUEST,
             )
 
     return None
 
 
+def _completed_error(data):
+    """Return a 400 Response when completed is not a JSON boolean."""
+    completed = data.get("completed")
+    if completed is not None and not isinstance(completed, bool):
+        return Response(
+            {"detail": "'completed' must be true or false."},
+            status=HTTP.BAD_REQUEST,
+        )
+    return None
+
+
 def _write_request_error(data, *, require_position):
     """Return a 400 Response if the write payload is malformed, else None."""
+    if not isinstance(data, dict):
+        return Response(
+            {"detail": "Request body must be a JSON object."},
+            status=HTTP.BAD_REQUEST,
+        )
+
     media_type = data.get("media_type")
     if media_type not in MEDIA_TYPES:
         return Response(
@@ -409,12 +553,11 @@ def _write_request_error(data, *, require_position):
             status=HTTP.BAD_REQUEST,
         )
 
-    return _identifier_error(data, media_type) or _seconds_error(
-        data,
-        require_position=require_position,
+    return (
+        _identifier_error(data, media_type)
+        or _seconds_error(data, require_position=require_position)
+        or _completed_error(data)
     )
-
-    return None
 
 
 _ENTRY_SCHEMA = {
@@ -447,28 +590,55 @@ _WRITE_SCHEMA = {
                 "Podcasts: episode_uuid (Pocket Casts UUID or RSS GUID)."
             ),
             "properties": {
-                "tmdb": {"type": "string", "nullable": True},
-                "imdb": {"type": "string", "nullable": True},
-                "tvdb": {"type": "string", "nullable": True},
-                "episode_uuid": {"type": "string", "nullable": True},
+                "tmdb": {
+                    "type": "string",
+                    "nullable": True,
+                    "maxLength": MAX_EXTERNAL_ID_LENGTH,
+                },
+                "imdb": {
+                    "type": "string",
+                    "nullable": True,
+                    "maxLength": MAX_EXTERNAL_ID_LENGTH,
+                },
+                "tvdb": {
+                    "type": "string",
+                    "nullable": True,
+                    "maxLength": MAX_EXTERNAL_ID_LENGTH,
+                },
+                "episode_uuid": {
+                    "type": "string",
+                    "nullable": True,
+                    "maxLength": MAX_EXTERNAL_ID_LENGTH,
+                },
             },
         },
         "season_number": {
             "type": "integer",
+            "minimum": 0,
+            "maximum": _MAX_POSITIVE_INTEGER,
             "nullable": True,
             "description": "Required for media_type 'episode'.",
         },
         "episode_number": {
             "type": "integer",
+            "minimum": 1,
+            "maximum": _MAX_POSITIVE_INTEGER,
             "nullable": True,
             "description": "Required for media_type 'episode'.",
         },
         "position_seconds": {
             "type": "integer",
+            "minimum": 0,
+            "maximum": _MAX_POSITIVE_INTEGER,
             "nullable": True,
             "description": "Absolute resume position. null clears it.",
         },
-        "duration_seconds": {"type": "integer", "nullable": True},
+        "duration_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": _MAX_POSITIVE_INTEGER,
+            "nullable": True,
+        },
         "completed": {"type": "boolean", "nullable": True},
     },
 }
@@ -611,18 +781,25 @@ class PlaybackProgressView(drf_views.APIView):
     def _put_video(self, request, media_type):
         """Upsert a movie/episode position, creating the Item if needed."""
         data = request.data
+        ids = _normalize_identifiers(data.get("ids"), _EXTERNAL_ID_KEYS) or {}
+        season_number = data.get("season_number")
+        episode_number = data.get("episode_number")
+        if media_type == MediaTypes.EPISODE.value:
+            season_number = _coerce_episode_coordinate(season_number, allow_zero=True)
+            episode_number = _coerce_episode_coordinate(episode_number, allow_zero=False)
         try:
             item = resolve_video_item(
                 request.user,
                 media_type,
-                data.get("ids") or {},
-                data.get("season_number"),
-                data.get("episode_number"),
+                ids,
+                season_number,
+                episode_number,
                 create=True,
             )
-        except Exception as e:
+        except Exception:
+            logger.warning("Could not resolve playback media", exc_info=True)
             return Response(
-                {"detail": "Could not resolve media.", "errors": str(e)},
+                {"detail": "Could not resolve media."},
                 status=HTTP.NOT_FOUND,
             )
         if item is None:
@@ -637,7 +814,7 @@ class PlaybackProgressView(drf_views.APIView):
             item,
             _coerce_position(data.get("position_seconds")),
             _coerce_position(duration) if duration is not None else None,
-            completed=bool(data.get("completed")),
+            completed=data.get("completed") is True,
         )
         progress.item = item
         show_map = _show_item_map([item])
@@ -645,7 +822,8 @@ class PlaybackProgressView(drf_views.APIView):
 
     def _put_podcast(self, request):
         """Write a podcast position onto the existing Podcast row."""
-        podcast = _resolve_podcast(request.user, request.data.get("ids") or {})
+        ids = _normalize_identifiers(request.data.get("ids"), ("episode_uuid",)) or {}
+        podcast = _resolve_podcast(request.user, ids)
         if podcast is None:
             return Response(
                 {"detail": "No tracked podcast episode matches that episode_uuid."},
@@ -657,7 +835,7 @@ class PlaybackProgressView(drf_views.APIView):
         )
         podcast.position_updated_at = timezone.now()
         update_fields = ["played_up_to_seconds", "position_updated_at"]
-        if request.data.get("completed"):
+        if request.data.get("completed") is True:
             podcast.status = Status.COMPLETED.value
             podcast.last_seen_status = _PODCAST_COMPLETED_STATUS
             update_fields += ["status", "last_seen_status"]
@@ -696,14 +874,14 @@ class PlaybackProgressView(drf_views.APIView):
 
         return _execute()
 
-
     def _clear(self, request):
         """Delete the stored position for the identified media."""
         data = request.data
         media_type = data.get("media_type")
 
         if media_type == MediaTypes.PODCAST.value:
-            podcast = _resolve_podcast(request.user, data.get("ids") or {})
+            ids = _normalize_identifiers(data.get("ids"), ("episode_uuid",)) or {}
+            podcast = _resolve_podcast(request.user, ids)
             if podcast is None:
                 return Response(
                     {"detail": "No tracked podcast episode matches that episode_uuid."},
@@ -716,18 +894,25 @@ class PlaybackProgressView(drf_views.APIView):
             )
             return Response(status=HTTP.NO_CONTENT)
 
+        ids = _normalize_identifiers(data.get("ids"), _EXTERNAL_ID_KEYS) or {}
+        season_number = data.get("season_number")
+        episode_number = data.get("episode_number")
+        if media_type == MediaTypes.EPISODE.value:
+            season_number = _coerce_episode_coordinate(season_number, allow_zero=True)
+            episode_number = _coerce_episode_coordinate(episode_number, allow_zero=False)
         try:
             item = resolve_video_item(
                 request.user,
                 media_type,
-                data.get("ids") or {},
-                data.get("season_number"),
-                data.get("episode_number"),
+                ids,
+                season_number,
+                episode_number,
                 create=False,
             )
-        except Exception as e:
+        except Exception:
+            logger.warning("Could not resolve playback media for clear", exc_info=True)
             return Response(
-                {"detail": "Could not resolve media.", "errors": str(e)},
+                {"detail": "Could not resolve media."},
                 status=HTTP.NOT_FOUND,
             )
         if item is None:
