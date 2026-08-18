@@ -5,7 +5,8 @@ from http import HTTPStatus as HTTP  # noqa: N814
 from django.db.models import Max, Q
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
-from rest_framework import permissions, views as drf_views
+from rest_framework import permissions
+from rest_framework import views as drf_views
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.response import Response
 
