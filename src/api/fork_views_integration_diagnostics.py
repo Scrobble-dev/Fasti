@@ -21,6 +21,8 @@ from app.models import (
 )
 from integrations.models import IntegrationEventReceipt, IntegrationToken
 
+from .cache_control import private_no_store
+
 _RESERVED_RECEIPT_STATUS = 0
 
 
@@ -105,50 +107,52 @@ class IntegrationDiagnosticsView(drf_views.APIView):
                 }
             )
 
-        return Response(
-            {
-                "state": "needs_attention" if recovery else "ready",
-                "tokens": {
-                    "active": active_tokens.count(),
-                    "revoked": revoked_count,
-                    "expired": expired_count,
-                    "last_used_at": latest_token_use,
+        return private_no_store(
+            Response(
+                {
+                    "state": "needs_attention" if recovery else "ready",
+                    "tokens": {
+                        "active": active_tokens.count(),
+                        "revoked": revoked_count,
+                        "expired": expired_count,
+                        "last_used_at": latest_token_use,
+                    },
+                    "delivery": {
+                        "receipt_count": receipts.count(),
+                        "incomplete_receipt_count": incomplete_receipts,
+                    },
+                    "progress": {
+                        "current_count": PlaybackProgress.objects.filter(
+                            user=request.user
+                        ).count(),
+                        **_latest_change(progress_changes),
+                    },
+                    "saved_media": {
+                        "current_count": SavedMediaMembership.objects.filter(
+                            user=request.user
+                        ).count(),
+                        **_latest_change(saved_changes),
+                    },
+                    "watched_state": {
+                        "movie_count": watched_movies,
+                        "episode_count": watched_episodes,
+                    },
+                    "external_client_sync": {
+                        "state": "not_reported",
+                        "detail": (
+                            "Floppy can report its local durable state, but it cannot claim that "
+                            "a Nuvio client completed synchronization unless that client reports "
+                            "or reconciles its remote state."
+                        ),
+                    },
+                    "offline": {
+                        "diagnostics_require_external_network": False,
+                        "existing_identity_progress_writes_require_external_network": False,
+                        "existing_identity_saved_media_writes_require_external_network": False,
+                        "new_unresolved_saved_media_may_require_metadata_resolution": True,
+                    },
+                    "recovery": recovery,
                 },
-                "delivery": {
-                    "receipt_count": receipts.count(),
-                    "incomplete_receipt_count": incomplete_receipts,
-                },
-                "progress": {
-                    "current_count": PlaybackProgress.objects.filter(
-                        user=request.user
-                    ).count(),
-                    **_latest_change(progress_changes),
-                },
-                "saved_media": {
-                    "current_count": SavedMediaMembership.objects.filter(
-                        user=request.user
-                    ).count(),
-                    **_latest_change(saved_changes),
-                },
-                "watched_state": {
-                    "movie_count": watched_movies,
-                    "episode_count": watched_episodes,
-                },
-                "external_client_sync": {
-                    "state": "not_reported",
-                    "detail": (
-                        "Floppy can report its local durable state, but it cannot claim that "
-                        "a Nuvio client completed synchronization unless that client reports "
-                        "or reconciles its remote state."
-                    ),
-                },
-                "offline": {
-                    "diagnostics_require_external_network": False,
-                    "existing_identity_progress_writes_require_external_network": False,
-                    "existing_identity_saved_media_writes_require_external_network": False,
-                    "new_unresolved_saved_media_may_require_metadata_resolution": True,
-                },
-                "recovery": recovery,
-            },
-            status=HTTP.OK,
+                status=HTTP.OK,
+            )
         )
