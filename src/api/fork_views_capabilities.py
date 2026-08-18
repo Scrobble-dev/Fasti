@@ -1,6 +1,5 @@
 """Public capability discovery for third-party Floppy clients."""
 
-from django.conf import settings
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
 from rest_framework import views as drf_views
@@ -16,6 +15,8 @@ from integrations.sync_policy import (
     CHANGE_RETENTION_DAYS,
     CURSOR_MAX_AGE_SECONDS,
     CURSOR_VERSION,
+    SNAPSHOT_CURSOR_VERSION,
+    SNAPSHOT_PAGE_MAX,
 )
 
 _CONTRACT_VERSION = "1"
@@ -39,7 +40,6 @@ class IntegrationCapabilitiesView(drf_views.APIView):
         return Response(
             {
                 "product": "Floppy",
-                "server_version": settings.VERSION,
                 "contract_version": _CONTRACT_VERSION,
                 "stability": "experimental",
                 "authentication": {
@@ -64,9 +64,23 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     },
                     "progress": {
                         "snapshot": {
+                            "path": "/api/v1/playback/progress/snapshot/",
+                            "method": "GET",
+                            "scope": "progress:read",
+                            "cursor_version": SNAPSHOT_CURSOR_VERSION,
+                            "client_bound_cursor": True,
+                            "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                            "page_max": SNAPSHOT_PAGE_MAX,
+                            "pagination": "stable_keyset",
+                            "authoritative_when_complete": True,
+                            "media_types": ["movie", "episode"],
+                        },
+                        "compatibility_snapshot": {
                             "path": "/api/v1/playback/progress/",
                             "method": "GET",
                             "scope": "progress:read",
+                            "pagination": "offset",
+                            "media_types": ["movie", "episode", "podcast"],
                         },
                         "write": {
                             "path": "/api/v1/playback/progress/",
@@ -94,9 +108,23 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                     },
                     "saved_media": {
                         "snapshot": {
+                            "path": "/api/v1/watchlist/snapshot/",
+                            "method": "GET",
+                            "scope": "watchlist:read",
+                            "cursor_version": SNAPSHOT_CURSOR_VERSION,
+                            "client_bound_cursor": True,
+                            "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
+                            "page_max": SNAPSHOT_PAGE_MAX,
+                            "pagination": "stable_keyset",
+                            "authoritative_when_complete": True,
+                            "media_types": ["movie", "tv", "anime"],
+                        },
+                        "compatibility_snapshot": {
                             "path": "/api/v1/watchlist/",
                             "method": "GET",
                             "scope": "watchlist:read",
+                            "pagination": "offset",
+                            "media_types": ["movie", "tv", "anime"],
                         },
                         "add": {
                             "path": "/api/v1/watchlist/",
@@ -143,10 +171,12 @@ class IntegrationCapabilitiesView(drf_views.APIView):
                 },
                 "sync": {
                     "checkpoint_then_snapshot_then_delta": True,
-                    "cursor_version": CURSOR_VERSION,
+                    "stable_snapshot_cursor_version": SNAPSHOT_CURSOR_VERSION,
+                    "change_cursor_version": CURSOR_VERSION,
                     "cursor_bound_to_authenticated_client": True,
                     "cursor_ttl_seconds": CURSOR_MAX_AGE_SECONDS,
                     "change_retention_days": CHANGE_RETENTION_DAYS,
+                    "stable_snapshot_pagination": "keyset_with_fixed_upper_boundary",
                     "delete_requires_explicit_event": True,
                     "cache_miss_is_delete": False,
                     "offline_reconnect_requires_snapshot_on_expired_cursor": True,
