@@ -2,7 +2,7 @@
 from http import HTTPStatus as HTTP  # noqa: N814
 from unittest.mock import patch
 
-from app.models import MediaTypes, PlaybackProgress
+from app.models import Item, MediaTypes, PlaybackProgress, Sources
 from integrations.media_identity import MAX_EXTERNAL_ID_LENGTH
 
 from .base import FloppyApiTestCase
@@ -54,6 +54,14 @@ class PlaybackProgressInputBoundaryTests(FloppyApiTestCase):
 
     def test_episode_coordinates_are_bounded_without_rejecting_specials(self):
         """Season zero is valid, but invalid coordinate types and ranges are not."""
+        Item.objects.create(
+            media_id="1001",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.EPISODE.value,
+            title="TV Show 1 Special",
+            season_number=0,
+            episode_number=1,
+        )
         valid_special = self._put(
             {
                 "media_type": "episode",
