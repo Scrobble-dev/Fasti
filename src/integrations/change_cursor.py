@@ -27,7 +27,7 @@ class ChangeCursorError(ValueError):
     code = "invalid_cursor"
 
 
-class ChangeCursorExpired(ChangeCursorError):
+class ChangeCursorExpired(ChangeCursorError):  # noqa: N818
     """Raised when an ordered change cursor is outside the recovery window."""
 
     code = "cursor_expired"
@@ -42,7 +42,8 @@ def encode_change_cursor(
 ) -> str:
     """Sign one ordered position for an exact user, client, and resource."""
     if not isinstance(sequence_id, int) or isinstance(sequence_id, bool) or sequence_id < 0:
-        raise ValueError("sequence_id must be a non-negative integer")
+        message = "sequence_id must be a non-negative integer"
+        raise ValueError(message)
     return signing.dumps(
         {
             "v": CURSOR_VERSION,
