@@ -109,6 +109,7 @@ class PlaybackProgressChange(models.Model):
                 fields=["user", "created_at"],
                 name="playchg_user_created_idx",
             ),
+            models.Index(fields=["created_at"], name="playchg_created_idx"),
         ]
 
     def __str__(self):
