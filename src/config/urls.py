@@ -88,11 +88,12 @@ urlpatterns = [
 if settings.FLOPPY_HEADLESS_ENABLED:
     urlpatterns.append(path("_allauth/", include("allauth.headless.urls")))
 
-# Delegated clients such as Nuvio use allauth's OIDC provider. Its URL set owns
-# discovery, authorization-code/PKCE, device authorization, token, userinfo, and
-# revocation behavior. The settings overlay refuses to enable it without a key.
+# Delegated clients such as Nuvio use allauth's OIDC provider. Include the
+# package-level IdP URL set so discovery, authorization, device authorization,
+# token, userinfo, revocation, and any future protocol-owned routes stay on the
+# upstream allauth contract. The feature remains disabled by default.
 if settings.FLOPPY_OIDC_IDP_ENABLED:
-    urlpatterns.append(path("", include("allauth.idp.oidc.urls")))
+    urlpatterns.append(path("", include("allauth.idp.urls")))
 
 # Build the accounts URLs
 account_patterns = [
