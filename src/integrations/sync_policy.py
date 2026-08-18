@@ -1,8 +1,11 @@
 """Shared limits for durable third-party synchronization state."""
 
 CURSOR_VERSION = 2
+SNAPSHOT_CURSOR_VERSION = 1
 CURSOR_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
-CHANGE_PAGE_MAX = 100
+INTEGRATION_PAGE_MAX = 100
+CHANGE_PAGE_MAX = INTEGRATION_PAGE_MAX
+SNAPSHOT_PAGE_MAX = INTEGRATION_PAGE_MAX
 
 # Change events outlive every valid cursor. This gives clients a bounded
 # offline-reconnect window without keeping append-only synchronization state
