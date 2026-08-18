@@ -16,6 +16,8 @@ from integrations.scopes import (
     NUVIO_RECOMMENDED_SCOPES,
 )
 
+from .cache_control import private_no_store
+
 _MAX_EXPIRY_DAYS = 3650
 _MAX_TOKEN_NAME_LENGTH = 255
 _MAX_CLIENT_IDENTIFIER_LENGTH = 255
@@ -51,16 +53,18 @@ _TOKEN_CREATE_SCHEMA = {
 
 def _error(code: str, message: str, *, param: str | None = None, status=HTTP.BAD_REQUEST):
     """Return a stable token-management validation error."""
-    return Response(
-        {
-            "error": {
-                "type": "invalid_request_error",
-                "code": code,
-                "message": message,
-                "param": param,
+    return private_no_store(
+        Response(
+            {
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": code,
+                    "message": message,
+                    "param": param,
+                },
             },
-        },
-        status=status,
+            status=status,
+        )
     )
 
 
@@ -183,19 +187,21 @@ class IntegrationTokenManagementView(drf_views.APIView):
     def get(self, request):
         """List token metadata for the signed-in user."""
         tokens = IntegrationToken.objects.filter(user=request.user).order_by("-created_at", "-id")
-        return Response(
-            {
-                "results": [_serialize_token(token) for token in tokens],
-                "available_scopes": [
-                    {
-                        "scope": scope,
-                        "description": INTEGRATION_SCOPE_DESCRIPTIONS[scope],
-                    }
-                    for scope in sorted(INTEGRATION_SCOPES)
-                ],
-                "recommended_nuvio_scopes": list(NUVIO_RECOMMENDED_SCOPES),
-            },
-            status=HTTP.OK,
+        return private_no_store(
+            Response(
+                {
+                    "results": [_serialize_token(token) for token in tokens],
+                    "available_scopes": [
+                        {
+                            "scope": scope,
+                            "description": INTEGRATION_SCOPE_DESCRIPTIONS[scope],
+                        }
+                        for scope in sorted(INTEGRATION_SCOPES)
+                    ],
+                    "recommended_nuvio_scopes": list(NUVIO_RECOMMENDED_SCOPES),
+                },
+                status=HTTP.OK,
+            )
         )
 
     @extend_schema(
@@ -225,17 +231,16 @@ class IntegrationTokenManagementView(drf_views.APIView):
             client_identifier=fields["client_identifier"],
             expires_at=fields["expires_at"],
         )
-        response = Response(
-            {
-                **_serialize_token(token),
-                "token": raw_token,
-                "secret_shown_once": True,
-            },
-            status=HTTP.CREATED,
+        return private_no_store(
+            Response(
+                {
+                    **_serialize_token(token),
+                    "token": raw_token,
+                    "secret_shown_once": True,
+                },
+                status=HTTP.CREATED,
+            )
         )
-        response["Cache-Control"] = "no-store"
-        response["Pragma"] = "no-cache"
-        return response
 
 
 class IntegrationTokenDetailView(drf_views.APIView):
@@ -278,4 +283,4 @@ class IntegrationTokenDetailView(drf_views.APIView):
             IntegrationToken.objects.filter(pk=token.pk, revoked_at__isnull=True).update(
                 revoked_at=timezone.now()
             )
-        return Response(status=HTTP.NO_CONTENT)
+        return private_no_store(Response(status=HTTP.NO_CONTENT))
