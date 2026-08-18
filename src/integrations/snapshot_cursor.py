@@ -5,7 +5,11 @@ from dataclasses import dataclass
 from django.core import signing
 from django.core.signing import BadSignature, SignatureExpired
 
-from integrations.sync_policy import CURSOR_MAX_AGE_SECONDS, SNAPSHOT_CURSOR_VERSION
+from integrations.sync_policy import (
+    CURSOR_MAX_AGE_SECONDS,
+    CURSOR_MAX_LENGTH,
+    SNAPSHOT_CURSOR_VERSION,
+)
 
 _CURSOR_SALT = "integrations.stable-snapshot"
 
@@ -64,6 +68,13 @@ def decode_snapshot_cursor(
     client_id: str,
 ) -> SnapshotCursorState:
     """Validate a stable snapshot cursor and return its immutable state."""
+    if (
+        not isinstance(cursor, str)
+        or not cursor
+        or len(cursor) > CURSOR_MAX_LENGTH
+    ):
+        raise SnapshotCursorError
+
     try:
         payload = signing.loads(
             cursor,
@@ -72,7 +83,7 @@ def decode_snapshot_cursor(
         )
     except SignatureExpired as error:
         raise SnapshotCursorExpired from error
-    except BadSignature as error:
+    except (BadSignature, ValueError, TypeError) as error:
         raise SnapshotCursorError from error
 
     if not isinstance(payload, dict):
