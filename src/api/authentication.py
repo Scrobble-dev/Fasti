@@ -11,56 +11,9 @@ from rest_framework.permissions import BasePermission
 
 from app.playback_context import set_playback_source_client_id
 from integrations.models import IntegrationToken
+from integrations.scopes import INTEGRATION_SCOPE_RULES
 from users.models import User
 
-
-_INTEGRATION_SCOPE_RULES = {
-    "api_scrobble": {
-        "POST": "scrobble:write",
-    },
-    "api_playback_progress": {
-        "GET": "progress:read",
-        "HEAD": "progress:read",
-        "PUT": "progress:write",
-        "DELETE": "progress:write",
-    },
-    "api_playback_progress_snapshot": {
-        "GET": "progress:read",
-        "HEAD": "progress:read",
-    },
-    "api_playback_progress_changes": {
-        "GET": "progress:read",
-        "HEAD": "progress:read",
-    },
-    "api_watchlist": {
-        "GET": "watchlist:read",
-        "HEAD": "watchlist:read",
-        "PUT": "watchlist:write",
-        "DELETE": "watchlist:write",
-    },
-    "api_watchlist_snapshot": {
-        "GET": "watchlist:read",
-        "HEAD": "watchlist:read",
-    },
-    "api_watchlist_changes": {
-        "GET": "watchlist:read",
-        "HEAD": "watchlist:read",
-    },
-    "api_watched_state": {
-        "GET": "watched:read",
-        "HEAD": "watched:read",
-        "PUT": "watched:write",
-        "DELETE": "watched:write",
-    },
-    "api_watched_state_snapshot": {
-        "GET": "watched:read",
-        "HEAD": "watched:read",
-    },
-    "api_watched_state_changes": {
-        "GET": "watched:read",
-        "HEAD": "watched:read",
-    },
-}
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
 _CLIENT_ID_DIGEST_LENGTH = 24
 
@@ -72,7 +25,7 @@ def _scope_for_request(request):
 
     resolver_match = getattr(request, "resolver_match", None)
     url_name = getattr(resolver_match, "url_name", None)
-    method_scopes = _INTEGRATION_SCOPE_RULES.get(url_name)
+    method_scopes = INTEGRATION_SCOPE_RULES.get(url_name)
     if method_scopes is None:
         return False, None
 
