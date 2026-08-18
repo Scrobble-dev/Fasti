@@ -47,7 +47,11 @@ class SavedMediaMembership(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=["user", "-updated_at"], name="savedmedia_user_updated_idx"),
+            models.Index(
+                fields=["user", "-updated_at"],
+                name="savedmedia_user_updated_idx",
+            ),
+            models.Index(fields=["user", "id"], name="savedmedia_user_id_idx"),
         ]
 
     def __str__(self):
