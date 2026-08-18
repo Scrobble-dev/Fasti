@@ -1,6 +1,7 @@
 """Read-only Stremio Addon Protocol publication for public Floppy lists."""
 
 from http import HTTPStatus as HTTP  # noqa: N814
+from typing import NoReturn
 from urllib.parse import parse_qs
 
 from django.contrib.auth.decorators import login_not_required
@@ -14,6 +15,7 @@ from lists.models import CustomList, CustomListItem
 
 _CATALOG_PAGE_SIZE = 100
 _MAX_SKIP = 1_000_000
+_MAX_CONTENT_ID_LENGTH = 500
 _STREMIO_TYPES = {
     "movie": (MediaTypes.MOVIE.value,),
     "series": (MediaTypes.TV.value, MediaTypes.ANIME.value),
@@ -23,6 +25,11 @@ _DIRECT_STREMIO_SOURCES = {
     Sources.TMDB.value,
     Sources.TVDB.value,
 }
+
+
+def _not_found(message: str) -> NoReturn:
+    """Raise one non-enumerating protocol 404 with a stable message."""
+    raise Http404(message)
 
 
 def _public_json(payload, *, status=HTTP.OK):
@@ -37,7 +44,7 @@ def _public_list(list_reference):
     """Return one explicitly public list or raise a non-enumerating 404."""
     custom_list = CustomList.objects.get_public_list(list_reference)
     if custom_list is None:
-        raise Http404("List not found")
+        _not_found("List not found")
     return custom_list
 
 
@@ -140,7 +147,7 @@ def _meta_preview(item):
 def _parse_content_id(content_id):
     """Return (namespace, value) for one exact Stremio/Nuvio identifier."""
     value = str(content_id or "").strip()
-    if not value or len(value) > 500:
+    if not value or len(value) > _MAX_CONTENT_ID_LENGTH:
         return None
     if value.lower().startswith("tt") and ":" not in value:
         return "imdb", value
@@ -201,7 +208,7 @@ def manifest(request, list_reference):
     if not available_types:
         # A valid addon still needs one resource/type. Keeping the manifest empty
         # would make installation look successful but unusable, so fail clearly.
-        raise Http404("List has no supported catalog items")
+        _not_found("List has no supported catalog items")
 
     return _public_json(
         {
@@ -222,7 +229,7 @@ def catalog(request, list_reference, media_type, catalog_id, extra_args=""):
     """Return one deterministic page from a public Floppy list."""
     custom_list = _public_list(list_reference)
     if catalog_id != f"floppy-list-{custom_list.pk}" or media_type not in _STREMIO_TYPES:
-        raise Http404("Catalog not found")
+        _not_found("Catalog not found")
 
     skip = _parse_skip(request, extra_args)
     if skip is None:
@@ -258,8 +265,8 @@ def meta(request, list_reference, media_type, content_id):
     custom_list = _public_list(list_reference)
     row = _matching_list_item(custom_list, media_type, content_id)
     if row is None:
-        raise Http404("Metadata not found")
+        _not_found("Metadata not found")
     payload = _meta_preview(row.item)
     if payload is None:
-        raise Http404("Metadata not found")
+        _not_found("Metadata not found")
     return _public_json({"meta": payload})
