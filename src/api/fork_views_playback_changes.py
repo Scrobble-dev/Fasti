@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from app.models import PlaybackProgressChange
 from app.playback_context import get_playback_source_client_id
 
-_CURSOR_VERSION = 1
+_CURSOR_VERSION = 2
 _CURSOR_RESOURCE = "playback_progress"
 _CURSOR_SALT = "api.playback-progress-changes"
 _CURSOR_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
@@ -67,13 +67,14 @@ def _cursor_error(code: str, message: str, status: int) -> Response:
     )
 
 
-def _encode_cursor(user_id: int, sequence_id: int) -> str:
-    """Sign one user-bound playback progress cursor."""
+def _encode_cursor(user_id: int, sequence_id: int, client_id: str) -> str:
+    """Sign one user-, resource-, and integration-client-bound progress cursor."""
     return signing.dumps(
         {
             "v": _CURSOR_VERSION,
             "resource": _CURSOR_RESOURCE,
             "user": user_id,
+            "client": client_id,
             "sequence": sequence_id,
         },
         salt=_CURSOR_SALT,
@@ -81,8 +82,12 @@ def _encode_cursor(user_id: int, sequence_id: int) -> str:
     )
 
 
-def _decode_cursor(cursor: str, user_id: int) -> tuple[int | None, Response | None]:
-    """Return the validated sequence encoded in ``cursor``."""
+def _decode_cursor(
+    cursor: str,
+    user_id: int,
+    client_id: str,
+) -> tuple[int | None, Response | None]:
+    """Return the sequence from a cursor bound to this user and integration client."""
     try:
         payload = signing.loads(
             cursor,
@@ -113,10 +118,14 @@ def _decode_cursor(cursor: str, user_id: int) -> tuple[int | None, Response | No
         payload.get("v") != _CURSOR_VERSION
         or payload.get("resource") != _CURSOR_RESOURCE
         or payload.get("user") != user_id
+        or payload.get("client") != client_id
     ):
         return None, _cursor_error(
             "invalid_cursor",
-            "The playback progress cursor is not valid for this user or resource.",
+            (
+                "The playback progress cursor is not valid for this user, "
+                "integration client, or resource."
+            ),
             HTTP.BAD_REQUEST,
         )
 
@@ -171,9 +180,10 @@ class PlaybackProgressChangesView(drf_views.APIView):
     @extend_schema(
         description=(
             "Create a snapshot checkpoint when cursor is omitted, or list ordered "
-            "movie/episode playback progress changes after a signed cursor. Clients "
-            "must fetch /api/v1/playback/progress after the initial checkpoint, then "
-            "apply this feed from the returned cursor. Delete events are explicit."
+            "movie/episode playback progress changes after a signed client-bound cursor. "
+            "Clients must fetch /api/v1/playback/progress after the initial checkpoint, "
+            "then apply this feed from the returned cursor. Delete events are explicit. "
+            "A cursor can only be resumed by the same authenticated integration client."
         ),
         responses={
             200: _RESPONSE_SCHEMA,
@@ -187,6 +197,7 @@ class PlaybackProgressChangesView(drf_views.APIView):
         if error:
             return error
 
+        client_id = get_playback_source_client_id()
         cursor = request.query_params.get("cursor")
         if not cursor:
             high_water = (
@@ -200,16 +211,24 @@ class PlaybackProgressChangesView(drf_views.APIView):
                 {
                     "version": _CURSOR_VERSION,
                     "results": [],
-                    "next_cursor": _encode_cursor(request.user.pk, high_water),
+                    "next_cursor": _encode_cursor(
+                        request.user.pk,
+                        high_water,
+                        client_id,
+                    ),
                     "has_more": False,
                     "snapshot_required": True,
-                    "client_id": get_playback_source_client_id(),
+                    "client_id": client_id,
                     "cursor_expires_in_seconds": _CURSOR_MAX_AGE_SECONDS,
                 },
                 status=HTTP.OK,
             )
 
-        sequence_id, error = _decode_cursor(cursor, request.user.pk)
+        sequence_id, error = _decode_cursor(
+            cursor,
+            request.user.pk,
+            client_id,
+        )
         if error:
             return error
 
@@ -227,10 +246,14 @@ class PlaybackProgressChangesView(drf_views.APIView):
             {
                 "version": _CURSOR_VERSION,
                 "results": [_serialize_change(change) for change in page],
-                "next_cursor": _encode_cursor(request.user.pk, next_sequence),
+                "next_cursor": _encode_cursor(
+                    request.user.pk,
+                    next_sequence,
+                    client_id,
+                ),
                 "has_more": has_more,
                 "snapshot_required": False,
-                "client_id": get_playback_source_client_id(),
+                "client_id": client_id,
                 "cursor_expires_in_seconds": _CURSOR_MAX_AGE_SECONDS,
             },
             status=HTTP.OK,
