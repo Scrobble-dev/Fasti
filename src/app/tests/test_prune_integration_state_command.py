@@ -9,7 +9,7 @@ from django.core.management.base import CommandError
 from django.test import TestCase
 from django.utils import timezone
 
-from app.models import PlaybackProgressChange, SavedMediaChange
+from app.models import PlaybackProgressChange, SavedMediaChange, WatchedStateChange
 from integrations.models import IntegrationEventReceipt
 from integrations.sync_policy import (
     CHANGE_RETENTION_DAYS,
@@ -79,6 +79,28 @@ class PruneIntegrationStateCommandTests(TestCase):
             ids={"tmdb": "4"},
         )
 
+        self.old_watched = WatchedStateChange.objects.create(
+            user=self.user,
+            item_id=5,
+            watched=True,
+            media_type="movie",
+            source="tmdb",
+            media_id="5",
+            ids={"tmdb": "5"},
+        )
+        WatchedStateChange.objects.filter(pk=self.old_watched.pk).update(
+            created_at=old_change_time
+        )
+        self.recent_watched = WatchedStateChange.objects.create(
+            user=self.user,
+            item_id=6,
+            watched=False,
+            media_type="movie",
+            source="tmdb",
+            media_id="6",
+            ids={"tmdb": "6"},
+        )
+
         self.old_completed_receipt = IntegrationEventReceipt.objects.create(
             user=self.user,
             client_event_id="old-completed",
@@ -119,10 +141,14 @@ class PruneIntegrationStateCommandTests(TestCase):
         )
         self.assertTrue(SavedMediaChange.objects.filter(pk=self.old_saved.pk).exists())
         self.assertTrue(
+            WatchedStateChange.objects.filter(pk=self.old_watched.pk).exists()
+        )
+        self.assertTrue(
             IntegrationEventReceipt.objects.filter(
                 pk=self.old_completed_receipt.pk
             ).exists()
         )
+        self.assertIn("watched-state changes: 1", output.getvalue())
         self.assertIn("Dry run only", output.getvalue())
 
     def test_apply_prunes_only_expired_safe_rows(self):
@@ -140,6 +166,12 @@ class PruneIntegrationStateCommandTests(TestCase):
         )
         self.assertTrue(
             SavedMediaChange.objects.filter(pk=self.recent_saved.pk).exists()
+        )
+        self.assertFalse(
+            WatchedStateChange.objects.filter(pk=self.old_watched.pk).exists()
+        )
+        self.assertTrue(
+            WatchedStateChange.objects.filter(pk=self.recent_watched.pk).exists()
         )
         self.assertFalse(
             IntegrationEventReceipt.objects.filter(
