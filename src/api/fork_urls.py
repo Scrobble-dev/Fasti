@@ -7,6 +7,7 @@ from . import (
     fork_views_capabilities,
     fork_views_discover,
     fork_views_integration_diagnostics,
+    fork_views_integration_snapshots,
     fork_views_integration_tokens,
     fork_views_integrations,
     fork_views_lists,
@@ -340,6 +341,11 @@ urlpatterns = [
         name="api_playback_progress",
     ),
     re_path(
+        r"^playback/progress/snapshot/?$",
+        fork_views_integration_snapshots.PlaybackProgressSnapshotView.as_view(),
+        name="api_playback_progress_snapshot",
+    ),
+    re_path(
         r"^playback/progress/changes/?$",
         fork_views_playback_changes.PlaybackProgressChangesView.as_view(),
         name="api_playback_progress_changes",
@@ -348,6 +354,11 @@ urlpatterns = [
         r"^watchlist/?$",
         fork_views_saved_media.SavedMediaView.as_view(),
         name="api_watchlist",
+    ),
+    re_path(
+        r"^watchlist/snapshot/?$",
+        fork_views_integration_snapshots.SavedMediaSnapshotView.as_view(),
+        name="api_watchlist_snapshot",
     ),
     re_path(
         r"^watchlist/changes/?$",
