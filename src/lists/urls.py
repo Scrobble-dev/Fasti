@@ -2,6 +2,7 @@ from django.urls import path
 
 from lists import (
     feeds,
+    stremio,
     views,
     views_add_reorder,
     views_list_actions,
@@ -47,6 +48,26 @@ urlpatterns = [
     path("list/<slug:list_reference>", views.list_detail, name="list_detail"),
     path("list/<slug:list_reference>/rss", feeds.list_rss_feed, name="list_rss"),
     path("list/<slug:list_reference>/json", feeds.list_json, name="list_json"),
+    path(
+        "list/<slug:list_reference>/stremio/manifest.json",
+        stremio.manifest,
+        name="list_stremio_manifest",
+    ),
+    path(
+        "list/<slug:list_reference>/stremio/catalog/<str:media_type>/<str:catalog_id>.json",
+        stremio.catalog,
+        name="list_stremio_catalog",
+    ),
+    path(
+        "list/<slug:list_reference>/stremio/catalog/<str:media_type>/<str:catalog_id>/<path:extra_args>.json",
+        stremio.catalog,
+        name="list_stremio_catalog_extra",
+    ),
+    path(
+        "list/<slug:list_reference>/stremio/meta/<str:media_type>/<path:content_id>.json",
+        stremio.meta,
+        name="list_stremio_meta",
+    ),
     path(
         "list/<slug:list_reference>/export",
         views.list_export_csv,
