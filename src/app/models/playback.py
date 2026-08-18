@@ -60,6 +60,7 @@ class PlaybackProgress(models.Model):
         ]
         indexes = [
             models.Index(fields=["user", "-updated_at"]),
+            models.Index(fields=["user", "id"], name="playprog_user_id_idx"),
         ]
 
     def __str__(self):
