@@ -13,6 +13,7 @@ from app.playback_context import get_playback_source_client_id
 from integrations.sync_policy import (
     CHANGE_PAGE_MAX,
     CURSOR_MAX_AGE_SECONDS,
+    CURSOR_MAX_LENGTH,
     CURSOR_VERSION,
 )
 
@@ -90,6 +91,13 @@ def _decode_cursor(
     client_id: str,
 ) -> tuple[int | None, Response | None]:
     """Return the sequence from a cursor bound to this user and integration client."""
+    if not isinstance(cursor, str) or not cursor or len(cursor) > CURSOR_MAX_LENGTH:
+        return None, _cursor_error(
+            "invalid_cursor",
+            "The playback progress cursor is invalid.",
+            HTTP.BAD_REQUEST,
+        )
+
     try:
         payload = signing.loads(
             cursor,
@@ -102,7 +110,7 @@ def _decode_cursor(
             "This cursor expired. Fetch a fresh progress snapshot before continuing.",
             HTTP.CONFLICT,
         )
-    except BadSignature:
+    except (BadSignature, ValueError, TypeError):
         return None, _cursor_error(
             "invalid_cursor",
             "The playback progress cursor is invalid.",
@@ -132,7 +140,7 @@ def _decode_cursor(
         )
 
     sequence_id = payload.get("sequence")
-    if not isinstance(sequence_id, int) or sequence_id < 0:
+    if not isinstance(sequence_id, int) or isinstance(sequence_id, bool) or sequence_id < 0:
         return None, _cursor_error(
             "invalid_cursor",
             "The playback progress cursor contains an invalid sequence.",
