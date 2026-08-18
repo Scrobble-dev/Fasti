@@ -15,6 +15,9 @@ from integrations.sync_policy import (
     PRUNE_BATCH_SIZE,
 )
 
+_MAX_BATCH_SIZE = 5000
+_BATCH_SIZE_ERROR = f"--batch-size must be between 1 and {_MAX_BATCH_SIZE}"
+
 
 class Command(BaseCommand):
     """Remove old integration state in bounded, database-only batches."""
@@ -42,8 +45,8 @@ class Command(BaseCommand):
         """Report or prune rows older than the supported recovery windows."""
         del args
         batch_size = options["batch_size"]
-        if batch_size < 1 or batch_size > 5000:
-            raise CommandError("--batch-size must be between 1 and 5000")
+        if batch_size < 1 or batch_size > _MAX_BATCH_SIZE:
+            raise CommandError(_BATCH_SIZE_ERROR)
 
         now = timezone.now()
         change_cutoff = now - timedelta(seconds=CHANGE_RETENTION_SECONDS)
