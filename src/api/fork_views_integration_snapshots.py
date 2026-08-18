@@ -6,7 +6,12 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import views as drf_views
 from rest_framework.response import Response
 
-from app.models import MediaTypes, PlaybackProgress, SavedMediaMembership
+from app.models import (
+    MediaTypes,
+    PlaybackProgress,
+    SavedMediaMembership,
+    WatchedState,
+)
 from app.playback_context import get_playback_source_client_id
 from integrations.snapshot_cursor import (
     SnapshotCursorError,
@@ -22,15 +27,18 @@ from integrations.sync_policy import (
 
 from .fork_views_playback import _serialize_progress, _show_item_map
 from .fork_views_saved_media import _serialize_membership
+from .fork_views_watched import serialize_watched_state
 
 _PROGRESS_RESOURCE = "playback_progress_snapshot"
 _SAVED_MEDIA_RESOURCE = "saved_media_snapshot"
+_WATCHED_RESOURCE = "watched_state_snapshot"
 _PROGRESS_MEDIA_TYPES = (MediaTypes.MOVIE.value, MediaTypes.EPISODE.value)
 _SAVED_MEDIA_TYPES = (
     MediaTypes.MOVIE.value,
     MediaTypes.TV.value,
     MediaTypes.ANIME.value,
 )
+_WATCHED_MEDIA_TYPES = (MediaTypes.MOVIE.value, MediaTypes.EPISODE.value)
 _DEFAULT_LIMIT = SNAPSHOT_PAGE_MAX
 
 _RESPONSE_SCHEMA = {
@@ -367,4 +375,86 @@ class SavedMediaSnapshotView(drf_views.APIView):
             rows=rows,
             limit=limit,
             serialize=lambda page: [_serialize_membership(row) for row in page],
+        )
+
+
+class WatchedStateSnapshotView(drf_views.APIView):
+    """Return a stable exact watched=true movie/episode snapshot."""
+
+    @extend_schema(
+        description=(
+            "Return a stable exact current watched-state snapshot for movies and episodes. "
+            "Only watched=true rows appear in the snapshot. A fully completed snapshot is "
+            "authoritative for the checkpoint that preceded it; partial-page absence is "
+            "never a delete. Apply /api/v1/watched/changes/ after the snapshot to observe "
+            "concurrent watched and unwatched mutations. Viewing history is separate."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="cursor",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Opaque client-bound continuation cursor from the prior page.",
+            ),
+            OpenApiParameter(
+                name="limit",
+                type=int,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=f"Page size from 1 to {SNAPSHOT_PAGE_MAX}.",
+            ),
+            OpenApiParameter(
+                name="media_type",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Optional comma-separated subset: movie,episode.",
+            ),
+        ],
+        responses={200: _RESPONSE_SCHEMA, 400: {"type": "object"}, 409: {"type": "object"}},
+    )
+    def get(self, request):
+        """Return one stable page of exact current watched=true state."""
+        limit, error = _parse_limit(request)
+        if error:
+            return error
+        client_id, state, media_types, error = _cursor_state(
+            request,
+            resource=_WATCHED_RESOURCE,
+            supported=_WATCHED_MEDIA_TYPES,
+        )
+        if error:
+            return error
+
+        queryset = WatchedState.objects.filter(
+            user=request.user,
+            watched=True,
+            item__media_type__in=media_types,
+        )
+        if state is None:
+            upper_id = (
+                queryset.order_by("-pk").values_list("pk", flat=True).first() or 0
+            )
+            after_id = 0
+        else:
+            upper_id = state.upper_id
+            after_id = state.after_id
+
+        rows = list(
+            queryset.filter(pk__gt=after_id, pk__lte=upper_id)
+            .select_related("item")
+            .order_by("pk")[: limit + 1]
+        )
+        return _snapshot_response(
+            request=request,
+            resource=_WATCHED_RESOURCE,
+            client_id=client_id,
+            media_types=media_types,
+            upper_id=upper_id,
+            rows=rows,
+            limit=limit,
+            serialize=lambda page: [
+                serialize_watched_state(row, include_state=True) for row in page
+            ],
         )
