@@ -5,7 +5,11 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from app.models import PlaybackProgressChange, SavedMediaChange
+from app.models import (
+    PlaybackProgressChange,
+    SavedMediaChange,
+    WatchedStateChange,
+)
 from integrations.models import IntegrationEventReceipt
 from integrations.sync_policy import (
     CHANGE_RETENTION_DAYS,
@@ -58,10 +62,12 @@ class Command(BaseCommand):
             created_at__lt=change_cutoff
         )
         saved_qs = SavedMediaChange.objects.filter(created_at__lt=change_cutoff)
+        watched_qs = WatchedStateChange.objects.filter(created_at__lt=change_cutoff)
 
         if apply_changes:
             progress_count = self._delete_queryset(progress_qs, batch_size)
             saved_count = self._delete_queryset(saved_qs, batch_size)
+            watched_count = self._delete_queryset(watched_qs, batch_size)
             receipt_count = self._scan_receipts(
                 receipt_cutoff,
                 batch_size,
@@ -71,6 +77,7 @@ class Command(BaseCommand):
         else:
             progress_count = progress_qs.count()
             saved_count = saved_qs.count()
+            watched_count = watched_qs.count()
             receipt_count = self._scan_receipts(
                 receipt_cutoff,
                 batch_size,
@@ -82,6 +89,7 @@ class Command(BaseCommand):
             f"{action} playback progress changes: {progress_count}"
         )
         self.stdout.write(f"{action} saved-media changes: {saved_count}")
+        self.stdout.write(f"{action} watched-state changes: {watched_count}")
         self.stdout.write(
             f"{action} completed idempotency receipts: {receipt_count}"
         )
