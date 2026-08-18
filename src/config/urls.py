@@ -82,6 +82,18 @@ urlpatterns = [
     ),
 ]
 
+# First-party packaged/mobile clients use allauth Headless session tokens. Keep
+# the network surface opt-in so existing local-only deployments do not gain new
+# routes merely by upgrading Floppy.
+if settings.FLOPPY_HEADLESS_ENABLED:
+    urlpatterns.append(path("_allauth/", include("allauth.headless.urls")))
+
+# Delegated clients such as Nuvio use allauth's OIDC provider. Its URL set owns
+# discovery, authorization-code/PKCE, device authorization, token, userinfo, and
+# revocation behavior. The settings overlay refuses to enable it without a key.
+if settings.FLOPPY_OIDC_IDP_ENABLED:
+    urlpatterns.append(path("", include("allauth.idp.oidc.urls")))
+
 # Build the accounts URLs
 account_patterns = [
     # see allauth/account/urls.py
