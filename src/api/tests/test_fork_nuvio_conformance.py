@@ -20,8 +20,8 @@ from .base import FloppyApiTestCase
 class NuvioConformanceTests(FloppyApiTestCase):
     """Verify the additive client contract needed by Nuvio-compatible callers."""
 
-    def test_capabilities_are_public_and_do_not_advertise_watched_delete(self):
-        """Clients can discover the contract without a user credential."""
+    def test_capabilities_are_public_and_advertise_separate_state_and_history_paths(self):
+        """Clients can discover exact watched sync without conflating it with scrobbling."""
         response = self.call_api("get", "api_integration_capabilities")
 
         self.assertEqual(response.status_code, HTTP.OK)
@@ -29,9 +29,20 @@ class NuvioConformanceTests(FloppyApiTestCase):
         self.assertEqual(response.data["stability"], "experimental")
         watched = response.data["resources"]["watched_state"]
         self.assertEqual(watched["snapshot"]["scope"], "watched:read")
-        self.assertEqual(watched["completion_write"]["via"], "scrobble")
-        self.assertIsNone(watched["delete"])
+        self.assertEqual(watched["snapshot"]["pagination"], "stable_keyset")
+        self.assertEqual(watched["write"]["scope"], "watched:write")
+        self.assertEqual(watched["clear"]["scope"], "watched:write")
+        self.assertFalse(watched["write"]["mutates_viewing_history"])
+        self.assertFalse(watched["clear"]["mutates_viewing_history"])
+        self.assertTrue(watched["changes"]["explicit_unwatched_events"])
+        self.assertEqual(watched["occurrence_write"]["via"], "scrobble")
         self.assertFalse(response.data["identity"]["authoritative_title_matching"])
+        self.assertTrue(response.data["identity"]["all_supplied_ids_must_agree"])
+        self.assertTrue(
+            response.data["sync"][
+                "viewing_history_is_separate_from_current_watched_state"
+            ]
+        )
 
     def test_watched_read_scope_is_required_for_scoped_tokens(self):
         """A progress-only token cannot read watched-state history projections."""
@@ -156,7 +167,7 @@ class NuvioConformanceTests(FloppyApiTestCase):
         self.assertEqual(matches[0]["watched_at"], second_time)
 
     def test_watched_snapshot_requires_explicit_supported_media_type(self):
-        """Callers cannot accidentally request one unbounded mixed watched list."""
+        """The compatibility endpoint retains its bounded one-type contract."""
         missing = self.call_api(
             "get",
             "api_watched_state",
