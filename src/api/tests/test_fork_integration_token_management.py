@@ -35,7 +35,8 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
         raw_token = payload["token"]
         self.assertTrue(raw_token.startswith("flp_"))
         self.assertTrue(payload["secret_shown_once"])
-        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.headers["Cache-Control"], "private, no-store")
+        self.assertEqual(response.headers["Pragma"], "no-cache")
         token = IntegrationToken.objects.get(user=self.user1, name="Nuvio TV")
         self.assertEqual(
             token.token_digest,
@@ -45,6 +46,8 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
 
         listed = self.client.get(reverse("api_integration_tokens"))
         self.assertEqual(listed.status_code, HTTP.OK)
+        self.assertEqual(listed.headers["Cache-Control"], "private, no-store")
+        self.assertEqual(listed.headers["Pragma"], "no-cache")
         listed_payload = listed.json()["results"][0]
         self.assertNotIn("token", listed_payload)
         self.assertNotIn("token_digest", listed_payload)
@@ -60,6 +63,7 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
 
         self.assertEqual(response.status_code, HTTP.BAD_REQUEST)
         self.assertEqual(response.json()["error"]["code"], "invalid_scopes")
+        self.assertEqual(response.headers["Cache-Control"], "private, no-store")
         self.assertFalse(IntegrationToken.objects.filter(user=self.user1).exists())
 
     def test_scoped_token_cannot_manage_other_credentials(self):
@@ -92,6 +96,7 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
         )
 
         self.assertEqual(response.status_code, HTTP.NOT_FOUND)
+        self.assertEqual(response.headers["Cache-Control"], "private, no-store")
         token.refresh_from_db()
         self.assertIsNone(token.revoked_at)
 
@@ -109,6 +114,8 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
 
         self.assertEqual(first.status_code, HTTP.NO_CONTENT)
         self.assertEqual(second.status_code, HTTP.NO_CONTENT)
+        self.assertEqual(first.headers["Cache-Control"], "private, no-store")
+        self.assertEqual(second.headers["Cache-Control"], "private, no-store")
         token.refresh_from_db()
         self.assertIsNotNone(token.revoked_at)
 
@@ -133,4 +140,5 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
         )
 
         self.assertEqual(response.status_code, HTTP.FORBIDDEN)
+        self.assertEqual(response.headers["Cache-Control"], "private, no-store")
         self.assertFalse(IntegrationToken.objects.filter(user=self.user1).exists())
