@@ -49,6 +49,16 @@ _INTEGRATION_SCOPE_RULES = {
     "api_watched_state": {
         "GET": "watched:read",
         "HEAD": "watched:read",
+        "PUT": "watched:write",
+        "DELETE": "watched:write",
+    },
+    "api_watched_state_snapshot": {
+        "GET": "watched:read",
+        "HEAD": "watched:read",
+    },
+    "api_watched_state_changes": {
+        "GET": "watched:read",
+        "HEAD": "watched:read",
     },
 }
 _LAST_USED_WRITE_INTERVAL = timedelta(minutes=15)
