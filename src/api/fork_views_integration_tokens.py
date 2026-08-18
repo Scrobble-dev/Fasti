@@ -14,6 +14,7 @@ from integrations.scopes import (
     INTEGRATION_SCOPE_DESCRIPTIONS,
     INTEGRATION_SCOPES,
     NUVIO_RECOMMENDED_SCOPES,
+    normalize_requested_scopes,
 )
 
 from .cache_control import private_no_store
@@ -121,24 +122,17 @@ def _parse_create_payload(data):
         )
 
     raw_scopes = data.get("scopes")
-    if not isinstance(raw_scopes, list) or not raw_scopes:
+    scopes, unsupported_scope = normalize_requested_scopes(raw_scopes)
+    if scopes is None:
         return None, _error(
             "invalid_scopes",
-            "scopes must be a non-empty array.",
+            "scopes must be a non-empty array of strings.",
             param="scopes",
         )
-    if any(not isinstance(scope, str) for scope in raw_scopes):
+    if unsupported_scope is not None:
         return None, _error(
             "invalid_scopes",
-            "Every scope must be a string.",
-            param="scopes",
-        )
-    scopes = list(dict.fromkeys(raw_scopes))
-    unsupported = sorted(set(scopes) - INTEGRATION_SCOPES)
-    if unsupported:
-        return None, _error(
-            "invalid_scopes",
-            f"Unsupported scope: {unsupported[0]}.",
+            f"Unsupported scope: {unsupported_scope}.",
             param="scopes",
         )
 
