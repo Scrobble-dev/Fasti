@@ -143,7 +143,7 @@ class PlaybackProgressChangesTests(FloppyApiTestCase):
     def test_expired_cursor_requires_fresh_snapshot(self):
         """Expired incremental state fails explicitly instead of skipping tombstones."""
         cursor = self._checkpoint()
-        with patch("api.fork_views_playback_changes._CURSOR_MAX_AGE_SECONDS", -1):
+        with patch("api.fork_views_playback_changes.CURSOR_MAX_AGE_SECONDS", -1):
             response = self.call_api(
                 "get",
                 "api_playback_progress_changes",
