@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus as HTTP  # noqa: N814
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import DateTimeField, F, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -332,8 +332,13 @@ def _serialize_progress(progress, show_map):
         else None
     )
     # Episode Items are created without provider links, so their show-level
-    # ids (which is what clients match on) come from the show row.
-    ids = _external_ids(item) or (_external_ids(show) if show else {})
+    # ids (which is what clients match on) come from the show row. Fall back
+    # to the episode Item only when no exact show identity is available.
+    ids = (
+        (_external_ids(show) or _external_ids(item))
+        if item.media_type == MediaTypes.EPISODE.value
+        else _external_ids(item)
+    )
 
     return {
         "media_type": item.media_type,
@@ -783,6 +788,7 @@ class PlaybackProgressView(drf_views.APIView):
                 _effective_updated_at=Coalesce(
                     "position_updated_at",
                     "progressed_at",
+                    output_field=DateTimeField(),
                 )
             )
         )
