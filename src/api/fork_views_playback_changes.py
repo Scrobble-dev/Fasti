@@ -10,13 +10,15 @@ from rest_framework.response import Response
 
 from app.models import PlaybackProgressChange
 from app.playback_context import get_playback_source_client_id
+from integrations.sync_policy import (
+    CHANGE_PAGE_MAX,
+    CURSOR_MAX_AGE_SECONDS,
+    CURSOR_VERSION,
+)
 
-_CURSOR_VERSION = 2
 _CURSOR_RESOURCE = "playback_progress"
 _CURSOR_SALT = "api.playback-progress-changes"
-_CURSOR_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
-_DEFAULT_LIMIT = 100
-_MAX_LIMIT = 100
+_DEFAULT_LIMIT = CHANGE_PAGE_MAX
 
 _CHANGE_SCHEMA = {
     "type": "object",
@@ -41,7 +43,7 @@ _CHANGE_SCHEMA = {
 _RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
-        "version": {"type": "integer", "enum": [_CURSOR_VERSION]},
+        "version": {"type": "integer", "enum": [CURSOR_VERSION]},
         "results": {"type": "array", "items": _CHANGE_SCHEMA},
         "next_cursor": {"type": "string"},
         "has_more": {"type": "boolean"},
@@ -71,7 +73,7 @@ def _encode_cursor(user_id: int, sequence_id: int, client_id: str) -> str:
     """Sign one user-, resource-, and integration-client-bound progress cursor."""
     return signing.dumps(
         {
-            "v": _CURSOR_VERSION,
+            "v": CURSOR_VERSION,
             "resource": _CURSOR_RESOURCE,
             "user": user_id,
             "client": client_id,
@@ -92,7 +94,7 @@ def _decode_cursor(
         payload = signing.loads(
             cursor,
             salt=_CURSOR_SALT,
-            max_age=_CURSOR_MAX_AGE_SECONDS,
+            max_age=CURSOR_MAX_AGE_SECONDS,
         )
     except SignatureExpired:
         return None, _cursor_error(
@@ -115,7 +117,7 @@ def _decode_cursor(
         )
 
     if (
-        payload.get("v") != _CURSOR_VERSION
+        payload.get("v") != CURSOR_VERSION
         or payload.get("resource") != _CURSOR_RESOURCE
         or payload.get("user") != user_id
         or payload.get("client") != client_id
@@ -146,9 +148,9 @@ def _parse_limit(request) -> tuple[int | None, Response | None]:
         limit = int(raw_limit)
     except (TypeError, ValueError):
         limit = 0
-    if limit < 1 or limit > _MAX_LIMIT:
+    if limit < 1 or limit > CHANGE_PAGE_MAX:
         return None, Response(
-            {"detail": f"'limit' must be between 1 and {_MAX_LIMIT}."},
+            {"detail": f"'limit' must be between 1 and {CHANGE_PAGE_MAX}."},
             status=HTTP.BAD_REQUEST,
         )
     return limit, None
@@ -209,7 +211,7 @@ class PlaybackProgressChangesView(drf_views.APIView):
             )
             return Response(
                 {
-                    "version": _CURSOR_VERSION,
+                    "version": CURSOR_VERSION,
                     "results": [],
                     "next_cursor": _encode_cursor(
                         request.user.pk,
@@ -219,7 +221,7 @@ class PlaybackProgressChangesView(drf_views.APIView):
                     "has_more": False,
                     "snapshot_required": True,
                     "client_id": client_id,
-                    "cursor_expires_in_seconds": _CURSOR_MAX_AGE_SECONDS,
+                    "cursor_expires_in_seconds": CURSOR_MAX_AGE_SECONDS,
                 },
                 status=HTTP.OK,
             )
@@ -244,7 +246,7 @@ class PlaybackProgressChangesView(drf_views.APIView):
 
         return Response(
             {
-                "version": _CURSOR_VERSION,
+                "version": CURSOR_VERSION,
                 "results": [_serialize_change(change) for change in page],
                 "next_cursor": _encode_cursor(
                     request.user.pk,
@@ -254,7 +256,7 @@ class PlaybackProgressChangesView(drf_views.APIView):
                 "has_more": has_more,
                 "snapshot_required": False,
                 "client_id": client_id,
-                "cursor_expires_in_seconds": _CURSOR_MAX_AGE_SECONDS,
+                "cursor_expires_in_seconds": CURSOR_MAX_AGE_SECONDS,
             },
             status=HTTP.OK,
         )
