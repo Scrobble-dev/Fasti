@@ -24,6 +24,8 @@ _DEFAULT_TIMEOUT_SECONDS = 5.0
 _MAX_TIMEOUT_SECONDS = 30.0
 _HTTP_SUCCESS_MIN = 200
 _HTTP_SUCCESS_MAX = 300
+_ASCII_SPACE = 0x20
+_ASCII_DELETE = 0x7F
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _JSON_CONTENT_TYPES = {"application/json", "text/json"}
 
@@ -93,7 +95,10 @@ def _parse_target(raw_url: str) -> _Target:
     raw_url = raw_url.strip()
     if not raw_url or len(raw_url) > _MAX_URL_LENGTH:
         _fail("invalid_url", "Remote URL is empty or too long.")
-    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in raw_url):
+    if any(
+        ord(character) < _ASCII_SPACE or ord(character) == _ASCII_DELETE
+        for character in raw_url
+    ):
         _fail("invalid_url", "Remote URL contains control characters.")
 
     try:
@@ -226,11 +231,12 @@ def _fetch_once(target: _Target, address: str, timeout: float):
         response.begin()
         body = _read_bounded(response)
         headers = {key.lower(): value for key, value in response.getheaders()}
-        return response.status, headers, body
     except SafeFetchError:
         raise
     except (OSError, ssl.SSLError, http.client.HTTPException):
         _fail("connection_failed", "Remote request failed.")
+    else:
+        return response.status, headers, body
     finally:
         if tls_socket is not None:
             tls_socket.close()
