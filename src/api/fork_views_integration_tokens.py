@@ -2,7 +2,9 @@
 
 from http import HTTPStatus as HTTP  # noqa: N814
 
+from allauth.account.decorators import reauthentication_required
 from django.utils import timezone
+from django.utils.decorators import method_decorator
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import permissions
 from rest_framework import views as drf_views
@@ -165,6 +167,7 @@ def _parse_create_payload(data):
     }, None
 
 
+@method_decorator(reauthentication_required(allow_get=True), name="dispatch")
 class IntegrationTokenManagementView(drf_views.APIView):
     """List and create scoped integration tokens from an authenticated browser session."""
 
@@ -200,8 +203,8 @@ class IntegrationTokenManagementView(drf_views.APIView):
 
     @extend_schema(
         description=(
-            "Create one named scoped credential. The full secret is returned once in this "
-            "response and is not stored in recoverable form."
+            "Create one named scoped credential. Recent account authentication is required. "
+            "The full secret is returned once and is not stored in recoverable form."
         ),
         request={"application/json": _TOKEN_CREATE_SCHEMA},
         responses={201: {"type": "object"}, 400: {"type": "object"}},
@@ -237,6 +240,7 @@ class IntegrationTokenManagementView(drf_views.APIView):
         )
 
 
+@method_decorator(reauthentication_required(), name="dispatch")
 class IntegrationTokenDetailView(drf_views.APIView):
     """Revoke one scoped integration token without erasing audit history."""
 
@@ -245,8 +249,9 @@ class IntegrationTokenDetailView(drf_views.APIView):
 
     @extend_schema(
         description=(
-            "Revoke one scoped credential owned by the signed-in user. Revocation is "
-            "idempotent and does not physically delete delivery receipts."
+            "Revoke one scoped credential owned by the signed-in user. Recent account "
+            "authentication is required. Revocation is idempotent and does not physically "
+            "delete delivery receipts."
         ),
         parameters=[
             OpenApiParameter(
