@@ -5,8 +5,8 @@ from http import HTTPStatus as HTTP  # noqa: N814
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import permissions
-from rest_framework.authentication import SessionAuthentication
 from rest_framework import views as drf_views
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.response import Response
 
 from integrations.models import IntegrationToken
@@ -17,13 +17,22 @@ from integrations.scopes import (
 )
 
 _MAX_EXPIRY_DAYS = 3650
+_MAX_TOKEN_NAME_LENGTH = 255
+_MAX_CLIENT_IDENTIFIER_LENGTH = 255
 
 _TOKEN_CREATE_SCHEMA = {
     "type": "object",
     "required": ["name", "scopes"],
     "properties": {
-        "name": {"type": "string", "minLength": 1, "maxLength": 255},
-        "client_identifier": {"type": "string", "maxLength": 255},
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": _MAX_TOKEN_NAME_LENGTH,
+        },
+        "client_identifier": {
+            "type": "string",
+            "maxLength": _MAX_CLIENT_IDENTIFIER_LENGTH,
+        },
         "scopes": {
             "type": "array",
             "items": {"type": "string", "enum": sorted(INTEGRATION_SCOPES)},
@@ -89,18 +98,21 @@ def _parse_create_payload(data):
         )
 
     name = str(data.get("name", "")).strip()
-    if not name or len(name) > 255:
+    if not name or len(name) > _MAX_TOKEN_NAME_LENGTH:
         return None, _error(
             "invalid_name",
-            "name must contain 1 to 255 characters.",
+            f"name must contain 1 to {_MAX_TOKEN_NAME_LENGTH} characters.",
             param="name",
         )
 
     client_identifier = str(data.get("client_identifier", "")).strip()
-    if len(client_identifier) > 255:
+    if len(client_identifier) > _MAX_CLIENT_IDENTIFIER_LENGTH:
         return None, _error(
             "invalid_client_identifier",
-            "client_identifier must be 255 characters or fewer.",
+            (
+                "client_identifier must be "
+                f"{_MAX_CLIENT_IDENTIFIER_LENGTH} characters or fewer."
+            ),
             param="client_identifier",
         )
 
