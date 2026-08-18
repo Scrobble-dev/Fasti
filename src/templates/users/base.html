@@ -60,14 +60,6 @@
               <span>Integrations</span>
             </a>
 
-            {% url 'integration_access' as integration_access_url %}
-            <a href="{{ integration_access_url }}"
-               {% if request.path == integration_access_url %}aria-current="page"{% endif %}
-               class="w-full flex items-center space-x-3 px-2 py-2 rounded-md transition-colors text-left border-l-2 cursor-pointer text-sm {% if request.path == integration_access_url %}bg-[var(--color-surface-strong)] text-[var(--color-text)] border-[var(--color-link)]{% else %}text-[var(--color-text-muted)] border-transparent hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]{% endif %}">
-              {% include "app/icons/padlock.svg" with classes="w-5 h-5" %}
-              <span>Integration Access</span>
-            </a>
-
             {% url 'rss_settings' as rss_url %}
             <a href="{{ rss_url }}"
                {% if request.path == rss_url %}aria-current="page"{% endif %}

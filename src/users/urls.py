@@ -1,6 +1,6 @@
 from django.urls import path
 
-from users import integration_access_views, onboarding_views, server_port_views, views
+from users import onboarding_views, server_port_views, views
 
 urlpatterns = [
     path("setup/", onboarding_views.onboarding_media_types, name="onboarding_media_types"),
@@ -76,11 +76,6 @@ urlpatterns = [
     ),
     path("settings/preferences", views.preferences, name="preferences"),
     path("settings/integrations", views.integrations, name="integrations"),
-    path(
-        "settings/integration-access",
-        integration_access_views.integration_access,
-        name="integration_access",
-    ),
     path("settings/rss", views.rss_settings, name="rss_settings"),
     path("settings/import", views.import_data, name="import_data"),
     path(

@@ -1,6 +1,6 @@
 from fakeredis import FakeConnection
 
-from .platform_settings import *  # noqa: F403
+from .settings import *  # noqa: F403
 
 CACHES = {
     "default": {

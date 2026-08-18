@@ -45,6 +45,7 @@ from integrations.tasks._media_imports import (
     import_hardcover,
     import_hltb,
     import_imdb,
+    import_jellyfin_playback_reporting,
     import_kitsu,
     import_mal,
     import_mdblist,
@@ -52,6 +53,8 @@ from integrations.tasks._media_imports import (
     import_plex,
     import_pocketcasts,
     import_pocketcasts_history,
+    import_psn,
+    import_psn_recurring,
     import_radarr,
     import_radarr_recurring,
     import_simkl,
@@ -84,6 +87,7 @@ from integrations.tasks._webhook import (
     _webhook_history_user,
     process_stremio_webhook,
     process_webhook,
+    verify_stremio_playback,
 )
 
 logger = logging.getLogger(__name__)
@@ -145,6 +149,7 @@ __all__ = [
     "import_hardcover",
     "import_hltb",
     "import_imdb",
+    "import_jellyfin_playback_reporting",
     "import_kitsu",
     "import_koito_history",
     "import_lastfm_history",
@@ -154,6 +159,8 @@ __all__ = [
     "import_plex",
     "import_pocketcasts",
     "import_pocketcasts_history",
+    "import_psn",
+    "import_psn_recurring",
     "import_radarr",
     "import_radarr_recurring",
     "import_simkl",
@@ -180,4 +187,5 @@ __all__ = [
     "sync_plex_watchlist",
     "update_collection_metadata_from_plex",
     "update_collection_metadata_from_plex_webhook",
+    "verify_stremio_playback",
 ]

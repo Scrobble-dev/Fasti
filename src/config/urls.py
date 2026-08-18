@@ -8,7 +8,6 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 import re
 
 from allauth.account import views as allauth_account_views
-from allauth.account.decorators import secure_admin_login
 from allauth.socialaccount import views as allauth_social_account_views
 from allauth.urls import build_provider_urlpatterns
 from django.conf import settings
@@ -38,11 +37,6 @@ handler400 = "app.error_views.bad_request"
 handler403 = "app.error_views.permission_denied"
 handler404 = "app.error_views.page_not_found"
 handler500 = "app.error_views.server_error"
-
-# Django's admin has its own login view, so it does not inherit allauth's
-# account rate limits or authentication policy automatically. Keep one login
-# boundary for browser accounts and admin access.
-admin.site.login = secure_admin_login(admin.site.login)
 
 urlpatterns = [
     path("api/v1/", include("api.urls")),
@@ -81,19 +75,6 @@ urlpatterns = [
         login_not_required(lambda request: JsonResponse({"status": "ok"})),
     ),
 ]
-
-# First-party packaged/mobile clients use allauth Headless session tokens. Keep
-# the network surface opt-in so existing local-only deployments do not gain new
-# routes merely by upgrading Floppy.
-if settings.FLOPPY_HEADLESS_ENABLED:
-    urlpatterns.append(path("_allauth/", include("allauth.headless.urls")))
-
-# Delegated clients such as Nuvio use allauth's OIDC provider. Include the
-# package-level IdP URL set so discovery, authorization, device authorization,
-# token, userinfo, revocation, and any future protocol-owned routes stay on the
-# upstream allauth contract. The feature remains disabled by default.
-if settings.FLOPPY_OIDC_IDP_ENABLED:
-    urlpatterns.append(path("", include("allauth.idp.urls")))
 
 # Build the accounts URLs
 account_patterns = [
