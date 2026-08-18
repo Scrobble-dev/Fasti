@@ -54,6 +54,10 @@ class WatchedState(models.Model):
         indexes = [
             models.Index(fields=["user", "id"], name="watchstate_user_id_idx"),
             models.Index(
+                fields=["user", "watched", "id"],
+                name="watchstate_user_watched_id_idx",
+            ),
+            models.Index(
                 fields=["user", "-updated_at"],
                 name="watchstate_user_updated_idx",
             ),
