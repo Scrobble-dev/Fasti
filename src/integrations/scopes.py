@@ -6,7 +6,10 @@ INTEGRATION_SCOPE_DESCRIPTIONS = {
     "progress:write": "Write or clear durable playback progress.",
     "watchlist:read": "Read saved-library membership and ordered membership changes.",
     "watchlist:write": "Add or remove saved-library membership.",
-    "watched:read": "Read exact current watched state for movies and episodes.",
+    "watched:read": "Read exact current watched state and ordered watched-state changes.",
+    "watched:write": (
+        "Set or clear exact current watched state without deleting viewing history."
+    ),
     "catalog:read": "Read a future explicitly shared catalog surface when available.",
 }
 
@@ -19,4 +22,5 @@ NUVIO_RECOMMENDED_SCOPES = (
     "watchlist:read",
     "watchlist:write",
     "watched:read",
+    "watched:write",
 )
