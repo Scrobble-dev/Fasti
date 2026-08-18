@@ -2,23 +2,26 @@
 
 from http import HTTPStatus as HTTP  # noqa: N814
 
-from django.core import signing
-from django.core.signing import BadSignature, SignatureExpired
 from drf_spectacular.utils import extend_schema
 from rest_framework import views as drf_views
 from rest_framework.response import Response
 
 from app.models import PlaybackProgressChange
 from app.playback_context import get_playback_source_client_id
+from integrations.change_cursor import (
+    ChangeCursorError,
+    ChangeCursorExpired,
+    decode_change_cursor,
+    encode_change_cursor,
+)
 from integrations.sync_policy import (
     CHANGE_PAGE_MAX,
     CURSOR_MAX_AGE_SECONDS,
-    CURSOR_MAX_LENGTH,
     CURSOR_VERSION,
 )
 
 _CURSOR_RESOURCE = "playback_progress"
-_CURSOR_SALT = "api.playback-progress-changes"
+_LEGACY_CURSOR_SALT = "api.playback-progress-changes"
 _DEFAULT_LIMIT = CHANGE_PAGE_MAX
 
 _CHANGE_SCHEMA = {
@@ -71,17 +74,12 @@ def _cursor_error(code: str, message: str, status: int) -> Response:
 
 
 def _encode_cursor(user_id: int, sequence_id: int, client_id: str) -> str:
-    """Sign one user-, resource-, and integration-client-bound progress cursor."""
-    return signing.dumps(
-        {
-            "v": CURSOR_VERSION,
-            "resource": _CURSOR_RESOURCE,
-            "user": user_id,
-            "client": client_id,
-            "sequence": sequence_id,
-        },
-        salt=_CURSOR_SALT,
-        compress=True,
+    """Encode one canonical user-, client-, and resource-bound cursor."""
+    return encode_change_cursor(
+        resource=_CURSOR_RESOURCE,
+        user_id=user_id,
+        client_id=client_id,
+        sequence_id=sequence_id,
     )
 
 
@@ -90,63 +88,28 @@ def _decode_cursor(
     user_id: int,
     client_id: str,
 ) -> tuple[int | None, Response | None]:
-    """Return the sequence from a cursor bound to this user and integration client."""
-    if not isinstance(cursor, str) or not cursor or len(cursor) > CURSOR_MAX_LENGTH:
-        return None, _cursor_error(
-            "invalid_cursor",
-            "The playback progress cursor is invalid.",
-            HTTP.BAD_REQUEST,
-        )
-
+    """Decode one cursor while accepting the pre-consolidation v2 salt."""
     try:
-        payload = signing.loads(
+        state = decode_change_cursor(
             cursor,
-            salt=_CURSOR_SALT,
-            max_age=CURSOR_MAX_AGE_SECONDS,
+            resource=_CURSOR_RESOURCE,
+            user_id=user_id,
+            client_id=client_id,
+            legacy_salts=(_LEGACY_CURSOR_SALT,),
         )
-    except SignatureExpired:
+    except ChangeCursorExpired:
         return None, _cursor_error(
             "cursor_expired",
             "This cursor expired. Fetch a fresh progress snapshot before continuing.",
             HTTP.CONFLICT,
         )
-    except (BadSignature, ValueError, TypeError):
+    except ChangeCursorError:
         return None, _cursor_error(
             "invalid_cursor",
-            "The playback progress cursor is invalid.",
+            "The playback progress cursor is invalid for this user, integration client, or resource.",
             HTTP.BAD_REQUEST,
         )
-
-    if not isinstance(payload, dict):
-        return None, _cursor_error(
-            "invalid_cursor",
-            "The playback progress cursor is invalid.",
-            HTTP.BAD_REQUEST,
-        )
-
-    if (
-        payload.get("v") != CURSOR_VERSION
-        or payload.get("resource") != _CURSOR_RESOURCE
-        or payload.get("user") != user_id
-        or payload.get("client") != client_id
-    ):
-        return None, _cursor_error(
-            "invalid_cursor",
-            (
-                "The playback progress cursor is not valid for this user, "
-                "integration client, or resource."
-            ),
-            HTTP.BAD_REQUEST,
-        )
-
-    sequence_id = payload.get("sequence")
-    if not isinstance(sequence_id, int) or isinstance(sequence_id, bool) or sequence_id < 0:
-        return None, _cursor_error(
-            "invalid_cursor",
-            "The playback progress cursor contains an invalid sequence.",
-            HTTP.BAD_REQUEST,
-        )
-    return sequence_id, None
+    return state.sequence_id, None
 
 
 def _parse_limit(request) -> tuple[int | None, Response | None]:
