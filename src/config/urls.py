@@ -8,6 +8,7 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 import re
 
 from allauth.account import views as allauth_account_views
+from allauth.account.decorators import secure_admin_login
 from allauth.socialaccount import views as allauth_social_account_views
 from allauth.urls import build_provider_urlpatterns
 from django.conf import settings
@@ -37,6 +38,11 @@ handler400 = "app.error_views.bad_request"
 handler403 = "app.error_views.permission_denied"
 handler404 = "app.error_views.page_not_found"
 handler500 = "app.error_views.server_error"
+
+# Django's admin has its own login view, so it does not inherit allauth's
+# account rate limits or authentication policy automatically. Keep one login
+# boundary for browser accounts and admin access.
+admin.site.login = secure_admin_login(admin.site.login)
 
 urlpatterns = [
     path("api/v1/", include("api.urls")),
