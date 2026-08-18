@@ -74,6 +74,7 @@ from app.models.tv import (
     Episode,
     Season,
 )
+from app.models.watched_state import WatchedState, WatchedStateChange
 
 __all__ = [
     "CREDITS_BACKFILL_VERSION",
@@ -138,6 +139,8 @@ __all__ = [
     "Studio",
     "Tag",
     "Track",
+    "WatchedState",
+    "WatchedStateChange",
     "build_episode_runtime_index",
     "prefill_episode_runtime_index",
 ]
