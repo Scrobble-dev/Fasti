@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from http import HTTPStatus as HTTP  # noqa: N814
 
 from django.db import transaction
+from django.db.models import F, Q
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import views as drf_views
@@ -44,6 +46,8 @@ _EXTERNAL_ID_KEYS = {"tmdb": "tmdb_id", "imdb": "imdb_id", "tvdb": "tvdb_id"}
 _PODCAST_COMPLETED_STATUS = 3  # playingStatus from the podcast provider APIs
 _MAX_POSITIVE_INTEGER = 2_147_483_647
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_VIDEO_SNAPSHOT_RANK = 1
+_PODCAST_SNAPSHOT_RANK = 0
 
 
 def _coerce_position(value):
@@ -351,9 +355,14 @@ def _podcast_updated_at(podcast):
     """Best-effort mutation time for a podcast position.
 
     Rows last written before position_updated_at existed fall back to
-    progressed_at.
+    progressed_at. Query annotations use the same precedence for filtering
+    and ordering so paginated responses stay consistent.
     """
-    return podcast.position_updated_at or podcast.progressed_at
+    return (
+        getattr(podcast, "_effective_updated_at", None)
+        or podcast.position_updated_at
+        or podcast.progressed_at
+    )
 
 
 def _serialize_podcast(podcast):
@@ -675,7 +684,7 @@ class PlaybackProgressView(drf_views.APIView):
         },
     )
     def get(self, request):
-        """Return the user's saved resume positions."""
+        """Return the user's saved resume positions without serializing the full library."""
         limit, offset, error = parse_limit_offset(request)
         if error:
             return error
@@ -684,22 +693,74 @@ class PlaybackProgressView(drf_views.APIView):
         if error:
             return error
 
-        entries = []
         video_types = [
             media_type
             for media_type in filters["media_types"]
             if media_type in _VIDEO_MEDIA_TYPES
         ]
-        if video_types:
-            entries.extend(self._video_entries(request.user, video_types, filters))
-        if MediaTypes.PODCAST.value in filters["media_types"]:
-            entries.extend(self._podcast_entries(request.user, filters))
+        video_queryset = (
+            self._video_queryset(request.user, video_types, filters)
+            if video_types
+            else None
+        )
+        podcast_queryset = (
+            self._podcast_queryset(request.user, filters)
+            if MediaTypes.PODCAST.value in filters["media_types"]
+            else None
+        )
 
-        entries.sort(key=lambda entry: entry["updated_at"] or _EPOCH, reverse=True)
-        return Response(paginate_data(request, entries, limit, offset), status=HTTP.OK)
+        video_total = video_queryset.count() if video_queryset is not None else 0
+        podcast_total = podcast_queryset.count() if podcast_queryset is not None else 0
+        total = video_total + podcast_total
+        if offset >= total:
+            return Response(
+                paginate_data(request, [], limit, offset, total=total),
+                status=HTTP.OK,
+            )
 
-    def _video_entries(self, user, media_types, filters):
-        """Serialize PlaybackProgress rows matching the request filters."""
+        candidate_limit = min(offset + limit, total)
+        candidates = []
+        if video_queryset is not None:
+            video_rows = list(
+                video_queryset.order_by("-updated_at", "-id")[:candidate_limit]
+            )
+            show_map = _show_item_map([row.item for row in video_rows])
+            candidates.extend(
+                (
+                    row.updated_at or _EPOCH,
+                    _VIDEO_SNAPSHOT_RANK,
+                    row.id,
+                    _serialize_progress(row, show_map),
+                )
+                for row in video_rows
+            )
+
+        if podcast_queryset is not None:
+            podcast_rows = list(
+                podcast_queryset.order_by(
+                    F("_effective_updated_at").desc(nulls_last=True),
+                    "-id",
+                )[:candidate_limit]
+            )
+            candidates.extend(
+                (
+                    _podcast_updated_at(podcast) or _EPOCH,
+                    _PODCAST_SNAPSHOT_RANK,
+                    podcast.id,
+                    _serialize_podcast(podcast),
+                )
+                for podcast in podcast_rows
+            )
+
+        candidates.sort(key=lambda candidate: candidate[:3], reverse=True)
+        entries = [candidate[3] for candidate in candidates]
+        return Response(
+            paginate_data(request, entries, limit, offset, total=total),
+            status=HTTP.OK,
+        )
+
+    def _video_queryset(self, user, media_types, filters):
+        """Return the filtered video progress queryset without evaluating it."""
         queryset = PlaybackProgress.objects.filter(
             user=user,
             item__media_type__in=media_types,
@@ -708,31 +769,39 @@ class PlaybackProgressView(drf_views.APIView):
             queryset = queryset.filter(updated_at__gte=filters["updated_since"])
         if filters["completed"] is not None:
             queryset = queryset.filter(completed=filters["completed"])
+        return queryset
 
-        rows = list(queryset)
-        show_map = _show_item_map([row.item for row in rows])
-        return [_serialize_progress(row, show_map) for row in rows]
+    def _podcast_queryset(self, user, filters):
+        """Return filtered podcast positions with database-side freshness semantics."""
+        queryset = (
+            Podcast.objects.filter(
+                user=user,
+                played_up_to_seconds__gt=0,
+            )
+            .select_related("item", "episode", "show")
+            .annotate(
+                _effective_updated_at=Coalesce(
+                    "position_updated_at",
+                    "progressed_at",
+                )
+            )
+        )
 
-    def _podcast_entries(self, user, filters):
-        """Serialize Podcast rows that carry a resume position."""
-        queryset = Podcast.objects.filter(
-            user=user,
-            played_up_to_seconds__gt=0,
-        ).select_related("item", "episode", "show")
+        if filters["updated_since"]:
+            queryset = queryset.filter(
+                _effective_updated_at__gte=filters["updated_since"]
+            )
 
-        entries = [_serialize_podcast(podcast) for podcast in queryset]
-        since = filters["updated_since"]
-        if since:
-            entries = [
-                entry
-                for entry in entries
-                if entry["updated_at"] and entry["updated_at"] >= since
-            ]
         if filters["completed"] is not None:
-            entries = [
-                entry for entry in entries if entry["completed"] == filters["completed"]
-            ]
-        return entries
+            completed_query = Q(last_seen_status=_PODCAST_COMPLETED_STATUS) | Q(
+                status=Status.COMPLETED.value
+            )
+            queryset = (
+                queryset.filter(completed_query)
+                if filters["completed"]
+                else queryset.exclude(completed_query)
+            )
+        return queryset
 
     @extend_schema(
         description=(
