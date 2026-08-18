@@ -69,6 +69,8 @@ class IntegrationDiagnosticsTests(FloppyApiTestCase):
         response = self._diagnostics()
 
         self.assertEqual(response.status_code, HTTP.OK)
+        self.assertEqual(response.headers["Cache-Control"], "private, no-store")
+        self.assertEqual(response.headers["Pragma"], "no-cache")
         payload = response.json()
         self.assertEqual(payload["state"], "needs_attention")
         self.assertEqual(payload["tokens"]["active"], 1)
