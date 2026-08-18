@@ -1,6 +1,7 @@
 # FORK: account-session lifecycle coverage for scoped integration credentials.
 import hashlib
 from http import HTTPStatus as HTTP  # noqa: N814
+from unittest.mock import patch
 
 from django.urls import reverse
 
@@ -13,9 +14,15 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
     """Verify user-managed scoped credentials remain least privilege."""
 
     def setUp(self):
-        """Start token-management requests from a signed-in browser session."""
+        """Start token-management requests from a recently authenticated session."""
         super().setUp()
         self.client.force_login(self.user1)
+        self._recent_auth_patcher = patch(
+            "allauth.account.decorators.reauthentication.did_recently_authenticate",
+            return_value=True,
+        )
+        self._recent_auth_patcher.start()
+        self.addCleanup(self._recent_auth_patcher.stop)
 
     def test_create_returns_secret_once_and_never_returns_digest(self):
         """The full secret appears only in the create response."""
@@ -52,6 +59,52 @@ class IntegrationTokenManagementTests(FloppyApiTestCase):
         self.assertNotIn("token", listed_payload)
         self.assertNotIn("token_digest", listed_payload)
         self.assertEqual(listed_payload["token_prefix"], token.token_prefix)
+
+    def test_list_does_not_require_recent_authentication(self):
+        """Users can inspect existing credentials without repeating login."""
+        with patch(
+            "allauth.account.decorators.reauthentication.did_recently_authenticate",
+            return_value=False,
+        ):
+            response = self.client.get(reverse("api_integration_tokens"))
+
+        self.assertEqual(response.status_code, HTTP.OK)
+
+    def test_create_requires_recent_allauth_authentication(self):
+        """A stale browser session cannot mint a persistent API credential."""
+        with patch(
+            "allauth.account.decorators.reauthentication.did_recently_authenticate",
+            return_value=False,
+        ):
+            response = self.client.post(
+                reverse("api_integration_tokens"),
+                data={"name": "Needs reauth", "scopes": ["progress:read"]},
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, HTTP.FOUND)
+        self.assertIn(reverse("account_reauthenticate"), response.headers["Location"])
+        self.assertFalse(IntegrationToken.objects.filter(user=self.user1).exists())
+
+    def test_revoke_requires_recent_allauth_authentication(self):
+        """A stale browser session cannot revoke a persistent API credential."""
+        token, _raw_token = IntegrationToken.generate(
+            user=self.user1,
+            name="Protected revoke",
+            scopes=["progress:read"],
+        )
+        with patch(
+            "allauth.account.decorators.reauthentication.did_recently_authenticate",
+            return_value=False,
+        ):
+            response = self.client.delete(
+                reverse("api_integration_token_detail", kwargs={"token_id": token.pk})
+            )
+
+        self.assertEqual(response.status_code, HTTP.FOUND)
+        self.assertIn(reverse("account_reauthenticate"), response.headers["Location"])
+        token.refresh_from_db()
+        self.assertIsNone(token.revoked_at)
 
     def test_unsupported_scope_is_rejected(self):
         """The account lifecycle API cannot mint wildcard or unknown scopes."""
