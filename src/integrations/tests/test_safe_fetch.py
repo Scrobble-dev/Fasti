@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase
@@ -99,10 +100,11 @@ class SafeFetchSecurityTests(SimpleTestCase):
         response = response_class.return_value
         response.status = 200
         response.getheaders.return_value = [("Content-Type", "application/json")]
-        response.getheader.side_effect = lambda name: {
+        response_headers = {
             "Content-Length": "2",
             "Content-Encoding": None,
-        }.get(name)
+        }
+        response.getheader.side_effect = response_headers.get
         response.read.return_value = b"{}"
         target = _parse_target("https://example.com/path?x=1")
 
@@ -125,18 +127,20 @@ class SafeFetchSecurityTests(SimpleTestCase):
 
     def test_response_size_and_compression_are_bounded(self):
         too_large = MagicMock()
-        too_large.getheader.side_effect = lambda name: {
+        too_large_headers = {
             "Content-Length": "1048577",
             "Content-Encoding": None,
-        }.get(name)
+        }
+        too_large.getheader.side_effect = too_large_headers.get
         with self.assertRaisesRegex(SafeFetchError, "size limit"):
             _read_bounded(too_large)
 
         compressed = MagicMock()
-        compressed.getheader.side_effect = lambda name: {
+        compressed_headers = {
             "Content-Length": "2",
             "Content-Encoding": "gzip",
-        }.get(name)
+        }
+        compressed.getheader.side_effect = compressed_headers.get
         with self.assertRaisesRegex(SafeFetchError, "Compressed remote responses"):
             _read_bounded(compressed)
 
@@ -160,7 +164,7 @@ class SafeFetchSecurityTests(SimpleTestCase):
         fetch.return_value = SafeFetchResult(
             status_code=200,
             content_type="application/json",
-            body=__import__("json").dumps(nested).encode(),
+            body=json.dumps(nested).encode(),
             origin="https://example.com",
         )
         with self.assertRaisesRegex(SafeFetchError, "nested too deeply") as raised:
