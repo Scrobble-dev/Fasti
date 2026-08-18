@@ -86,6 +86,7 @@ class SavedMediaChange(models.Model):
         indexes = [
             models.Index(fields=["user", "sequence_id"], name="savedchg_user_seq_idx"),
             models.Index(fields=["user", "created_at"], name="savedchg_user_created_idx"),
+            models.Index(fields=["created_at"], name="savedchg_created_idx"),
         ]
 
     def __str__(self):
