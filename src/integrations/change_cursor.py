@@ -57,28 +57,38 @@ def encode_change_cursor(
     )
 
 
+def _load_cursor_payload(cursor: str, legacy_salts: tuple[str, ...]) -> object:
+    """Load a canonical cursor, accepting known legacy salts during migration."""
+    expired_error = None
+    for salt in (_CURSOR_SALT, *legacy_salts):
+        try:
+            return signing.loads(
+                cursor,
+                salt=salt,
+                max_age=CURSOR_MAX_AGE_SECONDS,
+            )
+        except SignatureExpired as error:
+            expired_error = error
+        except (BadSignature, ValueError, TypeError):
+            continue
+    if expired_error is not None:
+        raise ChangeCursorExpired from expired_error
+    raise ChangeCursorError
+
+
 def decode_change_cursor(
     cursor: str,
     *,
     resource: str,
     user_id: int,
     client_id: str,
+    legacy_salts: tuple[str, ...] = (),
 ) -> ChangeCursorState:
     """Validate one ordered change cursor and return its sequence position."""
     if not isinstance(cursor, str) or not cursor or len(cursor) > CURSOR_MAX_LENGTH:
         raise ChangeCursorError
 
-    try:
-        payload = signing.loads(
-            cursor,
-            salt=_CURSOR_SALT,
-            max_age=CURSOR_MAX_AGE_SECONDS,
-        )
-    except SignatureExpired as error:
-        raise ChangeCursorExpired from error
-    except (BadSignature, ValueError, TypeError) as error:
-        raise ChangeCursorError from error
-
+    payload = _load_cursor_payload(cursor, legacy_salts)
     if not isinstance(payload, dict):
         raise ChangeCursorError
     if (
