@@ -130,46 +130,69 @@ def _receipt_result(receipt, digest: str, client_event_id: str):
     return (Response(replay_body, status=receipt.response_status_code), True)
 
 
+def _client_namespace(token: IntegrationToken | None) -> str:
+    """Return an opaque stable namespace for one authenticated client.
+
+    A configured client identifier survives token rotation. Tokens without one
+    remain isolated by their digest. The raw client identifier and token digest
+    are never stored in receipt keys.
+    """
+    if token is None:
+        return "legacy"
+    source = token.client_identifier.strip() or token.token_digest
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    return f"client-{digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}"
+
+
 def _receipt_belongs_to_client(receipt, token: IntegrationToken | None) -> bool:
-    """Return True when a receipt belongs to the authenticated client."""
-    expected_token_id = token.pk if token is not None else None
-    return receipt.token_id == expected_token_id
+    """Return True when a receipt belongs to the authenticated client namespace."""
+    if receipt.token_id is None or token is None:
+        return receipt.token_id is None and token is None
+    return _client_namespace(receipt.token) == _client_namespace(token)
 
 
 def _client_receipt_id(client_event_id: str, token: IntegrationToken | None) -> str:
-    """Return the fallback storage key for a client whose public key collides."""
+    """Return the canonical internal storage key for one delivery client."""
     if token is None:
-        namespace = "legacy"
-    else:
-        namespace = f"token-{token.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}"
+        return client_event_id
+    return f"{_client_namespace(token)}:{client_event_id}"
+
+
+def _legacy_token_receipt_id(client_event_id: str, token: IntegrationToken | None) -> str | None:
+    """Return the pre-stable-namespace storage key for compatibility reads."""
+    if token is None:
+        return None
+    namespace = f"token-{token.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}"
     return f"{namespace}:{client_event_id}"
 
 
 def _find_receipt_or_slot(user, client_event_id: str, token: IntegrationToken | None):
-    """Return this client's receipt, or a compatible free storage key.
+    """Return this client's receipt or its deterministic storage key.
 
-    Receipts written before client namespacing used the public key directly. Keep
-    reading those rows. Only use the server-derived fallback key when another
-    authenticated client for the same user already owns the public key.
+    New scoped-token receipts always use an opaque client namespace, so two
+    clients can safely reuse the same public Idempotency-Key without first
+    colliding on the user-level unique constraint. Historical public-key and
+    token-digest-prefixed receipts remain readable during the compatibility
+    period.
     """
-    public_receipt = IntegrationEventReceipt.objects.filter(
-        user=user,
-        client_event_id=client_event_id,
-    ).first()
-    if public_receipt is not None and _receipt_belongs_to_client(public_receipt, token):
-        return public_receipt, client_event_id
+    storage_id = _client_receipt_id(client_event_id, token)
+    candidate_ids = [storage_id]
+    if token is not None:
+        candidate_ids.append(client_event_id)
+        legacy_id = _legacy_token_receipt_id(client_event_id, token)
+        if legacy_id is not None:
+            candidate_ids.append(legacy_id)
 
-    namespaced_id = _client_receipt_id(client_event_id, token)
-    namespaced_receipt = IntegrationEventReceipt.objects.filter(
-        user=user,
-        client_event_id=namespaced_id,
-    ).first()
-    if namespaced_receipt is not None and _receipt_belongs_to_client(namespaced_receipt, token):
-        return namespaced_receipt, namespaced_id
+    for candidate_id in dict.fromkeys(candidate_ids):
+        receipt = (
+            IntegrationEventReceipt.objects.select_related("token")
+            .filter(user=user, client_event_id=candidate_id)
+            .first()
+        )
+        if receipt is not None and _receipt_belongs_to_client(receipt, token):
+            return receipt, candidate_id
 
-    if public_receipt is None:
-        return None, client_event_id
-    return None, namespaced_id
+    return None, storage_id
 
 
 def _reserve_receipt(
@@ -178,7 +201,7 @@ def _reserve_receipt(
     digest: str,
     token: IntegrationToken | None,
 ):
-    """Reserve one client delivery key, retrying only for a namespace collision."""
+    """Reserve one client delivery key, retrying only for a concurrent collision."""
     receipt, storage_id = _find_receipt_or_slot(user, client_event_id, token)
     if receipt is not None:
         return receipt, False
