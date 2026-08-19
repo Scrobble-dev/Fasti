@@ -2037,6 +2037,155 @@ class MediaDetailsViewTests(TestCase):
         self.assertEqual(response.context["media"]["image"], item.image)
 
     @patch("app.providers.services.get_media_metadata")
+    def test_media_details_shell_skips_provider_call_when_metadata_already_fetched(
+        self,
+        mock_get_metadata,
+    ):
+        """Shell-phase loads reuse stored metadata once it's been fetched before (#879)."""
+        Item.objects.create(
+            media_id="377938",
+            source=Sources.HARDCOVER.value,
+            media_type=MediaTypes.BOOK.value,
+            title="The Lord of the Rings",
+            image="https://images.example.com/custom-cover.jpg",
+            synopsis="A hobbit's journey.",
+            metadata_fetched_at=timezone.now(),
+        )
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.HARDCOVER.value,
+                    "media_type": MediaTypes.BOOK.value,
+                    "media_id": "377938",
+                    "title": "the-lord-of-the-rings",
+                },
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_metadata.assert_not_called()
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_media_details_secondary_skips_provider_call_for_fresh_book_metadata(
+        self,
+        mock_get_metadata,
+    ):
+        """Secondary-phase loads reuse fresh stored metadata for non-TV types (#879)."""
+        Item.objects.create(
+            media_id="377938",
+            source=Sources.HARDCOVER.value,
+            media_type=MediaTypes.BOOK.value,
+            title="The Lord of the Rings",
+            image="https://images.example.com/custom-cover.jpg",
+            metadata_fetched_at=timezone.now(),
+        )
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.HARDCOVER.value,
+                    "media_type": MediaTypes.BOOK.value,
+                    "media_id": "377938",
+                    "title": "the-lord-of-the-rings",
+                },
+            ),
+            {"fragment": "secondary"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_metadata.assert_not_called()
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_media_details_secondary_refetches_stale_book_metadata(
+        self,
+        mock_get_metadata,
+    ):
+        """Secondary-phase loads still refresh once stored metadata is stale (#879)."""
+        Item.objects.create(
+            media_id="377938",
+            source=Sources.HARDCOVER.value,
+            media_type=MediaTypes.BOOK.value,
+            title="The Lord of the Rings",
+            image="https://images.example.com/custom-cover.jpg",
+            metadata_fetched_at=timezone.now()
+            - timedelta(seconds=settings.CACHE_TIMEOUT + 1),
+        )
+        mock_get_metadata.return_value = {
+            "media_id": "377938",
+            "title": "The Lord of the Rings",
+            "media_type": MediaTypes.BOOK.value,
+            "source": Sources.HARDCOVER.value,
+            "image": "https://images.example.com/provider-cover.jpg",
+            "details": {},
+            "related": {},
+            "cast": [],
+            "crew": [],
+            "studios_full": [],
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.HARDCOVER.value,
+                    "media_type": MediaTypes.BOOK.value,
+                    "media_id": "377938",
+                    "title": "the-lord-of-the-rings",
+                },
+            ),
+            {"fragment": "secondary"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_metadata.assert_called_once()
+
+    @patch("app.providers.services.get_media_metadata")
+    def test_media_details_secondary_still_fetches_fresh_tv_metadata(
+        self,
+        mock_get_metadata,
+    ):
+        """TV secondary-phase loads always fetch live data for season/episode resolution (#879)."""
+        Item.objects.create(
+            media_id="1399",
+            source=Sources.TMDB.value,
+            media_type=MediaTypes.TV.value,
+            title="Game of Thrones",
+            image="https://images.example.com/custom-cover.jpg",
+            metadata_fetched_at=timezone.now(),
+        )
+        mock_get_metadata.return_value = {
+            "media_id": "1399",
+            "title": "Game of Thrones",
+            "media_type": MediaTypes.TV.value,
+            "source": Sources.TMDB.value,
+            "image": "https://images.example.com/custom-cover.jpg",
+            "details": {},
+            "related": {},
+            "cast": [],
+            "crew": [],
+            "studios_full": [],
+        }
+
+        response = self.client.get(
+            reverse(
+                "media_details",
+                kwargs={
+                    "source": Sources.TMDB.value,
+                    "media_type": MediaTypes.TV.value,
+                    "media_id": "1399",
+                    "title": "game-of-thrones",
+                },
+            ),
+            {"fragment": "secondary"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_get_metadata.assert_called()
+
+    @patch("app.providers.services.get_media_metadata")
     def test_media_details_repairs_stringified_title_payloads_on_existing_item(
         self,
         mock_get_metadata,
@@ -5649,6 +5798,75 @@ class MediaDetailsViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+
+    @patch("app.views.tmdb.episode", return_value={})
+    @patch("app.providers.services.get_media_metadata")
+    @patch("app.providers.tmdb.process_episodes")
+    def test_episode_details_prev_next_episode_numbers(
+        self,
+        mock_process_episodes,
+        mock_get_metadata,
+        _mock_episode,
+    ):
+        """Episode context exposes prev/next episode numbers, None at season edges."""
+        mock_get_metadata.side_effect = lambda *_args, **_kwargs: {
+            "title": "Test TV Show",
+            "media_id": "1668",
+            "source": Sources.TMDB.value,
+            "media_type": MediaTypes.TV.value,
+            "image": "http://example.com/image.jpg",
+            "season/1": {
+                "title": "Season 1",
+                "season_title": "Season 1",
+                "media_id": "1668",
+                "media_type": MediaTypes.SEASON.value,
+                "source": Sources.TMDB.value,
+                "image": "http://example.com/season.jpg",
+                "episodes": [{"episode_number": number} for number in range(1, 4)],
+            },
+        }
+        mock_process_episodes.return_value = [
+            {
+                "media_id": "1668",
+                "source": Sources.TMDB.value,
+                "media_type": MediaTypes.EPISODE.value,
+                "season_number": 1,
+                "episode_number": number,
+                "title": f"Episode {number}",
+                "air_date": f"2023-01-{number:02d}",
+                "watched": False,
+            }
+            for number in range(1, 4)
+        ]
+
+        def get_episode_details(episode_number):
+            return self.client.get(
+                reverse(
+                    "episode_details",
+                    kwargs={
+                        "source": Sources.TMDB.value,
+                        "media_id": "1668",
+                        "title": "test-tv-show",
+                        "season_number": 1,
+                        "episode_number": episode_number,
+                    },
+                ),
+            )
+
+        first = get_episode_details(1)
+        self.assertEqual(first.status_code, 200)
+        self.assertIsNone(first.context["prev_episode_number"])
+        self.assertEqual(first.context["next_episode_number"], 2)
+
+        middle = get_episode_details(2)
+        self.assertEqual(middle.status_code, 200)
+        self.assertEqual(middle.context["prev_episode_number"], 1)
+        self.assertEqual(middle.context["next_episode_number"], 3)
+
+        last = get_episode_details(3)
+        self.assertEqual(last.status_code, 200)
+        self.assertEqual(last.context["prev_episode_number"], 2)
+        self.assertIsNone(last.context["next_episode_number"])
 
     @patch("app.views.tmdb.episode", return_value={})
     @patch("app.providers.services.get_media_metadata")

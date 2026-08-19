@@ -121,7 +121,7 @@
                    @click.away="open = false"
                    @keydown.escape.window="open = false">
                 <button @click="open = !open"
-                        class="flex w-full items-center justify-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-100 rounded-md transition-colors duration-200 cursor-pointer md:w-auto md:justify-start">
+                        class="flex w-full items-center justify-center space-x-2 px-4 py-2 border border-[var(--color-surface-border)] bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm hover:bg-[var(--color-surface-muted)] rounded-xl transition-colors duration-200 cursor-pointer md:w-auto md:justify-start">
                   <span class="text-sm font-medium">{{ media.season_header_title|default:media.title }}</span>
                   <div class="w-4 h-4" :class="{ 'rotate-180': open }">{% include "app/icons/chevron-down.svg" with classes="w-full h-full" %}</div>
                 </button>
