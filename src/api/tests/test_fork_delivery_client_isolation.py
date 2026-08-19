@@ -3,6 +3,7 @@ import hashlib
 from http import HTTPStatus as HTTP  # noqa: N814
 from unittest.mock import MagicMock
 
+from django.db import IntegrityError, transaction
 from rest_framework.response import Response
 
 from integrations.delivery import get_or_record_receipt
@@ -13,10 +14,10 @@ from .base import FloppyApiTestCase
 _CLIENT_NAMESPACE_DIGEST_LENGTH = 24
 
 
-def _expected_client_storage_id(client_identifier: str, event_id: str) -> str:
-    """Return the opaque storage key expected for a named integration client."""
-    digest = hashlib.sha256(client_identifier.encode("utf-8")).hexdigest()
-    return f"client-{digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:{event_id}"
+def _expected_namespace(source: str) -> str:
+    """Return the opaque client namespace derived from a stable source."""
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    return f"client-{digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}"
 
 
 class DeliveryClientIsolationTests(FloppyApiTestCase):
@@ -65,20 +66,22 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
 
         receipts = IntegrationEventReceipt.objects.filter(user=self.user1).order_by("id")
         self.assertEqual(receipts.count(), 2)
+        self.assertEqual(receipts[0].client_event_id, "shared-event")
+        self.assertEqual(receipts[1].client_event_id, "shared-event")
         self.assertEqual(
-            receipts[0].client_event_id,
-            _expected_client_storage_id("nuvio-living-room", "shared-event"),
+            receipts[0].client_namespace,
+            _expected_namespace("nuvio-living-room"),
+        )
+        self.assertEqual(
+            receipts[1].client_namespace,
+            _expected_namespace("nuvio-bedroom"),
         )
         self.assertEqual(receipts[0].token, token_one)
-        self.assertEqual(
-            receipts[1].client_event_id,
-            _expected_client_storage_id("nuvio-bedroom", "shared-event"),
-        )
         self.assertEqual(receipts[1].token, token_two)
-        self.assertNotIn("nuvio-living-room", receipts[0].client_event_id)
-        self.assertNotIn("nuvio-bedroom", receipts[1].client_event_id)
-        self.assertNotIn(token_one.token_digest, receipts[0].client_event_id)
-        self.assertNotIn(token_two.token_digest, receipts[1].client_event_id)
+        self.assertNotIn("nuvio-living-room", receipts[0].client_namespace)
+        self.assertNotIn("nuvio-bedroom", receipts[1].client_namespace)
+        self.assertNotIn(token_one.token_digest, receipts[0].client_namespace)
+        self.assertNotIn(token_two.token_digest, receipts[1].client_namespace)
 
         first_replay_execute = MagicMock()
         second_replay_execute = MagicMock()
@@ -103,6 +106,51 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
         self.assertEqual(second_cached.data, {"client": "two"})
         first_replay_execute.assert_not_called()
         second_replay_execute.assert_not_called()
+
+    def test_database_uniqueness_is_client_scoped(self):
+        """The database rejects duplicate keys only inside one client namespace."""
+        token, _ = IntegrationToken.generate(
+            user=self.user1,
+            name="Living room",
+            client_identifier="nuvio-living-room",
+        )
+        namespace = _expected_namespace("nuvio-living-room")
+        IntegrationEventReceipt.objects.create(
+            user=self.user1,
+            token=token,
+            client_namespace=namespace,
+            client_event_id="same-event",
+            payload_digest="a" * 64,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            IntegrationEventReceipt.objects.create(
+                user=self.user1,
+                token=token,
+                client_namespace=namespace,
+                client_event_id="same-event",
+                payload_digest="b" * 64,
+            )
+
+        other_token, _ = IntegrationToken.generate(
+            user=self.user1,
+            name="Bedroom",
+            client_identifier="nuvio-bedroom",
+        )
+        IntegrationEventReceipt.objects.create(
+            user=self.user1,
+            token=other_token,
+            client_namespace=_expected_namespace("nuvio-bedroom"),
+            client_event_id="same-event",
+            payload_digest="c" * 64,
+        )
+        self.assertEqual(
+            IntegrationEventReceipt.objects.filter(
+                user=self.user1,
+                client_event_id="same-event",
+            ).count(),
+            2,
+        )
 
     def test_rotated_token_reuses_named_client_namespace(self):
         """A client identifier keeps idempotency state stable across token rotation."""
@@ -142,10 +190,57 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
         self.assertEqual(replay.data, {"detail": "accepted"})
         initial_execute.assert_called_once()
         replay_execute.assert_not_called()
+        receipt = IntegrationEventReceipt.objects.get(user=self.user1)
+        self.assertEqual(receipt.client_event_id, "rotation-event")
         self.assertEqual(
-            IntegrationEventReceipt.objects.filter(user=self.user1).count(),
-            1,
+            receipt.client_namespace,
+            _expected_namespace("nuvio-living-room"),
         )
+
+    def test_token_deletion_preserves_receipt_and_named_client_replay(self):
+        """Receipt evidence and replay survive physical credential deletion."""
+        token, _ = IntegrationToken.generate(
+            user=self.user1,
+            name="Nuvio old",
+            client_identifier="nuvio-living-room",
+        )
+        initial_execute = MagicMock(
+            return_value=Response({"detail": "accepted"}, status=HTTP.OK)
+        )
+        get_or_record_receipt(
+            user=self.user1,
+            client_event_id="deleted-token-event",
+            payload={"position_seconds": 60},
+            execute_fn=initial_execute,
+            token=token,
+        )
+        receipt = IntegrationEventReceipt.objects.get(user=self.user1)
+        namespace = receipt.client_namespace
+
+        token.delete()
+        receipt.refresh_from_db()
+        self.assertIsNone(receipt.token_id)
+        self.assertEqual(receipt.client_namespace, namespace)
+        self.assertEqual(receipt.client_event_id, "deleted-token-event")
+
+        rotated_token, _ = IntegrationToken.generate(
+            user=self.user1,
+            name="Nuvio rotated",
+            client_identifier="nuvio-living-room",
+        )
+        replay_execute = MagicMock()
+        replay, is_replay = get_or_record_receipt(
+            user=self.user1,
+            client_event_id="deleted-token-event",
+            payload={"position_seconds": 60},
+            execute_fn=replay_execute,
+            token=rotated_token,
+        )
+
+        self.assertTrue(is_replay)
+        self.assertEqual(replay.data, {"detail": "accepted"})
+        replay_execute.assert_not_called()
+        self.assertEqual(IntegrationEventReceipt.objects.filter(user=self.user1).count(), 1)
 
     def test_legacy_and_scoped_clients_do_not_share_receipts(self):
         """Legacy account delivery state does not capture a scoped client's key."""
@@ -180,18 +275,16 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
         self.assertTrue(
             IntegrationEventReceipt.objects.filter(
                 user=self.user1,
+                client_namespace="legacy",
                 client_event_id="shared-legacy-event",
                 token__isnull=True,
             ).exists()
         )
-        expected_digest = hashlib.sha256(token.token_digest.encode("utf-8")).hexdigest()
         self.assertTrue(
             IntegrationEventReceipt.objects.filter(
                 user=self.user1,
-                client_event_id=(
-                    f"client-{expected_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:"
-                    "shared-legacy-event"
-                ),
+                client_namespace=_expected_namespace(token.token_digest),
+                client_event_id="shared-legacy-event",
                 token=token,
             ).exists()
         )
