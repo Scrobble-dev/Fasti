@@ -1,4 +1,5 @@
 # FORK: client-namespace coverage for durable integration receipts.
+import hashlib
 from http import HTTPStatus as HTTP  # noqa: N814
 from unittest.mock import MagicMock
 
@@ -10,6 +11,12 @@ from integrations.models import IntegrationEventReceipt, IntegrationToken
 from .base import FloppyApiTestCase
 
 _CLIENT_NAMESPACE_DIGEST_LENGTH = 24
+
+
+def _expected_client_storage_id(client_identifier: str, event_id: str) -> str:
+    """Return the opaque storage key expected for a named integration client."""
+    digest = hashlib.sha256(client_identifier.encode("utf-8")).hexdigest()
+    return f"client-{digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:{event_id}"
 
 
 class DeliveryClientIsolationTests(FloppyApiTestCase):
@@ -58,17 +65,20 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
 
         receipts = IntegrationEventReceipt.objects.filter(user=self.user1).order_by("id")
         self.assertEqual(receipts.count(), 2)
-        self.assertEqual(receipts[0].client_event_id, "shared-event")
+        self.assertEqual(
+            receipts[0].client_event_id,
+            _expected_client_storage_id("nuvio-living-room", "shared-event"),
+        )
         self.assertEqual(receipts[0].token, token_one)
         self.assertEqual(
             receipts[1].client_event_id,
-            (
-                f"token-{token_two.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:"
-                "shared-event"
-            ),
+            _expected_client_storage_id("nuvio-bedroom", "shared-event"),
         )
-        self.assertNotIn(f"token-{token_two.pk}:", receipts[1].client_event_id)
         self.assertEqual(receipts[1].token, token_two)
+        self.assertNotIn("nuvio-living-room", receipts[0].client_event_id)
+        self.assertNotIn("nuvio-bedroom", receipts[1].client_event_id)
+        self.assertNotIn(token_one.token_digest, receipts[0].client_event_id)
+        self.assertNotIn(token_two.token_digest, receipts[1].client_event_id)
 
         first_replay_execute = MagicMock()
         second_replay_execute = MagicMock()
@@ -93,6 +103,49 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
         self.assertEqual(second_cached.data, {"client": "two"})
         first_replay_execute.assert_not_called()
         second_replay_execute.assert_not_called()
+
+    def test_rotated_token_reuses_named_client_namespace(self):
+        """A client identifier keeps idempotency state stable across token rotation."""
+        old_token, _ = IntegrationToken.generate(
+            user=self.user1,
+            name="Nuvio old",
+            client_identifier="nuvio-living-room",
+        )
+        new_token, _ = IntegrationToken.generate(
+            user=self.user1,
+            name="Nuvio rotated",
+            client_identifier="nuvio-living-room",
+        )
+        initial_execute = MagicMock(
+            return_value=Response({"detail": "accepted"}, status=HTTP.OK)
+        )
+        replay_execute = MagicMock()
+
+        initial, initial_replay = get_or_record_receipt(
+            user=self.user1,
+            client_event_id="rotation-event",
+            payload={"position_seconds": 42},
+            execute_fn=initial_execute,
+            token=old_token,
+        )
+        replay, is_replay = get_or_record_receipt(
+            user=self.user1,
+            client_event_id="rotation-event",
+            payload={"position_seconds": 42},
+            execute_fn=replay_execute,
+            token=new_token,
+        )
+
+        self.assertFalse(initial_replay)
+        self.assertTrue(is_replay)
+        self.assertEqual(initial.data, {"detail": "accepted"})
+        self.assertEqual(replay.data, {"detail": "accepted"})
+        initial_execute.assert_called_once()
+        replay_execute.assert_not_called()
+        self.assertEqual(
+            IntegrationEventReceipt.objects.filter(user=self.user1).count(),
+            1,
+        )
 
     def test_legacy_and_scoped_clients_do_not_share_receipts(self):
         """Legacy account delivery state does not capture a scoped client's key."""
@@ -131,11 +184,12 @@ class DeliveryClientIsolationTests(FloppyApiTestCase):
                 token__isnull=True,
             ).exists()
         )
+        expected_digest = hashlib.sha256(token.token_digest.encode("utf-8")).hexdigest()
         self.assertTrue(
             IntegrationEventReceipt.objects.filter(
                 user=self.user1,
                 client_event_id=(
-                    f"token-{token.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:"
+                    f"client-{expected_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}:"
                     "shared-legacy-event"
                 ),
                 token=token,
