@@ -19,7 +19,6 @@ _MAX_IDEMPOTENCY_KEY_LENGTH = 128
 _RESERVED_RESPONSE_STATUS = 0
 _ASCII_VISIBLE_MIN = 0x21
 _ASCII_VISIBLE_MAX = 0x7E
-_MAX_RECEIPT_RESERVATION_ATTEMPTS = 2
 _CLIENT_NAMESPACE_DIGEST_LENGTH = 24
 
 
@@ -131,12 +130,7 @@ def _receipt_result(receipt, digest: str, client_event_id: str):
 
 
 def _client_namespace(token: IntegrationToken | None) -> str:
-    """Return an opaque stable namespace for one authenticated client.
-
-    A configured client identifier survives token rotation. Tokens without one
-    remain isolated by their digest. The raw client identifier and token digest
-    are never stored in receipt keys.
-    """
+    """Return an opaque stable namespace for one authenticated client."""
     if token is None:
         return "legacy"
     source = token.client_identifier.strip() or token.token_digest
@@ -146,53 +140,58 @@ def _client_namespace(token: IntegrationToken | None) -> str:
 
 def _receipt_belongs_to_client(receipt, token: IntegrationToken | None) -> bool:
     """Return True when a receipt belongs to the authenticated client namespace."""
-    if receipt.token_id is None or token is None:
-        return receipt.token_id is None and token is None
-    return _client_namespace(receipt.token) == _client_namespace(token)
+    return receipt.client_namespace == _client_namespace(token)
 
 
-def _client_receipt_id(client_event_id: str, token: IntegrationToken | None) -> str:
-    """Return the canonical internal storage key for one delivery client."""
+def _legacy_client_receipt_id(
+    client_event_id: str,
+    token: IntegrationToken | None,
+) -> str | None:
+    """Return the pre-schema client-prefixed storage key for compatibility reads."""
     if token is None:
-        return client_event_id
+        return None
     return f"{_client_namespace(token)}:{client_event_id}"
 
 
-def _legacy_token_receipt_id(client_event_id: str, token: IntegrationToken | None) -> str | None:
-    """Return the pre-stable-namespace storage key for compatibility reads."""
+def _legacy_token_receipt_id(
+    client_event_id: str,
+    token: IntegrationToken | None,
+) -> str | None:
+    """Return the older token-digest-prefixed storage key for compatibility reads."""
     if token is None:
         return None
     namespace = f"token-{token.token_digest[:_CLIENT_NAMESPACE_DIGEST_LENGTH]}"
     return f"{namespace}:{client_event_id}"
 
 
-def _find_receipt_or_slot(user, client_event_id: str, token: IntegrationToken | None):
-    """Return this client's receipt or its deterministic storage key.
-
-    New scoped-token receipts always use an opaque client namespace, so two
-    clients can safely reuse the same public Idempotency-Key without first
-    colliding on the user-level unique constraint. Historical public-key and
-    token-digest-prefixed receipts remain readable during the compatibility
-    period.
-    """
-    storage_id = _client_receipt_id(client_event_id, token)
-    candidate_ids = [storage_id]
+def _find_receipt(user, client_event_id: str, token: IntegrationToken | None):
+    """Return this client's current or historical receipt for one public key."""
+    namespace = _client_namespace(token)
+    candidate_ids = [client_event_id]
     if token is not None:
-        candidate_ids.append(client_event_id)
-        legacy_id = _legacy_token_receipt_id(client_event_id, token)
-        if legacy_id is not None:
-            candidate_ids.append(legacy_id)
+        candidate_ids.extend(
+            filter(
+                None,
+                (
+                    _legacy_client_receipt_id(client_event_id, token),
+                    _legacy_token_receipt_id(client_event_id, token),
+                ),
+            )
+        )
 
     for candidate_id in dict.fromkeys(candidate_ids):
         receipt = (
-            IntegrationEventReceipt.objects.select_related("token")
-            .filter(user=user, client_event_id=candidate_id)
+            IntegrationEventReceipt.objects.filter(
+                user=user,
+                client_namespace=namespace,
+                client_event_id=candidate_id,
+            )
+            .select_related("token")
             .first()
         )
         if receipt is not None and _receipt_belongs_to_client(receipt, token):
-            return receipt, candidate_id
-
-    return None, storage_id
+            return receipt
+    return None
 
 
 def _reserve_receipt(
@@ -201,38 +200,28 @@ def _reserve_receipt(
     digest: str,
     token: IntegrationToken | None,
 ):
-    """Reserve one client delivery key, retrying only for a concurrent collision."""
-    receipt, storage_id = _find_receipt_or_slot(user, client_event_id, token)
+    """Reserve one client delivery key and resolve a concurrent duplicate safely."""
+    receipt = _find_receipt(user, client_event_id, token)
     if receipt is not None:
         return receipt, False
 
-    for _attempt in range(_MAX_RECEIPT_RESERVATION_ATTEMPTS):
-        try:
-            with transaction.atomic():
-                receipt = IntegrationEventReceipt.objects.create(
-                    user=user,
-                    token=token,
-                    client_event_id=storage_id,
-                    payload_digest=digest,
-                    response_status_code=_RESERVED_RESPONSE_STATUS,
-                    response_body={},
-                )
-        except IntegrityError:
-            receipt, next_storage_id = _find_receipt_or_slot(
-                user,
-                client_event_id,
-                token,
+    try:
+        with transaction.atomic():
+            receipt = IntegrationEventReceipt.objects.create(
+                user=user,
+                token=token,
+                client_namespace=_client_namespace(token),
+                client_event_id=client_event_id,
+                payload_digest=digest,
+                response_status_code=_RESERVED_RESPONSE_STATUS,
+                response_body={},
             )
-            if receipt is not None:
-                return receipt, False
-            if next_storage_id == storage_id:
-                raise
-            storage_id = next_storage_id
-        else:
-            return receipt, True
-
-    msg = "Could not reserve an idempotency receipt after a concurrent collision."
-    raise IntegrityError(msg)
+    except IntegrityError:
+        receipt = _find_receipt(user, client_event_id, token)
+        if receipt is None:
+            raise
+        return receipt, False
+    return receipt, True
 
 
 def get_or_record_receipt(
@@ -265,9 +254,6 @@ def get_or_record_receipt(
     if not created:
         return _receipt_result(receipt, digest, client_event_id)
 
-    # Keep provider/network work outside the reservation transaction. If execution
-    # raises after a mutation has landed, retain the reservation so a retry cannot
-    # unknowingly apply the mutation again.
     response = execute_fn()
 
     if response.data is not None:
