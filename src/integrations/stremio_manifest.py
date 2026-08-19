@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 from integrations.safe_fetch import SafeFetchError, fetch_json
 
@@ -82,7 +82,7 @@ class DeclarativeAddonManifest:
         return "meta" in self.consumable_resources
 
 
-def _invalid(code: str, param: str, message: str):
+def _invalid(code: str, param: str, message: str) -> NoReturn:
     raise ManifestValidationError(code=code, param=param, message=message) from None
 
 
@@ -299,7 +299,14 @@ def parse_manifest(
     if any(resource in _EXECUTABLE_OR_PLAYBACK_RESOURCES for resource in resources):
         # Playback/executable-adjacent resources remain visible as ignored capability
         # data but never become executable Floppy behavior.
-        ignored = tuple(dict.fromkeys((*ignored, *(_EXECUTABLE_OR_PLAYBACK_RESOURCES & set(resources)))))
+        ignored = tuple(
+            dict.fromkeys(
+                (
+                    *ignored,
+                    *sorted(_EXECUTABLE_OR_PLAYBACK_RESOURCES & set(resources)),
+                )
+            )
+        )
 
     return DeclarativeAddonManifest(
         addon_id=addon_id,
