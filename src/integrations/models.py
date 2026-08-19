@@ -192,7 +192,7 @@ class PocketCastsAccount(models.Model):
     password = models.TextField(
         blank=True,
         null=True,
-        help_text="Encrypted password for login",
+        help_text="Encrypted password or app password for login",
     )
     token_expires_at = models.DateTimeField(null=True, blank=True)
     last_sync_at = models.DateTimeField(null=True, blank=True)
@@ -222,30 +222,23 @@ class PocketCastsAccount(models.Model):
         - We have an access token (and it's not expired, or we have refresh token to renew it)
         - Connection is not marked as broken
         """
-        # If we have credentials (email and password), we can always reconnect
         has_credentials = bool(self.email and self.password)
 
-        # If connection is marked as broken and we don't have credentials, not connected
         if self.connection_broken and not has_credentials:
             return False
 
-        # If we have credentials, we're connected (can always re-login)
         if has_credentials:
             return True
 
-        # Legacy: check for access token
         if not self.access_token:
             return False
 
-        # If connection is marked as broken, not connected
         if self.connection_broken:
             return False
 
-        # If token is not expired, we're connected
         if not self.is_token_expired:
             return True
 
-        # An expired token is still usable while a refresh token exists.
         return bool(self.refresh_token)
 
     @property
@@ -1060,11 +1053,11 @@ class IntegrationToken(models.Model):
 
 
 class IntegrationEventReceipt(models.Model):
-    """Store client event receipts for idempotency and deduplication."""
+    """Store client-scoped delivery receipts for idempotency and deduplication."""
 
     token = models.ForeignKey(
         IntegrationToken,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name="event_receipts",
         null=True,
         blank=True,
@@ -1074,12 +1067,12 @@ class IntegrationEventReceipt(models.Model):
         on_delete=models.CASCADE,
         related_name="event_receipts",
     )
+    client_namespace = models.CharField(max_length=32, db_index=True)
     client_event_id = models.CharField(max_length=255, db_index=True)
     payload_digest = models.CharField(max_length=64)
     response_status_code = models.IntegerField(default=200)
     response_body = models.JSONField(default=dict, encoder=DjangoJSONEncoder)
     created_at = models.DateTimeField(auto_now_add=True)
-
 
     class Meta:
         """Model options."""
@@ -1088,13 +1081,14 @@ class IntegrationEventReceipt(models.Model):
         verbose_name_plural = "Integration event receipts"
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "client_event_id"],
-                name="unique_user_client_event_id",
+                fields=["user", "client_namespace", "client_event_id"],
+                name="uniq_receipt_user_client_event",
             ),
         ]
 
     def __str__(self):
         """Readable representation."""
-        return f"IntegrationEventReceipt({self.user.username}, {self.client_event_id})"
-
-
+        return (
+            "IntegrationEventReceipt("
+            f"{self.user.username}, {self.client_namespace}, {self.client_event_id})"
+        )
