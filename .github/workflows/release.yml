@@ -82,7 +82,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Generate SLSA Build Provenance Attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.build-image.outputs.digest }}
