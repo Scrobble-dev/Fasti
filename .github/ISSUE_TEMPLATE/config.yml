@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions & Q&A
+    url: https://github.com/Scrobble-dev/Fasti/discussions
+    about: Ask questions, discuss architecture, brainstorm ideas, or share setups.
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/Scrobble-dev/Fasti/security/advisories/new
+    about: Privately report a security vulnerability in accordance with SECURITY.md.
+  - name: Scrobble.dev Specification & Vocabulary
+    url: https://github.com/Scrobble-dev/scrobble.dev
+    about: Discuss or propose changes to the upstream open Scrobble.dev vocabulary standard.

@@ -1,0 +1,35 @@
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - dependencies
+  categories:
+    - title: "✨ Features & Capabilities"
+      labels:
+        - enhancement
+        - feat
+    - title: "🐛 Bug Fixes & Resilience"
+      labels:
+        - bug
+        - fix
+    - title: "🔌 Connectors & Importers"
+      labels:
+        - importer
+        - connector
+    - title: "♿ Accessibility & UX"
+      labels:
+        - accessibility
+        - ux
+        - a11y
+    - title: "🔒 Security & Hardening"
+      labels:
+        - security
+    - title: "📚 Documentation & Knowledge"
+      labels:
+        - documentation
+        - docs
+    - title: "⚙️ CI/CD & Maintenance"
+      labels:
+        - ci
+        - maintenance
+        - refactor
