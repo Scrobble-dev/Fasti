@@ -46,3 +46,21 @@ export const radii = {
   md: "6px",
   lg: "10px",
 } as const;
+
+export const cssVariables = `
+:root {
+  --fasti-surface-archive: ${colors.surface.archive};
+  --fasti-surface-paper: ${colors.surface.paper};
+  --fasti-surface-night: ${colors.surface.night};
+  --fasti-text-primary: ${colors.text.primary};
+  --fasti-text-muted: ${colors.text.muted};
+  --fasti-brand-mark: ${colors.brand.mark};
+  --fasti-action-primary: ${colors.action.primary};
+  --fasti-state-verified: ${colors.state.verified};
+  --fasti-state-attention: ${colors.state.attention};
+  --fasti-font-display: ${typography.display};
+  --fasti-font-body: ${typography.body};
+  --fasti-font-mono: ${typography.mono};
+  --fasti-touch-target-min: ${touchTargets.minimum};
+}
+`;
