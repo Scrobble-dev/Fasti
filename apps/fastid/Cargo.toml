@@ -16,6 +16,7 @@ fasti-core = { workspace = true }
 fasti-activity = { workspace = true }
 fasti-store = { workspace = true }
 fasti-api = { workspace = true }
+axum = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

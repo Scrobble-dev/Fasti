@@ -461,6 +461,7 @@ name = "fasti-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
  "fasti-activity",
  "fasti-core",
  "fasti-store",
@@ -575,6 +576,7 @@ name = "fastid"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "fasti-activity",
  "fasti-api",
  "fasti-core",

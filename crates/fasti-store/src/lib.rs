@@ -1,7 +1,7 @@
 //! Fasti SQLite Storage Engine.
 
 use fasti_activity::{ActivityEvent, EventReceipt, ReceiptStatus};
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection};
 use std::path::Path;
 use thiserror::Error;
 
