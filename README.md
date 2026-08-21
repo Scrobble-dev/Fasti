@@ -7,12 +7,14 @@
 **A self-hosted-first media chronicle and player for what you watch, read, hear and play.**  
 Built on the open activity language developed at [Scrobble.dev](https://scrobble.dev).
 
+[![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Scrobble.dev Activity Profile](https://img.shields.io/badge/Scrobble.dev-Profile_0.1-1E4FA3.svg)](https://scrobble.dev)
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-EA4AAA.svg?logo=github-sponsors)](https://github.com/sponsors/Scrobble-dev)
+[![Open Collective](https://img.shields.io/badge/Donate-Open%20Collective-7B8099.svg?logo=open-collective)](https://opencollective.com/fasti)
+[![Scrobble.dev Profile](https://img.shields.io/badge/Scrobble.dev-Profile_0.1-1E4FA3.svg)](https://scrobble.dev)
 [![Architecture: Local-First](https://img.shields.io/badge/Architecture-Local--First-2E6F63.svg)](docs/architecture/overview.md)
-[![Design Tokens](https://img.shields.io/badge/Design_Tokens-DTCG_2025.10-8B2E2A.svg)](brand/DESIGN.md)
 
-[Overview](#what-is-fasti) • [The Book of Days](#the-book-of-days) • [Architecture](#architecture) • [Relationship to Scrobble.dev](#relationship-to-scrobbledev) • [Quick Start](#quick-start) • [Roadmap](#roadmap) • [Contributing](#contributing)
+[Overview](#what-is-fasti) • [The Book of Days](#the-book-of-days) • [Architecture](#architecture) • [Relationship to Scrobble.dev](#relationship-to-scrobbledev) • [Quick Start](#quick-start) • [Roadmap](#roadmap) • [Sponsor](#supporting-fasti) • [Contributing](#contributing)
 
 </div>
 
@@ -192,6 +194,18 @@ We welcome contributions from developers, designers, archivists, and media enthu
 Security and privacy are fundamental to personal history. Fasti is private by default, transmits no telemetry, and operates without mandatory central cloud dependencies.
 
 To report a vulnerability, please follow the coordinated disclosure policy in [`SECURITY.md`](SECURITY.md).
+
+---
+
+## Supporting Fasti
+
+Fasti is an independent, community-driven open-source project. We believe personal cultural history belongs to you—not closed corporate platforms or subscription walled gardens.
+
+If you find Fasti valuable, consider sponsoring our development to help fund infrastructure, accessibility testing, and open vocabulary development:
+
+* **[Sponsor via GitHub Sponsors](https://github.com/sponsors/Scrobble-dev)**
+* **[Donate via Open Collective](https://opencollective.com/fasti)**
+* **[Support via Scrobble.dev](https://scrobble.dev/sponsor)**
 
 ---
 
