@@ -5,7 +5,7 @@
 ## Target Branch
 
 - [ ] `dev` — Standard feature, bugfix, connector, or documentation PR (will trigger continuous dev image build).
-- [ ] `main` — Official release promotion PR (requires two-person release maintainer sign-off).
+- [ ] `release` — Official release promotion PR (requires two-person release maintainer sign-off).
 
 ## Category of Change
 

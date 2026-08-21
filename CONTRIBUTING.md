@@ -26,7 +26,7 @@ If you forgot to sign off a commit on a branch:
 ```bash
 git commit --amend --no-edit -s
 # Or for multiple commits:
-git rebase --signoff origin/main
+git rebase --signoff origin/dev
 ```
 
 ### Full DCO 1.1 Text
@@ -155,7 +155,7 @@ Signed-off-by: Jane Developer <jane@example.com>
    ```bash
    git push origin feat/my-new-feature
    ```
-2. Open a Pull Request against `main` on `Scrobble-dev/Fasti`.
+2. Open a Pull Request against `dev` (or `release` for release promotions) on `Scrobble-dev/Fasti`.
 3. Complete the provided [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md), documenting:
    * The problem being solved.
    * Behavioral & data-model impact.

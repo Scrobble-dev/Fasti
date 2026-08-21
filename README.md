@@ -9,8 +9,10 @@ Built on the open activity language developed at [Scrobble.dev](https://scrobble
 
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-EA4AAA.svg?logo=github-sponsors)](https://github.com/sponsors/Scrobble-dev)
-[![Open Collective](https://img.shields.io/badge/Donate-Open%20Collective-7B8099.svg?logo=open-collective)](https://opencollective.com/fasti)
+[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-EA4AAA.svg?logo=github-sponsors)](https://github.com/sponsors/ryan-winkler)
+[![Open Collective](https://img.shields.io/badge/Donate-Open%20Collective-7B8099.svg?logo=open-collective)](https://opencollective.com/scrobble)
+[![Ko-fi](https://img.shields.io/badge/Donate-Ko--fi-FF5E5B.svg?logo=kofi)](https://ko-fi.com/ryanw_eu)
+[![Revolut](https://img.shields.io/badge/Donate-Revolut-0075EB.svg)](https://revolut.me/ryanwi)
 [![Scrobble.dev Profile](https://img.shields.io/badge/Scrobble.dev-Profile_0.1-1E4FA3.svg)](https://scrobble.dev)
 [![Architecture: Local-First](https://img.shields.io/badge/Architecture-Local--First-2E6F63.svg)](docs/architecture/overview.md)
 
@@ -203,9 +205,10 @@ Fasti is an independent, community-driven open-source project. We believe person
 
 If you find Fasti valuable, consider sponsoring our development to help fund infrastructure, accessibility testing, and open vocabulary development:
 
-* **[Sponsor via GitHub Sponsors](https://github.com/sponsors/Scrobble-dev)**
-* **[Donate via Open Collective](https://opencollective.com/fasti)**
-* **[Support via Scrobble.dev](https://scrobble.dev/sponsor)**
+* **[Sponsor via GitHub Sponsors](https://github.com/sponsors/ryan-winkler)**
+* **[Donate via Open Collective](https://opencollective.com/scrobble)**
+* **[Support via Ko-fi](https://ko-fi.com/ryanw_eu)**
+* **[Direct Contribution via Revolut](https://revolut.me/ryanwi)**
 
 ---
 

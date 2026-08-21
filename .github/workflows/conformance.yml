@@ -2,9 +2,9 @@ name: Scrobble.dev & Identity Conformance
 
 on:
   push:
-    branches: ["dev", "main"]
+    branches: ["dev", "release"]
   pull_request:
-    branches: ["dev", "main"]
+    branches: ["dev", "release"]
 
 permissions:
   contents: read

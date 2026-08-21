@@ -1,6 +1,5 @@
 # GitHub Funding & Sponsorship Configuration for Fasti
-github: [Scrobble-dev, ryan-winkler]
-open_collective: fasti
-ko_fi: scrobble
-polar: scrobble-dev
-custom: ["https://scrobble.dev/sponsor"]
+github: [ryan-winkler]
+open_collective: scrobble
+ko_fi: ryanw_eu
+custom: ["https://revolut.me/ryanwi"]
