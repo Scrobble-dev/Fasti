@@ -1,0 +1,63 @@
+name: Bug Report
+description: Report a reproducible bug or unexpected behavior in Fasti
+title: "fix: [Short summary of the bug]"
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks for reporting an issue! Please provide detailed reproduction steps so maintainers can diagnose the root cause."
+  - type: input
+    id: version
+    attributes:
+      label: Fasti Version / Commit
+      description: What version of Fasti or commit SHA were you running?
+      placeholder: "e.g. 0.1.0-alpha (dev-2026-08-21)"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      options:
+        - "fastid (Server Daemon)"
+        - "fasti-web (Web Client)"
+        - "fasti-desktop (Tauri Shell)"
+        - "fasti-cli (CLI Utility)"
+        - "fasti-store / SQLite Ledger"
+        - "fasti-sync / Replication"
+        - "fasti-player / Playback"
+        - "fasti-connectors / Importer"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating System / Deployment
+      options:
+        - "Docker / Podman Container"
+        - "Linux (systemd / bare metal)"
+        - "macOS"
+        - "Windows"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Explain step-by-step how to trigger the issue.
+      placeholder: "1. Start fastid daemon...\n2. Ingest event with ID...\n3. Observe projection error..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      placeholder: "What should have happened according to data invariants?"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs & Error Output
+      description: Please sanitize private credentials, tokens, or IP addresses before submitting.
+      render: shell

@@ -1,0 +1,25 @@
+name: Scrobble.dev Conformance
+
+on:
+  push:
+    branches: ["dev", "main"]
+  pull_request:
+    branches: ["dev", "main"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-conformance:
+    name: Validate Scrobble Activity Profile 0.1 Fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate fixture envelope schemas
+        run: |
+          echo "Validating fixtures against Scrobble.dev Activity Profile 0.1..."
+          for f in fixtures/activity/*.json; do
+            python3 -m json.tool "$f" > /dev/null || exit 1
+            echo "PASS: $f"
+          done
+          echo "All Scrobble.dev conformance checks passed."

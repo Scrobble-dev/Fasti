@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://scrobble.dev/schemas/activity-envelope.json",
+  "title": "FastiActivityEvent",
+  "type": "object",
+  "required": [
+    "event_id",
+    "schema_version",
+    "actor_id",
+    "device_id",
+    "device_seq",
+    "kind",
+    "media",
+    "timestamps",
+    "provenance"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique UUIDv7 event identifier"
+    },
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "actor_id": {
+      "type": "string"
+    },
+    "device_id": {
+      "type": "string"
+    },
+    "device_seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "media.played",
+        "media.progressed",
+        "media.paused",
+        "media.completed",
+        "media.rated",
+        "media.corrected",
+        "media.deleted"
+      ]
+    },
+    "media": {
+      "type": "object",
+      "required": ["source", "id", "grain"],
+      "properties": {
+        "source": { "type": "string" },
+        "id": { "type": "string" },
+        "grain": {
+          "type": "string",
+          "enum": ["track", "album", "episode", "season", "movie", "book", "chapter", "game", "session"]
+        },
+        "title": { "type": "string" }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "required": ["value", "unit"],
+      "properties": {
+        "value": { "type": "number" },
+        "total": { "type": "number" },
+        "unit": { "type": "string" }
+      }
+    },
+    "timestamps": {
+      "type": "object",
+      "required": ["occurred_at", "observed_at", "received_at"],
+      "properties": {
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "observed_at": { "type": "string", "format": "date-time" },
+        "received_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["channel", "client"],
+      "properties": {
+        "channel": { "type": "string" },
+        "client": { "type": "string" },
+        "external_event_id": { "type": "string" }
+      }
+    },
+    "correction_of": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "tombstone_of": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    }
+  }
+}

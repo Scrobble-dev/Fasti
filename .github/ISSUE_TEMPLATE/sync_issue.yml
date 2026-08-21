@@ -1,0 +1,28 @@
+name: Synchronisation / Reconnection Issue
+description: Report event duplicates, sequence gaps, or sync stall across offline periods
+title: "sync: [Brief summary of sync discrepancy]"
+labels: ["sync", "distributed-state"]
+body:
+  - type: markdown
+    attributes:
+      value: "Report replication or offline reconnection anomalies."
+  - type: input
+    id: topology
+    attributes:
+      label: Node Topology
+      description: Describe the nodes involved.
+      placeholder: "e.g. Fasti Desktop (macOS) syncing with Home Server fastid node"
+    validations:
+      required: true
+  - type: textarea
+    id: sequence_behavior
+    attributes:
+      label: Observable Sync Anomaly
+      placeholder: "Did events duplicate, fail to acknowledge receipts, or miss sequence numbers?"
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sync Cursor / Log Output
+      render: shell

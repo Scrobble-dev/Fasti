@@ -1,0 +1,30 @@
+{
+  "event_id": "01917541-1e4a-7b20-9120-c88f0e55f930",
+  "schema_version": "1.0",
+  "actor_id": "user_local_01",
+  "device_id": "fasti_tv_living_room",
+  "device_seq": 89,
+  "kind": "media.progressed",
+  "media": {
+    "source": "thetvdb",
+    "id": "78291-s01e04",
+    "grain": "episode",
+    "title": "The Leftovers S01E04 - B.J. and the A.C."
+  },
+  "progress": {
+    "value": 1845.0,
+    "total": 3420.0,
+    "unit": "seconds"
+  },
+  "timestamps": {
+    "occurred_at": "2026-08-21T15:30:00.000Z",
+    "observed_at": "2026-08-21T16:00:45.000Z",
+    "received_at": "2026-08-21T16:00:45.300Z"
+  },
+  "provenance": {
+    "channel": "webhook",
+    "client": "jellyfin-fasti-plugin/1.2"
+  },
+  "correction_of": null,
+  "tombstone_of": null
+}

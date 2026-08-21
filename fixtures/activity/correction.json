@@ -1,0 +1,30 @@
+{
+  "event_id": "01917542-5f6b-7c10-9830-a11b2c33d440",
+  "schema_version": "1.0",
+  "actor_id": "user_local_01",
+  "device_id": "fasti_web_browser",
+  "device_seq": 143,
+  "kind": "media.corrected",
+  "media": {
+    "source": "musicbrainz",
+    "id": "7825b441-fa60-449e-8c46-9533ec67e416",
+    "grain": "track",
+    "title": "Heroes (2017 Remaster) - David Bowie"
+  },
+  "progress": {
+    "value": 367.0,
+    "total": 367.0,
+    "unit": "seconds"
+  },
+  "timestamps": {
+    "occurred_at": "2026-08-21T15:20:00.000Z",
+    "observed_at": "2026-08-21T16:10:00.000Z",
+    "received_at": "2026-08-21T16:10:00.200Z"
+  },
+  "provenance": {
+    "channel": "manual",
+    "client": "fasti-web/0.1.0"
+  },
+  "correction_of": "01917540-8b1b-7a30-8a10-b99a0f44e820",
+  "tombstone_of": null
+}

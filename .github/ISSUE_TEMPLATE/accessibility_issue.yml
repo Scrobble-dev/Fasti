@@ -1,0 +1,28 @@
+name: Accessibility Problem
+description: Report a keyboard trap, screen reader gap, touch target violation, or cognitive friction
+title: "a11y: [Summary of accessibility barrier]"
+labels: ["accessibility", "ux"]
+body:
+  - type: markdown
+    attributes:
+      value: "Fasti holds a strict WCAG 2.2 AA and cognitive accessibility standard. Please describe any barrier encountered."
+  - type: dropdown
+    id: barrier_type
+    attributes:
+      label: Barrier Category
+      options:
+        - "Keyboard Navigation / Focus Trap"
+        - "Screen Reader (VoiceOver, NVDA, JAWS)"
+        - "Touch Target Size (< 44px)"
+        - "Color Contrast / Legibility"
+        - "Motion Sensitivity / prefers-reduced-motion"
+        - "Cognitive / Executive Function Friction"
+    validations:
+      required: true
+  - type: textarea
+    id: barrier_details
+    attributes:
+      label: Description of Barrier & Assistive Tech
+      placeholder: "Describe the element, the assistive tech used, and the barrier experienced."
+    validations:
+      required: true

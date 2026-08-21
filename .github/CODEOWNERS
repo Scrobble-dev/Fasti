@@ -1,0 +1,43 @@
+# Fasti CODEOWNERS
+# Ensures explicit ownership across functional subsystems and branch protections.
+# Learn more: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global Default - Project Steward & Core Maintainers
+* @Scrobble-dev/maintainers
+
+# Core Domain & Activity Ledger
+/crates/fasti-core/ @Scrobble-dev/core-team
+/crates/fasti-activity/ @Scrobble-dev/core-team
+/crates/fasti-store/ @Scrobble-dev/core-team
+/crates/fasti-projections/ @Scrobble-dev/core-team
+
+# Sync Protocol & Replication
+/crates/fasti-sync/ @Scrobble-dev/sync-team
+
+# HTTP API & Daemon
+/crates/fasti-api/ @Scrobble-dev/api-team
+/apps/fastid/ @Scrobble-dev/api-team
+
+# Authentication & Security Boundary
+/crates/fasti-auth/ @Scrobble-dev/security-team
+/SECURITY.md @Scrobble-dev/security-team
+/.github/workflows/security.yml @Scrobble-dev/security-team
+
+# Playback State Machine & Native Adapters
+/crates/fasti-player/ @Scrobble-dev/player-team
+
+# Importers & Connectors
+/crates/fasti-connectors/ @Scrobble-dev/integrations-team
+
+# Frontend & Desktop Shell
+/apps/web/ @Scrobble-dev/ui-team
+/apps/desktop/ @Scrobble-dev/ui-team
+/packages/ui/ @Scrobble-dev/ui-team
+/packages/tokens/ @Scrobble-dev/ui-team
+/brand/ @Scrobble-dev/ui-team
+
+# Release & CI/CD Pipelines (Requires Release Maintainer Approval)
+/.github/workflows/ @Scrobble-dev/release-team
+/Cargo.toml @Scrobble-dev/release-team
+/package.json @Scrobble-dev/release-team
+/pnpm-workspace.yaml @Scrobble-dev/release-team

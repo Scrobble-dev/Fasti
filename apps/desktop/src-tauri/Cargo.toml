@@ -1,0 +1,16 @@
+[package]
+name = "fasti-desktop"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Fasti Contributors <hello@scrobble.dev>"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+fasti-core = { path = "../../../crates/fasti-core" }
+fasti-player = { path = "../../../crates/fasti-player" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

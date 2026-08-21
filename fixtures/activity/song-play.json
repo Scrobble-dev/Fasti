@@ -1,0 +1,30 @@
+{
+  "event_id": "01917540-8b1b-7a30-8a10-b99a0f44e820",
+  "schema_version": "1.0",
+  "actor_id": "user_local_01",
+  "device_id": "fasti_desktop_mac",
+  "device_seq": 142,
+  "kind": "media.played",
+  "media": {
+    "source": "musicbrainz",
+    "id": "7825b441-fa60-449e-8c46-9533ec67e416",
+    "grain": "track",
+    "title": "Heroes - David Bowie"
+  },
+  "progress": {
+    "value": 367.0,
+    "total": 367.0,
+    "unit": "seconds"
+  },
+  "timestamps": {
+    "occurred_at": "2026-08-21T15:20:00.000Z",
+    "observed_at": "2026-08-21T15:26:07.000Z",
+    "received_at": "2026-08-21T15:26:07.150Z"
+  },
+  "provenance": {
+    "channel": "player",
+    "client": "fasti-desktop/0.1.0"
+  },
+  "correction_of": null,
+  "tombstone_of": null
+}

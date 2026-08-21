@@ -1,0 +1,21 @@
+{
+  "name": "@fasti/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fasti Web Client — Responsive, accessible media chronicle and player",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@fasti/tokens": "workspace:*",
+    "@fasti/sdk": "workspace:*",
+    "@fasti/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

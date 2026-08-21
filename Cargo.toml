@@ -1,0 +1,65 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/fastid",
+  "crates/fasti-core",
+  "crates/fasti-activity",
+  "crates/fasti-store",
+  "crates/fasti-projections",
+  "crates/fasti-sync",
+  "crates/fasti-api",
+  "crates/fasti-auth",
+  "crates/fasti-player",
+  "crates/fasti-connectors",
+  "crates/fasti-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Fasti Contributors <hello@scrobble.dev>"]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Scrobble-dev/Fasti"
+homepage = "https://scrobble.dev"
+
+[workspace.dependencies]
+# Internal crates
+fasti-core = { path = "crates/fasti-core", version = "0.1.0" }
+fasti-activity = { path = "crates/fasti-activity", version = "0.1.0" }
+fasti-store = { path = "crates/fasti-store", version = "0.1.0" }
+fasti-projections = { path = "crates/fasti-projections", version = "0.1.0" }
+fasti-sync = { path = "crates/fasti-sync", version = "0.1.0" }
+fasti-api = { path = "crates/fasti-api", version = "0.1.0" }
+fasti-auth = { path = "crates/fasti-auth", version = "0.1.0" }
+fasti-player = { path = "crates/fasti-player", version = "0.1.0" }
+fasti-connectors = { path = "crates/fasti-connectors", version = "0.1.0" }
+
+# Async & Runtime
+tokio = { version = "1.40", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization & Models
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Web & API
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-full"] }
+
+# SQLite & Persistence
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+
+# CLI & Utilities
+clap = { version = "4.5", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Testing & Property Checks
+proptest = "1.5"
+tempfile = "3.12"
