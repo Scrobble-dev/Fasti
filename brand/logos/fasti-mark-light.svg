@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" aria-label="Fasti Logo Mark">
+  <!-- Fasti: The Living Media Chronicle / Book of Time -->
+  <rect width="120" height="120" rx="26" fill="#F2EFE6"/>
+  <rect x="2" y="2" width="116" height="116" rx="24" stroke="#E2DEC6" stroke-width="1.5"/>
+  
+  <!-- Central Architectural Glyph: F + Timeline Spine + Ledger Rules -->
+  <g transform="translate(32, 26)">
+    <!-- Vertical Time Spine (Triple Ledger Rule) -->
+    <path d="M4 0V68" stroke="#8B2E2A" stroke-width="3" stroke-linecap="round"/>
+    <path d="M10 0V68" stroke="#181716" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M14 0V68" stroke="#625E56" stroke-width="1" stroke-linecap="round" stroke-dasharray="2 3"/>
+
+    <!-- Upper Arm (The Book Header) -->
+    <path d="M4 3H48C51 3 53 5 53 8V12C53 14 51 16 48 16H10" fill="#8B2E2A"/>
+    <path d="M14 8H46" stroke="#D4AF37" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Mid Arm (The Chronometer Notch / Calibration) -->
+    <path d="M4 31H38C40.5 31 42 32.5 42 35V38C42 40.5 40.5 42 38 42H10" fill="#181716"/>
+    <path d="M14 36.5H35" stroke="#D4AF37" stroke-width="1.2" stroke-linecap="round"/>
+
+    <!-- Tick Marks on the Spine (Horological Calibration) -->
+    <line x1="14" y1="18" x2="22" y2="18" stroke="#8B2E2A" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="14" y1="24" x2="19" y2="24" stroke="#625E56" stroke-width="1" stroke-linecap="round"/>
+    <line x1="14" y1="48" x2="22" y2="48" stroke="#8B2E2A" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="14" y1="54" x2="19" y2="54" stroke="#625E56" stroke-width="1" stroke-linecap="round"/>
+    <line x1="14" y1="60" x2="25" y2="60" stroke="#1E4FA3" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- Seal Point / Verified Anchor Node -->
+    <circle cx="4" cy="36.5" r="3.5" fill="#D4AF37" stroke="#181716" stroke-width="1.5"/>
+  </g>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" aria-label="Fasti Logo Mark (Dark Mode)">
+  <!-- Fasti: Dark Mode / The Night Chronicle -->
+  <rect width="120" height="120" rx="26" fill="#11110F"/>
+  <rect x="2" y="2" width="116" height="116" rx="24" stroke="#22221E" stroke-width="1.5"/>
+  
+  <g transform="translate(32, 26)">
+    <!-- Vertical Time Spine (Triple Ledger Rule) -->
+    <path d="M4 0V68" stroke="#D34B45" stroke-width="3" stroke-linecap="round"/>
+    <path d="M10 0V68" stroke="#FFFDF8" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M14 0V68" stroke="#8A857A" stroke-width="1" stroke-linecap="round" stroke-dasharray="2 3"/>
+
+    <!-- Upper Arm (The Book Header) -->
+    <path d="M4 3H48C51 3 53 5 53 8V12C53 14 51 16 48 16H10" fill="#D34B45"/>
+    <path d="M14 8H46" stroke="#F1D06E" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Mid Arm (The Chronometer Notch) -->
+    <path d="M4 31H38C40.5 31 42 32.5 42 35V38C42 40.5 40.5 42 38 42H10" fill="#2E2E2A"/>
+    <path d="M14 36.5H35" stroke="#F1D06E" stroke-width="1.2" stroke-linecap="round"/>
+
+    <!-- Tick Marks -->
+    <line x1="14" y1="18" x2="22" y2="18" stroke="#D34B45" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="14" y1="24" x2="19" y2="24" stroke="#8A857A" stroke-width="1" stroke-linecap="round"/>
+    <line x1="14" y1="48" x2="22" y2="48" stroke="#D34B45" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="14" y1="54" x2="19" y2="54" stroke="#8A857A" stroke-width="1" stroke-linecap="round"/>
+    <line x1="14" y1="60" x2="25" y2="60" stroke="#4B82E8" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- Anchor Point -->
+    <circle cx="4" cy="36.5" r="3.5" fill="#F1D06E" stroke="#11110F" stroke-width="1.5"/>
+  </g>
+</svg>

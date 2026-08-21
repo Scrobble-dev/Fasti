@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" width="480" height="120" fill="none" aria-label="Fasti Logo Lockup">
+  <!-- Fasti Brand Lockup: Mark + Wordmark + Tagline -->
+  <g transform="translate(16, 16)">
+    <!-- Squircle Container -->
+    <rect width="88" height="88" rx="20" fill="#F2EFE6"/>
+    <rect x="1.5" y="1.5" width="85" height="85" rx="18.5" stroke="#E2DEC6" stroke-width="1.5"/>
+    
+    <!-- Mini Mark -->
+    <g transform="translate(22, 18) scale(0.8)">
+      <path d="M4 0V68" stroke="#8B2E2A" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M10 0V68" stroke="#181716" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M14 0V68" stroke="#625E56" stroke-width="1.2" stroke-linecap="round" stroke-dasharray="2 3"/>
+      <path d="M4 3H48C51 3 53 5 53 8V12C53 14 51 16 48 16H10" fill="#8B2E2A"/>
+      <path d="M14 8H46" stroke="#D4AF37" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M4 31H38C40.5 31 42 32.5 42 35V38C42 40.5 40.5 42 38 42H10" fill="#181716"/>
+      <path d="M14 36.5H35" stroke="#D4AF37" stroke-width="1.2" stroke-linecap="round"/>
+      <line x1="14" y1="18" x2="22" y2="18" stroke="#8B2E2A" stroke-width="1.8" stroke-linecap="round"/>
+      <line x1="14" y1="48" x2="22" y2="48" stroke="#8B2E2A" stroke-width="1.8" stroke-linecap="round"/>
+      <line x1="14" y1="60" x2="26" y2="60" stroke="#1E4FA3" stroke-width="2.2" stroke-linecap="round"/>
+      <circle cx="4" cy="36.5" r="3.5" fill="#D4AF37" stroke="#181716" stroke-width="1.5"/>
+    </g>
+  </g>
+
+  <!-- Typography -->
+  <text x="124" y="66" font-family="Newsreader, Georgia, serif" font-size="44" font-weight="600" fill="#181716" letter-spacing="-0.03em">FASTI</text>
+  <text x="126" y="88" font-family="'Atkinson Hyperlegible Next', -apple-system, sans-serif" font-size="13.5" font-weight="500" fill="#625E56" letter-spacing="0.04em">THE LIVING MEDIA CHRONICLE</text>
+  <circle cx="280" cy="54" r="3" fill="#8B2E2A"/>
+</svg>

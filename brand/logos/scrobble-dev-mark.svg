@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none" aria-label="Scrobble.dev Logo Mark">
+  <!-- Scrobble.dev: The Open Media Grammar & Specification -->
+  <rect width="120" height="120" rx="26" fill="#16181D"/>
+  <rect x="2" y="2" width="116" height="116" rx="24" stroke="#252A34" stroke-width="1.5"/>
+
+  <!-- Technical Grammar Glyph: Brackets + S-Curve + Crosswalk Network Node -->
+  <g transform="translate(26, 26)">
+    <!-- Left Syntax Bracket -->
+    <path d="M12 8C6 8 4 11 4 17V26C4 30 1 34 0 34C1 34 4 38 4 42V51C4 57 6 60 12 60" stroke="#1E4FA3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Right Syntax Bracket -->
+    <path d="M56 8C62 8 64 11 64 17V26C64 30 67 34 68 34C67 34 64 38 64 42V51C64 57 62 60 56 60" stroke="#1E4FA3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Central S & Crosswalk Topology -->
+    <path d="M44 20H24C20 20 18 23 18 27C18 31 22 34 26 34H42C46 34 50 37 50 41C50 45 48 48 44 48H24" stroke="#38BDF8" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Intersecting Network Diagonal (Identity Crosswalk Mapping) -->
+    <line x1="22" y1="46" x2="46" y2="22" stroke="#2E6F63" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- Grammar / Evidence Nodes -->
+    <circle cx="22" cy="46" r="3.5" fill="#2E6F63" stroke="#16181D" stroke-width="1.5"/>
+    <circle cx="34" cy="34" r="4.5" fill="#38BDF8" stroke="#16181D" stroke-width="2"/>
+    <circle cx="46" cy="22" r="3.5" fill="#2E6F63" stroke="#16181D" stroke-width="1.5"/>
+  </g>
+</svg>
