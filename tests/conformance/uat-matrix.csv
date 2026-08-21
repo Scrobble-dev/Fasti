@@ -1,0 +1,81 @@
+ID,Area,Scenario,Expected result,Release gate,Priority,Test type
+ID-001,Stable record,Switch preferred metadata TMDB→TVDB,record_id and Chronicle links do not change,Identity Foundation,P0,E2E/contract
+ID-002,SIMKL import,"IMDb + Kitsu, no MAL",row imports as resolved/partial; useful IDs preserved,Identity Foundation,P0,E2E/contract
+ID-003,Unresolved,No safe mapping path,observation and local record remain usable/exportable,Identity Foundation,P0,E2E/contract
+ID-004,Resolution,All supplied exact IDs agree,one compatible record resolves automatically,Identity Foundation,P0,E2E/contract
+ID-005,Resolution,Supplied exact IDs conflict,409 conflict; no merge or user-state mutation,Identity Foundation,P0,E2E/contract
+ID-006,Resolution,Title-only match,candidate only; no authoritative merge,Identity Foundation,P0,E2E/contract
+ID-007,Lifecycle,Provider redirects old ID,old ID retired/redirected; Fasti ID unchanged,Identity Foundation,P0,E2E/contract
+ID-008,Lifecycle,Provider returns 404,record/history retained; review/redirect check offered,Identity Foundation,P0,E2E/contract
+ID-009,Assertions,not_same_as evidence exists,automatic merge blocked,Identity Foundation,P0,E2E/contract
+ID-010,Assertions,known absent namespace,repeat lookup avoided until policy/expiry changes,Identity Foundation,P0,E2E/contract
+ID-011,Anime,Split cour offset,second cour source episode 1 maps to target 13,Identity Foundation,P0,E2E/contract
+ID-012,Anime,Release spans two seasons,both ranges resolve to correct seasons,Identity Foundation,P0,E2E/contract
+ID-013,Anime,Season and absolute numbering diverge,both coordinate systems are preserved,Identity Foundation,P0,E2E/contract
+ID-014,Anime,One source expands to two targets,1:N link resolves both directions,Identity Foundation,P0,E2E/contract
+ID-015,Anime,Two source episodes merge to one target,N:1 link resolves both directions,Identity Foundation,P0,E2E/contract
+ID-016,Anime,Non-contiguous coverage,gaps are explicit; no fabricated target,Identity Foundation,P0,E2E/contract
+ID-017,Anime,Regular 1 and Special 1,numbering space prevents collision,Identity Foundation,P0,E2E/contract
+ID-018,Anime,Broadcast vs chronological order,chosen ordering is explicit,Identity Foundation,P0,E2E/contract
+ID-019,Anime,Alternate recut,separate records with alternate_cut_of relation,Identity Foundation,P0,E2E/contract
+ID-020,Anime,Live action shares title,related/not_same_as prevents merge,Identity Foundation,P0,E2E/contract
+ID-021,Mapping pack,New version changes range,history does not move; preview/review created,Identity Foundation,P0,E2E/contract
+ID-022,Mapping pack,Assertion revoked,revocation retained; dependents reviewed,Identity Foundation,P0,E2E/contract
+ID-023,Mapping pack,Digest mismatch,activation blocked; last-good remains,Identity Foundation,P0,E2E/contract
+ID-024,Mapping pack,Blocked licence route,data rejected/quarantined with reason,Identity Foundation,P0,E2E/contract
+ID-025,Mapping pack,Local overlay plus upstream update,overlay remains separate and reapplies,Identity Foundation,P0,E2E/contract
+ID-026,Metadata,Different source per field,effective fields and provenance are correct,Alpha,P1,E2E/contract
+ID-027,Metadata,Preferred provider offline,last-good projection visible; canonical state works,Alpha,P1,E2E/contract
+ID-028,Metadata,Disable provider,record and user state remain,Alpha,P1,E2E/contract
+ID-029,Provider SDK,Install Google Books manifest,common provider flow and conformance pass,Alpha,P1,E2E/contract
+ID-030,Provider SDK,No URL template,clear empty state; local identity usable,Alpha,P1,E2E/contract
+ID-031,Provider SDK,Response schema drifts,exact field error; last-good retained,Alpha,P1,E2E/contract
+ID-032,Provider SDK,429 rate limit,bounded retry/backoff; no tight loop/deletion,Alpha,P1,E2E/contract
+ID-033,Cache,Clear provider cache,no identity/history/progress/notes loss,Alpha,P1,E2E/contract
+ID-034,Cache,"Browse 10,000 temporary records",persistence stays within policy/budget,Alpha,P1,E2E/contract
+ID-035,Custom fields,Add descriptive field,"typed value validates, exports, restores",Alpha,P1,E2E/contract
+ID-036,Custom fields,Promote to candidate key,collision/migration preview; no auto change,Alpha,P1,E2E/contract
+ID-037,Custom fields,Register custom namespace,resolver/API can use versioned namespace,Alpha,P1,E2E/contract
+ID-038,Custom fields,Untyped field definition,validation fails with exact remedy,Alpha,P1,E2E/contract
+ID-039,Games,Prefer GOG metadata over Steam,Fasti identity stable; both provider IDs remain,Alpha,P1,E2E/contract
+ID-040,Games,Base vs remaster,work/release grains stay distinct,Alpha,P1,E2E/contract
+ID-041,Books,Work + edition + ISBN,correct grains and relations created,Alpha,P1,E2E/contract
+ID-042,Books,Conflicting/reused ISBN,conflict retained; no silent merge,Alpha,P1,E2E/contract
+ID-043,Music,Recording vs release,entities stay distinct and related,Alpha,P1,E2E/contract
+ID-044,Podcast,"Feed URL changes, GUID stable",episode identity remains,Alpha,P1,E2E/contract
+ID-045,Podcast,GUID changes unexpectedly,candidate/review; no auto merge,Alpha,P1,E2E/contract
+ID-046,Custom type,No external IDs or URL,local record/Chronicle valid,Alpha,P1,E2E/contract
+ID-047,Import,Mixed outcomes,all source rows accounted for,Alpha,P1,E2E/contract
+ID-048,Import,Crash after checkpoint,resume without duplicates,Alpha,P1,E2E/contract
+ID-049,Restore,Unresolved records and overlays,restored with evidence/review state,Alpha,P1,E2E/contract
+ID-050,Correction,Wrong episode mapping,original observation/time retained,Alpha,P1,E2E/contract
+ID-051,Correction,Undo merge,records/state restored through audited operation,Alpha,P1,E2E/contract
+ID-052,Correction,Split composite record,affected state previewed and assigned,Alpha,P1,E2E/contract
+ID-053,Multi-user,Same external ID in two workspaces,private bindings isolated,Alpha,P1,E2E/contract
+ID-054,Profiles,Different field preferences,"same record identity, different projections",Alpha,P1,E2E/contract
+ID-055,Offline,No providers/network,local observation and state commit,Beta/1.0,P1,E2E/contract
+ID-056,Offline,Mapping index missing/corrupt,unresolved-safe write plus repair action,Beta/1.0,P1,E2E/contract
+ID-057,Sync,Duplicate delivery and genuine rewatch,one receipt for duplicate; new occurrence for rewatch,Beta/1.0,P1,E2E/contract
+ID-058,Sync,Accepted identity decision across devices,explicit decision converges; observations remain,Beta/1.0,P1,E2E/contract
+ID-059,AI,AI lacks merge scope,merge denied/confirmation required,Beta/1.0,P1,E2E/contract
+ID-060,Security,Provider redirect to private IP,network policy rejects all hops,Beta/1.0,P1,E2E/contract
+ID-061,Security,Oversized mapping pack,bounded rejection; last-good active,Beta/1.0,P1,E2E/contract
+ID-062,Security,Secret appears in provider error URL,secret redacted everywhere,Beta/1.0,P1,E2E/contract
+ID-063,API,Canonical record URL,rec_ route stays canonical; aliases resolve,Beta/1.0,P1,E2E/contract
+ID-064,API,Exact-ID conflict response,structured code/message/safe state/action/docs,Beta/1.0,P1,E2E/contract
+ID-065,API,Capability discovery,identity versions/namespaces/limits/scopes visible,Beta/1.0,P1,E2E/contract
+ID-066,API,Mixed batch,per-item results; one conflict does not discard valid items,Beta/1.0,P1,E2E/contract
+ID-067,Context actions,Mouse/keyboard/touch action menu,same governed actions available,Beta/1.0,P1,E2E/contract
+ID-068,Empty state,Record has no sources,safe explanation plus add/search/leave unresolved,Beta/1.0,P1,E2E/contract
+ID-069,Empty state,Review queue empty,clear completed state and entry rules,Beta/1.0,P1,E2E/contract
+ID-070,Empty state,Provider key missing,value/setup/data/alternative explained,Beta/1.0,P1,E2E/contract
+ID-071,Accessibility,Screen-reader candidate review,logical evidence/risk/action order,Beta/1.0,P1,E2E/contract
+ID-072,Accessibility,Keyboard-only preview,full path works and focus returns,Beta/1.0,P1,E2E/contract
+ID-073,AuDHD,Leave and resume review,filters/item/decisions/next action restored,Beta/1.0,P1,E2E/contract
+ID-074,AuDHD,Mapping activation failure,persistent safe-state recovery notice,Beta/1.0,P1,E2E/contract
+ID-075,Performance,500k IDs and 2m occurrences,bounded query/memory/latency budget,Beta/1.0,P1,E2E/contract
+ID-076,Performance,Mapping index rebuild,"progress, bounded resources, atomic swap",Beta/1.0,P1,E2E/contract
+ID-077,Backup,Clean restore,"IDs, hashes, counts, links and unresolved state match",Beta/1.0,P1,E2E/contract
+ID-078,Knowledge,Known identity error,local/public KCS and OKF explain recovery,Beta/1.0,P1,E2E/contract
+ID-079,DX,Build simple provider from template,passes reference conformance without domain change,Beta/1.0,P1,E2E/contract
+ID-080,User success,Non-technical provider switch,"predictable impact, zero history movement, rollback without support",Beta/1.0,P1,E2E/contract

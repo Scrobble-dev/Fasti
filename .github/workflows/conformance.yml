@@ -1,4 +1,4 @@
-name: Scrobble.dev Conformance
+name: Scrobble.dev & Identity Conformance
 
 on:
   push:
@@ -11,15 +11,33 @@ permissions:
 
 jobs:
   validate-conformance:
-    name: Validate Scrobble Activity Profile 0.1 Fixtures
+    name: Validate Scrobble Activity Profile & Identity Contracts
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate fixture envelope schemas
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Validate Activity Fixtures
         run: |
-          echo "Validating fixtures against Scrobble.dev Activity Profile 0.1..."
+          echo "Validating activity event fixtures..."
           for f in fixtures/activity/*.json; do
             python3 -m json.tool "$f" > /dev/null || exit 1
             echo "PASS: $f"
           done
-          echo "All Scrobble.dev conformance checks passed."
+
+      - name: Validate Identity Contract Seed & Addon Manifests
+        run: |
+          echo "Validating identity contract and provider manifests..."
+          python3 -c "import yaml; yaml.safe_load(open('contracts/identity/identity-contract-seed.yaml'))"
+          for m in contracts/addons/manifests/*.yaml; do
+            python3 -c "import yaml; yaml.safe_load(open('$m'))"
+            echo "PASS: $m"
+          done
+          echo "All identity contracts and provider manifests validated successfully."

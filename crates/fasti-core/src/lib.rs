@@ -1,6 +1,6 @@
 //! Fasti Core domain primitives and invariants.
 //!
-//! Provides fundamental types for actors, devices, media references,
+//! Provides fundamental types for actors, devices, media references, grains,
 //! UUIDv7 event identifiers, and multi-timestamp semantics.
 
 use chrono::{DateTime, Utc};
@@ -25,6 +25,38 @@ impl Default for EventId {
     }
 }
 
+/// Canonical Fasti Record identifier (`rec_...`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RecordId(pub String);
+
+impl RecordId {
+    pub fn new_v7() -> Self {
+        Self(format!("rec_{}", Uuid::now_v7().simple()))
+    }
+}
+
+/// Grain or granularity of a media identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Grain {
+    Work,
+    Series,
+    Release,
+    Edition,
+    Season,
+    Segment,
+    Episode,
+    Film,
+    Recording,
+    AlbumRelease,
+    Track,
+    Chapter,
+    PodcastFeed,
+    PodcastEpisode,
+    GameRelease,
+    Custom,
+}
+
 /// Distinct timestamp semantics representing the lifecycle of an observation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventTimestamps {
@@ -43,10 +75,36 @@ pub struct MediaReference {
     pub source: String,
     /// Canonical identifier within the source system.
     pub id: String,
-    /// Media grain / granularity (e.g. "track", "album", "episode", "season", "movie", "book", "chapter", "game").
-    pub grain: String,
+    /// Media grain / granularity.
+    pub grain: Grain,
     /// Optional human-readable title.
     pub title: Option<String>,
+}
+
+/// Resolution status of an observation or identity candidate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolutionStatus {
+    Unresolved,
+    Candidate,
+    PartiallyResolved,
+    Resolved,
+    Conflicted,
+    Blocked,
+    KnownAbsent,
+}
+
+/// Directional typed relation between identity assertions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssertionRelation {
+    Exact,
+    SubsetOf,
+    SupersetOf,
+    Overlaps,
+    AlternateCutOf,
+    Related,
+    NotSameAs,
 }
 
 /// Progress measurement with native units preserved.
@@ -70,5 +128,11 @@ mod tests {
         let id2 = EventId::new_v7();
         assert_ne!(id1, id2);
         assert_eq!(id1.0.get_version_num(), 7);
+    }
+
+    #[test]
+    fn test_record_id_prefix() {
+        let rec = RecordId::new_v7();
+        assert!(rec.0.starts_with("rec_"));
     }
 }

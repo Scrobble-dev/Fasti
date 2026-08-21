@@ -1,7 +1,7 @@
 //! Fasti Activity Event validation and envelope definition.
 
 use chrono::{DateTime, Utc};
-use fasti_core::{EventId, EventTimestamps, MediaReference, Progress};
+use fasti_core::{EventId, EventTimestamps, MediaReference, Progress, RecordId, ResolutionStatus};
 use serde::{Deserialize, Serialize};
 
 /// Canonical activity event envelope representing an immutable occurrence.
@@ -27,6 +27,10 @@ pub struct ActivityEvent {
     pub timestamps: EventTimestamps,
     /// Provenance metadata detailing observer and ingestion source.
     pub provenance: Provenance,
+    /// Optional Fasti Record binding if resolved.
+    pub record_id: Option<RecordId>,
+    /// Current resolution status.
+    pub resolution_status: Option<ResolutionStatus>,
     /// Event ID this event supersedes/corrects, if any.
     pub correction_of: Option<EventId>,
     /// Event ID this event tombstones/deletes, if any.

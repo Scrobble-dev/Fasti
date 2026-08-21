@@ -1,0 +1,154 @@
+api_version: fasti.scrobble.dev/addons/v0.1
+kind: MetadataProvider
+metadata:
+  id: org.example.google-books
+  name: Google Books
+  version: 0.1.0
+  description: Illustrative declarative provider manifest for book editions.
+  licence: Example only. Complete provider terms review before release.
+
+compatibility:
+  fasti: '>=0.1.0 <0.2.0'
+  manifest_schema: 0.1.0
+
+permissions:
+  network:
+    hosts:
+      - www.googleapis.com
+    schemes:
+      - https
+    methods:
+      - GET
+  secrets:
+    - google_books_api_key
+  capabilities:
+    - metadata.search
+    - metadata.fetch
+    - identity.propose
+    - artwork.fetch
+  writes: []
+
+authentication:
+  type: query_parameter
+  parameter: key
+  secret_ref: secret:providers/google-books/api-key
+  optional_for_test: true
+
+record_support:
+  - record_type: book
+    grain:
+      - work
+      - edition
+  - record_type: manga
+    grain:
+      - work
+      - edition
+
+namespaces:
+  - namespace: google_books_volume
+    grain:
+      - edition
+    id_pattern: ^[A-Za-z0-9_-]+$
+    normalization: trim
+    licence_posture: identifiers_only
+  - namespace: isbn10
+    grain:
+      - edition
+    id_pattern: ^[0-9X]{10}$
+    normalization: isbn
+    licence_posture: open
+  - namespace: isbn13
+    grain:
+      - edition
+    id_pattern: ^[0-9]{13}$
+    normalization: isbn
+    licence_posture: open
+
+operations:
+  search:
+    method: GET
+    path: /books/v1/volumes
+    query:
+      q: ${input.query}
+      startIndex: ${page.offset}
+      maxResults: ${page.limit}
+      langRestrict: ${input.language?}
+    pagination:
+      kind: offset
+      total_path: $.totalItems
+    items_path: $.items
+  detail:
+    method: GET
+    path: /books/v1/volumes/${identity.value}
+
+normalization:
+  record_grain: edition
+  identity:
+    - namespace: google_books_volume
+      value: $.id
+    - namespace: isbn10
+      value: $.volumeInfo.industryIdentifiers[?(@.type=="ISBN_10")].identifier
+      optional: true
+    - namespace: isbn13
+      value: $.volumeInfo.industryIdentifiers[?(@.type=="ISBN_13")].identifier
+      optional: true
+  fields:
+    - field: title
+      value: $.volumeInfo.title
+      required: true
+    - field: authors
+      value: $.volumeInfo.authors
+      optional: true
+    - field: publisher
+      value: $.volumeInfo.publisher
+      optional: true
+    - field: published_date
+      value: $.volumeInfo.publishedDate
+      optional: true
+    - field: page_count
+      value: $.volumeInfo.pageCount
+      optional: true
+    - field: language
+      value: $.volumeInfo.language
+      optional: true
+    - field: description
+      value: $.volumeInfo.description
+      optional: true
+    - field: cover
+      value: $.volumeInfo.imageLinks.thumbnail
+      optional: true
+
+cache:
+  search_ttl: PT10M
+  detail_ttl: P7D
+  stale_while_revalidate: P7D
+  negative_ttl: PT30M
+  retain_last_good: true
+  persist_policy: only-if-library-saved-completed-or-user-pinned
+
+limits:
+  max_page_size: 40
+  max_response_bytes: 2000000
+  timeout_seconds: 15
+  retry:
+    max_attempts: 3
+    backoff: exponential-jitter
+
+errors:
+  '404':
+    code: provider.record_not_found
+    identity_effect: observation only; never delete Fasti record
+  '429':
+    code: provider.rate_limited
+    user_action: Wait for the retry time. Fasti keeps last-good metadata.
+
+conformance:
+  fixtures:
+    - search-empty
+    - search-pagination
+    - detail-with-isbn
+    - detail-without-isbn
+    - localized-edition
+    - rate-limit-with-last-good
+    - 404-does-not-delete
+    - invalid-response-schema

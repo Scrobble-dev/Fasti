@@ -13,7 +13,7 @@ pub enum StoreError {
     Serialization(#[from] serde_json::Error),
 }
 
-/// SQLite-backed store for the Fasti immutable event ledger and projections.
+/// SQLite-backed store for the Fasti immutable event ledger, identity graph, and projections.
 pub struct EventStore {
     conn: Connection,
 }
@@ -42,6 +42,60 @@ impl EventStore {
     fn run_migrations(&self) -> std::result::Result<(), StoreError> {
         self.conn.execute_batch(
             r#"
+            -- 1. Canonical Fasti Records
+            CREATE TABLE IF NOT EXISTS records (
+                record_id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                record_type TEXT NOT NULL,
+                grain TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_records_workspace ON records(workspace_id, record_type);
+
+            -- 2. Registered Namespace Definitions
+            CREATE TABLE IF NOT EXISTS namespace_definitions (
+                namespace TEXT PRIMARY KEY,
+                label TEXT NOT NULL,
+                grain TEXT NOT NULL,
+                id_pattern TEXT NOT NULL,
+                normalization TEXT NOT NULL,
+                licence_posture TEXT NOT NULL
+            );
+
+            -- 3. External Identifiers attached to Records
+            CREATE TABLE IF NOT EXISTS external_identifiers (
+                external_identifier_id TEXT PRIMARY KEY,
+                record_id TEXT NOT NULL REFERENCES records(record_id),
+                namespace TEXT NOT NULL,
+                value TEXT NOT NULL,
+                grain TEXT NOT NULL,
+                status TEXT NOT NULL,
+                observed_via TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_verified_at TEXT
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_xid_unique ON external_identifiers(namespace, value, grain);
+            CREATE INDEX IF NOT EXISTS idx_xid_record ON external_identifiers(record_id);
+
+            -- 4. Identity Assertions (Mappings)
+            CREATE TABLE IF NOT EXISTS identity_assertions (
+                assertion_id TEXT PRIMARY KEY,
+                from_xid TEXT NOT NULL,
+                to_xid TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                evidence_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                policy_version TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_assertions_from ON identity_assertions(from_xid);
+            CREATE INDEX IF NOT EXISTS idx_assertions_to ON identity_assertions(to_xid);
+
+            -- 5. Immutable Activity Ledger
             CREATE TABLE IF NOT EXISTS activity_ledger (
                 event_id TEXT PRIMARY KEY,
                 schema_version TEXT NOT NULL,
@@ -51,6 +105,7 @@ impl EventStore {
                 kind TEXT NOT NULL,
                 media_source TEXT NOT NULL,
                 media_id TEXT NOT NULL,
+                record_id TEXT REFERENCES records(record_id),
                 occurred_at TEXT NOT NULL,
                 observed_at TEXT NOT NULL,
                 received_at TEXT NOT NULL,
@@ -74,9 +129,9 @@ impl EventStore {
             r#"
             INSERT OR IGNORE INTO activity_ledger (
                 event_id, schema_version, actor_id, device_id, device_seq,
-                kind, media_source, media_id, occurred_at, observed_at,
+                kind, media_source, media_id, record_id, occurred_at, observed_at,
                 received_at, payload_json, correction_of, tombstone_of
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
             "#,
         )?;
 
@@ -89,6 +144,7 @@ impl EventStore {
             event.kind,
             event.media.source,
             event.media.id,
+            event.record_id.as_ref().map(|r| r.0.as_str()),
             event.timestamps.occurred_at.to_rfc3339(),
             event.timestamps.observed_at.to_rfc3339(),
             event.timestamps.received_at.to_rfc3339(),

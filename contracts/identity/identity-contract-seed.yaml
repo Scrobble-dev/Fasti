@@ -1,0 +1,324 @@
+api_version: fasti.scrobble.dev/identity/v0.1
+kind: IdentityContractSeed
+status: draft
+purpose: Seed for Fasti identity, enrichment, mapping packs, reconciliation and provider-neutral records. Not runtime user configuration.
+principles:
+  - A Fasti record has a stable local ID.
+  - No provider ID is the canonical record key.
+  - An unresolved record is valid data.
+  - Original observations remain immutable evidence.
+  - Metadata is a disposable projection.
+  - Mappings are directional typed scoped assertions.
+  - Absence is not deletion.
+  - Provider changes do not move Chronicle history.
+  - Irreversible changes require preview and stronger evidence.
+
+entities:
+  Record:
+    id_prefix: rec_
+    required:
+      - record_id
+      - workspace_id
+      - record_type
+      - grain
+      - status
+      - created_at
+    status:
+      - active
+      - merged
+      - superseded
+      - split
+      - archived
+    rules:
+      - record_id is opaque and immutable
+      - redirect chains terminate and do not cycle
+      - provider preference never changes record_id
+
+  NamespaceDefinition:
+    required:
+      - namespace
+      - label
+      - grain
+      - id_pattern
+      - normalization
+      - licence_posture
+    licence_posture:
+      - open
+      - identifiers_only
+      - indirect_only
+      - excluded
+      - unknown
+    rules:
+      - namespace plus grain defines comparison space
+      - acquisition route is separate from namespace
+
+  ExternalIdentifier:
+    id_prefix: xid_
+    required:
+      - external_identifier_id
+      - record_id
+      - namespace
+      - value
+      - grain
+      - status
+      - observed_via
+    status:
+      - active
+      - redirected
+      - retired
+      - invalid
+      - disputed
+
+  IdentityAssertion:
+    id_prefix: asr_
+    required:
+      - assertion_id
+      - from_ref
+      - to_ref
+      - relation
+      - direction
+      - evidence
+      - status
+    relations:
+      - exact
+      - subset_of
+      - superset_of
+      - overlaps
+      - alternate_cut_of
+      - related
+      - not_same_as
+    status:
+      - candidate
+      - accepted
+      - disputed
+      - revoked
+      - superseded
+    rules:
+      - related is never an alias
+      - not_same_as blocks automatic merge
+      - reverse lookup needs explicit reverse assertion unless exact bidirectionality is declared
+      - losing claims remain inspectable
+
+  CoverageSegment:
+    required:
+      - mode
+      - source_start
+      - source_end
+    mode:
+      - single
+      - flat
+      - season
+      - absolute
+      - custom
+    fields:
+      - season
+      - numbering_space
+      - ordering
+      - source_start
+      - source_end
+      - target_start
+      - target_end
+      - offset
+      - ratio
+      - region
+
+  EpisodeLink:
+    required:
+      - from
+      - to
+      - kind
+    kind:
+      - exact
+      - expands
+      - merges
+      - absent
+    limits:
+      from_max: 16
+      to_max: 16
+
+  Evidence:
+    id_prefix: evd_
+    required:
+      - evidence_id
+      - method
+      - observed_source
+      - observed_at
+      - derivation_root
+      - licence_route
+    method:
+      - rightsholder_asserted
+      - human_verified
+      - upstream_declared
+      - deterministic_transform
+      - derived_dates
+      - heuristic_match
+      - user_override
+    classes:
+      - asserted
+      - verified
+      - corroborated
+      - inferred
+      - candidate
+      - disputed
+    rules:
+      - corroboration counts only disjoint derivation roots
+      - heuristic evidence cannot authorize irreversible merge alone
+
+  Observation:
+    id_prefix: obs_
+    required:
+      - observation_id
+      - workspace_id
+      - profile_id
+      - source_client_id
+      - observed_at
+      - payload_digest
+      - resolution_status
+    resolution_status:
+      - unresolved
+      - partially_resolved
+      - resolved
+      - conflicted
+      - rejected
+    rules:
+      - original payload is not rewritten after enrichment
+      - observation remains exportable while unresolved
+
+  Correction:
+    id_prefix: cor_
+    required:
+      - correction_id
+      - target_type
+      - target_id
+      - before
+      - after
+      - reason
+      - actor
+      - created_at
+
+  MetadataProjection:
+    required:
+      - record_id
+      - provider_id
+      - schema_version
+      - fetched_at
+      - cache_state
+      - fields
+    cache_state:
+      - fresh
+      - stale
+      - refreshing
+      - failed_last_good
+      - unavailable
+      - cleared
+    rule: Changing provider changes projections, not record identity.
+
+  CustomFieldDefinition:
+    id_prefix: fld_
+    required:
+      - field_id
+      - record_type
+      - name
+      - value_type
+      - cardinality
+      - version
+    identity_modes:
+      - not_identity
+      - candidate_key
+      - registered_namespace
+    rules:
+      - custom field is not identity by default
+      - registered namespace requires grain, normalization, collision scope, migration preview, rollback and conformance
+
+grain:
+  - work
+  - series
+  - release
+  - edition
+  - season
+  - segment
+  - episode
+  - film
+  - recording
+  - album_release
+  - track
+  - chapter
+  - podcast_feed
+  - podcast_episode
+  - game_release
+  - custom
+
+resolution:
+  states:
+    - unresolved
+    - candidate
+    - partially_resolved
+    - resolved
+    - conflicted
+    - blocked
+    - known_absent
+  hard_stops:
+    - conflicting exact identity groups
+    - not_same_as assertion
+    - incompatible grain without explicit relation
+    - blocked source/licence route
+    - redirect cycle
+  safe_automatic:
+    - attach compatible exact ID
+    - follow verified redirect
+    - refresh metadata projection
+    - add reversible candidate evidence
+  preview_required:
+    - merge records
+    - split record
+    - change grain
+    - move Chronicle occurrences
+    - promote custom field to registered namespace
+    - accept disputed assertion
+
+mapping_pack:
+  required:
+    - pack_id
+    - version
+    - schema_version
+    - publisher
+    - licence
+    - artifacts
+    - source_lineage
+    - capabilities
+  activation:
+    - governed download
+    - digest/signature verification
+    - schema/capability validation
+    - licence and lineage check
+    - build disposable index
+    - conflict preview
+    - atomic activation
+    - retain known-good rollback
+  roles:
+    Electric-Town/anime-crosswalk-mappings: Doctrine, vocabulary, conformance and governance; no published dataset at this baseline.
+    AniBridge: Optional operational mapping-pack source through a versioned adapter and rights review.
+    AniList: Optional bounded metadata/relation/user-state provider; never canonical identity.
+    AniChart: AniList-based presentation, not a separate identity namespace.
+    SIMKL: Import/tracker evidence that can provide multiple IDs; missing a preferred namespace is not import failure.
+
+api:
+  resolve: POST /api/v1/identity/resolutions
+  record_identity: GET /api/v1/records/{record_id}/identity
+  add_identifier: POST /api/v1/records/{record_id}/identifiers
+  assertion: POST /api/v1/identity/assertions
+  review_queue: GET /api/v1/identity/review-items
+  merge_preview: POST /api/v1/identity/merges:preview
+  split_preview: POST /api/v1/identity/splits:preview
+  correct: POST /api/v1/identity/corrections
+  refresh_metadata: POST /api/v1/records/{record_id}/metadata:refresh
+
+references:
+  - https://github.com/Electric-Town/anime-crosswalk-mappings
+  - https://github.com/anibridge/anibridge-mappings
+  - https://github.com/nattadasu/animeApi/issues/11
+  - https://github.com/dannyvfilms/Floppy/issues/387
+  - https://github.com/dannyvfilms/Floppy/issues/645
+  - https://github.com/dannyvfilms/Floppy/issues/652
+  - https://github.com/dannyvfilms/Floppy/issues/860
+  - https://docs.anilist.co/
