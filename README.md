@@ -1,11 +1,17 @@
 <div align="center">
 
-# Fasti
+<a href="https://github.com/Scrobble-dev/Fasti">
+  <img src="brand/logos/fasti-lockup.svg" alt="Fasti — The Living Media Chronicle" width="460">
+</a>
+
+<br/><br/>
 
 ### *Every story, kept in time.*
 
 **A self-hosted-first media chronicle and player for what you watch, read, hear and play.**  
 Built on the open activity language developed at [Scrobble.dev](https://scrobble.dev).
+
+<br/>
 
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -16,7 +22,13 @@ Built on the open activity language developed at [Scrobble.dev](https://scrobble
 [![Scrobble.dev Profile](https://img.shields.io/badge/Scrobble.dev-Profile_0.1-1E4FA3.svg)](https://scrobble.dev)
 [![Architecture: Local-First](https://img.shields.io/badge/Architecture-Local--First-2E6F63.svg)](docs/architecture/overview.md)
 
-[Overview](#what-is-fasti) • [The Book of Days](#the-book-of-days) • [Architecture](#architecture) • [Relationship to Scrobble.dev](#relationship-to-scrobbledev) • [Quick Start](#quick-start) • [Roadmap](#roadmap) • [Sponsor](#supporting-fasti) • [Contributing](#contributing)
+<br/>
+
+[Overview](#what-is-fasti) • [The Book of Days](#the-book-of-days) • [Architecture](#architecture) • [Relationship to Scrobble.dev](#relationship-to-scrobbledev) • [Brand & Design](#brand--design-system) • [Quick Start](#quick-start) • [Roadmap](#roadmap) • [Sponsor](#supporting-fasti)
+
+<br/>
+
+<img src="brand/assets/fasti-brand-board.jpg" alt="Fasti Living Media Chronicle Brand Board" width="100%">
 
 </div>
 
@@ -155,15 +167,41 @@ pnpm build
 
 ## Brand & Design System
 
-Fasti follows the **Modern Annal / Living Marginalia** design standard: an editorial aesthetic combining quiet instrumentation with publication-grade typography.
+Fasti and Scrobble.dev follow the **Modern Annal / Living Marginalia** design standard: an archival editorial aesthetic combining quiet horological instrumentation with publication-grade typography.
 
-* **Editorial Headings:** *Newsreader* (Serif)
-* **Product Interface & Body:** *Atkinson Hyperlegible Next* (Sans-serif)
-* **Metadata & Evidence:** *Atkinson Hyperlegible Mono* / *IBM Plex Mono* (Monospace)
-* **Core Palette:** Warm Archive (`#F2EFE6`), Paper (`#FFFDF8`), Ink (`#181716`), Fasti Oxblood (`#8B2E2A`), Chronicle Blue (`#1E4FA3`), and Verdigris (`#2E6F63`).
-* **Touch Targets & Accessibility:** Strict 44px minimum touch targets and WCAG 2.2 AA accessibility baseline.
+<div align="center">
+  <table border="0">
+    <tr>
+      <td align="center" width="50%">
+        <a href="brand/logos/org-icon.svg">
+          <img src="brand/assets/org-icon.png" width="140" alt="Scrobble.dev Organization Icon" style="border-radius: 28px;">
+        </a>
+        <br/><strong>Scrobble-dev Organization Icon</strong>
+        <br/><em>Syntax Bracket & Crosswalk Node</em>
+      </td>
+      <td align="center" width="50%">
+        <a href="brand/logos/fasti-icon.svg">
+          <img src="brand/assets/fasti-icon.png" width="140" alt="Fasti Flagship App Icon" style="border-radius: 28px;">
+        </a>
+        <br/><strong>Fasti Flagship App Icon</strong>
+        <br/><em>Living Chronicle & Ledger Mark</em>
+      </td>
+    </tr>
+  </table>
+</div>
 
-For full guidelines and token definitions, see [`brand/DESIGN.md`](brand/DESIGN.md) and [`brand/tokens/tokens.json`](brand/tokens/tokens.json).
+* **Typography Hierarchy:**
+  * **The Story (Editorial Display):** *Newsreader* (Serif)
+  * **The Interface (Product UI & Navigation):** *Atkinson Hyperlegible* (Sans-serif)
+  * **The Evidence (Event IDs, Hashes, Code):** *IBM Plex Mono* / *Atkinson Mono* (Monospace)
+* **Core Palette (WCAG 2.2 AAA / AA):** Warm Archive (`#F2EFE6`), Paper Surface (`#FFFDF8`), Carbon Ink (`#181716`), Fasti Oxblood (`#8B2E2A`), Chronicle Blue (`#1E4FA3`), and Verdigris (`#2E6F63`).
+* **Ergonomics & Accessibility:** Strict 44px minimum touch targets, WCAG 2.2 AA/AAA baseline, and ADHD/AuDHD state continuity standards.
+
+Explore the complete system:
+* 🎨 **Interactive Brand Showcase:** Open [`brand/preview.html`](brand/preview.html) in any browser (`open "brand/preview.html"`) for live theme switching, component specimens, and token inspection.
+* 📖 **Design System Guide:** [`brand/DESIGN.md`](brand/DESIGN.md)
+* 📐 **Vector Assets & Logos:** [`brand/logos/`](brand/logos/) (`org-icon.svg`, `fasti-icon.svg`, `fasti-lockup.svg`, `scrobble-dev-lockup.svg`)
+* 📦 **W3C DTCG Tokens:** [`brand/tokens/tokens.json`](brand/tokens/tokens.json)
 
 ---
 
