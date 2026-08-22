@@ -65,6 +65,8 @@ jobs:
             git apply "/tmp/$name"
           done
 
+          cargo fmt --all
+
           allowed='^(crates/fasti-application/src/(capabilities|problems|receipts)\.rs|crates/fasti-contracts/src/generated_capability_ids\.rs|crates/fasti-store/src/(evidence|observation|seed)\.rs|tests/js/sdk-client\.test\.mjs|xtask/src/registry\.rs)$'
           changed="$(git status --short | sed -E 's/^.. //')"
           test -n "$changed"
