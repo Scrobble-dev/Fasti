@@ -126,6 +126,10 @@ jobs:
         run: |
           set -euo pipefail
           pnpm install --frozen-lockfile
+          git ls-files '*Cargo.toml' | LC_ALL=C sort | while IFS= read -r path; do sha256sum "$path"; done > /tmp/manifests.before
+          cargo metadata --format-version 1 >/dev/null
+          git ls-files '*Cargo.toml' | LC_ALL=C sort | while IFS= read -r path; do sha256sum "$path"; done > /tmp/manifests.after
+          diff --unified /tmp/manifests.before /tmp/manifests.after
           cargo metadata --locked --format-version 1 --no-deps >/dev/null
           cargo fmt --all -- --check
           cargo test --workspace --locked
