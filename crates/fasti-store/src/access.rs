@@ -91,7 +91,7 @@ impl AccessAdministrationPort for SqliteKernel {
         map_sql(
             transaction.execute(
                 "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, ?2, 'active', 0, ?3)",
-                params![client_id.to_string(), workspace_id().to_string(), created_at_text],
+                params![client_id.to_string(), workspace_id.to_string(), created_at_text],
             ),
             capability,
             correlation_id,
@@ -102,7 +102,7 @@ impl AccessAdministrationPort for SqliteKernel {
                 INSERT INTO node_state(
                     singleton, initialized, workspace_id, profile_id, client_id,
                     initialization_digest, initialization_expires_at, created_at
-                ) VALUES (1, 1, ?, ,?)
+                ) VALUES (1, 1, ?1, ?2, ?3, ?4, ?5, ?6)
                 "#,
                 params![
                     workspace_id.to_string(),
@@ -179,7 +179,7 @@ impl AccessAdministrationPort for SqliteKernel {
             .map(|value| value.with_timezone(&Utc))
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         if consumed_at.is_some()
-            || expires_at <= created_at
+            || expires_at < created_at
             || !verify_digest(&stored_proof_digest, &presented_proof_digest)
         {
             return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
@@ -202,7 +202,7 @@ impl AccessAdministrationPort for SqliteKernel {
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         let created_at_text = timestamp(created_at);
 
-        let updated_client = map_sql(
+        map_sql(
             transaction.execute(
                 "UPDATE clients SET current_credential_epoch = 1 WHERE client_id = ?1 AND status = 'active'",
                 [client.as_str()],
@@ -210,12 +210,6 @@ impl AccessAdministrationPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        if updated_client != 1 {
-            return Err(Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            )));
-        }
         map_sql(
             transaction.execute(
                 r#"
@@ -239,7 +233,7 @@ impl AccessAdministrationPort for SqliteKernel {
                 r#"
                 INSERT INTO profile_grants(
                     grant_id, workspace_id, profile_id, client_id, status, created_at
-                ) VALUES (?1, ?3, ?3, ?4, 'active', ?5)
+                ) VALUES (?1, ?2, ?3, ?4, 'active', ?5)
                 "#,
                 params![
                     grant_id.to_string(),
@@ -255,4 +249,281 @@ impl AccessAdministrationPort for SqliteKernel {
         for scope in B2_ADMIN_SCOPES {
             map_sql(
                 transaction.execute(
-                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?Ô°€üÌ¤ˆ°(€€€€€€€€€€€€€€€€€€€Á…É…µÌ…mÉ…¹Ñ}¥¹Ñ½}ÍÑÉ¥¹œ ¤°Í½Á•}ÍÑ½É…•}­•ä ©Í½Á”¥t°(€€€€€€€€€€€€€€€€¤°(€€€€€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€€€€€¤üì(€€€€€€€ô(€€€€€€€±•Ð½¹ÍÕµ•€ôµ…Á}ÍÅ° (€€€€€€€€€€€ÑÉ…¹Í…Ñ¥½¸¹•á•ÕÑ” (€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€UAQ¹½‘•}ÍÑ…Ñ”(€€€€€€€€€€€€€€€MP¥¹¥Ñ¥…±¥é…Ñ¥½¹}½¹ÍÕµ•‘}…Ð€ô€üÄ°(€€€€€€€€€€€€€€€€€€€¥¹¥Ñ¥…±¥é…Ñ¥½¹}‘¥•ÍÐ€ô9U10°(€€€€€€€€€€€€€€€€€€€¥¹¥Ñ¥…±¥é…Ñ¥½¹}•áÁ¥É•Í}…Ð€ô9U10(€€€€€€€€€€€€€€€]!IÍ¥¹±•Ñ½¸€ô€Ä9¥¹¥Ñ¥…±¥é…Ñ¥½¹}½¹ÍÕµ•‘}…Ð%L9U10(€€€€€€€€€€€€€€€€ˆŒ°(€€€€€€€€€€€€€€€mÉ•…Ñ•‘}…Ñ}Ñ•áÐ¹…Í}ÍÑÈ ¥t°(€€€€€€€€€€€€¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€¥˜½¹ÍÕµ•€„ô€Äì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé‰½½ÑÍÑÉ…Á}±½Í•¡½ÉÉ•±…Ñ¥½¹}¥¤¤¤ì(€€€€€€€ô(€€€€€€€µ…Á}ÍÅ°¡ÑÉ…¹Í…Ñ¥½¸¹½µµ¥Ð ¤°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì((€€€€€€€=¬¡¹É½±±¥ÉÍÑ±¥•¹Ñ=ÕÑ½µ”èé¹•Ü (€€€€€€€€€€€I•ÅÕ•ÍÑ•ÍÍ½¹Ñ•áÐèé¹•Ü (€€€€€€€€€€€€€€€Ý½É­ÍÁ…•}¥°(€€€€€€€€€€€€€€€ÁÉ½™¥±•}¥°(€€€€€€€€€€€€€€€±¥•¹Ñ}¥°(€€€€€€€€€€€€€€€É•‘•¹Ñ¥…±}¥°(€€€€€€€€€€€€€€€É…¹Ñ}¥°(€€€€€€€€€€€€€€€€Ä°(€€€€€€€€€€€€¤°(€€€€€€€€€€€É•‘•¹Ñ¥…°°(€€€€€€€€¤¤(€€€ô((€€€™¸…ÕÑ¡•¹Ñ¥…Ñ•}É•‘•¹Ñ¥…° (€€€€€€€€™Í•±˜°(€€€€€€€ÅÕ•ÉäèÕÑ¡•¹Ñ¥…Ñ•É•‘•¹Ñ¥…±EÕ•Éä°(€€€€¤€´øÁÁ±¥…Ñ¥½¹I•ÍÕ±ÐñI•ÅÕ•ÍÑ•ÍÍ½¹Ñ•áÐøì(€€€€€€€±•Ð½ÉÉ•±…Ñ¥½¹}¥€ôÅÕ•Éä¹½ÉÉ•±…Ñ¥½¹}¥ ¤ì(€€€€€€€±•Ð…Á…‰¥±¥Ñä€ô…Á…‰¥±¥Ñå-•äèé¥Í½Ù•É…Á…‰¥±¥Ñ¥•Ìì(€€€€€€€±•Ð‘¥•ÍÐ€ô‘¥•ÍÑ}Í•É•Ð¡ÅÕ•Éä¹É•‘•¹Ñ¥…° ¤¤ì(€€€€€€€±•Ð½¹¹•Ñ¥½¸€ôÍ•±˜¹±½­}½¹¹•Ñ¥½¸¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÉ½Ü€ôµ…Á}ÍÅ° (€€€€€€€€€€€½¹¹•Ñ¥½¸(€€€€€€€€€€€€€€€€¹ÅÕ•Éå}É½Ü (€€€€€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€€€€€M1PÈ¹Ý½É­ÍÁ…•}¥°Áœ¹ÁÉ½™¥±•}¥°È¹±¥•¹Ñ}¥°(€€€€€€€€€€€€€€€€€€€€€€È¹É•‘•¹Ñ¥…±}¥°Áœ¹É…¹Ñ}¥°È¹•Á½ (€€€€€€€€€€€€€€€€€€€I=4É•‘•¹Ñ¥…±ÌÈ(€€€€€€€€€€€€€€€€€€€)=%8±¥•¹ÑÌŒ(€€€€€€€€€€€€€€€€€€€€€=8Œ¹±¥•¹Ñ}¥€ôÈ¹±¥•¹Ñ}¥(€€€€€€€€€€€€€€€€€€€€9Œ¹Ý½É­ÍÁ…•}¥€ôÈ¹Ý½É­ÍÁ…•}¥(€€€€€€€€€€€€€€€€€€€)=%8ÁÉ½™¥±•}É…¹ÑÌÁœ(€€€€€€€€€€€€€€€€€€€€€=8Áœ¹±¥•¹Ñ}¥€ôÈ¹±¥•¹Ñ}¥(€€€€€€€€€€€€€€€€€€€€9Áœ¹Ý½É­ÍÁ…•}¥€ôÈ¹Ý½É­ÍÁ…•}¥(€€€€€€€€€€€€€€€€€€€€9Áœ¹ÁÉ½™¥±•}¥€ô€üÈ(€€€€€€€€€€€€€€€€€€€]!IÈ¹‘¥•ÍÐ€ô€üÄ(€€€€€€€€€€€€€€€€€€€€€9È¹ÍÑ…ÑÕÌ€ô€…Ñ¥Ù”œ(€€€€€€€€€€€€€€€€€€€€€9Œ¹ÍÑ…ÑÕÌ€ô€…Ñ¥Ù”œ(€€€€€€€€€€€€€€€€€€€€€9Áœ¹ÍÑ…ÑÕÌ€ô€…Ñ¥Ù”œ(€€€€€€€€€€€€€€€€€€€€€9È¹•Á½ €ôŒ¹ÕÉÉ•¹Ñ}É•‘•¹Ñ¥…±}•Á½ (€€€€€€€€€€€€€€€€€€€€ˆŒ°(€€€€€€€€€€€€€€€€€€€Á…É…µÌ…m‘¥•ÍÐ°ÅÕ•Éä¹ÁÉ½™¥±•}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¥t°(€€€€€€€€€€€€€€€€€€€ñÉ½Ýðì(€€€€€€€€€€€€€€€€€€€€€€€=¬  (€€€€€€€€€€€€€€€€€€€€€€€€€€€É½Ü¹•Ðèèñ|°MÑÉ¥¹œø À¤ü°(€€€€€€€€€€€€€€€€€€€€€€€€€€€É½Ü¹•Ðèèñ|°MÑÉ¥¹œø Ä¤ü°(€€€€€€€€€€€€€€€€€€€€€€€€€€€É½Ü¹•Ðèèñ|°MÑÉ¥¹œø È¤ü°(€€€€€€€€€€€€€€€€€€€€€€€€€€€É½Ü¹•Ðèèñ|°MÑÉ¥¹œø Ì¤ü°(€€€€€€€€€€€€€€€€€€€€€€€€€€€É½Ü¹•Ðèèñ|°MÑÉ¥¹œø Ð¤ü°(€€€€€€€€€€€€€€€€€€€€€€€€€€€É½Ü¹•Ðèèñ|°¤ØÐø Ô¤ü°(€€€€€€€€€€€€€€€€€€€€€€€€¤¤(€€€€€€€€€€€€€€€€€€€ô°(€€€€€€€€€€€€€€€€¤(€€€€€€€€€€€€€€€€¹½ÁÑ¥½¹…° ¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€±•ÐM½µ” ¡Ý½É­ÍÁ…”°ÁÉ½™¥±”°±¥•¹Ð°É•‘•¹Ñ¥…°°É…¹Ð°•Á½ ¤¤€ôÉ½Ü•±Í”ì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé…ÕÑ¡•¹Ñ¥…Ñ¥½¹}™…¥±• (€€€€€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€€€€€¤¤¤ì(€€€€€€€ôì(€€€€€€€±•Ð•Á½ €ôÔØÐèéÑÉå}™É½´¡•Á½ ¤(€€€€€€€€€€€€¹µ…Á}•ÉÈ¡ñ}ð	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé¥¹Ñ•É¥Ñå}™…¥±•¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤¤üì(€€€€€€€±•Ð…•ÍÌ€ôI•ÅÕ•ÍÑ•ÍÍ½¹Ñ•áÐèé¹•Ü (€€€€€€€€€€€Ý½É­ÍÁ…”¹Á…ÉÍ”èèñ]½É­ÍÁ…•%ø ¤¹µ…Á}•ÉÈ¡ñ}ðì(€€€€€€€€€€€€€€€	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé¥¹Ñ•É¥Ñå}™…¥±•¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤(€€€€€€€€€€€ô¤ü°(€€€€€€€€€€€ÁÉ½™¥±”¹Á…ÉÍ”èèñAÉ½™¥±•%ø ¤¹µ…Á}•ÉÈ¡ñ}ðì(€€€€€€€€€€€€€€€	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé¥¹Ñ•É¥Ñå}™…¥±•¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤(€€€€€€€€€€€ô¤ü°(€€€€€€€€€€€±¥•¹Ð¹Á…ÉÍ”èèñ±¥•¹Ñ%ø ¤¹µ…Á}•ÉÈ¡ñ}ðì(€€€€€€€€€€€€€€€	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé¥¹Ñ•É¥Ñå}™…¥±•¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤(€€€€€€€€€€€ô¤ü°(€€€€€€€€€€€É•‘•¹Ñ¥…°¹Á…ÉÍ”èèñÉ•‘•¹Ñ¥…±%ø ¤¹µ…Á}•ÉÈ¡ñ}ðì(€€€€€€€€€€€€€€€	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé¥¹Ñ•É¥Ñå}™…¥±•¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤(€€€€€€€€€€€ô¤ü°(€€€€€€€€€€€É…¹Ð¹Á…ÉÍ”èèñAÉ½™¥±•É…¹Ñ%ø ¤¹µ…Á}•ÉÈ¡ñ}ðì(€€€€€€€€€€€€€€€	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé¥¹Ñ•É¥Ñå}™…¥±•¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤(€€€€€€€€€€€ô¤ü°(€€€€€€€€€€€•Á½ °(€€€€€€€€¤ì(€€€€€€€±•ÐÍ¹…ÁÍ¡½Ð€ô±½…‘}…•ÍÍ}Í¹…ÁÍ¡½Ð ™½¹¹•Ñ¥½¸°€™…•ÍÌ°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€¥˜€…Í¹…ÁÍ¡½Ð¹¥Í}•ÍÑ…‰±¥Í¡• ¤ì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé…ÕÑ¡•¹Ñ¥…Ñ¥½¹}™…¥±• (€€€€€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€€€€€¤¤¤ì(€€€€€€€ô(€€€€€€€=¬¡…•ÍÌ¤(€€€ô((€€€™¸É½Ñ…Ñ•}É•‘•¹Ñ¥…° (€€€€€€€€™Í•±˜°(€€€€€€€½µµ…¹èI½Ñ…Ñ•É•‘•¹Ñ¥…±½µµ…¹°(€€€€¤€´øÁÁ±¥…Ñ¥½¹I•ÍÕ±ÐñI½Ñ…Ñ•É•‘•¹Ñ¥…±=ÕÑ½µ”øì(€€€€€€€±•Ð½ÉÉ•±…Ñ¥½¹}¥€ô½µµ…¹¹½ÉÉ•±…Ñ¥½¹}¥ ¤ì(€€€€€€€±•Ð…Á…‰¥±¥Ñä€ô…Á…‰¥±¥Ñå-•äèéI½Ñ…Ñ•É•‘•¹Ñ¥…°ì(€€€€€€€±•ÐÉ•Á±…•µ•¹Ð€ôÉ…¹‘½µ}Í•É•Ð¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÉ•Á±…•µ•¹Ñ}‘¥•ÍÐ€ô‘¥•ÍÑ}Í•É•Ð ™É•Á±…•µ•¹Ð¤ì(€€€€€€€±•ÐÉ•Á±…•µ•¹Ñ}¥€ôÉ•‘•¹Ñ¥…±%èé¹•Ý}ØÜ ¤ì(€€€€€€€±•Ð¹•Ý}•Á½ €ô½µµ…¹(€€€€€€€€€€€€¹…•ÍÌ ¤(€€€€€€€€€€€€¹ÁÉ•Í•¹Ñ•‘}É•‘•¹Ñ¥…±}•Á½  ¤(€€€€€€€€€€€€¹¡•­•‘}…‘ Ä¤(€€€€€€€€€€€€¹½­}½É}•±Í”¡ñðÁÉ½‰±•´¡AÉ½‰±•µ½‘”èé%¹Ñ•É¥Ñå…¥±•°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤ü°(€€€€€€€±•ÐÕÉÉ•¹Ñ}•Á½ €ô¤ØÐèéÑÉå}™É½´¡½µµ…¹¹…•ÍÌ ¤¹ÁÉ•Í•¹Ñ•‘}É•‘•¹Ñ¥…±}•Á½  ¤¤(€€€€€€€€€€€€¹µ…Á}•ÉÈ¡ñ}ðÁÉ½‰±•´¡AÉ½‰±•µ½‘”èé%¹Ñ•É¥Ñå…¥±•°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤ü°(€€€€€€€±•Ð¹•Ý}•Á½¡}ÍÑ½É…”€ô¤ØÐèéÑÉå}™É½´¡¹•Ý}•Á½ ¤(€€€€€€€€€€€€¹µ…Á}•ÉÈ¡ñ}ðÁÉ½‰±•´¡AÉ½‰±•µ½‘”èé%¹Ñ•É¥Ñå…¥±•°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤üì(€€€€€€€±•ÐÉ•…Ñ•‘}…Ð€ôÑ¥µ•ÍÑ…µÀ¡¹½Ü ¤¤ì((€€€€€€€±•ÐµÕÐ½¹¹•Ñ¥½¸€ôÍ•±˜¹±½­}½¹¹•Ñ¥½¸¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÑÉ…¹Í…Ñ¥½¸€ôµ…Á}ÍÅ° (€€€€€€€€€€€½¹¹•Ñ¥½¸¹ÑÉ…¹Í…Ñ¥½¹}Ý¥Ñ¡}‰•¡…Ù¥½È¡QÉ…¹Í…Ñ¥½¹	•¡…Ù¥½Èèé%µµ•‘¥…Ñ”¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€…ÕÑ¡½É¥é•}ÑÉ…¹Í…Ñ¥½¸ ™ÑÉ…¹Í…Ñ¥½¸°…Á…‰¥±¥Ñä°½µµ…¹¹…•ÍÌ ¤°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÉ•Ù½­•€ôµ…Á}ÍÅ° (€€€€€€€€€€€ÑÉ…¹Í…Ñ¥½¸¹•á•ÕÑ” (€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€UAQÉ•‘•¹Ñ¥…±ÌMPÍÑ…ÑÕÌ€ô€É•Ù½­•œ°É•Ù½­•‘}…Ð€ô€üÄ(€€€€€€€€€€€€€€€]!IÉ•‘•¹Ñ¥…±}¥€ô€üÈ(€€€€€€€€€€€€€€€€€9Ý½É­ÍÁ…•}¥€ô€üÌ(€€€€€€€€€€€€€€€€€9±¥•¹Ñ}¥€ô€üÐ(€€€€€€€€€€€€€€€€€9ÍÑ…ÑÕÌ€ô€…Ñ¥Ù”œ(€€€€€€€€€€€€€€€€ˆŒ°(€€€€€€€€€€€€€€€Á…É…µÌ…l(€€€€€€€€€€€€€€€€€€€É•…Ñ•‘}…Ð°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹É•‘•¹Ñ¥…±}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹Ý½É­ÍÁ…•}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹±¥•¹Ñ}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤(€€€€€€€€€€€€€€€t°(€€€€€€€€€€€€¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€¥˜É•Ù½­•€„ô€Äì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé…ÕÑ¡•¹Ñ¥…Ñ¥½¹}™…¥±• (€€€€€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€€€€€¤¤¤ì(€€€€€€€ô(€€€€€€€±•Ð…‘Ù…¹•€ôµ…Á}ÍÅ° (€€€€€€€€€€€ÑÉ…¹Í…Ñ¥½¸¹•á•ÕÑ” (€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€UAQ±¥•¹ÑÌMPÕÉÉ•¹Ñ}É•‘•¹Ñ¥…±}•Á½ €ô€üÄ(€€€€€€€€€€€€€€€]!I±¥•¹Ñ}¥€ô€üÈ9Ý½É­ÍÁ…•}¥€ô€üÌ(€€€€€€€€€€€€€€€€€9ÍÑ…ÑÕÌ€ô€…Ñ¥Ù”œ9ÕÉÉ•¹Ñ}É•‘•¹Ñ¥…±}•Á½ €ô€üÐ(€€€€€€€€€€€€€€€€ˆŒ°(€€€€€€€€€€€€€€€Á…É…µÌ…l(€€€€€€€€€€€€€€€€€€€¹•Ý}•Á½¡}ÍÑ½É…”°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹±¥•¹Ñ}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹Ý½É­ÍÁ…•}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€ÕÉÉ•¹Ñ}•Á½ (€€€€€€€€€€€€€€€t°(€€€€€€€€€€€€¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€¥˜…‘Ù…¹•€„ô€Äì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé…ÕÑ¡•¹Ñ¥…Ñ¥½¹}™…¥±• (€€€€€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€€€€€¤¤¤ì(€€€€€€€ô(€€€€€€€µ…Á}ÍÅ° (€€€€€€€€€€€ÑÉ…¹Í…Ñ¥½¸¹•á•ÕÑ” (€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€%9MIP%9Q<É•‘•¹Ñ¥…±Ì (€€€€€€€€€€€€€€€€€€€É•‘•¹Ñ¥…±}¥°Ý½É­ÍÁ…•}¥°±¥•¹Ñ}¥°‘¥•ÍÐ°•Á½ °ÍÑ…ÑÕÌ°É•…Ñ•‘}…Ð(€€€€€€€€€€€€€€€€¤Y1UL€ üÄ°€üÌ°€üÌ°€üÐ°€üÔ°€…Ñ¥Ù”œ°€üØ¤(€€€€€€€€€€€€€€€€ˆŒ°(€€€€€€€€€€€€€€€Á…É…µÌ…l(€€€€€€€€€€€€€€€€€€€É•Á±…•µ•¹Ñ}¥¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹Ý½É­ÍÁ…•}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹±¥•¹Ñ}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€É•Á±…•µ•¹Ñ}‘¥•ÍÐ°(€€€€€€€€€€€€€€€€€€€¹•Ý}•Á½¡}ÍÑ½É…”°(€€€€€€€€€€€€€€€€€€€É•…Ñ•‘}…Ð(€€€€€€€€€€€€€€€t°(€€€€€€€€€€€€¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€µ…Á}ÍÅ°¡ÑÉ…¹Í…Ñ¥½¸¹½µµ¥Ð ¤°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì((€€€€€€€=¬¡I½Ñ…Ñ•É•‘•¹Ñ¥…±=ÕÑ½µ”èé¹•Ü (€€€€€€€€€€€I•ÅÕ•ÍÑ•ÍÍ½¹Ñ•áÐèé¹•Ü (€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹Ý½É­ÍÁ…•}¥ ¤°(€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹ÁÉ½™¥±•}¥ ¤°(€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹±¥•¹Ñ}¥ ¤°(€€€€€€€€€€€€€€€É•Á±…•µ•¹Ñ}¥°(€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹É…¹Ñ}¥ ¤°(€€€€€€€€€€€€€€€¹•Ý}•Á½ °(€€€€€€€€€€€€¤°(€€€€€€€€€€€É•Á±…•µ•¹Ð°(€€€€€€€€¤¤(€€€ô((€€€™¸É•Ù½­•}É•‘•¹Ñ¥…° ™Í•±˜°½µµ…¹èI•Ù½­•É•‘•¹Ñ¥…±½µµ…¹¤€´øÁÁ±¥…Ñ¥½¹I•ÍÕ±Ðð ¤øì(€€€€€€€±•Ð½ÉÉ•±…Ñ¥½¹}¥€ô½µµ…¹¹½ÉÉ•±…Ñ¥½¹}¥ ¤ì(€€€€€€€±•Ð…Á…‰¥±¥Ñä€ô…Á…‰¥±¥Ñå-•äèéI•Ù½­•É•‘•¹Ñ¥…°ì(€€€€€€€±•ÐÉ•Ù½­•‘}…Ð€ôÑ¥µ•ÍÑ…µÀ¡¹½Ü ¤¤ì(€€€€€€€±•ÐµÕÐ½¹¹•Ñ¥½¸€ôÍ•±˜¹±½­}½¹¹•Ñ¥½¸¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÑÉ…¹Í…Ñ¥½¸€ôµ…Á}ÍÅ° (€€€€€€€€€€€½¹¹•Ñ¥½¸¹ÑÉ…¹Í…Ñ¥½¹}Ý¥Ñ¡}‰•¡…Ù¥½È¡QÉ…¹Í…Ñ¥½¹	•¡…Ù¥½Èèé%µµ•‘¥…Ñ”¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€…ÕÑ¡½É¥é•}ÑÉ…¹Í…Ñ¥½¸ ™ÑÉ…¹Í…Ñ¥½¸°…Á…‰¥±¥Ñä°½µµ…¹¹…•ÍÌ ¤°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•Ð¡…¹•€ôµ…Á}ÍÅ° (€€€€€€€€€€€ÑÉ…¹Í…Ñ¥½¸¹•á•ÕÑ” (€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€UAQÉ•‘•¹Ñ¥…±ÌMPÍÑ…ÑÕÌ€ô€É•Ù½­•œ°É•Ù½­•‘}…Ð€ô€üÄ(€€€€€€€€€€€€€€€]!IÉ•‘•¹Ñ¥…±}¥€ô€üÈ(€€€€€€€€€€€€€€€€€9Ý½É­ÍÁ…•}¥€ô€üÌ(€€€€€€€€€€€€€€€€€9±¥•¹Ñ}¥€ô€üÐ(€€€€€€€€€€€€€€€€€9ÍÑ…ÑÕÌ€ô€…Ñ¥Ù”œ(€€€€€€€€€€€€€€€€ˆŒ°(€€€€€€€€€€€€€€€Á…É…µÌ…l(€€€€€€€€€€€€€€€€€€€É•Ù½­•‘}…Ð°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹Ñ…É•Ñ}É•‘•¹Ñ¥…±}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹Ý½É­ÍÁ…•}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤°(€€€€€€€€€€€€€€€€€€€½µµ…¹¹…•ÍÌ ¤¹±¥•¹Ñ}¥ ¤¹Ñ½}ÍÑÉ¥¹œ ¤(€€€€€€€€€€€€€€€t°(€€€€€€€€€€€€¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€¥˜¡…¹•€„ô€Äì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé…ÕÑ¡•¹Ñ¥…Ñ¥½¹}™…¥±• (€€€€€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€€€€€¤¤¤ì(€€€€€€€ô(€€€€€€€µ…Á}ÍÅ°¡ÑÉ…¹Í…Ñ¥½¸¹½µµ¥Ð ¤°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€=¬  ¤¤(€€€ô((€€€™¸Í•±•Ñ}ÁÉ½™¥±” (€€€€€€€€™Í•±˜°(€€€€€€€½ÉÉ•±…Ñ¥½¹}¥è™…ÍÑ¥}‘½µ…¥¸èéI•ÅÕ•ÍÑ½ÉÉ•±…Ñ¥½¹%°(€€€€€€€…•ÍÌèI•ÅÕ•ÍÑ•ÍÍ½¹Ñ•áÐ°(€€€€¤€´øÁÁ±¥…Ñ¥½¹I•ÍÕ±ÐñAÉ½™¥±•M•±•Ñ¥½¹=ÕÑ½µ”øì(€€€€€€€±•Ð…Á…‰¥±¥Ñä€ô…Á…‰¥±¥Ñå-•äèéM•±•ÑAÉ½™¥±”ì(€€€€€€€±•Ð½¹¹•Ñ¥½¸€ôÍ•±˜¹±½­}½¹¹•Ñ¥½¸¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÍ¹…ÁÍ¡½Ð€ô±½…‘}…•ÍÍ}Í¹…ÁÍ¡½Ð ™½¹¹•Ñ¥½¸°€™…•ÍÌ°…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€…ÕÑ¡½É¥é” (€€€€€€€€€€€€™ÕÑ¡½É¥é…Ñ¥½¹I•ÅÕ¥É•µ•¹Ðèé™½É}…Á…‰¥±¥Ñä¡…Á…‰¥±¥Ñä¤°(€€€€€€€€€€€M½µ” ™…•ÍÌ¤°(€€€€€€€€€€€M½µ” ™Í¹…ÁÍ¡½Ð¤°(€€€€€€€€¤(€€€€€€€€¹µ…Á}•ÉÈ¡ñ}ð	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èé™½É‰¥‘‘•¸¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤¤¤üì(€€€€€€€=¬¡AÉ½™¥±•M•±•Ñ¥½¹=ÕÑ½µ”èé¹•Ü (€€€€€€€€€€€…•ÍÌ¹Ý½É­ÍÁ…•}¥ ¤°(€€€€€€€€€€€…•ÍÌ¹ÁÉ½™¥±•}¥ ¤°(€€€€€€€€¤¤(€€€ô((€€€™¸½¹™¥ÕÉ•}±¥ÍÑ•¹•È (€€€€€€€€™Í•±˜°(€€€€€€€½µµ…¹è½¹™¥ÕÉ•1¥ÍÑ•¹•É½µµ…¹°(€€€€¤€´øÁÁ±¥…Ñ¥½¹I•ÍÕ±Ðñ1¥ÍÑ•¹•É½¹™¥ÕÉ…Ñ¥½¸øì(€€€€€€€±•Ð½ÉÉ•±…Ñ¥½¹}¥€ô½µµ…¹¹½ÉÉ•±…Ñ¥½¹}¥ ¤ì(€€€€€€€±•Ð…Á…‰¥±¥Ñä€ô…Á…‰¥±¥Ñå-•äèé½¹™¥ÕÉ•1¥ÍÑ•¹•Èì(€€€€€€€¥˜½µµ…¹¹±½½Á‰…­}Á½ÉÐ ¤€ôô€Àì(€€€€€€€€€€€É•ÑÕÉ¸ÉÈ¡	½àèé¹•Ü¡…ÍÑ¥AÉ½‰±•´èéÕ¹ÍÕÁÁ½ÉÑ•‘}±¥ÍÑ•¹•È¡½ÉÉ•±…Ñ¥½¹}¥¤¤¤ì(€€€€€€€ô(€€€€€€€±•Ð±¥ÍÑ•¸€ô™½Éµ…Ð„ ˆÄÈÜ¸À¸À¸Äéíôˆ°½µµ…¹¹±½½Á‰…­}Á½ÉÐ ¤¤ì(€€€€€€€±•ÐµÕÐ½¹¹•Ñ¥½¸€ôÍ•±˜¹±½­}½¹¹•Ñ¥½¸¡…Á…‰¥±¥Ñä°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€±•ÐÑÉ…¹Í…Ñ¥½¸€ôµ…Á}ÍÅ° (€€€€€€€€€€€½¹¹•Ñ¥½¸¹ÑÉ…¹Í…Ñ¥½¹}Ý¥Ñ¡}‰•¡…Ù¥½È¡QÉ…¹Í…Ñ¥½¹	•¡…Ù¥½Èèé%µµ•‘¥…Ñ”¤°(€€€€€€€€€€€…Á…‰¥±¥Ñä°(€€€€€€€€€€€½ÉÉ•±…Ñ¥½¹}¥°(€€€€€€€€¤üì(€€€€€€€…ÕÑ¡½É¥é•}ÑÉ…¹Í…Ñ¥½¸ ™ÑÉ…¹Í…Ñ¥½¸°…Á…‰¥±¥Ñä°½µµ…¹¹…•ÍÌ ¤°½ÉÉ•±…Ñ¥½¹}¥¤üì(€€€€€€€µ…Á}ÍÅ° (€€€€€€€€€€€ÑÉ…¹Í…Ñ¥½¸¹•á•ÕÑ” (€€€€€€€€€€€€€€€ÈŒˆ(€€€€€€€€€€€€€€€%9MIP%9Q<±¥ÍÑ•¹•É}½¹™¥ÕÉ…Ñ¥½¸¡Í¥¹±•Ñ½¸°±¥ÍÑ•¸°É•µ½Ñ•}•¹…‰±•°ÕÁ‘…Ñ•‘}…Ð¤(€€€€€€€€€€€€€€€Y1UL€ Ä°€ÿRÂÂó2¢ôâ4ôädÄ”5B‡6–ævÆWFöâ’DòUDDR4U@¢Æ—7FVâÒW†6ÇVFVBæÆ—7FVâÀ¢&VÖ÷FUöVæ&ÆVBÒÀ¢WFFVEöBÒW†6ÇVFVBçWFFVEö@¢"2À¢&×2¶Æ—7FVâÂF–ÖW7F×†æ÷r‚’•ÒÀ¢’À¢6&–Æ—G’À¢6÷'&VÆF–öåö–BÀ¢“ó°¢Ö÷7Â‡G&ç67F–öâæ6öÖÖ—B‚’Â6&–Æ—G’Â6÷'&VÆF–öåö–B“ó°¢ö²„Æ—7FVæW$6öæf–wW&F–öã£¦æWr†Æ—7FVâÂfÇ6R’¢Ð§Ð  ¢5¶6fr‡FW7B•Ð¦ÖöBFW7G2°¢W6R7WW#£¢£°¢W6Rf7F•öÆ–6F–öã£¥6V7&WDÖFW&–Ã°¢W6Rf7F•öFöÖ–ã£¥&WVW7D6÷'&VÆF–öä–C° ¢fâ6÷•÷6V7&WB‡6V7&WC¢e6V7&WDÖFW&–Â’Óâ6V7&WDÖFW&–Â°¢6V7&WDÖFW&–Ã£§G'•ög&öÕö†W‚‚g6V7&WBæW‡÷6Uö†W‚‚’’æW‡V7B‚&6÷’öæR×F–ÖRFW7B6V7&WB"¢Ð ¢5·FW7EÐ¢fâWF†VçF–6F–öå÷6VÆV7G5ööæÇ•÷F†U÷&WVW7FVE÷&öf–ÆUöw&çB‚’°¢ÆWBFV×÷&'’ÒFV×f–ÆS£§FV×F—"‚’æW‡V7B‚'FV×÷&'’F—&V7F÷'’"“°¢ÆWB¶W&æVÂÒ7Æ—FT¶W&æVÃ£¦÷Vâ‡FV×÷&'’çF‚‚’’æW‡V7B‚&Æö6Â¶W&æVÂ"“°¢ÆWB–æ—F–Æ—¦VBÒ¶W&æVÀ¢æ–æ—F–Æ—¦UöæöFR„–æ—F–Æ—¦TæöFT6öÖÖæC£¦æWr…&WVW7D6÷'&VÆF–öä–C£¦æWu÷cr‚’’¢æW‡V7B‚&–æ—F–Æ—¦RæöFR"“°¢ÆWBVç&öÆÆVBÒ¶W&æVÀ¢æVç&öÆÅöf—'7Eö6Æ–VçB„Vç&öÆÄf—'7D6Æ–VçD6öÖÖæC£¦æWr€¢&WVW7D6÷'&VÆF–öä–C£¦æWu÷cr‚’À¢6÷•÷6V7&WB†–æ—F–Æ—¦VBæ–æ—F–Æ—¦F–öå÷&ööb‚’’À¢’¢æW‡V7B‚&Vç&öÆÂf—'7B6Æ–VçB"“°¢ÆWB7&VFVçF–ÂÒVç&öÆÆVBæ7&VFVçF–Â‚’æW‡÷6Uö†W‚‚“°¢ÆWB–æ—F–Åö66W72Ò¦Vç&öÆÆVBæ66W72‚“° ¢ÆWB6V6öæE÷&öf–ÆRÒ&öf–ÆT–C£¦æWu÷cr‚“°¢ÆWB6V6öæEöw&çBÒ&öf–ÆTw&çD–C£¦æWu÷cr‚“°¢ÆWB7&VFVEöBÒF–ÖW7F×†æ÷r‚’“°¢°¢ÆWB6öææV7F–öâÒ¶W&æVÀ¢æÆö6µö6öææV7F–öâ„6&–Æ—G”¶W“£¤F—66÷fW$6&–Æ—F–W2Â&WVW7D6÷'&VÆF–öä–C£¦æWu÷cr‚’¢æW‡V7B‚&6öææV7F–öâ"“°¢6öææV7F–öà¢æW†V7WFR€¢$”å4U%B”åDò&öf–ÆW2‡&öf–ÆUö–BÂv÷&·76Uö–BÂ7&VFVEöB’dÅTU2ƒóÂó"Âó2’"À¢&×2°¢6V6öæE÷&öf–ÆRçFõ÷7G&–ær‚’À¢–æ—F–Åö66W72çv÷&·76Uö–B‚’çFõ÷7G&–ær‚’À¢7&VFVEö@¢ÒÀ¢¢æW‡V7B‚'6V6öæB&öf–ÆR"“°¢6öææV7F–öà¢æW†V7WFR€¢"2 ¢”å4U%B”åDò&öf–ÆUöw&çG2€¢w&çEö–BÂv÷&·76Uö–BÂ&öf–ÆUö–BÂ6Æ–VçEö–BÂ7FGW2Â7&VFVEö@¢’dÅTU2ƒóÂó"Âó2ÂóBÂv7F—fRrÂóR¢"2À¢&×2°¢6V6öæEöw&çBçFõ÷7G&–ær‚’À¢–æ—F–Åö66W72çv÷&·76Uö–B‚’çFõ÷7G&–ær‚’À¢6V6öæE÷&öf–ÆRçFõ÷7G&–ær‚’À¢–æ—F–Åö66W72æ6Æ–VçEö–B‚’çFõ÷7G&–ær‚’À¢7&VFVEö@¢ÒÀ¢¢æW‡V7B‚'6V6öæBw&çB"“°¢f÷"66÷R–â#%ôDÔ”åõ44õU2°¢6öææV7F–öà¢æW†V7WFR€¢$”å4U%B”åDòw&çE÷66÷W2†w&çEö–BÂ66÷Uö¶W’’dÅTU2ƒóÂó"’"À¢&×2·6V6öæEöw&çBçFõ÷7G&–ær‚’Â66÷U÷7F÷&vUö¶W’‚§66÷R•ÒÀ¢¢æW‡V7B‚&w&çB66÷R"“°¢Ð¢Ð ¢ÆWB6VÆV7FVBÒ¶W&æVÀ¢æWF†VçF–6FUö7&VFVçF–Â„WF†VçF–6FT7&VFVçF–ÅVW'“£¦æWr€¢&WVW7D6÷'&VÆF–öä–C£¦æWu÷cr‚’À¢6V7&WDÖFW&–Ã£§G'•ög&öÕö†W‚‚f7&VFVçF–Â’æW‡V7B‚&7&VFVçF–Â6÷’"’À¢6V6öæE÷&öf–ÆRÀ¢’¢æW‡V7B‚&WF†VçF–6FR6V6öæB&öf–ÆR"“°¢76W'EöW‡6VÆV7FVBç&öf–ÆUö–B‚’Â6V6öæE÷&öf–ÆR“°¢76W'EöW‡6VÆV7FVBæw&çEö–B‚’Â6V6öæEöw&çB“° ¢ÆWB–æ—F–ÂÒ¶W&æVÀ¢æWF†VçF–6FUö7&VFVçF–Â„WF†VçF–6FT7&VFVçF–ÅVW'“£¦æWr€¢&WVW7D6÷'&VÆF–öä–C£¦æWu÷cr‚’À¢6V7&WDÖFW&–Ã£§G'•ög&öÕö†W‚‚f7&VFVçF–Â’æW‡V7B‚&7&VFVçF–Â6÷’"’À¢–æ—F–Åö66W72ç&öf–ÆUö–B‚’À¢’¢æW‡V7B‚&WF†VçF–6FR–æ—F–Â&öf–ÆR"“°¢76W'EöW†–æ—F–Âç&öf–ÆUö–B‚’Â–æ—F–Åö66W72ç&öf–ÆUö–B‚’“°¢76W'EöW†–æ—F–Âæw&çEö–B‚’Â–æ—F–Åö66W72æw&çEö–B‚’“° ¢ÆWBW'&÷"Ò¶W&æVÀ¢æWF†VçF–6FUö7&VFVçF–Â„WF†VçF–6FT7&VFVçF–ÅVW'“£¦æWr€¢&WVW7D6÷'&VÆF–öä–C£¦æWu÷cr‚’À¢6V7&WDÖFW&–Ã£§G'•ög&öÕö†W‚‚f7&VFVçF–Â’æW‡V7B‚&7&VFVçF–Â6÷’"’À¢&öf–ÆT–C£¦æWu÷cr‚’À¢’¢æW‡V7EöW'"‚&âVæw&çFVB&öf–ÆR×W7Bf–Â6Æ÷6VB"“°¢76W'EöW†W'&÷"æ6öFR‚’Â&ö&ÆVÔ6öFS£¤WF†VçF–6F–öäf–ÆVB“°¢Ð§Ð 
+                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, ?2)",
+                    params![grant_id.to_string(), scope_storage_key(*scope)],
+                ),
+                capability,
+                correlation_id,
+            )?;
+        }
+        map_sql(
+            transaction.execute(
+                r#"
+                UPDATE node_state
+                SET initialization_consumed_at = ?1,
+                    initialization_digest = NULL,
+                    initialization_expires_at = NULL
+                WHERE singleton = 1
+                "#,
+                [created_at_text.as_str()],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+
+        Ok(EnrollFirstClientOutcome::new(
+            RequestAccessContext::new(
+                workspace_id,
+                profile_id,
+                client_id,
+                credential_id,
+                grant_id,
+                1,
+            ),
+            credential,
+        ))
+    }
+
+    fn authenticate_credential(
+        &self,
+        query: AuthenticateCredentialQuery,
+    ) -> ApplicationResult<RequestAccessContext> {
+        let correlation_id = query.correlation_id();
+        let capability = CapabilityKey::DiscoverCapabilities;
+        let digest = digest_secret(query.credential());
+        let connection = self.lock_connection(capability, correlation_id)?;
+        let row = map_sql(
+            connection
+                .query_row(
+                    r#"
+                    SELECT cr.workspace_id, pg.profile_id, cr.client_id,
+                           cr.credential_id, pg.grant_id, cr.epoch
+                    FROM credentials cr
+                    JOIN clients c ON c.client_id = cr.client_id
+                    JOIN profile_grants pg ON pg.client_id = cr.client_id
+                    WHERE cr.digest = ?1
+                      AND cr.status = 'active'
+                      AND c.status = 'active'
+                      AND pg.status = 'active'
+                      AND cr.epoch = c.current_credential_epoch
+                    "#,
+                    [digest],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, i64>(5)?,
+                        ))
+                    },
+                )
+                .optional(),
+            capability,
+            correlation_id,
+        )?;
+        let Some((workspace, profile, client, credential, grant, epoch)) = row else {
+            return Err(Box::new(FastiProblem::authentication_failed(
+                capability,
+                correlation_id,
+            )));
+        };
+        let access = RequestAccessContext::new(
+            workspace.parse::<WorkspaceId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?,
+            profile.parse::<ProfileId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?,
+            client.parse::<ClientId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?,
+            credential.parse::<CredentialId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?,
+            grant.parse::<ProfileGrantId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?,
+            u64::try_from(epoch).unwrap_or(u64::MAX),
+        );
+        let snapshot = load_access_snapshot(&connection, &access, capability, correlation_id)?;
+        if !snapshot.is_established() {
+            return Err(Box::new(FastiProblem::authentication_failed(
+                capability,
+                correlation_id,
+            )));
+        }
+        Ok(access)
+    }
+
+    fn rotate_credential(
+        &self,
+        command: RotateCredentialCommand,
+    ) -> ApplicationResult<RotateCredentialOutcome> {
+        let correlation_id = command.correlation_id();
+        let capability = CapabilityKey::RotateCredential;
+        let replacement = random_secret(capability, correlation_id)?;
+        let replacement_digest = digest_secret(&replacement);
+        let replacement_id = CredentialId::new_v7();
+        let new_epoch = command
+            .access()
+            .presented_credential_epoch()
+            .checked_add(1)
+            .ok_or_else(|| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+        let created_at = timestamp(now());
+
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        map_sql(
+            transaction.execute(
+                "UPDATE credentials SET status = 'revoked', revoked_at = ?1 WHERE credential_id = ?2 AND status = 'active'",
+                params![created_at, command.access().credential_id().to_string()],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                "UPDATE clients SET current_credential_epoch = ?1 WHERE client_id = ?2 AND status = 'active'",
+                params![i64::try_from(new_epoch).unwrap_or(i64::MAX), command.access().client_id().to_string()],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                r#"
+                INSERT INTO credentials(
+                    credential_id, workspace_id, client_id, digest, epoch, status, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6)
+                "#,
+                params![
+                    replacement_id.to_string(),
+                    command.access().workspace_id().to_string(),
+                    command.access().client_id().to_string(),
+                    replacement_digest,
+                    i64::try_from(new_epoch).unwrap_or(i64::MAX),
+                    created_at
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+
+        Ok(RotateCredentialOutcome::new(
+            RequestAccessContext::new(
+                command.access().workspace_id(),
+                command.access().profile_id(),
+                command.access().client_id(),
+                replacement_id,
+                command.access().grant_id(),
+                new_epoch,
+            ),
+            replacement,
+        ))
+    }
+
+    fn revoke_credential(&self, command: RevokeCredentialCommand) -> ApplicationResult<()> {
+        let correlation_id = command.correlation_id();
+        let capability = CapabilityKey::RevokeCredential;
+        let revoked_at = timestamp(now());
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let changed = map_sql(
+            transaction.execute(
+                r#"
+                UPDATE credentials SET status = 'revoked', revoked_at = ?1
+                WHERE credential_id = ?2
+                  AND workspace_id = ?3
+                  AND client_id = ?4
+                  AND status = 'active'
+                "#,
+                params![
+                    revoked_at,
+                    command.target_credential_id().to_string(),
+                    command.access().workspace_id().to_string(),
+                    command.access().client_id().to_string()
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        if changed != 1 {
+            return Err(Box::new(FastiProblem::authentication_failed(
+                capability,
+                correlation_id,
+            )));
+        }
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(())
+    }
+
+    fn select_profile(
+        &self,
+        correlation_id: fasti_domain::RequestCorrelationId,
+        access: RequestAccessContext,
+    ) -> ApplicationResult<ProfileSelectionOutcome> {
+        let capability = CapabilityKey::SelectProfile;
+        let connection = self.lock_connection(capability, correlation_id)?;
+        let snapshot = load_access_snapshot(&connection, &access, capability, correlation_id)?;
+        authorize(
+            &AuthorizationRequirement::for_capability(capability),
+            Some(&access),
+            Some(&snapshot),
+        )
+        .map_err(|_| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
+        Ok(ProfileSelectionOutcome::new(
+            access.workspace_id(),
+            access.profile_id(),
+        ))
+    }
+
+    fn configure_listener(
+        &self,
+        command: ConfigureListenerCommand,
+    ) -> ApplicationResult<ListenerConfiguration> {
+        let correlation_id = command.correlation_id();
+        let capability = CapabilityKey::ConfigureListener;
+        if command.loopback_port() == 0 {
+            return Err(Box::new(FastiProblem::unsupported_listener(correlation_id)));
+        }
+        let listen = format!("127.0.0.1:{}", command.loopback_port());
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        map_sql(
+            transaction.execute(
+                r#"
+                INSERT INTO listener_configuration(singleton, listen, remote_enabled, updated_at)
+                VALUES (1, ?1, 0, ?2)
+                ON CONFLICT(singleton) DO UPDATE SET
+                    listen = excluded.listen,
+                    remote_enabled = 0,
+                    updated_at = excluded.updated_at
+                "#,
+                params![listen, timestamp(now())],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(ListenerConfiguration::new(listen, false))
+    }
+}
