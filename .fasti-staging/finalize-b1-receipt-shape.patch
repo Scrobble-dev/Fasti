@@ -1,0 +1,16 @@
+--- a/crates/fasti-application/src/receipts.rs
++++ b/crates/fasti-application/src/receipts.rs
+@@ -20,10 +20,15 @@
+     profile_id: ProfileId,
+     source_client_id: ClientId,
+     observation_id: ObservationId,
++    #[serde(skip_serializing_if = "Option::is_none")]
+     occurrence_id: Option<OccurrenceId>,
++    #[serde(skip_serializing_if = "Option::is_none")]
+     interpretation_id: Option<InterpretationId>,
++    #[serde(skip_serializing_if = "Option::is_none")]
+     record_id: Option<RecordId>,
++    #[serde(skip_serializing_if = "Option::is_none")]
+     review_item_id: Option<ReviewItemId>,
+     evidence_id: EvidenceId,
+     payload_digest: Sha256Digest,
