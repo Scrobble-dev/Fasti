@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/budgets.schema.json",
+  "title": "Fasti performance budgets",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "memory_bytes"],
+  "properties": {
+    "$schema": { "const": "./budgets.schema.json" },
+    "schema_version": { "const": "fasti.performance-budgets.v1" },
+    "memory_bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idle_target",
+        "normal_target",
+        "heavy_target",
+        "absolute_ceiling"
+      ],
+      "properties": {
+        "idle_target": { "const": 67108864 },
+        "normal_target": { "const": 100663296 },
+        "heavy_target": { "const": 167772160 },
+        "absolute_ceiling": { "const": 201326592 }
+      }
+    }
+  }
+}

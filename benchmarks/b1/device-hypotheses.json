@@ -1,0 +1,101 @@
+{
+  "$schema": "./device-hypotheses.schema.json",
+  "schema_version": "fasti.b1.device-hypotheses.v1",
+  "policy": "A device is not qualified until its custodian, exact runner fingerprint, artifact and contract references, and validated evidence receipt are assigned.",
+  "devices": [
+    {
+      "profile": "raspberry_pi_5_champion",
+      "display_name": "Raspberry Pi 5",
+      "role": "champion",
+      "hypothesis": "The B1 native and OCI artifacts can meet every applicable budget on the champion constrained-hardware profile.",
+      "qualification_state": "blocking_unassigned",
+      "custodian": null,
+      "runner_fingerprint": null,
+      "artifact_ref": null,
+      "contract_ref": null,
+      "evidence_ref": null,
+      "results": null,
+      "blocking_reason": "No device custodian or measured evidence receipt is assigned.",
+      "calibration": null
+    },
+    {
+      "profile": "j4125_calibrated",
+      "display_name": "J4125-class x86 runner",
+      "role": "calibrated_secondary",
+      "hypothesis": "A named J4125-class runner can provide a repeatable secondary signal after its relationship to the Raspberry Pi 5 champion is measured.",
+      "qualification_state": "blocking_unassigned",
+      "custodian": null,
+      "runner_fingerprint": null,
+      "artifact_ref": null,
+      "contract_ref": null,
+      "evidence_ref": null,
+      "results": null,
+      "blocking_reason": "No device custodian, calibration method, or measured evidence receipt is assigned.",
+      "calibration": {
+        "reference_profile": "raspberry_pi_5_champion",
+        "state": "not_started",
+        "method": null
+      }
+    },
+    {
+      "profile": "ugoos_am6b_plus",
+      "display_name": "Ugoos AM6B+",
+      "role": "packaging_hypothesis",
+      "hypothesis": "A future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
+      "qualification_state": "blocking_unassigned",
+      "custodian": null,
+      "runner_fingerprint": null,
+      "artifact_ref": null,
+      "contract_ref": null,
+      "evidence_ref": null,
+      "results": null,
+      "blocking_reason": "The runtime, packaging path, device custodian, and measured evidence are unassigned.",
+      "calibration": null
+    },
+    {
+      "profile": "xiaomi_box_m3",
+      "display_name": "Xiaomi Box M3",
+      "role": "packaging_hypothesis",
+      "hypothesis": "A future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
+      "qualification_state": "blocking_unassigned",
+      "custodian": null,
+      "runner_fingerprint": null,
+      "artifact_ref": null,
+      "contract_ref": null,
+      "evidence_ref": null,
+      "results": null,
+      "blocking_reason": "The exact model, runtime, packaging path, device custodian, and measured evidence are unassigned.",
+      "calibration": null
+    },
+    {
+      "profile": "nvidia_shield",
+      "display_name": "Nvidia Shield",
+      "role": "packaging_hypothesis",
+      "hypothesis": "A future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
+      "qualification_state": "blocking_unassigned",
+      "custodian": null,
+      "runner_fingerprint": null,
+      "artifact_ref": null,
+      "contract_ref": null,
+      "evidence_ref": null,
+      "results": null,
+      "blocking_reason": "The exact model, runtime, packaging path, device custodian, and measured evidence are unassigned.",
+      "calibration": null
+    },
+    {
+      "profile": "representative_tv",
+      "display_name": "Representative TV hardware",
+      "role": "packaging_hypothesis",
+      "hypothesis": "A deliberately selected TV profile can exercise remote-oriented packaging without weakening the same local capability and memory gates.",
+      "qualification_state": "blocking_unassigned",
+      "custodian": null,
+      "runner_fingerprint": null,
+      "artifact_ref": null,
+      "contract_ref": null,
+      "evidence_ref": null,
+      "results": null,
+      "blocking_reason": "No representative model, runtime, packaging path, device custodian, or measured evidence is assigned.",
+      "calibration": null
+    }
+  ]
+}

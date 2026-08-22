@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/device-hypotheses.schema.json",
+  "title": "Fasti device qualification hypotheses",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "policy", "devices"],
+  "properties": {
+    "$schema": { "const": "./device-hypotheses.schema.json" },
+    "schema_version": { "const": "fasti.b1.device-hypotheses.v1" },
+    "policy": {
+      "const": "A device is not qualified until its custodian, exact runner fingerprint, artifact and contract references, and validated evidence receipt are assigned."
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profile",
+          "display_name",
+          "role",
+          "hypothesis",
+          "qualification_state",
+          "custodian",
+          "runner_fingerprint",
+          "artifact_ref",
+          "contract_ref",
+          "evidence_ref",
+          "results",
+          "blocking_reason",
+          "calibration"
+        ],
+        "properties": {
+          "profile": {
+            "enum": [
+              "raspberry_pi_5_champion",
+              "j4125_calibrated",
+              "ugoos_am6b_plus",
+              "xiaomi_box_m3",
+              "nvidia_shield",
+              "representative_tv"
+            ]
+          },
+          "display_name": { "type": "string", "minLength": 1 },
+          "role": {
+            "enum": ["champion", "calibrated_secondary", "packaging_hypothesis"]
+          },
+          "hypothesis": { "type": "string", "minLength": 1 },
+          "qualification_state": { "const": "blocking_unassigned" },
+          "custodian": { "type": "null" },
+          "runner_fingerprint": { "type": "null" },
+          "artifact_ref": { "type": "null" },
+          "contract_ref": { "type": "null" },
+          "evidence_ref": { "type": "null" },
+          "results": { "type": "null" },
+          "blocking_reason": { "type": "string", "minLength": 1 },
+          "calibration": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["reference_profile", "state", "method"],
+                "properties": {
+                  "reference_profile": { "const": "raspberry_pi_5_champion" },
+                  "state": { "const": "not_started" },
+                  "method": { "type": "null" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

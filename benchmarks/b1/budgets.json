@@ -1,0 +1,10 @@
+{
+  "$schema": "./budgets.schema.json",
+  "schema_version": "fasti.performance-budgets.v1",
+  "memory_bytes": {
+    "idle_target": 67108864,
+    "normal_target": 100663296,
+    "heavy_target": 167772160,
+    "absolute_ceiling": 201326592
+  }
+}
