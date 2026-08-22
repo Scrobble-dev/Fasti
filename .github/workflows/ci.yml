@@ -102,3 +102,21 @@ jobs:
         run: docker build --tag fasti:b0 .
       - name: Verify non-root, health, false-success, and idle-memory gates
         run: bash scripts/smoke-oci.sh fasti:b0
+
+  review-source-snapshot:
+    name: Exact tracked source snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Archive the exact reviewed tree
+        run: |
+          git archive --format=tar.gz --output=/tmp/fasti-source.tar.gz HEAD
+          sha256sum /tmp/fasti-source.tar.gz > /tmp/fasti-source.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fasti-source-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            /tmp/fasti-source.tar.gz
+            /tmp/fasti-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
