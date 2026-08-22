@@ -7,14 +7,14 @@
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
     http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
-    routing::{get, post},
+    response::{sse::Event, sse::Sse, IntoResponse, Response},
+    routing::{get, post, put},
     Json, Router,
 };
 use fasti_application::{
     conformance::B1ConformanceFixture, conformance::FixtureEnrollment,
     conformance::FixtureInitialization, AcceptObservationCommand, AcceptObservationReceipt,
-    CapabilityKey, FastiProblem, ReplayReceiptQuery, Violation,
+    CapabilityKey, FastiProblem, ReplayReceiptQuery, StreamReceiptsQuery, Violation,
 };
 use fasti_contracts::{
     public_capability_id, AcceptObservationRequest, AcceptObservationResponse,
@@ -28,6 +28,7 @@ use fasti_domain::{
     ClaimedPrecision, ClaimedTrust, EvidenceId, EvidenceReference, ObservedAt, OccurredAt,
     OperationId, ReceiptId, RequestCorrelationId, Sha256Digest,
 };
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex, OnceLock};
 use utoipa::{
     openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
@@ -38,6 +39,7 @@ const DOCUMENTATION_BASE: &str = "https://fasti.scrobble.dev";
 const GENERATED_CAPABILITIES: &str =
     include_str!("../../../contracts/generated/v1/capabilities.json");
 const BEARER_PREFIX: &str = "Bearer ";
+const LAST_EVENT_ID: &str = "last-event-id";
 const MAX_JSON_BODY_BYTES: usize = 4 * 1024;
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
@@ -139,6 +141,100 @@ async fn discover_capabilities(
         conformance: ConformanceMarkerDto::FIXTURE_ONLY,
         capabilities: capabilities.capabilities.clone(),
     }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/profile-selection",
+    tag = "b1-conformance-fixture",
+    security(("fixture_bearer" = [])),
+    description = "Problem-only finalized binding. B2 owns successful profile selection semantics.",
+    responses(
+        (status = 403, description = "Credential or capability grant denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Successful profile selection is unavailable until B2", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn select_profile_unavailable(
+    State(state): State<Arc<B1HttpState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    unavailable_admin(state, headers, CapabilityKey::SelectProfile).await
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/credential-rotations",
+    tag = "b1-conformance-fixture",
+    security(("fixture_bearer" = [])),
+    description = "Problem-only finalized binding. B2 owns successful credential rotation semantics.",
+    responses(
+        (status = 403, description = "Credential or capability grant denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Successful credential rotation is unavailable until B2", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn rotate_credential_unavailable(
+    State(state): State<Arc<B1HttpState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    unavailable_admin(state, headers, CapabilityKey::RotateCredential).await
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/credential-revocations",
+    tag = "b1-conformance-fixture",
+    security(("fixture_bearer" = [])),
+    description = "Problem-only finalized binding. B2 owns successful credential revocation semantics.",
+    responses(
+        (status = 403, description = "Credential or capability grant denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Successful credential revocation is unavailable until B2", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn revoke_credential_unavailable(
+    State(state): State<Arc<B1HttpState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    unavailable_admin(state, headers, CapabilityKey::RevokeCredential).await
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/v1/listener-configuration",
+    tag = "b1-conformance-fixture",
+    security(("fixture_bearer" = [])),
+    description = "Problem-only finalized binding. B2 owns successful listener configuration semantics.",
+    responses(
+        (status = 403, description = "Credential or capability grant denied", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "Successful listener configuration is unavailable until B2", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn configure_listener_unavailable(
+    State(state): State<Arc<B1HttpState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    unavailable_admin(state, headers, CapabilityKey::ConfigureListener).await
+}
+
+async fn unavailable_admin(
+    state: Arc<B1HttpState>,
+    headers: HeaderMap,
+    capability: CapabilityKey,
+) -> Result<Response, HttpProblem> {
+    let correlation_id = RequestCorrelationId::new_v7();
+    let transport = state
+        .transport
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let enrollment = authenticate_enrollment(&headers, &transport, capability, correlation_id)?;
+    state
+        .fixture
+        .reject_unavailable_admin_capability(
+            enrollment.credential_secret(),
+            capability,
+            correlation_id,
+        )
+        .map_err(application_problem)?;
+    unreachable!("unavailable admin capabilities never return success")
 }
 
 #[utoipa::path(
@@ -328,7 +424,10 @@ async fn replay_receipt(
 ) -> HttpResult<ReplayReceiptResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let receipt_id = receipt_id.parse::<ReceiptId>().map_err(|_| {
-        application_problem(Box::new(FastiProblem::receipt_not_found(correlation_id)))
+        application_problem(Box::new(FastiProblem::receipt_not_found(
+            CapabilityKey::ReplayReceipt,
+            correlation_id,
+        )))
     })?;
     let transport = state
         .transport
@@ -350,6 +449,62 @@ async fn replay_receipt(
         conformance: ConformanceMarkerDto::FIXTURE_ONLY,
         receipt: receipt_dto(&receipt),
     }))
+}
+
+/// AsyncAPI-governed finite fixture replay. This route is deliberately absent
+/// from the finite conformance OpenAPI document.
+async fn stream_receipts(
+    State(state): State<Arc<B1HttpState>>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    let correlation_id = RequestCorrelationId::new_v7();
+    let last_event_id = headers.get(LAST_EVENT_ID).map(|value| {
+        value
+            .to_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|_| "invalid-non-utf8-cursor".to_owned())
+    });
+    let transport = state
+        .transport
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let enrollment = authenticate_enrollment(
+        &headers,
+        &transport,
+        CapabilityKey::StreamReceipts,
+        correlation_id,
+    )?;
+    let batch = state
+        .fixture
+        .stream_receipts_fixture(
+            enrollment.credential_secret(),
+            StreamReceiptsQuery::new(correlation_id, *enrollment.access(), last_event_id),
+        )
+        .map_err(application_problem)?
+        .into_inner();
+    drop(transport);
+
+    let events = batch.events().iter().map(|stream_event| {
+        let receipt = stream_event.receipt();
+        let payload = serde_json::json!({
+            "capability_id": public_capability_id(CapabilityKey::AcceptObservation),
+            "correlation_id": stream_event.correlation_id().to_string(),
+            "receipt_id": receipt.receipt_id().to_string(),
+            "operation_id": receipt.operation_id().to_string(),
+            "observation_id": receipt.observation_id().to_string(),
+            "resolution": "unresolved",
+            "committed_at": receipt.committed_at().value().to_rfc3339()
+        });
+        Ok::<Event, Infallible>(
+            Event::default()
+                .event("receiptCommitted")
+                .id(stream_event.cursor().to_string())
+                .json_data(payload)
+                .expect("governed receipt envelope is serializable"),
+        )
+    });
+    let response = Sse::new(tokio_stream::iter(events.collect::<Vec<_>>())).into_response();
+    Ok(response)
 }
 
 fn authenticate_enrollment<'a>(
@@ -615,6 +770,10 @@ impl Modify for SecurityAddon {
 #[openapi(
     paths(
         discover_capabilities,
+        select_profile_unavailable,
+        rotate_credential_unavailable,
+        revoke_credential_unavailable,
+        configure_listener_unavailable,
         initialize_node,
         enroll_first_client,
         accept_observation,
@@ -663,9 +822,23 @@ pub fn b1_conformance_openapi() -> utoipa::openapi::OpenApi {
 pub fn b1_conformance_router() -> Router {
     Router::new()
         .route("/api/v1/capabilities", get(discover_capabilities))
+        .route("/api/v1/profile-selection", put(select_profile_unavailable))
+        .route(
+            "/api/v1/credential-rotations",
+            post(rotate_credential_unavailable),
+        )
+        .route(
+            "/api/v1/credential-revocations",
+            post(revoke_credential_unavailable),
+        )
+        .route(
+            "/api/v1/listener-configuration",
+            put(configure_listener_unavailable),
+        )
         .route("/api/v1/node/initialization", post(initialize_node))
         .route("/api/v1/client-enrollments", post(enroll_first_client))
         .route("/api/v1/observations", post(accept_observation))
+        .route("/api/v1/receipts/stream", get(stream_receipts))
         .route("/api/v1/receipts/:receipt_id", get(replay_receipt))
         .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
         .with_state(Arc::new(B1HttpState::default()))
@@ -679,7 +852,7 @@ mod tests {
         http::{Request, Response},
     };
     use fasti_contracts::{DurabilityDto, RuntimeAvailabilityDto};
-    use fasti_domain::{EvidenceId, OperationId};
+    use fasti_domain::{EvidenceId, OperationId, ReceiptId};
     use serde::de::DeserializeOwned;
     use static_assertions::assert_not_impl_any;
     use tower::ServiceExt;
@@ -737,6 +910,15 @@ mod tests {
         request
     }
 
+    fn authorized_empty_request(method: &str, uri: &str, credential: &str) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+            .body(Body::empty())
+            .expect("valid authorized request")
+    }
+
     async fn initialize_and_enroll(router: &Router) -> String {
         let initialize = router
             .clone()
@@ -791,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn conformance_openapi_matches_only_the_mounted_fixture_routes() {
+    fn finite_conformance_openapi_excludes_asyncapi_stream_and_matches_bindings() {
         let document = b1_conformance_openapi();
         let actual = document
             .paths
@@ -802,8 +984,12 @@ mod tests {
         let expected = [
             "/api/v1/capabilities",
             "/api/v1/client-enrollments",
+            "/api/v1/credential-revocations",
+            "/api/v1/credential-rotations",
+            "/api/v1/listener-configuration",
             "/api/v1/node/initialization",
             "/api/v1/observations",
+            "/api/v1/profile-selection",
             "/api/v1/receipts/{receipt_id}",
         ]
         .into_iter()
@@ -811,6 +997,7 @@ mod tests {
         .collect();
         assert_eq!(actual, expected);
         assert!(!document.paths.paths.contains_key("/api/v1/health"));
+        assert!(!document.paths.paths.contains_key("/api/v1/receipts/stream"));
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI");
         assert!(serialized.contains("fixture_only"));
@@ -842,6 +1029,29 @@ mod tests {
                     response.content.contains_key("application/problem+json"),
                     "{path} response {status} has the wrong media type"
                 );
+            }
+        }
+
+        for (path, method) in [
+            ("/api/v1/profile-selection", "put"),
+            ("/api/v1/credential-rotations", "post"),
+            ("/api/v1/credential-revocations", "post"),
+            ("/api/v1/listener-configuration", "put"),
+        ] {
+            let item = &document.paths.paths[path];
+            let operation = match method {
+                "post" => item.post.as_ref(),
+                "put" => item.put.as_ref(),
+                _ => unreachable!(),
+            }
+            .expect("problem-only operation is documented");
+            assert!(!operation.responses.responses.contains_key("200"));
+            for status in ["403", "501"] {
+                let utoipa::openapi::RefOr::T(response) = &operation.responses.responses[status]
+                else {
+                    panic!("{path} response {status} must be inline");
+                };
+                assert!(response.content.contains_key("application/problem+json"));
             }
         }
     }
@@ -962,6 +1172,160 @@ mod tests {
         assert!(serialized.get("occurrence_id").is_none());
         assert!(serialized["receipt"].get("record_id").is_none());
         assert!(serialized["receipt"].get("occurrence_id").is_none());
+    }
+
+    #[tokio::test]
+    async fn problem_only_admin_bindings_authorize_then_return_typed_501() {
+        let router = b1_conformance_router();
+        let credential = initialize_and_enroll(&router).await;
+        for (method, path, capability_id) in [
+            ("PUT", "/api/v1/profile-selection", "profile.select"),
+            ("POST", "/api/v1/credential-rotations", "credential.rotate"),
+            (
+                "POST",
+                "/api/v1/credential-revocations",
+                "credential.revoke",
+            ),
+            (
+                "PUT",
+                "/api/v1/listener-configuration",
+                "listener.configure",
+            ),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(authorized_empty_request(method, path, &credential))
+                .await
+                .expect("problem-only response");
+            let problem = assert_problem_response(response, StatusCode::NOT_IMPLEMENTED).await;
+            assert_eq!(problem.code, "capability_unavailable");
+            assert_eq!(problem.capability_id, capability_id);
+            assert_eq!(problem.safe_state, "no_mutation");
+        }
+
+        let unauthenticated = router
+            .oneshot(
+                Request::put("/api/v1/profile-selection")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("denial response");
+        let problem = assert_problem_response(unauthenticated, StatusCode::FORBIDDEN).await;
+        assert_eq!(problem.capability_id, "profile.select");
+    }
+
+    #[tokio::test]
+    async fn asyncapi_receipt_stream_is_ordered_cursor_bounded_and_authenticated() {
+        let router = b1_conformance_router();
+        let credential = initialize_and_enroll(&router).await;
+        let mut receipts = Vec::new();
+        for _ in 0..3 {
+            let response = router
+                .clone()
+                .oneshot(authorized_json_request(
+                    "POST",
+                    "/api/v1/observations",
+                    &credential,
+                    &observation_request(),
+                ))
+                .await
+                .expect("acceptance response");
+            let accepted: AcceptObservationResponse = response_json(response).await;
+            receipts.push(accepted.receipt);
+        }
+
+        let response = router
+            .clone()
+            .oneshot(authorized_empty_request(
+                "GET",
+                "/api/v1/receipts/stream",
+                &credential,
+            ))
+            .await
+            .expect("SSE response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream")
+        );
+        let body = to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("bounded finite stream body");
+        let body = std::str::from_utf8(&body).expect("UTF-8 SSE");
+        let frames = body
+            .split("\n\n")
+            .filter(|frame| !frame.is_empty())
+            .collect::<Vec<_>>();
+        assert_eq!(frames.len(), 3);
+        for (frame, receipt) in frames.iter().zip(&receipts) {
+            assert!(frame.contains("event: receiptCommitted"));
+            assert!(frame.contains(&format!("id: {}", receipt.receipt_id)));
+            let data = frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .expect("SSE data line");
+            let payload: serde_json::Value = serde_json::from_str(data).expect("event JSON");
+            assert_eq!(payload["capability_id"], "observation.accept");
+            assert_eq!(payload["receipt_id"], receipt.receipt_id);
+            assert_eq!(payload["operation_id"], receipt.operation_id);
+            assert_eq!(payload["observation_id"], receipt.observation_id);
+            assert_eq!(payload["resolution"], "unresolved");
+            assert!(payload.get("correlation_id").is_some());
+            assert!(payload.get("committed_at").is_some());
+            assert!(payload.get("record_id").is_none());
+            assert!(payload.get("occurrence_id").is_none());
+        }
+
+        let mut cursor_request =
+            authorized_empty_request("GET", "/api/v1/receipts/stream", &credential);
+        cursor_request.headers_mut().insert(
+            LAST_EVENT_ID,
+            receipts[1].receipt_id.parse().expect("valid cursor header"),
+        );
+        let cursor_response = router
+            .clone()
+            .oneshot(cursor_request)
+            .await
+            .expect("cursor response");
+        let cursor_body = to_bytes(cursor_response.into_body(), 16 * 1024)
+            .await
+            .expect("bounded cursor body");
+        let cursor_body = std::str::from_utf8(&cursor_body).expect("UTF-8 SSE");
+        assert!(!cursor_body.contains(&receipts[0].receipt_id));
+        assert!(!cursor_body.contains(&receipts[1].receipt_id));
+        assert!(cursor_body.contains(&receipts[2].receipt_id));
+
+        for cursor in ["invalid-cursor".to_owned(), ReceiptId::new_v7().to_string()] {
+            let mut request =
+                authorized_empty_request("GET", "/api/v1/receipts/stream", &credential);
+            request
+                .headers_mut()
+                .insert(LAST_EVENT_ID, cursor.parse().expect("header value"));
+            let response = router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("cursor denial");
+            let problem = assert_problem_response(response, StatusCode::NOT_FOUND).await;
+            assert_eq!(problem.code, "receipt_not_found");
+            assert_eq!(problem.capability_id, "receipt.stream");
+            assert_eq!(problem.param.as_deref(), Some("/last_event_id"));
+        }
+
+        let missing_auth = router
+            .oneshot(
+                Request::get("/api/v1/receipts/stream")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("auth denial");
+        let problem = assert_problem_response(missing_auth, StatusCode::FORBIDDEN).await;
+        assert_eq!(problem.capability_id, "receipt.stream");
     }
 
     #[tokio::test]

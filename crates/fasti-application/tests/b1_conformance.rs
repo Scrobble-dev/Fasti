@@ -2,7 +2,8 @@
 
 use fasti_application::{
     conformance::{B1ConformanceFixture, FixtureDurability, FixturePhase, MAX_FIXTURE_OPERATIONS},
-    AcceptObservationCommand, AcceptObservationOutcome, ProblemCode, ReplayReceiptQuery,
+    AcceptObservationCommand, AcceptObservationOutcome, CapabilityKey, ProblemCode,
+    ReplayReceiptQuery, StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
 };
 use fasti_domain::{
     ClaimedTrust, EvidenceId, EvidenceReference, ObservedAt, OperationId, RequestCorrelationId,
@@ -192,6 +193,28 @@ fn capability_discovery_uses_the_enrolled_application_grant() {
 }
 
 #[test]
+fn finalized_admin_bindings_authorize_then_fail_unavailable_without_success() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = initialize_and_enroll(&fixture);
+    for capability in [
+        CapabilityKey::SelectProfile,
+        CapabilityKey::RotateCredential,
+        CapabilityKey::RevokeCredential,
+        CapabilityKey::ConfigureListener,
+    ] {
+        let problem = fixture
+            .reject_unavailable_admin_capability(
+                enrollment.credential_secret(),
+                capability,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect_err("B2 success semantics remain unavailable");
+        assert_eq!(problem.code(), ProblemCode::CapabilityUnavailable);
+        assert_eq!(problem.capability(), capability);
+    }
+}
+
+#[test]
 fn idempotency_and_receipt_replay_are_atomic_and_exact() {
     let fixture = B1ConformanceFixture::new();
     let enrollment = initialize_and_enroll(&fixture);
@@ -287,6 +310,102 @@ fn bounded_capacity_rejects_without_mutation_and_preserves_exact_replay() {
         .expect("capacity does not invalidate existing receipts")
         .into_inner();
     assert_eq!(&replay, original.receipt());
+}
+
+#[test]
+fn receipt_stream_orders_and_bounds_replay_with_application_owned_cursors() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = initialize_and_enroll(&fixture);
+    let access = *enrollment.access();
+    let mut receipt_ids = Vec::new();
+    for _ in 0..MAX_FIXTURE_OPERATIONS {
+        let outcome = fixture
+            .accept_fixture(
+                enrollment.credential_secret(),
+                command(access, OperationId::new_v7(), "91"),
+            )
+            .expect("bounded receipt")
+            .into_inner();
+        receipt_ids.push(outcome.receipt().receipt_id());
+    }
+
+    let first = fixture
+        .stream_receipts_fixture(
+            enrollment.credential_secret(),
+            StreamReceiptsQuery::new(RequestCorrelationId::new_v7(), access, None),
+        )
+        .expect("initial stream")
+        .into_inner();
+    assert_eq!(first.events().len(), MAX_RECEIPT_STREAM_REPLAY);
+    assert_eq!(
+        first
+            .events()
+            .iter()
+            .map(|event| event.cursor())
+            .collect::<Vec<_>>(),
+        receipt_ids[..MAX_RECEIPT_STREAM_REPLAY]
+    );
+
+    let after_hundred = fixture
+        .stream_receipts_fixture(
+            enrollment.credential_secret(),
+            StreamReceiptsQuery::new(
+                RequestCorrelationId::new_v7(),
+                access,
+                Some(receipt_ids[99].to_string()),
+            ),
+        )
+        .expect("cursor replay")
+        .into_inner();
+    assert_eq!(after_hundred.events().len(), 28);
+    assert_eq!(after_hundred.events()[0].cursor(), receipt_ids[100]);
+    assert_eq!(after_hundred.events()[27].cursor(), receipt_ids[127]);
+
+    let empty = fixture
+        .stream_receipts_fixture(
+            enrollment.credential_secret(),
+            StreamReceiptsQuery::new(
+                RequestCorrelationId::new_v7(),
+                access,
+                Some(receipt_ids[127].to_string()),
+            ),
+        )
+        .expect("latest cursor is current")
+        .into_inner();
+    assert!(empty.events().is_empty());
+
+    let foreign_fixture = B1ConformanceFixture::new();
+    let foreign_enrollment = initialize_and_enroll(&foreign_fixture);
+    let foreign_receipt = foreign_fixture
+        .accept_fixture(
+            foreign_enrollment.credential_secret(),
+            command(*foreign_enrollment.access(), OperationId::new_v7(), "92"),
+        )
+        .expect("foreign fixture receipt")
+        .into_inner()
+        .receipt()
+        .receipt_id();
+
+    for cursor in ["invalid-cursor".to_owned(), foreign_receipt.to_string()] {
+        let problem = fixture
+            .stream_receipts_fixture(
+                enrollment.credential_secret(),
+                StreamReceiptsQuery::new(RequestCorrelationId::new_v7(), access, Some(cursor)),
+            )
+            .expect_err("invalid or stale cursor fails closed");
+        assert_eq!(problem.code(), ProblemCode::ReceiptNotFound);
+        assert_eq!(problem.capability(), CapabilityKey::StreamReceipts);
+        assert_eq!(problem.param(), Some("/last_event_id"));
+    }
+
+    let denied = fixture
+        .stream_receipts_fixture(
+            foreign_enrollment.credential_secret(),
+            StreamReceiptsQuery::new(RequestCorrelationId::new_v7(), access, None),
+        )
+        .expect_err("foreign credential cannot stream receipts");
+    assert_eq!(denied.code(), ProblemCode::Forbidden);
+    assert_eq!(denied.capability(), CapabilityKey::StreamReceipts);
 }
 
 #[test]

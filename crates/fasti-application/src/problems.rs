@@ -273,10 +273,17 @@ impl FastiProblem {
         }
     }
 
-    pub fn receipt_not_found(correlation_id: RequestCorrelationId) -> Self {
+    pub fn receipt_not_found(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        debug_assert!(matches!(
+            capability,
+            CapabilityKey::ReplayReceipt | CapabilityKey::StreamReceipts
+        ));
         Self {
             code: ProblemCode::ReceiptNotFound,
-            capability: CapabilityKey::ReplayReceipt,
+            capability,
             message: "no receipt is available for the requested identifier".to_owned(),
             safe_state: SafeState::NoMutation,
             retryability: Retryability::NotRetryable,
@@ -285,7 +292,13 @@ impl FastiProblem {
                 label: "Verify the receipt ID and request context".to_owned(),
             }],
             correlation_id,
-            param: Some("/receipt_id".to_owned()),
+            param: Some(
+                match capability {
+                    CapabilityKey::StreamReceipts => "/last_event_id",
+                    _ => "/receipt_id",
+                }
+                .to_owned(),
+            ),
             actual: None,
             documentation_path: Some("v1/problems/receipt-not-found"),
             violations: Vec::new(),
@@ -463,6 +476,17 @@ mod tests {
         assert_eq!(problem.safe_state(), SafeState::NoMutation);
         assert_eq!(problem.retryability(), Retryability::RetryAfterCorrection);
         assert_eq!(problem.next_actions()[0].id(), "release_capacity");
+    }
+
+    #[test]
+    fn receipt_absence_keeps_replay_and_stream_capabilities_distinct() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let replay = FastiProblem::receipt_not_found(CapabilityKey::ReplayReceipt, correlation_id);
+        let stream = FastiProblem::receipt_not_found(CapabilityKey::StreamReceipts, correlation_id);
+        assert_eq!(replay.capability(), CapabilityKey::ReplayReceipt);
+        assert_eq!(replay.param(), Some("/receipt_id"));
+        assert_eq!(stream.capability(), CapabilityKey::StreamReceipts);
+        assert_eq!(stream.param(), Some("/last_event_id"));
     }
 
     #[test]

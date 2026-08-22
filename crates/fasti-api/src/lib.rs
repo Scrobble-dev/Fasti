@@ -112,7 +112,12 @@ mod tests {
             ("POST", "/api/v1/node/initialization"),
             ("POST", "/api/v1/client-enrollments"),
             ("POST", "/api/v1/observations"),
+            ("GET", "/api/v1/receipts/stream"),
             ("GET", "/api/v1/receipts/rcp_not-a-real-id"),
+            ("PUT", "/api/v1/profile-selection"),
+            ("POST", "/api/v1/credential-rotations"),
+            ("POST", "/api/v1/credential-revocations"),
+            ("PUT", "/api/v1/listener-configuration"),
         ] {
             let response = api_router()
                 .oneshot(

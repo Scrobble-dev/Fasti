@@ -9,8 +9,9 @@
 use crate::{
     authorize, AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
     AccessSnapshot, ApplicationResult, AuthorizationRequirement, CapabilityKey, CredentialStatus,
-    FastiProblem, GrantStatus, ObservationAcceptancePort, ReplayReceiptQuery, RequestAccessContext,
-    ScopeKey,
+    FastiProblem, GrantStatus, ObservationAcceptancePort, ReceiptStreamBatch, ReceiptStreamEvent,
+    ReceiptStreamPort, ReplayReceiptQuery, RequestAccessContext, ScopeKey, StreamReceiptsQuery,
+    MAX_RECEIPT_STREAM_REPLAY,
 };
 use chrono::Utc;
 use fasti_domain::{
@@ -182,6 +183,7 @@ struct EnrolledState {
     credential_secret: [u8; 32],
     operations: HashMap<OperationId, StoredOperation>,
     receipts: HashMap<ReceiptId, AcceptObservationReceipt>,
+    receipt_order: Vec<ReceiptId>,
 }
 
 impl Drop for EnrolledState {
@@ -326,7 +328,10 @@ impl B1ConformanceFixture {
             access.presented_credential_epoch(),
             [
                 ScopeKey::CapabilityRead,
+                ScopeKey::CredentialManage,
+                ScopeKey::ListenerConfigure,
                 ScopeKey::ObservationAccept,
+                ScopeKey::ProfileSelect,
                 ScopeKey::ReceiptRead,
             ],
         );
@@ -337,6 +342,7 @@ impl B1ConformanceFixture {
             credential_secret: credential_secret.bytes,
             operations: HashMap::new(),
             receipts: HashMap::new(),
+            receipt_order: Vec::new(),
         });
         Ok(FixtureOnly::new(FixtureEnrollment {
             access,
@@ -387,6 +393,53 @@ impl B1ConformanceFixture {
             correlation_id,
         )?;
         Ok(FixtureOnly::new(()))
+    }
+
+    /// Authorize one finalized B1 admin binding, then return the governed B2
+    /// runtime-unavailable problem. No success representation is invented.
+    pub fn reject_unavailable_admin_capability(
+        &self,
+        credential_secret: &FixtureCredentialSecret,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<FixtureOnly<()>> {
+        assert!(matches!(
+            capability,
+            CapabilityKey::SelectProfile
+                | CapabilityKey::RotateCredential
+                | CapabilityKey::RevokeCredential
+                | CapabilityKey::ConfigureListener
+        ));
+        let state = self.lock_state();
+        let enrolled = enrolled_ref(&state, capability, correlation_id)?;
+        authenticate_fixture_credential(
+            enrolled,
+            Some(credential_secret),
+            capability,
+            correlation_id,
+        )?;
+        authorize_capability(
+            capability,
+            Some(&enrolled.access),
+            &enrolled.access_snapshot,
+            correlation_id,
+        )?;
+        Err(Box::new(FastiProblem::capability_unavailable(
+            capability,
+            correlation_id,
+        )))
+    }
+
+    /// Authenticate, interpret Last-Event-ID, and copy at most 100 ordered
+    /// receipts while holding the fixture lock. The caller receives an owned
+    /// batch, so SSE serialization never retains a storage lock.
+    pub fn stream_receipts_fixture(
+        &self,
+        credential_secret: &FixtureCredentialSecret,
+        query: StreamReceiptsQuery,
+    ) -> ApplicationResult<FixtureOnly<ReceiptStreamBatch>> {
+        self.stream(query, Some(credential_secret))
+            .map(FixtureOnly::new)
     }
 
     pub fn inspect_fixture(&self) -> FixtureOnly<FixtureStateView> {
@@ -449,6 +502,7 @@ impl B1ConformanceFixture {
 
         if enrolled.operations.len() >= MAX_FIXTURE_OPERATIONS
             || enrolled.receipts.len() >= MAX_FIXTURE_OPERATIONS
+            || enrolled.receipt_order.len() >= MAX_FIXTURE_OPERATIONS
         {
             return Err(Box::new(FastiProblem::capacity_exceeded(
                 CapabilityKey::AcceptObservation,
@@ -487,6 +541,7 @@ impl B1ConformanceFixture {
         enrolled
             .receipts
             .insert(receipt.receipt_id(), receipt.clone());
+        enrolled.receipt_order.push(receipt.receipt_id());
         Ok(AcceptObservationOutcome::Committed(receipt))
     }
 
@@ -513,7 +568,75 @@ impl B1ConformanceFixture {
             .receipts
             .get(&query.receipt_id())
             .cloned()
-            .ok_or_else(|| Box::new(FastiProblem::receipt_not_found(query.correlation_id())))
+            .ok_or_else(|| {
+                Box::new(FastiProblem::receipt_not_found(
+                    CapabilityKey::ReplayReceipt,
+                    query.correlation_id(),
+                ))
+            })
+    }
+
+    fn stream(
+        &self,
+        query: StreamReceiptsQuery,
+        credential_secret: Option<&FixtureCredentialSecret>,
+    ) -> ApplicationResult<ReceiptStreamBatch> {
+        let state = self.lock_state();
+        let enrolled = enrolled_ref(
+            &state,
+            CapabilityKey::StreamReceipts,
+            query.correlation_id(),
+        )?;
+        authenticate_fixture_credential(
+            enrolled,
+            credential_secret,
+            CapabilityKey::StreamReceipts,
+            query.correlation_id(),
+        )?;
+        authorize_capability(
+            CapabilityKey::StreamReceipts,
+            Some(query.access()),
+            &enrolled.access_snapshot,
+            query.correlation_id(),
+        )?;
+
+        let start = match query.last_event_id() {
+            None => 0,
+            Some(raw) => {
+                let cursor = raw.parse::<ReceiptId>().map_err(|_| {
+                    Box::new(FastiProblem::receipt_not_found(
+                        CapabilityKey::StreamReceipts,
+                        query.correlation_id(),
+                    ))
+                })?;
+                enrolled
+                    .receipt_order
+                    .iter()
+                    .position(|receipt_id| *receipt_id == cursor)
+                    .map(|index| index + 1)
+                    .ok_or_else(|| {
+                        Box::new(FastiProblem::receipt_not_found(
+                            CapabilityKey::StreamReceipts,
+                            query.correlation_id(),
+                        ))
+                    })?
+            }
+        };
+        let events = enrolled
+            .receipt_order
+            .iter()
+            .skip(start)
+            .take(MAX_RECEIPT_STREAM_REPLAY)
+            .map(|receipt_id| {
+                let receipt = enrolled
+                    .receipts
+                    .get(receipt_id)
+                    .expect("receipt order and receipt map change atomically")
+                    .clone();
+                ReceiptStreamEvent::new(query.correlation_id(), receipt)
+            })
+            .collect();
+        Ok(ReceiptStreamBatch::new(events))
     }
 
     fn lock_state(&self) -> MutexGuard<'_, FixtureState> {
@@ -538,6 +661,17 @@ impl ObservationAcceptancePort for B1ConformanceFixture {
         query: ReplayReceiptQuery,
     ) -> ApplicationResult<AcceptObservationReceipt> {
         self.replay(query, None)
+    }
+}
+
+impl ReceiptStreamPort for B1ConformanceFixture {
+    fn authorize_and_stream(
+        &self,
+        query: StreamReceiptsQuery,
+    ) -> ApplicationResult<ReceiptStreamBatch> {
+        // Delivery adapters authenticate credential material before this
+        // already-authenticated application port.
+        self.stream(query, None)
     }
 }
 
