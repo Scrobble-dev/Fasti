@@ -14,9 +14,9 @@ Unresolved, partially resolved, conflicted, known-absent, and blocked states are
 
 ## Architecture
 
-Domain-driven design is mandatory. Domain policy lives in named bounded contexts. Application capabilities coordinate domain behavior through ports. Storage, HTTP, CLI, SDK, provider, UI, and packaging code are adapters and must not own domain meaning.
+Domain policy lives in named contexts. Application capabilities coordinate that behavior through ports. Storage, HTTP, CLI, SDK, provider, UI, and packaging code map external concerns to those rules and must not own them.
 
-DRY is mandatory at the semantic level: an invariant, capability, public type, error, permission, or lifecycle rule has one owner. Generated surfaces consume that owner. Incidental repetition may remain when removing it would couple bounded contexts or hide intent.
+Each invariant, capability, public type, problem, permission, or lifecycle rule has one authoritative owner. Generated surfaces consume that owner. Incidental repetition may remain when removing it would couple otherwise independent contexts or hide intent.
 
 Provider adapters translate evidence into the neutral observation contract. They cannot create a second identity model, write directly to persistence, or make a provider canonical.
 
@@ -34,7 +34,7 @@ B0 records the location and future ownership of these surfaces without pretendin
 
 ## Local operation and distribution
 
-Core workflows must function with the network denied or fail with a local typed problem and safe next action. The same runtime must support native execution, an OCI wrapper, and later packaged distribution without making one delivery medium the domain architecture.
+Core workflows must function with the network denied or fail with a local typed problem and safe next action. The same runtime must support native execution, an OCI wrapper, and later packaged distribution without making one delivery medium the governing architecture.
 
 Public binary, package, image, attestation, and GitHub Release publication remain disabled until B8 readiness and an explicit release action.
 

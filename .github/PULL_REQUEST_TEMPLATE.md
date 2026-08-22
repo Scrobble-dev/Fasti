@@ -8,6 +8,18 @@
 
 Discussion:
 
+## Relationships
+
+Related issues:
+
+Related pull requests:
+
+Accepted plans or reviews:
+
+Relevant upstream work:
+
+Supersedes or follows:
+
 ## Target Branch
 
 - [ ] `release` — Standard integration target unless the linked Discussion names another branch. This PR cannot publish a public image, package, attestation, binary, or GitHub Release.
@@ -25,7 +37,7 @@ Discussion:
 
 - [ ] **DCO Sign-off:** All commits are signed off with `git commit -s` (`Signed-off-by: Name <email>`).
 - [ ] **Discussion-first scope:** The linked Discussion predates implementation and the change stays inside its bounded context and accepted scope.
-- [ ] **DDD / DRY:** Domain meaning has one owner; adapters and generated surfaces do not redefine it.
+- [ ] **Meaning ownership:** Domain meaning has one owner; adapters and generated surfaces do not redefine it, and dependencies point toward the governed rules.
 - [ ] **Data Model Invariants:** If changing schema or persistence, an ADR/RFC has been approved and backward compatibility / migration tests are included.
 - [ ] **Scrobble.dev Boundary:** This PR does not unilaterally modify normative Scrobble.dev specification definitions.
 - [ ] **Contract parity:** Every applicable OpenAPI, AsyncAPI, Schema, JSON-LD, OKF, CLI, SDK, permission, error, example, and knowledge surface agrees or is explicitly `N/A` / later body.

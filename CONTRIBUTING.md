@@ -84,7 +84,7 @@ We organize contributions into explicit lanes to set expectations on review requ
 |---|---|---|
 | **Documentation & Guides** | Truth corrections, architecture, recovery, examples, and task-first guides | Documentation checks and QA |
 | **Governed Fixtures** | Provenance-labelled media observations, identity cases, and hostile inputs | Domain review and executable schema checks |
-| **Domain & Application** | Invariants, typed values, capabilities, ports, and problems | DDD/DRY review, contract mutation gates, and QA |
+| **Domain & Application** | Invariants, typed values, capabilities, ports, and problems | Meaning-ownership review, dependency checks, contract mutation gates, and QA |
 | **Contracts & SDK** | OpenAPI, AsyncAPI, Schema, JSON-LD, OKF, examples, and generated clients | Deterministic generation, parity checks, and QA |
 | **Delivery & Persistence** | HTTP/SSE, CLI, SQLite/files, OCI, recovery, and performance | Native/OCI tests, fault evidence, and QA |
 | **Design & Accessibility** | Tokens and later media UI, keyboard, screen reader, touch, TV remote, ADHD/AuDHD | Approved design contract, design review, accessibility evidence, and QA |
@@ -107,18 +107,15 @@ We organize contributions into explicit lanes to set expectations on review requ
    ```
 3. **Verify the environment**:
    ```bash
-   # Rust workspace check
    cargo fmt --all -- --check
    cargo clippy --workspace --all-targets --locked -- -D warnings
    cargo test --workspace --locked
 
-   # TypeScript / Node check
    pnpm install --frozen-lockfile
    pnpm format:check
    pnpm typecheck
    pnpm test
 
-   # Repository truth and portability checks
    bash scripts/check-repository-truth.sh
    bash scripts/check-no-publish.sh
    node scripts/check-doc-links.mjs
@@ -178,6 +175,7 @@ Signed-off-by: Jane Developer <jane@example.com>
    * The problem being solved.
    * Behavioral & data-model impact.
    * Test evidence (unit, integration, or manual verification).
+   * Related issues, pull requests, accepted plans, and relevant upstream work.
    * Accessibility and security considerations.
 5. Run every gate named by the linked Discussion. QA is mandatory; rendered UI/UX also requires design review.
 6. Ensure all CI checks are green.

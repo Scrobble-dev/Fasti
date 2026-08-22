@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Marked the current repository as a development baseline with no supported public install.
 * Made the OCI image daemon-and-CLI only, non-root, lockfile-bound, and free of web-build fallbacks.
 * Required a linked Discussion and scope alignment before implementation or a pull request.
+* Pinned external workflow actions and normal OCI base images to immutable revisions.
+* Made runner handoff snapshots reject source mutation during copy.
+* Replaced generic agent routing with phase, contract, offline, security, performance, accessibility, and traceability rules.
+* Expressed architecture gates through concrete ownership and dependency rules across contributor surfaces.
 
 ### Removed
 

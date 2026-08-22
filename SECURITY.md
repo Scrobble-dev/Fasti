@@ -21,6 +21,23 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 These controls make the development baseline honest; they do not make it a production service.
 
+## Current threat model
+
+The current source tree protects these assets:
+
+- stable local identity and media history;
+- original observations and evidence;
+- profile, client, credential, grant, and receipt integrity;
+- generated contract meaning;
+- benchmark and hardware qualification evidence;
+- private runner bundles and CI results.
+
+Treat unauthenticated network clients, hostile local processes, provider input, archives, paths, structured data, pull requests, dependencies, actions, base images, and concurrent file changes as untrusted.
+
+Current trust boundaries are the production loopback listener, the feature-gated conformance listener, delivery adapters into application policy, source and CI into generated artifacts, and runner files into exact-commit bundles. Native, OCI, and later package formats must expose the same governed behavior.
+
+The system must fail closed when authorization, durability, limits, source identity, evidence, or hardware identity is missing or stale. Missing behavior must not return a success receipt. Provider data must not become canonical identity. Secrets must not enter URLs, arguments, logs, screenshots, fixtures, or proof bundles.
+
 ## Required future invariants
 
 B1-B8 must prove, rather than merely document:
