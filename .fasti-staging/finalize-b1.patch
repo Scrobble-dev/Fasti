@@ -1,0 +1,469 @@
+diff --git a/crates/fasti-application/src/capabilities.rs b/crates/fasti-application/src/capabilities.rs
+index 8281159..cba4cfa 100644
+--- a/crates/fasti-application/src/capabilities.rs
++++ b/crates/fasti-application/src/capabilities.rs
+@@ -107,25 +107,26 @@ define_capabilities!(
+     (
+         DiscoverCapabilities,
+         B1,
+-        B2,
++        B1,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [CapabilityRead],
+-        [AuthenticationFailed, Forbidden, StorageUnavailable]
++        [Forbidden]
+     ),
+     (
+         InitializeNode,
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         BootstrapOnly,
+         [],
+         [
+-            AlreadyInitialized,
+-            CapacityExceeded,
+-            StorageUnavailable,
++            Forbidden,
++            MalformedJson,
++            PayloadTooLarge,
++            UnsupportedMediaType,
+             ValidationFailed
+         ]
+     ),
+@@ -134,13 +135,14 @@ define_capabilities!(
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
+-        BootstrapOnly,
+-        [],
++        FixtureOnly,
++        Scoped,
++        [ClientEnroll],
+         [
+-            AuthenticationFailed,
+-            BootstrapClosed,
+-            StorageUnavailable,
++            Forbidden,
++            MalformedJson,
++            PayloadTooLarge,
++            UnsupportedMediaType,
+             ValidationFailed
+         ]
+     ),
+@@ -149,84 +151,56 @@ define_capabilities!(
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [ProfileSelect],
+-        [AuthenticationFailed, Forbidden, StorageUnavailable]
++        [CapabilityUnavailable, Forbidden]
+     ),
+     (
+         RotateCredential,
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [CredentialManage],
+-        [AuthenticationFailed, Forbidden, StorageUnavailable]
++        [CapabilityUnavailable, Forbidden]
+     ),
+     (
+         RevokeCredential,
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [CredentialManage],
+-        [AuthenticationFailed, Forbidden, StorageUnavailable]
++        [CapabilityUnavailable, Forbidden]
+     ),
+     (
+         ConfigureListener,
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [ListenerConfigure],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            StorageUnavailable,
+-            UnsupportedListener,
+-            ValidationFailed
+-        ]
+-    ),
+-    (
+-        UploadEvidence,
+-        B2,
+-        B2,
+-        Finalized,
+-        Implemented,
+-        Scoped,
+-        [ObservationAccept],
+-        [
+-            AuthenticationFailed,
+-            CapacityExceeded,
+-            Forbidden,
+-            IntegrityFailed,
+-            PayloadTooLarge,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
++        [CapabilityUnavailable, Forbidden]
+     ),
+     (
+         AcceptObservation,
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [ObservationAccept],
+         [
+-            AuthenticationFailed,
+             CapacityExceeded,
+-            EvidenceNotFound,
+             Forbidden,
+             IdempotencyConflict,
+-            IntegrityFailed,
+             InvalidObservation,
+             MalformedJson,
+             PayloadTooLarge,
+-            StorageUnavailable,
+             UnsupportedMediaType,
+             ValidationFailed
+         ]
+@@ -236,148 +210,80 @@ define_capabilities!(
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [ReceiptRead],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            ReceiptNotFound,
+-            StorageUnavailable
+-        ]
++        [Forbidden, ReceiptNotFound]
+     ),
+     (
+         StreamReceipts,
+         B1,
+         B2,
+         Finalized,
+-        Implemented,
++        FixtureOnly,
+         Scoped,
+         [ReceiptRead],
+-        [
+-            AuthenticationFailed,
+-            CursorExpired,
+-            Forbidden,
+-            ReceiptNotFound,
+-            StorageUnavailable
+-        ]
++        [Forbidden, ReceiptNotFound]
+     ),
+     (
+         CreateRecord,
+         B2,
+         B2,
+-        Finalized,
+-        Implemented,
++        Reserved,
++        LaterBody,
+         Scoped,
+         [IdentityWrite],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            InvalidIdentifier,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
++        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
+     ),
+     (
+         AttachIdentifier,
+         B2,
+         B2,
+-        Finalized,
+-        Implemented,
++        Reserved,
++        LaterBody,
+         Scoped,
+         [IdentityWrite],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            IdentityConflict,
+-            InvalidIdentifier,
+-            RecordNotFound,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
+-    ),
+-    (
+-        ApplyIdentitySeed,
+-        B2,
+-        B2,
+-        Finalized,
+-        Implemented,
+-        Scoped,
+-        [IdentityWrite],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            IdentityConflict,
+-            InvalidIdentifier,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
++        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
+     ),
+     (
+         InspectReview,
+         B2,
+         B2,
+-        Finalized,
+-        Implemented,
++        Reserved,
++        LaterBody,
+         Scoped,
+         [ReviewRead],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            ReviewNotFound,
+-            StorageUnavailable
+-        ]
++        [CapabilityUnavailable, Forbidden]
+     ),
+     (
+         DeferReview,
+         B2,
+         B2,
+-        Finalized,
+-        Implemented,
++        Reserved,
++        LaterBody,
+         Scoped,
+         [ReviewWrite],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            ReviewNotFound,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
++        [CapabilityUnavailable, Forbidden, ValidationFailed]
+     ),
+     (
+         ResumeReview,
+         B2,
+         B2,
+-        Finalized,
+-        Implemented,
++        Reserved,
++        LaterBody,
+         Scoped,
+         [ReviewWrite],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            ReviewNotFound,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
++        [CapabilityUnavailable, Forbidden, ValidationFailed]
+     ),
+     (
+         ResolveReview,
+         B2,
+         B2,
+-        Finalized,
+-        Implemented,
++        Reserved,
++        LaterBody,
+         Scoped,
+         [ReviewWrite],
+-        [
+-            AuthenticationFailed,
+-            Forbidden,
+-            IdentityConflict,
+-            InvalidIdentifier,
+-            RecordNotFound,
+-            ReviewNotFound,
+-            StorageUnavailable,
+-            ValidationFailed
+-        ]
++        [CapabilityUnavailable, Forbidden, ValidationFailed]
+     ),
+     (
+         AppendCorrection,
+@@ -443,21 +349,29 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn b2_runtime_capabilities_are_explicit() {
++    fn b2_runtime_capabilities_remain_non_production_until_activation() {
+         for capability in [
+             CapabilityKey::InitializeNode,
+-            CapabilityKey::UploadEvidence,
+             CapabilityKey::AcceptObservation,
+             CapabilityKey::CreateRecord,
+             CapabilityKey::ResolveReview,
+         ] {
+             assert_eq!(capability.runtime_body(), CapabilityBody::B2);
+-            assert_eq!(capability.contract_state(), ContractState::Finalized);
+-            assert_eq!(
+-                capability.runtime_availability(),
+-                RuntimeAvailability::Implemented
+-            );
++            assert!(!capability.is_production_executable());
+         }
++
++        assert_eq!(
++            CapabilityKey::InitializeNode.runtime_availability(),
++            RuntimeAvailability::FixtureOnly
++        );
++        assert_eq!(
++            CapabilityKey::CreateRecord.contract_state(),
++            ContractState::Reserved
++        );
++        assert_eq!(
++            CapabilityKey::CreateRecord.runtime_availability(),
++            RuntimeAvailability::LaterBody
++        );
+     }
+ 
+     #[test]
+diff --git a/crates/fasti-contracts/src/generated_capability_ids.rs b/crates/fasti-contracts/src/generated_capability_ids.rs
+index 0342c6c..a2c8a2d 100644
+--- a/crates/fasti-contracts/src/generated_capability_ids.rs
++++ b/crates/fasti-contracts/src/generated_capability_ids.rs
+@@ -7,7 +7,6 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
+     match key {
+         CapabilityKey::AcceptObservation => "observation.accept",
+         CapabilityKey::AppendCorrection => "correction.chain.append",
+-        CapabilityKey::ApplyIdentitySeed => "identity.seed.apply",
+         CapabilityKey::AttachIdentifier => "identity.identifier.attach",
+         CapabilityKey::ConfigureListener => "listener.configure",
+         CapabilityKey::CreateRecord => "identity.record.create",
+@@ -27,7 +26,6 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
+         CapabilityKey::SelectProfile => "profile.select",
+         CapabilityKey::StreamReceipts => "receipt.stream",
+         CapabilityKey::SystemHealth => "system.health",
+-        CapabilityKey::UploadEvidence => "evidence.upload",
+         CapabilityKey::VerifyWorkspace => "portability.workspace.verify",
+     }
+ }
+diff --git a/crates/fasti-store/src/evidence.rs b/crates/fasti-store/src/evidence.rs
+index 9a9bb0a..a3a04cd 100644
+--- a/crates/fasti-store/src/evidence.rs
++++ b/crates/fasti-store/src/evidence.rs
+@@ -20,7 +20,7 @@ impl EvidenceUploadPort for SqliteKernel {
+         request: EvidenceUploadRequest,
+     ) -> ApplicationResult<Box<dyn EvidenceUploadSession>> {
+         let correlation_id = request.correlation_id();
+-        let capability = CapabilityKey::UploadEvidence;
++        let capability = CapabilityKey::AcceptObservation;
+         let limit = request
+             .declared_size()
+             .unwrap_or(MAX_EVIDENCE_BYTES)
+@@ -109,7 +109,7 @@ struct SqliteEvidenceUpload {
+ impl EvidenceUploadSession for SqliteEvidenceUpload {
+     fn write_chunk(&mut self, bytes: &[u8]) -> ApplicationResult<()> {
+         let correlation_id = self.request.correlation_id();
+-        let capability = CapabilityKey::UploadEvidence;
++        let capability = CapabilityKey::AcceptObservation;
+         let next = self
+             .bytes_written
+             .checked_add(bytes.len() as u64)
+@@ -138,7 +138,7 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
+ 
+     fn finish(mut self: Box<Self>) -> ApplicationResult<EvidenceReference> {
+         let correlation_id = self.request.correlation_id();
+-        let capability = CapabilityKey::UploadEvidence;
++        let capability = CapabilityKey::AcceptObservation;
+         let mut file = self
+             .file
+             .take()
+diff --git a/crates/fasti-store/src/seed.rs b/crates/fasti-store/src/seed.rs
+index 4d60864..ac208a3 100644
+--- a/crates/fasti-store/src/seed.rs
++++ b/crates/fasti-store/src/seed.rs
+@@ -15,7 +15,7 @@ impl IdentitySeedPort for SqliteKernel {
+         &self,
+         command: ApplyIdentitySeedCommand,
+     ) -> ApplicationResult<ApplyIdentitySeedOutcome> {
+-        let capability = CapabilityKey::ApplyIdentitySeed;
++        let capability = CapabilityKey::CreateRecord;
+         let correlation_id = command.correlation_id();
+         if command.manifest().version().trim().is_empty()
+             || command.manifest().entries().len() > MAX_SEED_ENTRIES
+diff --git a/tests/js/sdk-client.test.mjs b/tests/js/sdk-client.test.mjs
+index b4d3d98..6ac41f9 100644
+--- a/tests/js/sdk-client.test.mjs
++++ b/tests/js/sdk-client.test.mjs
+@@ -1021,6 +1021,7 @@ async function withRustFixture(exercise) {
+   );
+   const child = spawn(executable, ["127.0.0.1:0"], {
+     cwd: repositoryRoot,
++    env: { ...process.env, RUST_BACKTRACE: "1" },
+     stdio: ["ignore", "pipe", "pipe"],
+   });
+   let stderr = "";
+@@ -1034,7 +1035,14 @@ async function withRustFixture(exercise) {
+     assert.equal(readiness.availability, "fixture_only");
+     assert.equal(readiness.durability, "none");
+     assert.match(readiness.address, /^127\.0\.0\.1:\d+$/);
+-    await exercise(`http://${readiness.address}`);
++    try {
++      await exercise(`http://${readiness.address}`);
++    } catch (error) {
++      throw new Error(
++        `Rust fixture exercise failed: ${fixtureProcessContext(child, stderr)}`,
++        { cause: error },
++      );
++    }
+   } finally {
+     if (child.exitCode === null && child.signalCode === null) {
+       child.kill("SIGINT");
+@@ -1047,6 +1055,15 @@ async function withRustFixture(exercise) {
+   }
+ }
+ 
++function fixtureProcessContext(child, stderr) {
++  const boundedStderr = stderr.slice(-16 * 1024).trim();
++  return [
++    `exit_code=${child.exitCode ?? "running"}`,
++    `signal=${child.signalCode ?? "none"}`,
++    `stderr=${boundedStderr || "<empty>"}`,
++  ].join(" ");
++}
++
+ async function readReadiness(child, stderr) {
+   child.stdout.setEncoding("utf8");
+   return await new Promise((resolve, reject) => {
