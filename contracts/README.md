@@ -24,7 +24,7 @@ The production OpenAPI document contains only `GET /api/v1/health`, matching the
 
 JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surfaces: operational access or administration can be reasoned `N/A` for linked data while still requiring recovery knowledge. The SDK, CLI discovery, examples, and documentation consume the same registry instead of re-declaring capability meaning.
 
-Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. A verifier receipt proves only the software contract spine. B1 remains open until named physical Raspberry Pi 5 and J4125 RAM evidence and mandatory QA/developer-experience receipts exist. B2 is not authorized.
+Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until named physical Raspberry Pi 5 and J4125 RAM evidence exists. B2 is not authorized.
 
 Provider seeds and manifest examples remain future adapter inputs, not working integrations. There is no supported install, release, persistence kernel, web interface, desktop package, or player.
 

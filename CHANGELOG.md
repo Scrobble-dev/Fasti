@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Brand guidelines and design system specifications adhering to W3C Design Tokens Community Group (DTCG 2025.10).
 * Constitution, glossary, capability ledger, contract ownership, UAT ownership, and Definition of Done.
 * Health-only daemon surface and explicit nonzero guards for planned B3 CLI operations.
+* Executable, loopback-only B1 conformance fixture with governed HTTP and SSE behavior.
+* Deterministically generated TypeScript contract SDK and focused local integration-author guide.
 * GitHub issue forms, PR review checklist, CODEOWNERS, and non-publishing CI/security workflows.
 
 ### Changed

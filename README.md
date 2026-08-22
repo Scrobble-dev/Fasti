@@ -124,7 +124,43 @@ These are gates only when measured on the named artifact and hardware profile. B
 
 ## Development
 
-There is no supported installation yet. Contributors can verify the current source baseline with the tool baselines selected by CI and OCI:
+There is no supported installation yet. The shortest contributor path runs the production daemon's one truthful capability. With the Rust toolchain and dependencies available:
+
+```bash
+cargo run --locked -p fastid
+```
+
+In a second terminal:
+
+```bash
+curl --fail --silent http://127.0.0.1:8420/api/v1/health
+```
+
+The exact response is:
+
+```json
+{"status":"healthy","version":"0.1.0"}
+```
+
+That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
+
+To inspect the governed public capability identifiers without starting a service:
+
+```bash
+cargo run --locked -p fasti-cli -- capability list
+```
+
+Contract authors can run the loopback-only, nondurable B1 fixture with:
+
+```bash
+cargo run --locked -p fasti-api \
+  --features conformance-fixture \
+  --bin b1-conformance-server -- 127.0.0.1:8421
+```
+
+The fixture prints one JSON readiness line declaring `"availability":"fixture_only"` and `"durability":"none"`. Its command help is available through the same Cargo invocation with `-- --help`. See the [contract ownership guide](contracts/README.md) and the [local TypeScript SDK guide](packages/sdk/README.md) for the bounded integration-author path.
+
+The full source baseline uses the tool versions selected by CI and OCI:
 
 - Rust `1.97.1`;
 - Node.js `22`;
