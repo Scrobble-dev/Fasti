@@ -20,7 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .fasti-staging/b2-source.tar.gz.b64 > /tmp/b2-source.tar.gz
+          python3 -c 'from base64 import b64decode; from pathlib import Path; source = Path(".fasti-staging/b2-source.tar.gz.b64"); encoded = "".join(source.read_text(encoding="utf-8").split()); encoded += "=" * (-len(encoded) % 4); Path("/tmp/b2-source.tar.gz").write_bytes(b64decode(encoded, validate=True))'
           echo "44848c330440cb0e5674e368c475d0a98848b8363ac03f22356ec89983fac196  /tmp/b2-source.tar.gz" | sha256sum --check --strict
           tar -tzf /tmp/b2-source.tar.gz | LC_ALL=C sort > /tmp/actual-paths.txt
           cat > /tmp/expected-paths.txt <<'PATHS'
@@ -60,6 +60,7 @@ jobs:
           rm -f .fasti-staging/b2-source.tar.gz.b64
           rmdir .fasti-staging
           rm -f .github/workflows/b2-apply-reviewed-source.yml
+          rm -f .github/workflows/b2-format-evidence.yml
           git diff --check
       - name: Create the reviewed B2 source commit
         shell: bash
@@ -72,5 +73,5 @@ jobs:
             -m "feat(b2): expose the durable local kernel through API and CLI" \
             -m "Add the loopback-first production API, stable public B2 transport shapes, local node composition, authenticated status, content-addressed evidence upload, observation and receipt delivery, identity and review operations, credential lifecycle, listener configuration, provider-neutral seed handling, and a credential-free headless sandbox." \
             -m "Keep credential material in permission-restricted files, keep query strings free of credentials, preserve bounded request and replay behavior, keep Docker as one wrapper over the native runtime, and retain explicit later-body guards for export, restore, and verification." \
-            -m "This commit also reconciles the local package graph and adds a temporary read-only formatting export job for exact follow-up validation."
+            -m "This commit also reconciles the local package graph and keeps one temporary read-only formatting export job for exact follow-up validation."
           git push origin HEAD:security/b1-evidence-hardening-20260822
