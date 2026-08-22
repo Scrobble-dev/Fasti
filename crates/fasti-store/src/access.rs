@@ -633,10 +633,9 @@ mod tests {
             let initialized = kernel
                 .initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
                 .expect("initialize node");
-            let proof = SecretMaterial::try_from_hex(
-                &initialized.initialization_proof().expose_hex(),
-            )
-            .expect("copy one-time proof for enrollment");
+            let proof =
+                SecretMaterial::try_from_hex(&initialized.initialization_proof().expose_hex())
+                    .expect("copy one-time proof for enrollment");
             let enrolled = kernel
                 .enroll_first_client(EnrollFirstClientCommand::new(
                     RequestCorrelationId::new_v7(),
