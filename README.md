@@ -6,7 +6,7 @@
 
 <br/><br/>
 
-### *Every story, kept in time.*
+### _Every story, kept in time._
 
 **An identity-first, self-hosted system of record for what you watch, read, hear, and play.**
 **Fasti records. Players play.**
@@ -18,7 +18,7 @@
 
 <br/>
 
-[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b1-foundation-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 <br/>
 
@@ -38,22 +38,22 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet.
+This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B1 software work is in progress; B2 is not authorized.
 
-The B0 baseline deliberately exposes only behavior it can prove:
+The production daemon deliberately exposes only behavior it can prove:
 
-| Surface | B0 state |
-|---|---|
-| `GET /api/v1/health` | Implemented process health response |
-| `POST /api/v1/events` | Absent; returns `404` until B2 can persist and replay a durable receipt |
-| `fasti export` | Reserved for B3; exits nonzero and changes no data |
-| `fasti restore` | Reserved for B3; exits nonzero and changes no data |
-| `fasti verify` | Reserved for B3; exits nonzero and emits no success receipt |
-| Web UI | Not implemented; B4 owns the approved Tabler-based media interface |
-| Desktop packaging | Not implemented; B8 owns packaged application work |
-| Public images and binaries | Disabled until the B8 readiness gate and an explicit release action |
+| Surface                                 | Current state                                                                                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document                                                                                |
+| B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability |
+| `POST /api/v1/events`                   | Absent from production; returns `404` until B2 can persist and replay a durable receipt                                                                 |
+| `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                |
+| `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                        |
+| Web UI                                  | Not implemented; B4 owns the approved Tabler-based media interface                                                                                      |
+| Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                      |
+| Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                     |
 
-The governed identity seed, provider-manifest example, UAT matrix, schema draft, and brand system are inputs to the implementation. Their presence does not claim that their capabilities already exist.
+The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
 
 ## Constitution
 
@@ -70,40 +70,44 @@ See the [glossary](docs/glossary.md), [capability ledger](docs/capability-ledger
 
 ## Current B1 foundation architecture
 
-The active workspace now has the inward ownership spine while B1 builds its executable contracts:
+The active workspace has an inward-facing ownership spine and executable B1 contract surfaces:
 
 ```text
-apps/fastid          health-only daemon composition root
-crates/fasti-api     implemented HTTP health route; unsupported routes remain absent
-crates/fasti-cli     explicit nonzero guards for planned B3 operations
-crates/fasti-domain  typed IDs, time values, and domain vocabulary
+apps/fastid          production, health-only daemon composition root
+crates/fasti-domain  typed IDs, time values, and domain invariants
 crates/fasti-application
-                     capability ownership and one typed problem catalog
+                     use cases, authorization, bounded fixture behavior, and typed problems
+crates/fasti-contracts
+                     shared public DTOs and generated capability identifiers
+crates/fasti-api     production Utoipa health API plus a separately gated loopback fixture
+crates/fasti-cli     local capability discovery and explicit B3 nonzero guards
 crates/fasti-store   intentionally empty adapter boundary until B2 persistence
 
-packages/sdk         minimal typed health client
-packages/schemas     governed draft schema input
+contracts            authoritative registry, authored semantics, examples, and generated artifacts
+packages/sdk         generated typed TypeScript HTTP/SSE client
+packages/schemas     governed JSON Schema 2020-12 inputs
 packages/tokens      approved design-token projection
+xtask                deterministic generation and fail-closed verification
 ```
 
-Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B1 introduces `fasti-contracts` and the deterministic task runner only after this domain/application foundation is compile-green.
+Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases.
 
 Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
 
 ## Contract gates
 
-B0 validates the syntax and shape of governed drafts. It does not claim full standards conformance.
+B1 now has a machine-readable capability registry as the authoritative ledger. Deterministic generation projects that meaning into:
 
-B1 must make the following surfaces executable and drift-proof before its capabilities are accepted:
-
-- OpenAPI 3.1 generated from real Utoipa-bound handlers and shared public DTOs;
-- AsyncAPI 3.x transport bindings for channels, replay, and message flow;
+- a production OpenAPI 3.1 document generated from the one mounted health handler;
+- a separate OpenAPI 3.1 document for real, feature-gated conformance handlers and shared public DTOs;
+- AsyncAPI 3.x transport binding for the `receipt.stream` SSE channel;
 - JSON Schema 2020-12 for public payloads;
 - JSON-LD 1.1 vocabularies and contexts with expansion tests;
-- OKF, examples, permissions, errors, and knowledge links;
-- a generated TypeScript HTTP/SSE SDK with typed problems and governed retry behavior.
+- OKF, semantic examples, permissions, problems, and knowledge links;
+- a generated TypeScript HTTP/SSE SDK with typed parsing, problems, bounded input, and governed reconnect behavior;
+- local `fasti capability list` and `fasti capability show <id>` views of the same public registry.
 
-Generation must be deterministic. Checked-in artifacts, executable handlers, CLI behavior, SDK methods, and the [capability ledger](docs/capability-ledger.md) must describe the same capability. See [contracts/README.md](contracts/README.md) for ownership and current locations.
+`cargo xtask contract verify --locked` fails closed on registry, generation, drift, semantic examples, standards, SDK, Rust, package, and repository-truth gates and emits a software receipt only after all checks pass. That receipt does not close B1: named Raspberry Pi 5 and J4125 RAM evidence plus mandatory QA and developer-experience receipts are still required. See [contracts/README.md](contracts/README.md) for ownership and current locations.
 
 ## Performance and portability targets
 
@@ -116,7 +120,7 @@ Fasti targets small self-hosted hardware rather than treating it as an afterthou
 - Raspberry Pi 5 champion profile and a calibrated J4125-class x86 profile;
 - Ugoos AM6B+, Xiaomi Box M3, Nvidia Shield, and representative TV hardware as explicit packaging hypotheses.
 
-These are gates only when measured on the named artifact and hardware profile. B0 does not present estimates as passing evidence.
+These are gates only when measured on the named artifact and hardware profile. B1 remains open until named physical Raspberry Pi 5 and J4125 measurements exist; host estimates and software contract receipts are not substitutes.
 
 ## Development
 
@@ -133,6 +137,7 @@ cd Fasti
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+cargo xtask contract verify --locked
 
 pnpm install --frozen-lockfile
 pnpm format:check
@@ -147,7 +152,7 @@ docker build --tag fasti:b0 .
 bash scripts/smoke-oci.sh fasti:b0
 ```
 
-The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, the absent event route, guarded CLI failure, and a 64 MiB B0 idle-memory threshold. That one-shot container sample is a regression sentinel, not the Raspberry Pi 5 or J4125 performance receipt required by later bodies. Override the default command to inspect the guarded CLI, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero in B0.
+The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. That one-shot container sample is a regression sentinel, not the Raspberry Pi 5 or J4125 performance receipt required to close B1. Override the default command to inspect a guarded command, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3.
 
 ## Brand and design system
 
@@ -162,7 +167,7 @@ The product interface arrives after the headless contract and local kernel. Its 
 ## Roadmap
 
 - **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
-- **B1: Executable contract spine** — establish bounded contexts and generate the required OpenAPI, AsyncAPI, Schema, JSON-LD, OKF, and SDK surfaces.
+- **B1: Executable contract spine** — software surfaces are being made executable and drift-proof; closure still requires physical Pi 5/J4125 RAM evidence and mandatory QA/developer-experience receipts.
 - **B2: Local kernel** — persist evidence, identity, access, operations, and durable receipt replay on constrained hardware.
 - **B3: Corrections and portability** — append-only interpretation revision plus complete export, clean restore, and equality proof.
 - **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
