@@ -7,71 +7,257 @@
   "required": ["$schema", "schema_version", "policy", "devices"],
   "properties": {
     "$schema": { "const": "./device-hypotheses.schema.json" },
-    "schema_version": { "const": "fasti.b1.device-hypotheses.v1" },
+    "schema_version": { "const": "fasti.b1.device-hypotheses.v2" },
     "policy": {
-      "const": "A device is not qualified until its custodian, exact runner fingerprint, artifact and contract references, and validated evidence receipt are assigned."
+      "const": "A device is not qualified until its observed runner fingerprint, exact source artifacts and contracts, and validated evidence receipt are correlated; calibrated secondary status additionally requires validated champion evidence."
     },
     "devices": {
       "type": "array",
       "minItems": 6,
       "maxItems": 6,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "profile",
-          "display_name",
-          "role",
-          "hypothesis",
-          "qualification_state",
-          "custodian",
-          "runner_fingerprint",
-          "artifact_ref",
-          "contract_ref",
-          "evidence_ref",
-          "results",
-          "blocking_reason",
-          "calibration"
-        ],
-        "properties": {
-          "profile": {
-            "enum": [
-              "raspberry_pi_5_champion",
-              "j4125_calibrated",
-              "ugoos_am6b_plus",
-              "xiaomi_box_m3",
-              "nvidia_shield",
-              "representative_tv"
-            ]
-          },
-          "display_name": { "type": "string", "minLength": 1 },
-          "role": {
-            "enum": ["champion", "calibrated_secondary", "packaging_hypothesis"]
-          },
-          "hypothesis": { "type": "string", "minLength": 1 },
-          "qualification_state": { "const": "blocking_unassigned" },
-          "custodian": { "type": "null" },
-          "runner_fingerprint": { "type": "null" },
-          "artifact_ref": { "type": "null" },
-          "contract_ref": { "type": "null" },
-          "evidence_ref": { "type": "null" },
-          "results": { "type": "null" },
-          "blocking_reason": { "type": "string", "minLength": 1 },
-          "calibration": {
-            "oneOf": [
-              { "type": "null" },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["reference_profile", "state", "method"],
-                "properties": {
-                  "reference_profile": { "const": "raspberry_pi_5_champion" },
-                  "state": { "const": "not_started" },
-                  "method": { "type": "null" }
+      "items": { "$ref": "#/$defs/device" }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "nullableString": {
+      "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }]
+    },
+    "profile": {
+      "enum": [
+        "raspberry_pi_5_champion",
+        "j4125_calibrated",
+        "ugoos_am6b_plus",
+        "xiaomi_box_m3",
+        "nvidia_shield",
+        "representative_tv"
+      ]
+    },
+    "runnerFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner_id",
+        "hardware_profile",
+        "hardware_profile_derivation",
+        "physicality",
+        "os_release",
+        "kernel_release",
+        "architecture",
+        "cpu_model",
+        "device_model",
+        "logical_cpu_count",
+        "total_memory_bytes"
+      ],
+      "properties": {
+        "runner_id": { "$ref": "#/$defs/nonEmptyString" },
+        "hardware_profile": { "$ref": "#/$defs/profile" },
+        "hardware_profile_derivation": { "const": "fingerprint_rule_v1" },
+        "physicality": { "$ref": "#/$defs/physicality" },
+        "os_release": { "$ref": "#/$defs/nonEmptyString" },
+        "kernel_release": { "$ref": "#/$defs/nonEmptyString" },
+        "architecture": { "$ref": "#/$defs/nonEmptyString" },
+        "cpu_model": { "$ref": "#/$defs/nonEmptyString" },
+        "device_model": { "$ref": "#/$defs/nullableString" },
+        "logical_cpu_count": { "type": "integer", "minimum": 1 },
+        "total_memory_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "physicality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "mechanism",
+        "systemd_detect_virt",
+        "cpu_hypervisor_flag",
+        "dmi"
+      ],
+      "properties": {
+        "status": { "const": "physical" },
+        "mechanism": {
+          "enum": [
+            "raspberry_pi_device_tree",
+            "j4125_systemd_cpu_dmi_cross_check",
+            "device_tree_model"
+          ]
+        },
+        "systemd_detect_virt": { "$ref": "#/$defs/nullableString" },
+        "cpu_hypervisor_flag": { "const": false },
+        "dmi": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/nonEmptyString" },
+              "required": ["sys_vendor", "product_name"],
+              "properties": {
+                "sys_vendor": { "$ref": "#/$defs/nonEmptyString" },
+                "product_name": { "$ref": "#/$defs/nonEmptyString" }
+              }
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "git_commit",
+        "git_tree",
+        "native_fastid_sha256",
+        "oci_image_id"
+      ],
+      "properties": {
+        "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "git_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "native_fastid_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "oci_image_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^evidence/[A-Za-z0-9._-]+\\.json$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["budget_statuses", "all_applicable_budgets_passed"],
+      "properties": {
+        "budget_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "idle_target",
+            "normal_target",
+            "heavy_target",
+            "absolute_ceiling"
+          ],
+          "properties": {
+            "idle_target": { "enum": ["pass", "fail"] },
+            "normal_target": { "const": "not_applicable" },
+            "heavy_target": { "const": "not_applicable" },
+            "absolute_ceiling": { "enum": ["pass", "fail"] }
+          }
+        },
+        "all_applicable_budgets_passed": { "type": "boolean" }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference_profile",
+        "state",
+        "method",
+        "reference_evidence_ref",
+        "measured_relation"
+      ],
+      "properties": {
+        "reference_profile": { "const": "raspberry_pi_5_champion" },
+        "state": {
+          "enum": ["not_started", "method_assigned", "validated"]
+        },
+        "method": { "$ref": "#/$defs/nullableString" },
+        "reference_evidence_ref": {
+          "oneOf": [{ "$ref": "#/$defs/evidenceRef" }, { "type": "null" }]
+        },
+        "measured_relation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "idle_target_ratio_j4125_to_champion",
+                "absolute_ceiling_ratio_j4125_to_champion"
+              ],
+              "properties": {
+                "idle_target_ratio_j4125_to_champion": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "absolute_ceiling_ratio_j4125_to_champion": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
                 }
               }
-            ]
-          }
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "display_name",
+        "role",
+        "hypothesis",
+        "qualification_state",
+        "custodian",
+        "runner_fingerprint",
+        "artifact_ref",
+        "contract_ref",
+        "evidence_ref",
+        "results",
+        "blocking_reason",
+        "calibration"
+      ],
+      "properties": {
+        "profile": { "$ref": "#/$defs/profile" },
+        "display_name": { "$ref": "#/$defs/nonEmptyString" },
+        "role": {
+          "enum": ["champion", "calibrated_secondary", "packaging_hypothesis"]
+        },
+        "hypothesis": { "$ref": "#/$defs/nonEmptyString" },
+        "qualification_state": {
+          "enum": [
+            "blocking_unassigned",
+            "assigned_pending_evidence",
+            "evidence_validated",
+            "qualified",
+            "calibrated"
+          ]
+        },
+        "custodian": { "$ref": "#/$defs/nullableString" },
+        "runner_fingerprint": {
+          "oneOf": [{ "$ref": "#/$defs/runnerFingerprint" }, { "type": "null" }]
+        },
+        "artifact_ref": {
+          "oneOf": [{ "$ref": "#/$defs/artifactRef" }, { "type": "null" }]
+        },
+        "contract_ref": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "type": "null" }
+          ]
+        },
+        "evidence_ref": {
+          "oneOf": [{ "$ref": "#/$defs/evidenceRef" }, { "type": "null" }]
+        },
+        "results": {
+          "oneOf": [{ "$ref": "#/$defs/results" }, { "type": "null" }]
+        },
+        "blocking_reason": { "$ref": "#/$defs/nullableString" },
+        "calibration": {
+          "oneOf": [{ "$ref": "#/$defs/calibration" }, { "type": "null" }]
         }
       }
     }

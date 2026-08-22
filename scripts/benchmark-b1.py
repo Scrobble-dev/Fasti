@@ -17,6 +17,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import statistics
 import subprocess
 import sys
@@ -32,7 +33,12 @@ ROOT = Path(__file__).resolve().parents[1]
 B1_DIR = ROOT / "benchmarks" / "b1"
 BUDGETS_PATH = B1_DIR / "budgets.json"
 VALIDATOR_PATH = B1_DIR / "validate-evidence.mjs"
-HARNESS_VERSION = "fasti-b1-benchmark.v1"
+HARNESS_VERSION = "fasti-b1-benchmark.v2"
+IMAGE_SOURCE_LABELS = {
+    "git_commit": "org.opencontainers.image.revision",
+    "git_tree": "dev.scrobble.fasti.source.tree",
+    "contract_ref": "dev.scrobble.fasti.contracts",
+}
 SCENARIO_IDS = (
     "native_empty_process",
     "native_fastid_idle",
@@ -114,6 +120,141 @@ def parse_cpu_model() -> str:
     raise CaptureError("no CPU model was found in /proc/cpuinfo")
 
 
+def parse_device_model() -> str | None:
+    for path in [
+        Path("/proc/device-tree/model"),
+        Path("/sys/firmware/devicetree/base/model"),
+    ]:
+        try:
+            value = path.read_bytes().rstrip(b"\x00").decode("utf-8", errors="replace").strip()
+        except (FileNotFoundError, PermissionError):
+            continue
+        if value:
+            return value
+    return None
+
+
+def derive_hardware_profile(cpu_model: str, device_model: str | None) -> str:
+    """Derive a target profile only from host-observed fingerprint fields."""
+
+    cpu = cpu_model.casefold()
+    device = (device_model or "").casefold()
+    if "raspberry pi 5" in device:
+        return "raspberry_pi_5_champion"
+    if re.search(r"\bj4125\b", cpu):
+        return "j4125_calibrated"
+    if "ugoos" in device and "am6b" in device:
+        return "ugoos_am6b_plus"
+    if "xiaomi" in device and any(
+        marker in device for marker in ["mi box 3", "mibox3", "mdz-16-ab", "mdz-19-aa"]
+    ):
+        return "xiaomi_box_m3"
+    if "nvidia" in device and "shield" in device:
+        return "nvidia_shield"
+    return "unclassified"
+
+
+def parse_cpu_flags() -> set[str]:
+    path = Path("/proc/cpuinfo")
+    if not path.is_file():
+        raise CaptureError("/proc/cpuinfo is required for virtualization checks")
+    flags: set[str] = set()
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip().lower() in {"flags", "features"}:
+            flags.update(value.casefold().split())
+    return flags
+
+
+def parse_dmi_identity() -> dict[str, str]:
+    result: dict[str, str] = {}
+    for field in ["sys_vendor", "product_name", "product_version", "board_vendor", "board_name"]:
+        path = Path("/sys/class/dmi/id") / field
+        try:
+            value = path.read_text(encoding="utf-8", errors="replace").strip()
+        except (FileNotFoundError, PermissionError):
+            continue
+        if value:
+            result[field] = value
+    return result
+
+
+def detect_systemd_virtualization() -> str:
+    require_command("systemd-detect-virt")
+    result = subprocess.run(
+        ["systemd-detect-virt", "--vm"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    observed = result.stdout.strip().casefold()
+    if result.returncode == 0 and observed and observed != "none":
+        return observed
+    if result.returncode == 1 and observed in {"", "none"}:
+        return "none"
+    diagnostic = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+    raise CaptureError(f"systemd-detect-virt could not establish physical hardware: {diagnostic}")
+
+
+def physicality_evidence(
+    hardware_profile: str,
+    cpu_flags: set[str],
+    dmi: dict[str, str],
+    systemd_virtualization: str | None,
+) -> dict[str, Any]:
+    if hardware_profile == "raspberry_pi_5_champion":
+        if "hypervisor" in cpu_flags:
+            raise CaptureError("Raspberry Pi 5 qualification refused because virtualization is visible")
+        return {
+            "status": "physical",
+            "mechanism": "raspberry_pi_device_tree",
+            "systemd_detect_virt": None,
+            "cpu_hypervisor_flag": False,
+            "dmi": None,
+        }
+    if hardware_profile == "j4125_calibrated":
+        if systemd_virtualization != "none":
+            raise CaptureError(
+                f"J4125 qualification requires a physical runner; virtualization was {systemd_virtualization!r}"
+            )
+        if "hypervisor" in cpu_flags:
+            raise CaptureError("J4125 qualification refused because the CPU hypervisor flag is present")
+        required = {"sys_vendor", "product_name"}
+        if not required.issubset(dmi):
+            raise CaptureError("J4125 qualification requires DMI system vendor and product name")
+        virtual_markers = {
+            "bhyve",
+            "bochs",
+            "kvm",
+            "microsoft corporation virtual machine",
+            "parallels",
+            "qemu",
+            "virtualbox",
+            "vmware",
+            "xen",
+        }
+        identity = " ".join(dmi.values()).casefold()
+        if any(marker in identity for marker in virtual_markers):
+            raise CaptureError(f"J4125 DMI identifies virtualized hardware: {identity!r}")
+        return {
+            "status": "physical",
+            "mechanism": "j4125_systemd_cpu_dmi_cross_check",
+            "systemd_detect_virt": "none",
+            "cpu_hypervisor_flag": False,
+            "dmi": dmi,
+        }
+    if "hypervisor" in cpu_flags:
+        raise CaptureError("device-tree hardware qualification refused because virtualization is visible")
+    return {
+        "status": "physical",
+        "mechanism": "device_tree_model",
+        "systemd_detect_virt": None,
+        "cpu_hypervisor_flag": False,
+        "dmi": None,
+    }
+
+
 def parse_total_memory_bytes() -> int:
     meminfo = Path("/proc/meminfo")
     if not meminfo.is_file():
@@ -126,7 +267,7 @@ def parse_total_memory_bytes() -> int:
     raise CaptureError("MemTotal is missing or unsupported in /proc/meminfo")
 
 
-def ensure_clean_tree() -> tuple[str, str]:
+def ensure_clean_tree() -> tuple[str, str, str]:
     status = run_checked(["git", "status", "--porcelain=v1", "--untracked-files=all"])
     if status:
         raise CaptureError(
@@ -134,9 +275,98 @@ def ensure_clean_tree() -> tuple[str, str]:
         )
     commit = run_checked(["git", "rev-parse", "HEAD"])
     tree = run_checked(["git", "rev-parse", "HEAD^{tree}"])
-    if len(commit) != 40 or len(tree) != 40:
-        raise CaptureError("Git did not return full commit and tree object IDs")
-    return commit, tree
+    contract_ref = run_checked(["git", "rev-parse", "HEAD:contracts"])
+    if any(re.fullmatch(r"[0-9a-f]{40}", value) is None for value in [commit, tree, contract_ref]):
+        raise CaptureError("Git did not return full commit, tree, and HEAD:contracts object IDs")
+    return commit, tree, contract_ref
+
+
+def local_docker_socket_path(endpoint: str) -> Path:
+    if not endpoint.startswith("unix://"):
+        raise CaptureError(
+            f"Docker must use a demonstrably local Unix socket; effective endpoint was {endpoint!r}"
+        )
+    socket_path = Path(endpoint.removeprefix("unix://"))
+    if not socket_path.is_absolute():
+        raise CaptureError(f"Docker Unix socket path must be absolute: {socket_path}")
+    try:
+        mode = socket_path.stat().st_mode
+    except (FileNotFoundError, PermissionError) as error:
+        raise CaptureError(f"Docker Unix socket is unavailable: {socket_path}: {error}") from error
+    if not stat.S_ISSOCK(mode):
+        raise CaptureError(f"Docker endpoint is not a Unix socket: {socket_path}")
+    return socket_path
+
+
+def verify_local_docker() -> dict[str, str]:
+    context = run_checked(["docker", "context", "show"])
+    configured_endpoint = json.loads(
+        run_checked(
+            [
+                "docker",
+                "context",
+                "inspect",
+                context,
+                "--format",
+                "{{json .Endpoints.docker.Host}}",
+            ]
+        )
+    )
+    environment_endpoint = os.environ.get("DOCKER_HOST")
+    endpoint = environment_endpoint or configured_endpoint
+    socket_path = local_docker_socket_path(endpoint)
+    return {
+        "context": context,
+        "endpoint": endpoint,
+        "socket_path": str(socket_path),
+        "locality": "verified_local_unix_socket",
+    }
+
+
+def inspect_bound_image(image_ref: str, expected_source: dict[str, str]) -> dict[str, Any]:
+    documents = json.loads(run_checked(["docker", "image", "inspect", image_ref]))
+    if not isinstance(documents, list) or len(documents) != 1:
+        raise CaptureError(f"Docker returned an unexpected image inspection for {image_ref!r}")
+    document = documents[0]
+    image_id = document.get("Id")
+    if not isinstance(image_id, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", image_id) is None:
+        raise CaptureError(f"Docker image has no immutable content ID: {image_ref}")
+    labels = (document.get("Config") or {}).get("Labels") or {}
+    observed_labels: dict[str, str] = {}
+    for source_field, label_name in IMAGE_SOURCE_LABELS.items():
+        expected = expected_source[source_field]
+        observed = labels.get(label_name)
+        if observed != expected:
+            raise CaptureError(
+                f"Docker image {image_ref!r} label {label_name!r} must equal {expected!r}, observed {observed!r}"
+            )
+        observed_labels[label_name] = observed
+    return {"id": image_id, "source_labels": observed_labels}
+
+
+def verify_capture_inputs_unchanged(args: argparse.Namespace, context: dict[str, Any]) -> None:
+    commit, tree, contract_ref = ensure_clean_tree()
+    source = context["source"]
+    observed_source = {
+        "git_commit": commit,
+        "git_tree": tree,
+        "contract_ref": contract_ref,
+    }
+    expected_source = {key: source[key] for key in observed_source}
+    if observed_source != expected_source:
+        raise CaptureError(
+            f"source identity changed during capture: expected {expected_source!r}, observed {observed_source!r}"
+        )
+    native_digest = sha256_file(args.native_binary)
+    if native_digest != source["native_fastid_sha256"]:
+        raise CaptureError("native fastid bytes changed during capture")
+    docker_locality = verify_local_docker()
+    if docker_locality != context["docker_locality"]:
+        raise CaptureError("Docker context, endpoint, or local socket changed during capture")
+    mutable_ref = inspect_bound_image(source["oci_image_ref"], expected_source)
+    immutable_ref = inspect_bound_image(source["oci_image_id"], expected_source)
+    if mutable_ref != immutable_ref or immutable_ref["id"] != source["oci_image_id"]:
+        raise CaptureError("Docker image identity or source labels changed during capture")
 
 
 def preflight(args: argparse.Namespace) -> dict[str, Any]:
@@ -148,12 +378,10 @@ def preflight(args: argparse.Namespace) -> dict[str, Any]:
     for command in ["curl", "docker", "git", "ip", "node", "unshare"]:
         require_command(command)
 
-    if not args.native_binary.is_file() or not os.access(args.native_binary, os.X_OK):
-        raise CaptureError(f"native fastid binary is missing or not executable: {args.native_binary}")
     if args.output.exists():
         raise CaptureError(f"refusing to overwrite existing evidence: {args.output}")
 
-    commit, tree = ensure_clean_tree()
+    commit, tree, contract_ref = ensure_clean_tree()
     if not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
         raise CaptureError("cgroup v2 is required; /sys/fs/cgroup/cgroup.controllers is absent")
 
@@ -168,48 +396,98 @@ def preflight(args: argparse.Namespace) -> dict[str, Any]:
     ]
     run_checked(unshare_test)
 
+    docker_locality = verify_local_docker()
     docker_cgroup = run_checked(["docker", "info", "--format", "{{.CgroupVersion}}"])
     if docker_cgroup != "2":
         raise CaptureError(f"Docker must use cgroup v2, reported {docker_cgroup!r}")
     docker_version = run_checked(["docker", "version", "--format", "{{.Server.Version}}"])
-    image_id = run_checked(["docker", "image", "inspect", "--format", "{{.Id}}", args.image])
-    if not image_id:
-        raise CaptureError(f"Docker image has no immutable ID: {args.image}")
+    expected_source = {
+        "git_commit": commit,
+        "git_tree": tree,
+        "contract_ref": contract_ref,
+    }
+    image = inspect_bound_image(args.image, expected_source)
+    args.immutable_image = image["id"]
+
+    cpu_model = parse_cpu_model()
+    device_model = parse_device_model()
+    hardware_profile = derive_hardware_profile(cpu_model, device_model)
+    if hardware_profile == "unclassified":
+        raise CaptureError(
+            "runner fingerprint does not match a supported hardware profile; profile labels cannot be supplied by the operator"
+        )
+    cpu_flags = parse_cpu_flags()
+    dmi = parse_dmi_identity()
+    virtualization = (
+        detect_systemd_virtualization() if hardware_profile == "j4125_calibrated" else None
+    )
+    physicality = physicality_evidence(hardware_profile, cpu_flags, dmi, virtualization)
 
     fingerprint_commands = [
         "uname -srmo",
         "read /etc/os-release:PRETTY_NAME",
         "read /proc/cpuinfo:first(model name|model|hardware)",
+        "read /proc/device-tree/model or /sys/firmware/devicetree/base/model when present",
         "read /proc/meminfo:MemTotal",
+        "read /proc/cpuinfo:flags or features",
         command_text(["docker", "version", "--format", "{{.Server.Version}}"]),
         command_text(["docker", "info", "--format", "{{.CgroupVersion}}"]),
+        command_text(["docker", "context", "show"]),
+        command_text(
+            [
+                "docker",
+                "context",
+                "inspect",
+                docker_locality["context"],
+                "--format",
+                "{{json .Endpoints.docker.Host}}",
+            ]
+        ),
+        f"stat Unix socket {docker_locality['socket_path']}",
         command_text(unshare_test),
     ]
+    if hardware_profile == "j4125_calibrated":
+        fingerprint_commands.extend(
+            [
+                command_text(["systemd-detect-virt", "--vm"]),
+                "read /sys/class/dmi/id/{sys_vendor,product_name,product_version,board_vendor,board_name}",
+            ]
+        )
 
     return {
         "runner": {
             "runner_id": args.runner_id,
-            "hardware_profile": args.hardware_profile,
+            "hardware_profile": hardware_profile,
+            "hardware_profile_derivation": "fingerprint_rule_v1",
+            "physicality": physicality,
             "custodian": args.custodian,
             "os_release": parse_os_release(),
             "kernel_release": platform.release(),
             "architecture": platform.machine(),
-            "cpu_model": parse_cpu_model(),
+            "cpu_model": cpu_model,
+            "device_model": device_model,
             "logical_cpu_count": os.cpu_count() or 1,
             "total_memory_bytes": parse_total_memory_bytes(),
             "cgroup_version": "v2",
-            "container_engine": {"name": "docker", "version": docker_version},
+            "container_engine": {
+                "name": "docker",
+                "version": docker_version,
+                **docker_locality,
+            },
         },
         "source": {
             "git_commit": commit,
             "git_tree": tree,
             "tree_state": "clean",
-            "native_fastid_sha256": sha256_file(args.native_binary),
+            "native_fastid_sha256": None,
+            "native_artifact_origin": "extracted_from_immutable_oci_image",
             "oci_image_ref": args.image,
-            "oci_image_id": image_id,
-            "contract_ref": args.contract_ref,
+            "oci_image_id": image["id"],
+            "oci_source_labels": image["source_labels"],
+            "contract_ref": contract_ref,
         },
         "fingerprint_commands": fingerprint_commands,
+        "docker_locality": docker_locality,
     }
 
 
@@ -261,7 +539,16 @@ def process_cpu_ticks(pid: int) -> int:
     return int(fields[11]) + int(fields[12])
 
 
-def cgroup_path_for_pid(pid: int) -> Path:
+def validate_container_cgroup_identity(relative: str, container_id: str) -> None:
+    if re.fullmatch(r"[0-9a-f]{64}", container_id) is None:
+        raise CaptureError(f"Docker returned an invalid container ID: {container_id!r}")
+    if container_id not in relative:
+        raise CaptureError(
+            "Docker State.Pid is not correlated to a local cgroup containing the exact container ID"
+        )
+
+
+def cgroup_path_for_pid(pid: int, container_id: str) -> Path:
     try:
         lines = Path(f"/proc/{pid}/cgroup").read_text(encoding="ascii").splitlines()
     except (FileNotFoundError, PermissionError) as error:
@@ -273,6 +560,7 @@ def cgroup_path_for_pid(pid: int) -> Path:
             break
     if relative is None:
         raise CaptureError(f"PID {pid} has no cgroup-v2 membership")
+    validate_container_cgroup_identity(relative, container_id)
     path = Path("/sys/fs/cgroup") / relative.lstrip("/")
     for required in ["memory.current", "memory.peak", "cpu.stat"]:
         if not (path / required).is_file():
@@ -417,16 +705,17 @@ def metrics_from_records(
 
     elapsed = max(finished_at - started_at, 0.000001)
     cpu_seconds = int(records[-1]["cpu_ticks"]) / clock_ticks
+    steady_rss = [int(record["rss_bytes"]) for record in steady]
     result: dict[str, Any] = {
         "startup_ms": round((ready_at - started_at) * 1000, 3),
-        "steady_process_tree_rss_bytes": round(
-            statistics.median(int(record["rss_bytes"]) for record in steady)
-        ),
+        "steady_process_tree_rss_bytes": max(steady_rss),
+        "steady_process_tree_rss_statistics": summarize(steady_rss),
         "peak_process_tree_rss_bytes": max(int(record["rss_bytes"]) for record in records),
         "process_tree_cpu_seconds": round(cpu_seconds, 6),
         "process_tree_cpu_percent": round((cpu_seconds / elapsed) * 100, 6),
         "process_count_peak": max(int(record["process_count"]) for record in records),
         "cgroup": None,
+        "container_identity": None,
     }
 
     if with_cgroup:
@@ -434,10 +723,10 @@ def metrics_from_records(
         if any(not required.issubset(record) for record in steady):
             raise CaptureError("one or more cgroup-v2 measurements were missing")
         cgroup_cpu = float(records[-1]["cgroup_cpu_seconds"])
+        steady_cgroup = [int(record["cgroup_current_bytes"]) for record in steady]
         result["cgroup"] = {
-            "steady_memory_current_bytes": round(
-                statistics.median(int(record["cgroup_current_bytes"]) for record in steady)
-            ),
+            "steady_memory_current_bytes": max(steady_cgroup),
+            "steady_memory_current_statistics": summarize(steady_cgroup),
             "peak_memory_bytes": max(int(record["cgroup_peak_bytes"]) for record in records),
             "cpu_seconds": round(cgroup_cpu, 6),
             "cpu_percent": round((cgroup_cpu / elapsed) * 100, 6),
@@ -596,6 +885,25 @@ def docker_logs(name: str) -> str:
     return result.stdout + result.stderr
 
 
+def oci_run_command(name: str, immutable_image: str, script: str) -> list[str]:
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", immutable_image) is None:
+        raise CaptureError(f"OCI measurement requires an immutable image ID, got {immutable_image!r}")
+    return [
+        "docker",
+        "run",
+        "--detach",
+        "--name",
+        name,
+        "--network",
+        "none",
+        "--entrypoint",
+        "/bin/sh",
+        immutable_image,
+        "-c",
+        script,
+    ]
+
+
 def run_oci_once(
     scenario_id: str,
     run_number: int,
@@ -620,20 +928,7 @@ exec /bin/sleep 3600
     else:
         raise CaptureError(f"unknown OCI scenario: {scenario_id}")
 
-    run_command = [
-        "docker",
-        "run",
-        "--detach",
-        "--name",
-        name,
-        "--network",
-        "none",
-        "--entrypoint",
-        "/bin/sh",
-        args.image,
-        "-c",
-        script,
-    ]
+    run_command = oci_run_command(name, args.immutable_image, script)
     commands.append(command_text(run_command))
     started_at = time.monotonic()
     try:
@@ -651,7 +946,7 @@ exec /bin/sleep 3600
             raise CaptureError(f"{scenario_id} unexpectedly has Docker networks: {networks!r}")
 
         pid = docker_container_pid(name, args.startup_timeout_seconds)
-        cgroup_path = cgroup_path_for_pid(pid)
+        cgroup_path = cgroup_path_for_pid(pid, container_id)
         commands.extend(
             [
                 command_text(["docker", "inspect", "--format", "{{.State.Pid}}", name]),
@@ -762,6 +1057,11 @@ exec /bin/sleep 3600
             with_cgroup=True,
         )
         metrics["run"] = run_number
+        metrics["container_identity"] = {
+            "container_id": container_id,
+            "host_pid": pid,
+            "cgroup_path": str(cgroup_path),
+        }
         return metrics, commands, observed_exit
     finally:
         subprocess.run(
@@ -879,7 +1179,14 @@ def capture_scenario(scenario_id: str, args: argparse.Namespace) -> dict[str, An
 
 
 def artifact_sizes(args: argparse.Namespace) -> tuple[dict[str, int], list[str]]:
-    image_size_command = ["docker", "image", "inspect", "--format", "{{.Size}}", args.image]
+    image_size_command = [
+        "docker",
+        "image",
+        "inspect",
+        "--format",
+        "{{.Size}}",
+        args.immutable_image,
+    ]
     binary_size_command = [
         "docker",
         "run",
@@ -888,7 +1195,7 @@ def artifact_sizes(args: argparse.Namespace) -> tuple[dict[str, int], list[str]]
         "none",
         "--entrypoint",
         "/bin/sh",
-        args.image,
+        args.immutable_image,
         "-c",
         "stat -c '%s %s' /usr/local/bin/fastid /usr/local/bin/fasti",
     ]
@@ -909,6 +1216,48 @@ def artifact_sizes(args: argparse.Namespace) -> tuple[dict[str, int], list[str]]
         command_text(image_size_command),
     ]
     return sizes, commands
+
+
+def extract_native_fastid(
+    args: argparse.Namespace, context: dict[str, Any], destination: Path
+) -> list[str]:
+    name = f"fasti-b1-native-artifact-{os.getpid()}-{uuid.uuid4().hex[:10]}"
+    create_command = [
+        "docker",
+        "create",
+        "--name",
+        name,
+        "--network",
+        "none",
+        "--entrypoint",
+        "/bin/true",
+        args.immutable_image,
+    ]
+    copy_command = [
+        "docker",
+        "cp",
+        f"{name}:/usr/local/bin/fastid",
+        str(destination),
+    ]
+    try:
+        container_id = run_checked(create_command)
+        if not container_id:
+            raise CaptureError("Docker returned no container ID for native artifact extraction")
+        run_checked(copy_command)
+    finally:
+        subprocess.run(
+            ["docker", "rm", "--force", name],
+            cwd=ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    destination.chmod(0o755)
+    if not destination.is_file() or not os.access(destination, os.X_OK):
+        raise CaptureError("extracted immutable-image fastid is missing or not executable")
+    args.native_binary = destination
+    context["source"]["native_fastid_sha256"] = sha256_file(destination)
+    return [command_text(create_command), command_text(copy_command)]
 
 
 def budget_verdicts(scenarios: list[dict[str, Any]], budgets: dict[str, Any]) -> list[dict[str, Any]]:
@@ -964,17 +1313,21 @@ def budget_verdicts(scenarios: list[dict[str, Any]], budgets: dict[str, Any]) ->
     ]
 
 
-def capture(args: argparse.Namespace) -> None:
-    context = preflight(args)
+def capture_bound(
+    args: argparse.Namespace,
+    context: dict[str, Any],
+    native_artifact_commands: list[str],
+) -> None:
     budgets_bytes = BUDGETS_PATH.read_bytes()
     budgets_document = json.loads(budgets_bytes)
     memory_budgets = budgets_document["memory_bytes"]
 
     sizes, size_commands = artifact_sizes(args)
     scenarios = [capture_scenario(scenario_id, args) for scenario_id in SCENARIO_IDS]
+    verify_capture_inputs_unchanged(args, context)
     evidence = {
         "$schema": "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json",
-        "schema_version": "fasti.b1.performance-evidence.v1",
+        "schema_version": "fasti.b1.performance-evidence.v2",
         "body": "B1",
         "status": "complete",
         "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -993,6 +1346,18 @@ def capture(args: argparse.Namespace) -> None:
             "baseline_subtraction": False,
             "fingerprint_commands": context["fingerprint_commands"],
             "artifact_size_commands": size_commands,
+            "native_artifact_commands": native_artifact_commands,
+            "source_recheck_commands": [
+                command_text(["git", "status", "--porcelain=v1", "--untracked-files=all"]),
+                command_text(["git", "rev-parse", "HEAD"]),
+                command_text(["git", "rev-parse", "HEAD^{tree}"]),
+                command_text(["git", "rev-parse", "HEAD:contracts"]),
+                f"sha256 {args.native_binary}",
+                command_text(["docker", "image", "inspect", context["source"]["oci_image_ref"]]),
+                command_text(["docker", "image", "inspect", context["source"]["oci_image_id"]]),
+                command_text(["docker", "context", "show"]),
+                f"verify local Unix socket {context['docker_locality']['socket_path']}",
+            ],
         },
         "scenarios": scenarios,
         "artifact_sizes": sizes,
@@ -1018,6 +1383,15 @@ def capture(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def capture(args: argparse.Namespace) -> None:
+    context = preflight(args)
+    with tempfile.TemporaryDirectory(prefix="fasti-b1-native-artifact-") as temp_name:
+        native_commands = extract_native_fastid(
+            args, context, Path(temp_name) / "fastid"
+        )
+        capture_bound(args, context, native_commands)
+
+
 def self_test() -> None:
     run_checked(["node", str(VALIDATOR_PATH), "--self-test"])
     print("PASS: B1 benchmark harness validator self-test")
@@ -1034,23 +1408,9 @@ def parser() -> argparse.ArgumentParser:
         "capture",
         help="capture complete evidence; Linux, route-less netns, Docker network-none, and cgroup v2 are mandatory",
     )
-    capture_parser.add_argument("--native-binary", type=Path, required=True)
     capture_parser.add_argument("--image", required=True)
-    capture_parser.add_argument(
-        "--hardware-profile",
-        required=True,
-        choices=[
-            "raspberry_pi_5_champion",
-            "j4125_calibrated",
-            "ugoos_am6b_plus",
-            "xiaomi_box_m3",
-            "nvidia_shield",
-            "representative_tv",
-        ],
-    )
     capture_parser.add_argument("--runner-id", required=True, help="stable non-secret label for this exact runner")
     capture_parser.add_argument("--custodian", required=True, help="person or team accountable for the physical run")
-    capture_parser.add_argument("--contract-ref", required=True, help="immutable digest or Git object for the contract set")
     capture_parser.add_argument("--output", type=Path, required=True)
     capture_parser.add_argument("--repetitions", type=int, default=5)
     capture_parser.add_argument("--steady-window-seconds", type=float, default=5.0)
@@ -1062,7 +1422,6 @@ def parser() -> argparse.ArgumentParser:
 def validate_arguments(args: argparse.Namespace) -> None:
     if args.command != "capture":
         return
-    args.native_binary = args.native_binary.resolve()
     args.output = args.output.resolve()
     if args.repetitions < 3:
         raise CaptureError("at least three repetitions are required")
@@ -1075,13 +1434,10 @@ def validate_arguments(args: argparse.Namespace) -> None:
     for label, value in [
         ("runner ID", args.runner_id),
         ("custodian", args.custodian),
-        ("contract reference", args.contract_ref),
         ("image reference", args.image),
     ]:
         if not value.strip():
             raise CaptureError(f"{label} must not be empty")
-    if re.fullmatch(r"(?:[0-9a-f]{40}|sha256:[0-9a-f]{64})", args.contract_ref) is None:
-        raise CaptureError("contract reference must be a full 40-hex Git object or sha256:<64 lowercase hex>")
 
 
 def main() -> None:

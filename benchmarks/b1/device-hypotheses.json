@@ -1,7 +1,7 @@
 {
   "$schema": "./device-hypotheses.schema.json",
-  "schema_version": "fasti.b1.device-hypotheses.v1",
-  "policy": "A device is not qualified until its custodian, exact runner fingerprint, artifact and contract references, and validated evidence receipt are assigned.",
+  "schema_version": "fasti.b1.device-hypotheses.v2",
+  "policy": "A device is not qualified until its observed runner fingerprint, exact source artifacts and contracts, and validated evidence receipt are correlated; calibrated secondary status additionally requires validated champion evidence.",
   "devices": [
     {
       "profile": "raspberry_pi_5_champion",
@@ -34,7 +34,9 @@
       "calibration": {
         "reference_profile": "raspberry_pi_5_champion",
         "state": "not_started",
-        "method": null
+        "method": null,
+        "reference_evidence_ref": null,
+        "measured_relation": null
       }
     },
     {

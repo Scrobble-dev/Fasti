@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -79,6 +80,13 @@ function assertSummary(actual, expected, label) {
   }
 }
 
+function assertOrderedSummary(summary, label) {
+  assert(
+    summary.minimum <= summary.median && summary.median <= summary.maximum,
+    `${label} must satisfy minimum <= median <= maximum`,
+  );
+}
+
 const expectedScenarioIds = [
   "native_empty_process",
   "native_fastid_idle",
@@ -97,45 +105,434 @@ const ociScenarioIds = new Set([
   "oci_fasti_cli_guard",
 ]);
 
-function validateStaticFiles() {
-  const budgets = loadJson(budgetsPath);
-  const ledger = loadJson(ledgerPath);
-  assertSchema(schemaValidator(budgetsSchemaPath), budgets, "budgets.json");
+function deriveHardwareProfile(runner) {
+  const cpu = runner.cpu_model.toLowerCase();
+  const device = (runner.device_model ?? "").toLowerCase();
+  if (device.includes("raspberry pi 5")) return "raspberry_pi_5_champion";
+  if (/\bj4125\b/.test(cpu)) return "j4125_calibrated";
+  if (device.includes("ugoos") && device.includes("am6b")) {
+    return "ugoos_am6b_plus";
+  }
+  if (
+    device.includes("xiaomi") &&
+    ["mi box 3", "mibox3", "mdz-16-ab", "mdz-19-aa"].some((marker) =>
+      device.includes(marker),
+    )
+  ) {
+    return "xiaomi_box_m3";
+  }
+  if (device.includes("nvidia") && device.includes("shield")) {
+    return "nvidia_shield";
+  }
+  return "unclassified";
+}
+
+const canonicalProfiles = [
+  "raspberry_pi_5_champion",
+  "j4125_calibrated",
+  "ugoos_am6b_plus",
+  "xiaomi_box_m3",
+  "nvidia_shield",
+  "representative_tv",
+];
+
+function runnerFingerprint(evidence) {
+  const runner = evidence.runner;
+  return {
+    runner_id: runner.runner_id,
+    hardware_profile: runner.hardware_profile,
+    hardware_profile_derivation: runner.hardware_profile_derivation,
+    physicality: runner.physicality,
+    os_release: runner.os_release,
+    kernel_release: runner.kernel_release,
+    architecture: runner.architecture,
+    cpu_model: runner.cpu_model,
+    device_model: runner.device_model,
+    logical_cpu_count: runner.logical_cpu_count,
+    total_memory_bytes: runner.total_memory_bytes,
+  };
+}
+
+function artifactRef(evidence) {
+  const source = evidence.source;
+  return {
+    git_commit: source.git_commit,
+    git_tree: source.git_tree,
+    native_fastid_sha256: source.native_fastid_sha256,
+    oci_image_id: source.oci_image_id,
+  };
+}
+
+function evidenceResults(evidence) {
+  const budget_statuses = Object.fromEntries(
+    evidence.budget_verdicts.map((verdict) => [verdict.budget, verdict.status]),
+  );
+  return {
+    budget_statuses,
+    all_applicable_budgets_passed:
+      budget_statuses.idle_target === "pass" &&
+      budget_statuses.absolute_ceiling === "pass",
+  };
+}
+
+function calibrationSettings(evidence) {
+  return {
+    git_tree: evidence.source.git_tree,
+    contract_ref: evidence.source.contract_ref,
+    harness: {
+      version: evidence.harness.version,
+      repetitions: evidence.harness.repetitions,
+      steady_window_seconds: evidence.harness.steady_window_seconds,
+      sample_interval_ms: evidence.harness.sample_interval_ms,
+      baseline_subtraction: evidence.harness.baseline_subtraction,
+    },
+    budget_snapshot: evidence.budget_snapshot,
+    scenarios: evidence.scenarios.map((scenario) => ({
+      id: scenario.id,
+      subject: scenario.subject,
+      measurement_scope: scenario.measurement_scope,
+      network_required: scenario.network_denied.required,
+      network_mechanism: scenario.network_denied.mechanism,
+      workload_expectation: scenario.workload_exit.expectation,
+    })),
+  };
+}
+
+function measuredBudget(evidence, budget) {
+  return evidence.budget_verdicts.find((verdict) => verdict.budget === budget)
+    .measured_bytes;
+}
+
+function calibrationRelation(j4125, champion) {
+  return {
+    idle_target_ratio_j4125_to_champion:
+      measuredBudget(j4125, "idle_target") /
+      measuredBudget(champion, "idle_target"),
+    absolute_ceiling_ratio_j4125_to_champion:
+      measuredBudget(j4125, "absolute_ceiling") /
+      measuredBudget(champion, "absolute_ceiling"),
+  };
+}
+
+function assertJsonEqual(actual, expected, message) {
+  assert(isDeepStrictEqual(actual, expected), message);
+}
+
+function validatePhysicality(runner, label) {
+  const proof = runner.physicality;
+  if (runner.hardware_profile === "unclassified") {
+    assert(
+      proof.status === "test_fixture" && proof.mechanism === "test_fixture",
+      `${label} unclassified runner must remain explicit test-fixture evidence`,
+    );
+    return;
+  }
+  assert(
+    proof.status === "physical" && !proof.cpu_hypervisor_flag,
+    `${label} does not establish non-virtual physical hardware`,
+  );
+  if (runner.hardware_profile === "raspberry_pi_5_champion") {
+    assert(
+      proof.mechanism === "raspberry_pi_device_tree" &&
+        runner.device_model?.toLowerCase().includes("raspberry pi 5") &&
+        proof.systemd_detect_virt === null &&
+        proof.dmi === null,
+      `${label} lacks Raspberry Pi 5 device-tree physicality proof`,
+    );
+  }
+  if (runner.hardware_profile === "j4125_calibrated") {
+    const dmi = Object.values(proof.dmi ?? {})
+      .join(" ")
+      .toLowerCase();
+    const virtualMarkers = [
+      "bhyve",
+      "bochs",
+      "kvm",
+      "microsoft corporation virtual machine",
+      "parallels",
+      "qemu",
+      "virtualbox",
+      "vmware",
+      "xen",
+    ];
+    assert(
+      proof.mechanism === "j4125_systemd_cpu_dmi_cross_check" &&
+        proof.systemd_detect_virt === "none" &&
+        proof.dmi?.sys_vendor &&
+        proof.dmi?.product_name &&
+        !virtualMarkers.some((marker) => dmi.includes(marker)),
+      `${label} lacks fail-closed physical J4125 virtualization evidence`,
+    );
+  }
+}
+
+function fileEvidenceResolver(reference) {
+  const evidenceRoot = resolve(here, "evidence");
+  const path = resolve(here, reference.path);
+  assert(
+    path.startsWith(`${evidenceRoot}/`),
+    `device evidence path escapes benchmarks/b1/evidence: ${reference.path}`,
+  );
+  return { evidence: loadJson(path), digest: sha256(path) };
+}
+
+function correlateDeviceEvidence(device, reference, resolver, label) {
+  const resolved = resolver(reference);
+  assert(
+    resolved !== undefined,
+    `${label} evidence reference cannot be resolved`,
+  );
+  assert(
+    resolved.digest === reference.sha256,
+    `${label} evidence digest does not match its referenced bytes`,
+  );
+  validateEvidence(resolved.evidence, `${label} evidence`, false);
+  const evidence = resolved.evidence;
+  assert(
+    evidence.status === "complete",
+    `${label} cannot qualify from test-fixture evidence`,
+  );
+  assert(
+    evidence.runner.hardware_profile === device.profile,
+    `${label} evidence hardware profile does not match the ledger profile`,
+  );
+  assert(
+    evidence.runner.custodian === device.custodian,
+    `${label} evidence custodian does not match the ledger assignment`,
+  );
+  assertJsonEqual(
+    device.runner_fingerprint,
+    runnerFingerprint(evidence),
+    `${label} runner fingerprint does not match validated evidence`,
+  );
+  assertJsonEqual(
+    device.artifact_ref,
+    artifactRef(evidence),
+    `${label} artifact reference does not match validated evidence`,
+  );
+  assert(
+    device.contract_ref === evidence.source.contract_ref,
+    `${label} contract reference does not match validated evidence`,
+  );
+  assertJsonEqual(
+    device.results,
+    evidenceResults(evidence),
+    `${label} results do not match validated evidence`,
+  );
+  return evidence;
+}
+
+function validateLedgerDocument(ledger, resolver = fileEvidenceResolver) {
   assertSchema(
     schemaValidator(ledgerSchemaPath),
     ledger,
     "device-hypotheses.json",
   );
-
   const profiles = ledger.devices.map((device) => device.profile);
-  assert(
-    new Set(profiles).size === profiles.length,
-    "device hypotheses contain a duplicate profile",
+  assertJsonEqual(
+    profiles,
+    canonicalProfiles,
+    "device hypotheses must appear once in canonical profile order",
   );
-  assert(
-    ledger.devices.every(
-      (device) =>
-        device.qualification_state === "blocking_unassigned" &&
-        device.custodian === null &&
-        device.runner_fingerprint === null &&
-        device.artifact_ref === null &&
-        device.contract_ref === null &&
-        device.evidence_ref === null &&
-        device.results === null,
-    ),
-    "an unmeasured device hypothesis must remain explicitly unassigned and blocking",
+  const devicesByProfile = Object.fromEntries(
+    ledger.devices.map((device) => [device.profile, device]),
   );
+  const expectedRoles = {
+    raspberry_pi_5_champion: "champion",
+    j4125_calibrated: "calibrated_secondary",
+    ugoos_am6b_plus: "packaging_hypothesis",
+    xiaomi_box_m3: "packaging_hypothesis",
+    nvidia_shield: "packaging_hypothesis",
+    representative_tv: "packaging_hypothesis",
+  };
+
+  for (const device of ledger.devices) {
+    const label = `device ${device.profile}`;
+    assert(
+      device.role === expectedRoles[device.profile],
+      `${label} has the wrong qualification role`,
+    );
+    const facts = [
+      device.custodian,
+      device.runner_fingerprint,
+      device.artifact_ref,
+      device.contract_ref,
+    ];
+    const evidenceFacts = [device.evidence_ref, device.results];
+    if (device.profile === "j4125_calibrated") {
+      assert(
+        device.calibration !== null,
+        `${label} requires calibration state`,
+      );
+    } else {
+      assert(
+        device.calibration === null,
+        `${label} must not claim calibration`,
+      );
+    }
+
+    if (device.qualification_state === "blocking_unassigned") {
+      assert(
+        [...facts, ...evidenceFacts].every((value) => value === null) &&
+          device.blocking_reason !== null,
+        `${label} unassigned state must remain null-backed and explicitly blocking`,
+      );
+      if (device.calibration !== null) {
+        assert(
+          device.calibration.state === "not_started" &&
+            device.calibration.method === null &&
+            device.calibration.reference_evidence_ref === null &&
+            device.calibration.measured_relation === null,
+          `${label} cannot claim calibration before assignment`,
+        );
+      }
+      continue;
+    }
+
+    assert(
+      facts.every((value) => value !== null),
+      `${label} assignment is missing custodian, fingerprint, artifact, or contract facts`,
+    );
+    assert(
+      device.runner_fingerprint.hardware_profile === device.profile,
+      `${label} assigned fingerprint has the wrong profile`,
+    );
+
+    if (device.qualification_state === "assigned_pending_evidence") {
+      assert(
+        evidenceFacts.every((value) => value === null) &&
+          device.blocking_reason !== null,
+        `${label} pending evidence must remain blocking without evidence or results`,
+      );
+      continue;
+    }
+
+    assert(
+      evidenceFacts.every((value) => value !== null),
+      `${label} validated state requires evidence and results`,
+    );
+    const deviceEvidence = correlateDeviceEvidence(
+      device,
+      device.evidence_ref,
+      resolver,
+      label,
+    );
+
+    if (device.qualification_state === "evidence_validated") {
+      assert(
+        device.blocking_reason !== null,
+        `${label} evidence-only state must explain why qualification remains blocked`,
+      );
+      continue;
+    }
+
+    assert(
+      device.results.all_applicable_budgets_passed &&
+        device.blocking_reason === null,
+      `${label} qualification requires every applicable budget to pass and no blocker`,
+    );
+    if (device.qualification_state === "qualified") {
+      assert(
+        device.role !== "calibrated_secondary",
+        `${label} secondary hardware must use calibrated state`,
+      );
+      continue;
+    }
+
+    assert(
+      device.qualification_state === "calibrated" &&
+        device.role === "calibrated_secondary" &&
+        device.calibration.state === "validated" &&
+        device.calibration.method !== null &&
+        device.calibration.reference_evidence_ref !== null &&
+        device.calibration.measured_relation !== null,
+      `${label} calibrated state lacks method or champion reference evidence`,
+    );
+    const champion = devicesByProfile.raspberry_pi_5_champion;
+    assert(
+      champion.qualification_state === "qualified" &&
+        isDeepStrictEqual(
+          champion.evidence_ref,
+          device.calibration.reference_evidence_ref,
+        ),
+      `${label} calibration must reference the ledger's qualified champion evidence`,
+    );
+    const reference = resolver(device.calibration.reference_evidence_ref);
+    assert(
+      reference !== undefined,
+      `${label} champion reference evidence cannot be resolved`,
+    );
+    assert(
+      reference.digest === device.calibration.reference_evidence_ref.sha256,
+      `${label} champion reference evidence digest does not match`,
+    );
+    validateEvidence(reference.evidence, `${label} champion reference`, false);
+    assert(
+      reference.evidence.runner.hardware_profile ===
+        "raspberry_pi_5_champion" &&
+        evidenceResults(reference.evidence).all_applicable_budgets_passed,
+      `${label} calibration reference is not qualifying Raspberry Pi 5 evidence`,
+    );
+    assertJsonEqual(
+      calibrationSettings(deviceEvidence),
+      calibrationSettings(reference.evidence),
+      `${label} calibration evidence does not share git tree, contracts, harness, budgets, and scenario settings with champion evidence`,
+    );
+    const expectedRelation = calibrationRelation(
+      deviceEvidence,
+      reference.evidence,
+    );
+    assert(
+      closeEnough(
+        device.calibration.measured_relation
+          .idle_target_ratio_j4125_to_champion,
+        expectedRelation.idle_target_ratio_j4125_to_champion,
+      ) &&
+        closeEnough(
+          device.calibration.measured_relation
+            .absolute_ceiling_ratio_j4125_to_champion,
+          expectedRelation.absolute_ceiling_ratio_j4125_to_champion,
+        ),
+      `${label} measured calibration relation is not derived from both receipts`,
+    );
+  }
+}
+
+function validateStaticFiles() {
+  const budgets = loadJson(budgetsPath);
+  const ledger = loadJson(ledgerPath);
+  assertSchema(schemaValidator(budgetsSchemaPath), budgets, "budgets.json");
+  validateLedgerDocument(ledger);
 
   return budgets;
 }
 
-function validateEvidence(evidence, label = "evidence") {
-  const budgets = validateStaticFiles();
+function validateEvidence(evidence, label = "evidence", validateStatic = true) {
+  const budgets = validateStatic
+    ? validateStaticFiles()
+    : loadJson(budgetsPath);
   assertSchema(schemaValidator(evidenceSchemaPath), evidence, label);
 
   assert(
-    JSON.stringify(evidence.budget_snapshot.memory_bytes) ===
-      JSON.stringify(budgets.memory_bytes),
+    evidence.runner.hardware_profile === deriveHardwareProfile(evidence.runner),
+    `${label} hardware profile is not derived from its observed CPU/device fingerprint`,
+  );
+  validatePhysicality(evidence.runner, label);
+  assert(
+    evidence.source.oci_source_labels["org.opencontainers.image.revision"] ===
+      evidence.source.git_commit &&
+      evidence.source.oci_source_labels["dev.scrobble.fasti.source.tree"] ===
+        evidence.source.git_tree &&
+      evidence.source.oci_source_labels["dev.scrobble.fasti.contracts"] ===
+        evidence.source.contract_ref,
+    `${label} OCI source labels do not bind the recorded commit, tree, and contracts`,
+  );
+
+  assert(
+    isDeepStrictEqual(
+      evidence.budget_snapshot.memory_bytes,
+      budgets.memory_bytes,
+    ),
     `${label} budget snapshot differs from the canonical budgets`,
   );
   assert(
@@ -145,7 +542,7 @@ function validateEvidence(evidence, label = "evidence") {
 
   const scenarioIds = evidence.scenarios.map((scenario) => scenario.id);
   assert(
-    JSON.stringify(scenarioIds) === JSON.stringify(expectedScenarioIds),
+    isDeepStrictEqual(scenarioIds, expectedScenarioIds),
     `${label} scenarios must appear once in the canonical order`,
   );
 
@@ -173,6 +570,10 @@ function validateEvidence(evidence, label = "evidence") {
         scenario.samples.every((sample) => sample.cgroup === null),
         `${scenario.id} must not claim cgroup isolation`,
       );
+      assert(
+        scenario.samples.every((sample) => sample.container_identity === null),
+        `${scenario.id} must not claim a Docker container identity`,
+      );
     }
 
     if (ociScenarioIds.has(scenario.id)) {
@@ -188,15 +589,43 @@ function validateEvidence(evidence, label = "evidence") {
         scenario.samples.every((sample) => sample.cgroup !== null),
         `${scenario.id} is missing cgroup measurements`,
       );
+      assert(
+        scenario.samples.every(
+          (sample) =>
+            sample.container_identity !== null &&
+            sample.container_identity.cgroup_path.includes(
+              sample.container_identity.container_id,
+            ),
+        ),
+        `${scenario.id} State.Pid is not correlated to its exact local container cgroup`,
+      );
     }
 
     for (const sample of scenario.samples) {
+      assertOrderedSummary(
+        sample.steady_process_tree_rss_statistics,
+        `${scenario.id} steady process-tree observations`,
+      );
+      assert(
+        sample.steady_process_tree_rss_bytes ===
+          sample.steady_process_tree_rss_statistics.maximum,
+        `${scenario.id} steady process-tree gate must use the maximum observation`,
+      );
       assert(
         sample.steady_process_tree_rss_bytes <=
           sample.peak_process_tree_rss_bytes,
         `${scenario.id} steady process-tree RSS exceeds its peak`,
       );
       if (sample.cgroup !== null) {
+        assertOrderedSummary(
+          sample.cgroup.steady_memory_current_statistics,
+          `${scenario.id} steady cgroup observations`,
+        );
+        assert(
+          sample.cgroup.steady_memory_current_bytes ===
+            sample.cgroup.steady_memory_current_statistics.maximum,
+          `${scenario.id} steady cgroup gate must use the maximum observation`,
+        );
         assert(
           sample.cgroup.steady_memory_current_bytes <=
             sample.cgroup.peak_memory_bytes,
@@ -248,6 +677,41 @@ function validateEvidence(evidence, label = "evidence") {
   const byId = Object.fromEntries(
     evidence.scenarios.map((scenario) => [scenario.id, scenario]),
   );
+  for (const id of ociScenarioIds) {
+    const dockerRuns = byId[id].commands.filter((command) =>
+      command.startsWith("docker run "),
+    );
+    assert(
+      dockerRuns.length > 0 &&
+        dockerRuns.every((command) =>
+          command.includes(evidence.source.oci_image_id),
+        ),
+      `${id} was not run from the recorded immutable image ID`,
+    );
+  }
+  const artifactDockerRuns = evidence.harness.artifact_size_commands.filter(
+    (command) => command.startsWith("docker run "),
+  );
+  assert(
+    artifactDockerRuns.length > 0 &&
+      artifactDockerRuns.every((command) =>
+        command.includes(evidence.source.oci_image_id),
+      ),
+    "artifact size probes were not run from the recorded immutable image ID",
+  );
+  const nativeCreates = evidence.harness.native_artifact_commands.filter(
+    (command) => command.startsWith("docker create "),
+  );
+  assert(
+    nativeCreates.length === 1 &&
+      nativeCreates[0].includes(evidence.source.oci_image_id) &&
+      evidence.harness.native_artifact_commands.some((command) =>
+        command.startsWith("docker cp "),
+      ) &&
+      evidence.artifact_sizes.native_fastid_binary_bytes ===
+        evidence.artifact_sizes.oci_fastid_binary_bytes,
+    "native fastid was not extracted byte-for-byte from the recorded immutable image",
+  );
   const cliExit = byId.oci_fasti_cli_guard.workload_exit;
   assert(
     cliExit.expectation === "guarded_nonzero",
@@ -282,13 +746,12 @@ function validateEvidence(evidence, label = "evidence") {
     evidence.budget_verdicts.map((verdict) => [verdict.budget, verdict]),
   );
   assert(
-    JSON.stringify(Object.keys(verdicts)) ===
-      JSON.stringify([
-        "idle_target",
-        "normal_target",
-        "heavy_target",
-        "absolute_ceiling",
-      ]),
+    isDeepStrictEqual(Object.keys(verdicts), [
+      "idle_target",
+      "normal_target",
+      "heavy_target",
+      "absolute_ceiling",
+    ]),
     "budget verdicts must appear once in canonical order",
   );
 
@@ -339,11 +802,17 @@ function fixtureSummary(samples, field) {
 
 function makeSelfTestEvidence() {
   const budgets = loadJson(budgetsPath);
+  const imageId = "sha256:" + "4".repeat(64);
   const samples = (withCgroup) =>
     [1, 2, 3].map((run) => ({
       run,
       startup_ms: 10 + run,
       steady_process_tree_rss_bytes: 8_000_000 + run,
+      steady_process_tree_rss_statistics: {
+        minimum: 7_000_000 + run,
+        median: 7_500_000 + run,
+        maximum: 8_000_000 + run,
+      },
       peak_process_tree_rss_bytes: 9_000_000 + run,
       process_tree_cpu_seconds: 0.01 * run,
       process_tree_cpu_percent: 0.5 * run,
@@ -351,9 +820,21 @@ function makeSelfTestEvidence() {
       cgroup: withCgroup
         ? {
             steady_memory_current_bytes: 10_000_000 + run,
+            steady_memory_current_statistics: {
+              minimum: 9_000_000 + run,
+              median: 9_500_000 + run,
+              maximum: 10_000_000 + run,
+            },
             peak_memory_bytes: 11_000_000 + run,
             cpu_seconds: 0.02 * run,
             cpu_percent: 0.75 * run,
+          }
+        : null,
+      container_identity: withCgroup
+        ? {
+            container_id: "6".repeat(64),
+            host_pid: 1234 + run,
+            cgroup_path: `/sys/fs/cgroup/system.slice/docker-${"6".repeat(64)}.scope`,
           }
         : null,
     }));
@@ -375,7 +856,9 @@ function makeSelfTestEvidence() {
           : "linux_network_namespace_without_routes",
         proof: "self-test fixture only",
       },
-      commands: ["self-test fixture only"],
+      commands: withCgroup
+        ? [`docker run --network none ${imageId} self-test`]
+        : ["self-test fixture only"],
       workload_exit: guarded
         ? { expectation: "guarded_nonzero", observed_code: 1, matched: true }
         : {
@@ -434,30 +917,52 @@ function makeSelfTestEvidence() {
   return {
     $schema:
       "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json",
-    schema_version: "fasti.b1.performance-evidence.v1",
+    schema_version: "fasti.b1.performance-evidence.v2",
     body: "B1",
-    status: "complete",
+    status: "test_fixture",
     captured_at: "2026-08-22T00:00:00Z",
     runner: {
       runner_id: "self-test-fixture",
-      hardware_profile: "raspberry_pi_5_champion",
+      hardware_profile: "unclassified",
+      hardware_profile_derivation: "fingerprint_rule_v1",
+      physicality: {
+        status: "test_fixture",
+        mechanism: "test_fixture",
+        systemd_detect_virt: null,
+        cpu_hypervisor_flag: false,
+        dmi: null,
+      },
       custodian: "self-test-fixture",
       os_release: "self-test Linux",
       kernel_release: "self-test",
       architecture: "self-test",
       cpu_model: "self-test",
+      device_model: null,
       logical_cpu_count: 1,
       total_memory_bytes: 1,
       cgroup_version: "v2",
-      container_engine: { name: "docker", version: "self-test" },
+      container_engine: {
+        name: "docker",
+        version: "self-test",
+        context: "self-test",
+        endpoint: "unix:///self-test/docker.sock",
+        socket_path: "/self-test/docker.sock",
+        locality: "verified_local_unix_socket",
+      },
     },
     source: {
       git_commit: "1".repeat(40),
       git_tree: "2".repeat(40),
       tree_state: "clean",
       native_fastid_sha256: "3".repeat(64),
+      native_artifact_origin: "extracted_from_immutable_oci_image",
       oci_image_ref: "self-test:fixture",
-      oci_image_id: "sha256:" + "4".repeat(64),
+      oci_image_id: imageId,
+      oci_source_labels: {
+        "org.opencontainers.image.revision": "1".repeat(40),
+        "dev.scrobble.fasti.source.tree": "2".repeat(40),
+        "dev.scrobble.fasti.contracts": "5".repeat(40),
+      },
       contract_ref: "5".repeat(40),
     },
     budget_snapshot: {
@@ -466,13 +971,20 @@ function makeSelfTestEvidence() {
       memory_bytes: budgets.memory_bytes,
     },
     harness: {
-      version: "fasti-b1-benchmark.v1",
+      version: "fasti-b1-benchmark.v2",
       repetitions: 3,
       steady_window_seconds: 3,
       sample_interval_ms: 10,
       baseline_subtraction: false,
       fingerprint_commands: ["self-test fixture only"],
-      artifact_size_commands: ["self-test fixture only"],
+      native_artifact_commands: [
+        `docker create --network none ${imageId}`,
+        "docker cp self-test:/usr/local/bin/fastid /tmp/fastid",
+      ],
+      artifact_size_commands: [
+        `docker run --rm --network none ${imageId} self-test`,
+      ],
+      source_recheck_commands: ["self-test fixture only"],
     },
     scenarios,
     artifact_sizes: {
@@ -533,9 +1045,164 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function fixtureReference(name, evidence) {
+  return {
+    path: `evidence/${name}.json`,
+    sha256: createHash("sha256").update(JSON.stringify(evidence)).digest("hex"),
+  };
+}
+
+function assignDeviceFromEvidence(device, evidence, evidence_ref, state) {
+  device.qualification_state = state;
+  device.custodian = evidence.runner.custodian;
+  device.runner_fingerprint = runnerFingerprint(evidence);
+  device.artifact_ref = artifactRef(evidence);
+  device.contract_ref = evidence.source.contract_ref;
+  device.evidence_ref = evidence_ref;
+  device.results = evidenceResults(evidence);
+  device.blocking_reason = null;
+}
+
+function validateLedgerStateTransitions(validEvidence) {
+  const piEvidence = clone(validEvidence);
+  piEvidence.status = "complete";
+  piEvidence.runner.hardware_profile = "raspberry_pi_5_champion";
+  piEvidence.runner.device_model = "Raspberry Pi 5 Model B Rev 1.0";
+  piEvidence.runner.custodian = "pi-custodian";
+  piEvidence.runner.physicality = {
+    status: "physical",
+    mechanism: "raspberry_pi_device_tree",
+    systemd_detect_virt: null,
+    cpu_hypervisor_flag: false,
+    dmi: null,
+  };
+
+  const j4125Evidence = clone(validEvidence);
+  j4125Evidence.status = "complete";
+  j4125Evidence.runner.hardware_profile = "j4125_calibrated";
+  j4125Evidence.runner.cpu_model = "Intel(R) Celeron(R) CPU J4125 @ 2.00GHz";
+  j4125Evidence.runner.custodian = "j4125-custodian";
+  j4125Evidence.runner.physicality = {
+    status: "physical",
+    mechanism: "j4125_systemd_cpu_dmi_cross_check",
+    systemd_detect_virt: "none",
+    cpu_hypervisor_flag: false,
+    dmi: {
+      sys_vendor: "Physical Lab Vendor",
+      product_name: "J4125 Appliance",
+    },
+  };
+
+  validateEvidence(piEvidence, "assigned Pi fixture", false);
+  validateEvidence(j4125Evidence, "assigned J4125 fixture", false);
+  const piRef = fixtureReference("self-test-pi", piEvidence);
+  const j4125Ref = fixtureReference("self-test-j4125", j4125Evidence);
+  const fixtures = new Map([
+    [piRef.path, { evidence: piEvidence, digest: piRef.sha256 }],
+    [j4125Ref.path, { evidence: j4125Evidence, digest: j4125Ref.sha256 }],
+  ]);
+  const resolver = (reference) => fixtures.get(reference.path);
+
+  const ledger = loadJson(ledgerPath);
+  const pi = ledger.devices[0];
+  assignDeviceFromEvidence(pi, piEvidence, piRef, "qualified");
+  const j4125 = ledger.devices[1];
+  assignDeviceFromEvidence(j4125, j4125Evidence, j4125Ref, "calibrated");
+  j4125.calibration = {
+    reference_profile: "raspberry_pi_5_champion",
+    state: "validated",
+    method:
+      "Same immutable B1 workload and budget contract measured on both named runners.",
+    reference_evidence_ref: piRef,
+    measured_relation: calibrationRelation(j4125Evidence, piEvidence),
+  };
+  validateLedgerDocument(ledger, resolver);
+
+  const reorderedKeys = clone(ledger);
+  for (const device of reorderedKeys.devices.slice(0, 2)) {
+    device.runner_fingerprint = Object.fromEntries(
+      Object.entries(device.runner_fingerprint).reverse(),
+    );
+    device.artifact_ref = Object.fromEntries(
+      Object.entries(device.artifact_ref).reverse(),
+    );
+    device.results = Object.fromEntries(
+      Object.entries(device.results).reverse(),
+    );
+    device.results.budget_statuses = Object.fromEntries(
+      Object.entries(device.results.budget_statuses).reverse(),
+    );
+  }
+  validateLedgerDocument(reorderedKeys, resolver);
+
+  const mismatchedSettingsEvidence = clone(j4125Evidence);
+  mismatchedSettingsEvidence.harness.sample_interval_ms = 20;
+  const mismatchedSettingsRef = fixtureReference(
+    "self-test-j4125-mismatched-settings",
+    mismatchedSettingsEvidence,
+  );
+  const mismatchedSettingsLedger = clone(ledger);
+  mismatchedSettingsLedger.devices[1].evidence_ref = mismatchedSettingsRef;
+  const mismatchedSettingsResolver = (reference) => {
+    if (reference.path === mismatchedSettingsRef.path) {
+      return {
+        evidence: mismatchedSettingsEvidence,
+        digest: mismatchedSettingsRef.sha256,
+      };
+    }
+    return fixtures.get(reference.path);
+  };
+  let settingsRejected = false;
+  try {
+    validateLedgerDocument(
+      mismatchedSettingsLedger,
+      mismatchedSettingsResolver,
+    );
+  } catch (error) {
+    assert(
+      error.message.includes("does not share git tree"),
+      `unexpected calibration-settings failure: ${error.message}`,
+    );
+    settingsRejected = true;
+  }
+  assert(settingsRejected, "ledger accepted mismatched calibration settings");
+
+  const mismatchedRelation = clone(ledger);
+  mismatchedRelation.devices[1].calibration.measured_relation.idle_target_ratio_j4125_to_champion += 0.25;
+  let relationRejected = false;
+  try {
+    validateLedgerDocument(mismatchedRelation, resolver);
+  } catch (error) {
+    assert(
+      error.message.includes("measured calibration relation"),
+      `unexpected calibration-relation failure: ${error.message}`,
+    );
+    relationRejected = true;
+  }
+  assert(relationRejected, "ledger accepted an invented calibration relation");
+
+  const mismatchedArtifact = clone(ledger);
+  mismatchedArtifact.devices[1].artifact_ref.native_fastid_sha256 = "9".repeat(
+    64,
+  );
+  try {
+    validateLedgerDocument(mismatchedArtifact, resolver);
+  } catch (error) {
+    assert(
+      error.message.includes("artifact reference does not match"),
+      `unexpected ledger-correlation failure: ${error.message}`,
+    );
+    return;
+  }
+  throw new Error(
+    "ledger accepted an artifact reference unrelated to evidence",
+  );
+}
+
 function runSelfTest() {
   const valid = makeSelfTestEvidence();
   validateEvidence(valid, "valid in-memory self-test fixture");
+  validateLedgerStateTransitions(valid);
 
   const missing = clone(valid);
   delete missing.scenarios[1].samples[0].peak_process_tree_rss_bytes;
@@ -554,8 +1221,57 @@ function runSelfTest() {
   inventedWorkload.budget_verdicts[1].measured_bytes = 1;
   expectFailure(inventedWorkload, "must not claim a B1 workload result");
 
+  const assertedHardware = clone(valid);
+  assertedHardware.runner.hardware_profile = "raspberry_pi_5_champion";
+  expectFailure(assertedHardware, "JSON Schema validation");
+
+  const virtualJ4125 = clone(valid);
+  virtualJ4125.status = "complete";
+  virtualJ4125.runner.hardware_profile = "j4125_calibrated";
+  virtualJ4125.runner.cpu_model = "Intel Celeron J4125";
+  virtualJ4125.runner.physicality = {
+    status: "physical",
+    mechanism: "j4125_systemd_cpu_dmi_cross_check",
+    systemd_detect_virt: "kvm",
+    cpu_hypervisor_flag: true,
+    dmi: { sys_vendor: "QEMU", product_name: "Standard PC" },
+  };
+  expectFailure(
+    virtualJ4125,
+    "does not establish non-virtual physical hardware",
+  );
+
+  const remoteDocker = clone(valid);
+  remoteDocker.runner.container_engine.endpoint =
+    "tcp://benchmark.example:2376";
+  expectFailure(remoteDocker, "JSON Schema validation");
+
+  const unrelatedStatePid = clone(valid);
+  unrelatedStatePid.scenarios[2].samples[0].container_identity.cgroup_path = `/sys/fs/cgroup/system.slice/docker-${"7".repeat(64)}.scope`;
+  expectFailure(
+    unrelatedStatePid,
+    "not correlated to its exact local container cgroup",
+  );
+
+  const staleImageLabel = clone(valid);
+  staleImageLabel.source.oci_source_labels[
+    "org.opencontainers.image.revision"
+  ] = "9".repeat(40);
+  expectFailure(staleImageLabel, "OCI source labels do not bind");
+
+  const mutableImageRun = clone(valid);
+  mutableImageRun.scenarios[3].commands = [
+    "docker run --network none fasti:mutable self-test",
+  ];
+  expectFailure(mutableImageRun, "recorded immutable image ID");
+
+  const medianIdleGate = clone(valid);
+  medianIdleGate.scenarios[1].samples[0].steady_process_tree_rss_bytes =
+    medianIdleGate.scenarios[1].samples[0].steady_process_tree_rss_statistics.median;
+  expectFailure(medianIdleGate, "gate must use the maximum observation");
+
   console.log(
-    "PASS: static schemas, device ledger, evidence semantics, and four negative sentinels",
+    "PASS: static schemas, assignable device ledger, evidence semantics, and twelve negative sentinels",
   );
 }
 
