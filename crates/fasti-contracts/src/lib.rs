@@ -9,6 +9,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+mod conformance;
+mod generated_capability_ids;
+
+pub use conformance::*;
+pub use generated_capability_ids::public_capability_id;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HealthResponse {
@@ -103,6 +109,7 @@ impl ProblemDetails {
 
 const fn status_for(code: ProblemCode) -> u16 {
     match code {
+        ProblemCode::CapacityExceeded => 507,
         ProblemCode::Forbidden => 403,
         ProblemCode::ReceiptNotFound => 404,
         ProblemCode::IdempotencyConflict => 409,
@@ -117,6 +124,7 @@ const fn status_for(code: ProblemCode) -> u16 {
 
 const fn title_for(code: ProblemCode) -> &'static str {
     match code {
+        ProblemCode::CapacityExceeded => "Capacity exceeded",
         ProblemCode::CapabilityUnavailable => "Capability unavailable",
         ProblemCode::ContractDrift => "Contract drift",
         ProblemCode::Forbidden => "Forbidden",

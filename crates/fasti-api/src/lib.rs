@@ -4,6 +4,12 @@ use axum::{routing::get, Json, Router};
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
 use utoipa::OpenApi;
 
+#[cfg(feature = "conformance-fixture")]
+mod conformance;
+
+#[cfg(feature = "conformance-fixture")]
+pub use conformance::{b1_conformance_openapi, b1_conformance_router};
+
 #[utoipa::path(
     get,
     path = "/api/v1/health",
@@ -97,5 +103,28 @@ mod tests {
             .expect("router response");
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn all_b1_fixture_routes_are_absent_from_production() {
+        for (method, path) in [
+            ("GET", "/api/v1/capabilities"),
+            ("POST", "/api/v1/node/initialization"),
+            ("POST", "/api/v1/client-enrollments"),
+            ("POST", "/api/v1/observations"),
+            ("GET", "/api/v1/receipts/rcp_not-a-real-id"),
+        ] {
+            let response = api_router()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("valid request"),
+                )
+                .await
+                .expect("router response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
     }
 }

@@ -9,10 +9,33 @@ description = "HTTP REST API routes, handlers, and JSON contracts for Fasti"
 
 [dependencies]
 axum = { workspace = true }
+fasti-application = { workspace = true, optional = true }
 fasti-contracts = { workspace = true }
+fasti-domain = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 utoipa = { workspace = true }
 
+[features]
+default = []
+conformance-fixture = [
+  "dep:fasti-application",
+  "dep:fasti-domain",
+  "dep:getrandom",
+  "dep:serde_json",
+  "dep:tokio",
+  "fasti-application/conformance-fixture",
+]
+
+[[bin]]
+name = "b1-conformance-server"
+path = "src/bin/b1-conformance-server.rs"
+required-features = ["conformance-fixture"]
+
 [dev-dependencies]
+serde = { workspace = true }
 serde_json = { workspace = true }
+static_assertions = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }

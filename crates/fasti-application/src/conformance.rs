@@ -24,6 +24,10 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Hard upper bound for distinct retained operations and receipts in the
+/// non-durable conformance fixture.
+pub const MAX_FIXTURE_OPERATIONS: usize = 128;
+
 /// The only persistence statement made by the conformance fixture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixtureDurability {
@@ -173,6 +177,7 @@ struct InitializedState {
 }
 
 struct EnrolledState {
+    access: RequestAccessContext,
     access_snapshot: AccessSnapshot,
     credential_secret: [u8; 32],
     operations: HashMap<OperationId, StoredOperation>,
@@ -319,10 +324,15 @@ impl B1ConformanceFixture {
             CredentialStatus::Active,
             GrantStatus::Active,
             access.presented_credential_epoch(),
-            [ScopeKey::ObservationAccept, ScopeKey::ReceiptRead],
+            [
+                ScopeKey::CapabilityRead,
+                ScopeKey::ObservationAccept,
+                ScopeKey::ReceiptRead,
+            ],
         );
 
         *state = FixtureState::Enrolled(EnrolledState {
+            access,
             access_snapshot,
             credential_secret: credential_secret.bytes,
             operations: HashMap::new(),
@@ -352,6 +362,31 @@ impl B1ConformanceFixture {
     ) -> ApplicationResult<FixtureOnly<AcceptObservationReceipt>> {
         self.replay(query, Some(credential_secret))
             .map(FixtureOnly::new)
+    }
+
+    /// Authorize capability discovery against the application-owned enrolled
+    /// grant. Delivery adapters may map the registry only after this use-case
+    /// boundary succeeds; they must never fabricate an access snapshot.
+    pub fn authorize_capability_discovery(
+        &self,
+        credential_secret: &FixtureCredentialSecret,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<FixtureOnly<()>> {
+        let state = self.lock_state();
+        let enrolled = enrolled_ref(&state, CapabilityKey::DiscoverCapabilities, correlation_id)?;
+        authenticate_fixture_credential(
+            enrolled,
+            Some(credential_secret),
+            CapabilityKey::DiscoverCapabilities,
+            correlation_id,
+        )?;
+        authorize_capability(
+            CapabilityKey::DiscoverCapabilities,
+            Some(&enrolled.access),
+            &enrolled.access_snapshot,
+            correlation_id,
+        )?;
+        Ok(FixtureOnly::new(()))
     }
 
     pub fn inspect_fixture(&self) -> FixtureOnly<FixtureStateView> {
@@ -407,6 +442,15 @@ impl B1ConformanceFixture {
                 return Ok(AcceptObservationOutcome::Replayed(stored.receipt.clone()));
             }
             return Err(Box::new(FastiProblem::idempotency_conflict(
+                CapabilityKey::AcceptObservation,
+                command.correlation_id(),
+            )));
+        }
+
+        if enrolled.operations.len() >= MAX_FIXTURE_OPERATIONS
+            || enrolled.receipts.len() >= MAX_FIXTURE_OPERATIONS
+        {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
                 CapabilityKey::AcceptObservation,
                 command.correlation_id(),
             )));

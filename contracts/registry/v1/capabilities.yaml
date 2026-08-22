@@ -327,6 +327,7 @@ capabilities:
     problems:
       [
         capability_unavailable,
+        capacity_exceeded,
         forbidden,
         idempotency_conflict,
         invalid_identifier,

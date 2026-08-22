@@ -23,6 +23,7 @@ macro_rules! define_string_enum {
 }
 
 define_string_enum!(ProblemCode {
+    CapacityExceeded => "capacity_exceeded",
     CapabilityUnavailable => "capability_unavailable",
     ContractDrift => "contract_drift",
     Forbidden => "forbidden",
@@ -181,6 +182,31 @@ pub struct FastiProblem {
 }
 
 impl FastiProblem {
+    /// The bounded application resource cannot accept another distinct item.
+    /// Callers may retry only after capacity has been released; no mutation has
+    /// occurred for the rejected request.
+    pub fn capacity_exceeded(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self {
+            code: ProblemCode::CapacityExceeded,
+            capability,
+            message: "bounded application capacity has been reached".to_owned(),
+            safe_state: SafeState::NoMutation,
+            retryability: Retryability::RetryAfterCorrection,
+            next_actions: vec![NextAction {
+                id: "release_capacity".to_owned(),
+                label: "Release retained capacity before retrying".to_owned(),
+            }],
+            correlation_id,
+            param: None,
+            actual: None,
+            documentation_path: Some("v1/problems/capacity-exceeded"),
+            violations: Vec::new(),
+        }
+    }
+
     pub fn capability_unavailable(
         capability: CapabilityKey,
         correlation_id: RequestCorrelationId,
@@ -289,6 +315,32 @@ impl FastiProblem {
         .try_with_violations(violations)
     }
 
+    /// Transport or representation validation failed before the capability
+    /// could mutate application state.
+    pub fn validation_failed(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self {
+            code: ProblemCode::ValidationFailed,
+            capability,
+            message: "request representation does not satisfy the governed contract".to_owned(),
+            safe_state: SafeState::NoMutation,
+            retryability: Retryability::RetryAfterCorrection,
+            next_actions: vec![NextAction {
+                id: "correct_request".to_owned(),
+                label: "Correct the request representation and retry".to_owned(),
+            }],
+            correlation_id,
+            param: None,
+            actual: None,
+            documentation_path: Some("v1/problems/validation-failed"),
+            violations: Vec::new(),
+        }
+        .try_with_violations(violations)
+    }
+
     pub fn try_with_next_actions(
         mut self,
         next_actions: Vec<NextAction>,
@@ -352,6 +404,7 @@ mod tests {
 
     #[test]
     fn semantic_values_have_one_stable_contract_spelling() {
+        assert_eq!(ProblemCode::CapacityExceeded.as_str(), "capacity_exceeded");
         assert_eq!(
             ProblemCode::CapabilityUnavailable.as_str(),
             "capability_unavailable"
@@ -399,6 +452,17 @@ mod tests {
         )
         .expect("valid redacted violation");
         assert_eq!(violation.actual(), None);
+    }
+
+    #[test]
+    fn capacity_failure_is_retryable_only_after_correction_and_never_mutates() {
+        let problem = FastiProblem::capacity_exceeded(
+            CapabilityKey::AcceptObservation,
+            RequestCorrelationId::new_v7(),
+        );
+        assert_eq!(problem.safe_state(), SafeState::NoMutation);
+        assert_eq!(problem.retryability(), Retryability::RetryAfterCorrection);
+        assert_eq!(problem.next_actions()[0].id(), "release_capacity");
     }
 
     #[test]

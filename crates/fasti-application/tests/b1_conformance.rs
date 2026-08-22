@@ -1,7 +1,7 @@
 #![cfg(feature = "conformance-fixture")]
 
 use fasti_application::{
-    conformance::{B1ConformanceFixture, FixtureDurability, FixturePhase},
+    conformance::{B1ConformanceFixture, FixtureDurability, FixturePhase, MAX_FIXTURE_OPERATIONS},
     AcceptObservationCommand, AcceptObservationOutcome, ProblemCode, ReplayReceiptQuery,
 };
 use fasti_domain::{
@@ -168,6 +168,30 @@ fn authorization_is_rechecked_and_mismatched_access_cannot_accept() {
 }
 
 #[test]
+fn capability_discovery_uses_the_enrolled_application_grant() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = initialize_and_enroll(&fixture);
+    let other_fixture = B1ConformanceFixture::new();
+    let other_enrollment = initialize_and_enroll(&other_fixture);
+
+    let authorized = fixture
+        .authorize_capability_discovery(
+            enrollment.credential_secret(),
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("enrolled grant owns capability discovery authorization");
+    assert_eq!(authorized.durability(), FixtureDurability::None);
+
+    let denied = fixture
+        .authorize_capability_discovery(
+            other_enrollment.credential_secret(),
+            RequestCorrelationId::new_v7(),
+        )
+        .expect_err("foreign credential cannot discover capabilities");
+    assert_eq!(denied.code(), ProblemCode::Forbidden);
+}
+
+#[test]
 fn idempotency_and_receipt_replay_are_atomic_and_exact() {
     let fixture = B1ConformanceFixture::new();
     let enrollment = initialize_and_enroll(&fixture);
@@ -216,6 +240,53 @@ fn idempotency_and_receipt_replay_are_atomic_and_exact() {
     assert_eq!(replayed_original, original);
     assert_eq!(fixture.inspect_fixture().as_ref().operation_count, 1);
     assert_eq!(fixture.inspect_fixture().as_ref().receipt_count, 1);
+}
+
+#[test]
+fn bounded_capacity_rejects_without_mutation_and_preserves_exact_replay() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = initialize_and_enroll(&fixture);
+    let access = *enrollment.access();
+    let mut first = None;
+
+    for index in 0..MAX_FIXTURE_OPERATIONS {
+        let outcome = fixture
+            .accept_fixture(
+                enrollment.credential_secret(),
+                command(access, OperationId::new_v7(), "77"),
+            )
+            .expect("bounded slot accepts")
+            .into_inner();
+        if index == 0 {
+            first = Some(outcome);
+        }
+    }
+    let before = *fixture.inspect_fixture().as_ref();
+    assert_eq!(before.operation_count, MAX_FIXTURE_OPERATIONS);
+    assert_eq!(before.receipt_count, MAX_FIXTURE_OPERATIONS);
+
+    let rejected = fixture
+        .accept_fixture(
+            enrollment.credential_secret(),
+            command(access, OperationId::new_v7(), "88"),
+        )
+        .expect_err("new operation exceeds bounded capacity");
+    assert_eq!(rejected.code(), ProblemCode::CapacityExceeded);
+    assert_eq!(*fixture.inspect_fixture().as_ref(), before);
+
+    let original = first.expect("first outcome retained");
+    let replay = fixture
+        .replay_fixture(
+            enrollment.credential_secret(),
+            ReplayReceiptQuery::new(
+                RequestCorrelationId::new_v7(),
+                access,
+                original.receipt().receipt_id(),
+            ),
+        )
+        .expect("capacity does not invalidate existing receipts")
+        .into_inner();
+    assert_eq!(&replay, original.receipt());
 }
 
 #[test]

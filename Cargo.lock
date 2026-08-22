@@ -402,8 +402,13 @@ name = "fasti-api"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "fasti-application",
  "fasti-contracts",
+ "fasti-domain",
+ "getrandom 0.3.4",
+ "serde",
  "serde_json",
+ "static_assertions",
  "tokio",
  "tower",
  "utoipa",
@@ -438,6 +443,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "static_assertions",
  "utoipa",
 ]
 
