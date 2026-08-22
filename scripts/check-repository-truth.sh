@@ -9,6 +9,9 @@ retired_paths=(
   "crates/fasti-sync"
   "crates/fasti-connectors"
   "crates/fasti-projections"
+  "crates/fasti-core"
+  "crates/fasti-activity"
+  "crates/fasti-auth"
 )
 
 for path in "${retired_paths[@]}"; do
@@ -19,6 +22,16 @@ for path in "${retired_paths[@]}"; do
     fi
   done < <(git ls-files --cached --others --exclude-standard -- "$path")
 done
+
+if grep -Eqi 'axum|rusqlite|tokio|utoipa|schemars|tauri' crates/fasti-domain/Cargo.toml; then
+  echo "fasti-domain must not depend on adapters, runtimes, or contract generators" >&2
+  exit 1
+fi
+
+if grep -Eqi 'axum|rusqlite|tokio|utoipa|schemars|tauri' crates/fasti-application/Cargo.toml; then
+  echo "fasti-application must depend inward and remain adapter-free" >&2
+  exit 1
+fi
 
 while IFS= read -r knowledge_file; do
   if ! grep -Fq "**Status:** Governed design draft; not implemented" "$knowledge_file"; then

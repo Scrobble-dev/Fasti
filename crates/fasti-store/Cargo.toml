@@ -5,10 +5,4 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "SQLite event-store scaffold retained for B1 boundary reconciliation"
-
-[dependencies]
-fasti-activity = { workspace = true }
-rusqlite = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
+description = "Storage adapter boundary reserved for the B2 local kernel"

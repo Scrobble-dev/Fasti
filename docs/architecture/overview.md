@@ -2,7 +2,7 @@
 
 Fasti is an identity-first local system of record for media activity. It is not a media player.
 
-## Current B0 shape
+## Current B1 foundation shape
 
 ```text
 fastid ──> fasti-api ──> GET /api/v1/health
@@ -11,9 +11,13 @@ fasti CLI ──> explicit nonzero guards for export, restore, and verify
 
 governed drafts ──> identity seed, provider-manifest example,
                     activity fixtures, schema, and UAT matrix
+
+fasti-domain ──> typed identifier/time invariants
+       ^
+       └── fasti-application ──> capability ownership and typed problems
 ```
 
-The retained `fasti-core`, `fasti-activity`, `fasti-store`, and `fasti-auth` crates are scaffolds awaiting B1 reconciliation. Their presence is not the final boundary and does not prove durable observation acceptance, access control, identity resolution, export, restore, or replication.
+The retired `fasti-core`, `fasti-activity`, and `fasti-auth` scaffolds are not compatibility layers. Their raw IDs, collapsed activity envelope, caller-controlled server times, and token claims were not proven domain primitives. `fasti-store` is an intentionally empty adapter boundary until B2 implements and proves the local kernel. This foundation does not prove durable observation acceptance, access control, identity resolution, export, restore, or replication.
 
 ## Target bounded contexts
 

@@ -68,25 +68,25 @@ The controlling engineering rules are in [the Fasti constitution](docs/constitut
 
 See the [glossary](docs/glossary.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md) for the shared vocabulary and gates.
 
-## Current B0 architecture
+## Current B1 foundation architecture
 
-The active workspace is intentionally small while B1 establishes the final bounded contexts:
+The active workspace now has the inward ownership spine while B1 builds its executable contracts:
 
 ```text
 apps/fastid          health-only daemon composition root
 crates/fasti-api     implemented HTTP health route; unsupported routes remain absent
 crates/fasti-cli     explicit nonzero guards for planned B3 operations
-crates/fasti-core    draft primitives retained for B1 reconciliation
-crates/fasti-activity
-crates/fasti-store
-crates/fasti-auth    draft scaffolds retained only until B1 folds proven primitives
+crates/fasti-domain  typed IDs, time values, and domain vocabulary
+crates/fasti-application
+                     capability ownership and one typed problem catalog
+crates/fasti-store   intentionally empty adapter boundary until B2 persistence
 
 packages/sdk         minimal typed health client
 packages/schemas     governed draft schema input
 packages/tokens      approved design-token projection
 ```
 
-Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. B1 will introduce `fasti-domain`, `fasti-application`, `fasti-contracts`, and the contract-generation task runner before new capabilities are added.
+Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B1 introduces `fasti-contracts` and the deterministic task runner only after this domain/application foundation is compile-green.
 
 Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
 
