@@ -12,22 +12,27 @@
     "captured_at",
     "runner",
     "source",
+    "corpus",
     "budget_snapshot",
     "harness",
     "scenarios",
     "artifact_sizes",
-    "budget_verdicts"
+    "retained_artifacts",
+    "budget_verdicts",
+    "artifact_budget_verdicts",
+    "idle_cpu_verdicts"
   ],
   "properties": {
     "$schema": {
       "const": "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json"
     },
-    "schema_version": { "const": "fasti.b1.performance-evidence.v2" },
+    "schema_version": { "const": "fasti.b1.performance-evidence.v3" },
     "body": { "const": "B1" },
     "status": { "enum": ["complete", "test_fixture"] },
     "captured_at": { "type": "string", "minLength": 20 },
     "runner": { "$ref": "#/$defs/runner" },
     "source": { "$ref": "#/$defs/source" },
+    "corpus": { "$ref": "#/$defs/corpus" },
     "budget_snapshot": { "$ref": "#/$defs/budgetSnapshot" },
     "harness": { "$ref": "#/$defs/harness" },
     "scenarios": {
@@ -37,11 +42,24 @@
       "items": { "$ref": "#/$defs/scenario" }
     },
     "artifact_sizes": { "$ref": "#/$defs/artifactSizes" },
+    "retained_artifacts": { "$ref": "#/$defs/retainedArtifacts" },
     "budget_verdicts": {
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
       "items": { "$ref": "#/$defs/verdict" }
+    },
+    "artifact_budget_verdicts": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/artifactVerdict" }
+    },
+    "idle_cpu_verdicts": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/idleCpuVerdict" }
     }
   },
   "allOf": [
@@ -55,7 +73,9 @@
           "runner": {
             "type": "object",
             "properties": {
-              "hardware_profile": { "not": { "const": "unclassified" } }
+              "hardware_profile": {
+                "enum": ["raspberry_pi_5_champion", "j4125_calibrated"]
+              }
             }
           }
         }
@@ -74,27 +94,47 @@
   ],
   "$defs": {
     "nonEmptyString": { "type": "string", "minLength": 1 },
+    "accountableString": {
+      "type": "string",
+      "minLength": 3,
+      "pattern": "^(?!.*(?:[Tt][Bb][Dd]|[Tt][Oo][Dd][Oo]|[Pp][Ll][Aa][Cc][Ee][Hh][Oo][Ll][Dd][Ee][Rr]|[Uu][Nn][Kk][Nn][Oo][Ww][Nn]|[Uu][Nn][Aa][Ss][Ss][Ii][Gg][Nn][Ee][Dd]|[Ee][Xx][Aa][Mm][Pp][Ll][Ee])).*[A-Za-z0-9].*$",
+      "not": {
+        "pattern": "^(?:[Rr][Uu][Nn][Nn][Ee][Rr]|[Cc][Uu][Ss][Tt][Oo][Dd][Ii][Aa][Nn]|[Tt][Ee][Ss][Tt]|[Nn][Oo][Nn][Ee]|[Nn][Uu][Ll][Ll]|[Nn]/[Aa])$"
+      }
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "runner": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "runner_id",
+        "machine_fingerprint_sha256",
         "hardware_profile",
         "hardware_profile_derivation",
+        "profile_policy_sha256",
         "physicality",
         "custodian",
         "os_release",
+        "os_image",
         "kernel_release",
         "architecture",
         "cpu_model",
         "device_model",
         "logical_cpu_count",
         "total_memory_bytes",
+        "firmware",
+        "root_filesystem",
+        "storage",
+        "cpu_governor",
+        "temperature",
+        "profile_requirements",
         "cgroup_version",
+        "cgroup",
         "container_engine"
       ],
       "properties": {
-        "runner_id": { "$ref": "#/$defs/nonEmptyString" },
+        "runner_id": { "$ref": "#/$defs/accountableString" },
+        "machine_fingerprint_sha256": { "$ref": "#/$defs/sha256" },
         "hardware_profile": {
           "enum": [
             "raspberry_pi_5_champion",
@@ -106,10 +146,14 @@
             "unclassified"
           ]
         },
-        "hardware_profile_derivation": { "const": "fingerprint_rule_v1" },
+        "hardware_profile_derivation": {
+          "const": "physical_profile_policy_v1"
+        },
+        "profile_policy_sha256": { "$ref": "#/$defs/sha256" },
         "physicality": { "$ref": "#/$defs/physicality" },
-        "custodian": { "$ref": "#/$defs/nonEmptyString" },
+        "custodian": { "$ref": "#/$defs/accountableString" },
         "os_release": { "$ref": "#/$defs/nonEmptyString" },
+        "os_image": { "$ref": "#/$defs/osImage" },
         "kernel_release": { "$ref": "#/$defs/nonEmptyString" },
         "architecture": { "$ref": "#/$defs/nonEmptyString" },
         "cpu_model": { "$ref": "#/$defs/nonEmptyString" },
@@ -118,7 +162,14 @@
         },
         "logical_cpu_count": { "type": "integer", "minimum": 1 },
         "total_memory_bytes": { "type": "integer", "minimum": 1 },
+        "firmware": { "$ref": "#/$defs/firmware" },
+        "root_filesystem": { "$ref": "#/$defs/rootFilesystem" },
+        "storage": { "$ref": "#/$defs/storage" },
+        "cpu_governor": { "$ref": "#/$defs/cpuGovernor" },
+        "temperature": { "$ref": "#/$defs/temperature" },
+        "profile_requirements": { "$ref": "#/$defs/profileRequirements" },
         "cgroup_version": { "const": "v2" },
+        "cgroup": { "$ref": "#/$defs/runnerCgroup" },
         "container_engine": {
           "type": "object",
           "additionalProperties": false,
@@ -141,6 +192,185 @@
         }
       }
     },
+    "osImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pretty_name",
+        "id",
+        "version_id",
+        "version_codename",
+        "build_id",
+        "image_id",
+        "image_version",
+        "claim_scope",
+        "retained_image",
+        "approval"
+      ],
+      "properties": {
+        "pretty_name": { "$ref": "#/$defs/nonEmptyString" },
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "version_id": { "$ref": "#/$defs/nonEmptyString" },
+        "version_codename": { "$ref": "#/$defs/nonEmptyString" },
+        "build_id": { "type": ["string", "null"], "minLength": 1 },
+        "image_id": { "type": ["string", "null"], "minLength": 1 },
+        "image_version": { "type": ["string", "null"], "minLength": 1 },
+        "claim_scope": { "const": "runtime_os_release_fields_only" },
+        "retained_image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file_name", "size_bytes", "sha256"],
+          "properties": {
+            "file_name": { "type": "string", "pattern": "^[^/]+$" },
+            "size_bytes": { "type": "integer", "minimum": 1 },
+            "sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "approval": {
+          "enum": [
+            "approved_by_canonical_digest_policy",
+            "retained_digest_recorded_no_profile_allowlist"
+          ]
+        }
+      }
+    },
+    "firmware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "description", "sha256"],
+      "properties": {
+        "source": { "$ref": "#/$defs/nonEmptyString" },
+        "description": { "$ref": "#/$defs/nonEmptyString" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "rootFilesystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "type", "mount_options"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^/dev/" },
+        "type": { "$ref": "#/$defs/nonEmptyString" },
+        "mount_options": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root_source",
+        "root_filesystem_type",
+        "root_mount_options",
+        "physical_device",
+        "device_type",
+        "transport",
+        "storage_class",
+        "classification_evidence",
+        "rotational",
+        "size_bytes",
+        "model",
+        "usb_link_speed_mbps",
+        "identity_sha256",
+        "raw_serial_recorded"
+      ],
+      "properties": {
+        "root_source": { "type": "string", "pattern": "^/dev/" },
+        "root_filesystem_type": { "$ref": "#/$defs/nonEmptyString" },
+        "root_mount_options": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "physical_device": { "type": "string", "pattern": "^/dev/" },
+        "device_type": { "$ref": "#/$defs/nonEmptyString" },
+        "transport": { "$ref": "#/$defs/nonEmptyString" },
+        "storage_class": {
+          "enum": ["ssd", "hdd", "emmc_or_flash", "unknown_non_rotational"]
+        },
+        "classification_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "rotational": { "type": "boolean" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "model": { "$ref": "#/$defs/nonEmptyString" },
+        "usb_link_speed_mbps": { "type": ["number", "null"], "minimum": 1 },
+        "identity_sha256": { "$ref": "#/$defs/sha256" },
+        "raw_serial_recorded": { "const": false }
+      }
+    },
+    "cpuGovernor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "observed", "cpu_count_observed"],
+      "properties": {
+        "source": {
+          "const": "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
+        },
+        "observed": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "cpu_count_observed": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "thermalReading": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "sensor", "celsius"],
+      "properties": {
+        "source": { "type": "string", "pattern": "^/sys/class/thermal/" },
+        "sensor": { "$ref": "#/$defs/nonEmptyString" },
+        "celsius": { "type": "number", "minimum": -20, "maximum": 125 }
+      }
+    },
+    "temperature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preflight", "post_capture"],
+      "properties": {
+        "preflight": { "$ref": "#/$defs/thermalReading" },
+        "post_capture": { "$ref": "#/$defs/thermalReading" }
+      }
+    },
+    "profileRequirements": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "minProperties": 5,
+          "additionalProperties": true,
+          "required": ["profile", "storage", "mechanical_scope_note"],
+          "properties": {
+            "profile": {
+              "enum": ["raspberry_pi_5_champion", "j4125_calibrated"]
+            },
+            "storage": { "$ref": "#/$defs/nonEmptyString" },
+            "mechanical_scope_note": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        }
+      ]
+    },
+    "runnerCgroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "oci_memory_limit_bytes", "oci_swap_limit_bytes"],
+      "properties": {
+        "version": { "const": "v2" },
+        "oci_memory_limit_bytes": { "type": ["integer", "null"], "minimum": 1 },
+        "oci_swap_limit_bytes": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
     "physicality": {
       "type": "object",
       "additionalProperties": false,
@@ -149,13 +379,14 @@
         "mechanism",
         "systemd_detect_virt",
         "cpu_hypervisor_flag",
-        "dmi"
+        "dmi",
+        "device_tree"
       ],
       "properties": {
         "status": { "enum": ["physical", "test_fixture"] },
         "mechanism": {
           "enum": [
-            "raspberry_pi_device_tree",
+            "raspberry_pi_systemd_device_tree_cross_check",
             "j4125_systemd_cpu_dmi_cross_check",
             "device_tree_model",
             "test_fixture"
@@ -178,6 +409,28 @@
             },
             { "type": "null" }
           ]
+        },
+        "device_tree": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "model", "compatible"],
+              "properties": {
+                "source": {
+                  "enum": ["/proc/device-tree", "/sys/firmware/devicetree/base"]
+                },
+                "model": { "$ref": "#/$defs/nonEmptyString" },
+                "compatible": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "$ref": "#/$defs/nonEmptyString" }
+                }
+              }
+            },
+            { "type": "null" }
+          ]
         }
       }
     },
@@ -193,7 +446,13 @@
         "oci_image_ref",
         "oci_image_id",
         "oci_source_labels",
-        "contract_ref"
+        "contract_ref",
+        "build_recipe_path",
+        "build_recipe_sha256",
+        "profile_policy_path",
+        "profile_policy_sha256",
+        "build_context",
+        "build_context_archive_sha256"
       ],
       "properties": {
         "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
@@ -217,7 +476,9 @@
           "required": [
             "org.opencontainers.image.revision",
             "dev.scrobble.fasti.source.tree",
-            "dev.scrobble.fasti.contracts"
+            "dev.scrobble.fasti.contracts",
+            "dev.scrobble.fasti.build.recipe.sha256",
+            "dev.scrobble.fasti.build.context.archive.sha256"
           ],
           "properties": {
             "org.opencontainers.image.revision": {
@@ -231,19 +492,68 @@
             "dev.scrobble.fasti.contracts": {
               "type": "string",
               "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.build.recipe.sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "dev.scrobble.fasti.build.context.archive.sha256": {
+              "$ref": "#/$defs/sha256"
             }
           }
         },
         "contract_ref": {
           "type": "string",
           "pattern": "^[0-9a-f]{40}$"
+        },
+        "build_recipe_path": { "const": "benchmarks/b1/Dockerfile" },
+        "build_recipe_sha256": { "$ref": "#/$defs/sha256" },
+        "profile_policy_path": {
+          "const": "benchmarks/b1/physical-profiles.json"
+        },
+        "profile_policy_sha256": { "$ref": "#/$defs/sha256" },
+        "build_context_archive_sha256": { "$ref": "#/$defs/sha256" },
+        "build_context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "git_archive_sha256",
+            "git_archive_size_bytes",
+            "archive_command",
+            "archive_entry_count"
+          ],
+          "properties": {
+            "method": { "const": "verifier_owned_git_archive_head" },
+            "git_archive_sha256": { "$ref": "#/$defs/sha256" },
+            "git_archive_size_bytes": { "type": "integer", "minimum": 1 },
+            "archive_command": { "$ref": "#/$defs/nonEmptyString" },
+            "archive_entry_count": { "type": "integer", "minimum": 1 }
+          }
         }
+      }
+    },
+    "corpus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "seed", "digest", "reason"],
+      "properties": {
+        "status": { "const": "not_applicable" },
+        "seed": { "type": "null" },
+        "digest": { "type": "null" },
+        "reason": { "$ref": "#/$defs/nonEmptyString" }
       }
     },
     "budgetSnapshot": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source", "sha256", "memory_bytes"],
+      "required": [
+        "source",
+        "sha256",
+        "memory_bytes",
+        "idle_cpu_percent_one_core",
+        "timing_seconds",
+        "artifact_bytes"
+      ],
       "properties": {
         "source": { "const": "benchmarks/b1/budgets.json" },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -262,6 +572,43 @@
             "heavy_target": { "type": "integer", "minimum": 1 },
             "absolute_ceiling": { "type": "integer", "minimum": 1 }
           }
+        },
+        "idle_cpu_percent_one_core": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["average", "p95"],
+          "properties": {
+            "average": { "const": 0.5 },
+            "p95": { "const": 1 }
+          }
+        },
+        "timing_seconds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["idle_warmup", "idle_measurement", "sample_interval_ms"],
+          "properties": {
+            "idle_warmup": { "const": 600 },
+            "idle_measurement": { "const": 900 },
+            "sample_interval_ms": { "const": 1000 }
+          }
+        },
+        "artifact_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "native_runtime_installed",
+            "native_archive_compressed",
+            "oci_image_compressed",
+            "oci_image_unpacked",
+            "contract_pack_compressed"
+          ],
+          "properties": {
+            "native_runtime_installed": { "const": 33554432 },
+            "native_archive_compressed": { "const": 20971520 },
+            "oci_image_compressed": { "const": 52428800 },
+            "oci_image_unpacked": { "const": 104857600 },
+            "contract_pack_compressed": { "const": 5242880 }
+          }
         }
       }
     },
@@ -272,23 +619,31 @@
         "version",
         "repetitions",
         "steady_window_seconds",
+        "idle_warmup_seconds",
+        "idle_measurement_seconds",
         "sample_interval_ms",
         "baseline_subtraction",
+        "capture_command",
+        "governed_build_commands",
         "fingerprint_commands",
         "native_artifact_commands",
         "artifact_size_commands",
         "source_recheck_commands"
       ],
       "properties": {
-        "version": { "const": "fasti-b1-benchmark.v2" },
-        "repetitions": { "type": "integer", "minimum": 3 },
+        "version": { "const": "fasti-b1-benchmark.v3" },
+        "repetitions": { "type": "integer", "minimum": 5 },
         "steady_window_seconds": { "type": "number", "minimum": 3 },
-        "sample_interval_ms": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 250
-        },
+        "idle_warmup_seconds": { "const": 600 },
+        "idle_measurement_seconds": { "const": 900 },
+        "sample_interval_ms": { "const": 1000 },
         "baseline_subtraction": { "const": false },
+        "capture_command": { "$ref": "#/$defs/nonEmptyString" },
+        "governed_build_commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
         "fingerprint_commands": {
           "type": "array",
           "minItems": 1,
@@ -349,6 +704,81 @@
         "maximum": { "type": "number", "minimum": 0 }
       }
     },
+    "idleCpu": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "counter_scope",
+            "measurement_seconds",
+            "average_percent_one_core",
+            "p95_percent_one_core",
+            "interval_count"
+          ],
+          "properties": {
+            "counter_scope": {
+              "enum": ["native_process_tree_schedstat", "cgroup_v2_usage_usec"]
+            },
+            "measurement_seconds": { "type": "number", "minimum": 899 },
+            "average_percent_one_core": { "type": "number", "minimum": 0 },
+            "p95_percent_one_core": { "type": "number", "minimum": 0 },
+            "interval_count": { "type": "integer", "minimum": 2 }
+          }
+        }
+      ]
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "elapsed_ns",
+        "steady",
+        "process_tree_rss_bytes",
+        "process_tree_cpu_runtime_ns",
+        "process_count",
+        "cgroup_memory_current_bytes",
+        "cgroup_memory_peak_bytes",
+        "cgroup_cpu_runtime_ns",
+        "cgroup_memory_limit_bytes",
+        "cgroup_swap_limit_bytes",
+        "cgroup_oom_kill_count"
+      ],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "elapsed_ns": { "type": "integer", "minimum": 0 },
+        "steady": { "type": "boolean" },
+        "process_tree_rss_bytes": { "type": "integer", "minimum": 0 },
+        "process_tree_cpu_runtime_ns": { "type": "integer", "minimum": 0 },
+        "process_count": { "type": "integer", "minimum": 1 },
+        "cgroup_memory_current_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "cgroup_memory_peak_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "cgroup_cpu_runtime_ns": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "cgroup_memory_limit_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "cgroup_swap_limit_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "cgroup_oom_kill_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      }
+    },
     "sample": {
       "type": "object",
       "additionalProperties": false,
@@ -361,8 +791,12 @@
         "process_tree_cpu_seconds",
         "process_tree_cpu_percent",
         "process_count_peak",
+        "steady_started_elapsed_ns",
+        "finished_elapsed_ns",
+        "observations",
         "cgroup",
-        "container_identity"
+        "container_identity",
+        "idle_cpu"
       ],
       "properties": {
         "run": { "type": "integer", "minimum": 1 },
@@ -375,6 +809,14 @@
         "process_tree_cpu_seconds": { "type": "number", "minimum": 0 },
         "process_tree_cpu_percent": { "type": "number", "minimum": 0 },
         "process_count_peak": { "type": "integer", "minimum": 1 },
+        "steady_started_elapsed_ns": { "type": "integer", "minimum": 0 },
+        "finished_elapsed_ns": { "type": "integer", "minimum": 1 },
+        "observations": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2000,
+          "items": { "$ref": "#/$defs/observation" }
+        },
         "cgroup": {
           "oneOf": [
             { "type": "null" },
@@ -386,7 +828,10 @@
                 "steady_memory_current_statistics",
                 "peak_memory_bytes",
                 "cpu_seconds",
-                "cpu_percent"
+                "cpu_percent",
+                "memory_limit_bytes",
+                "swap_limit_bytes",
+                "oom_kill_count"
               ],
               "properties": {
                 "steady_memory_current_bytes": {
@@ -398,7 +843,16 @@
                 },
                 "peak_memory_bytes": { "type": "integer", "minimum": 1 },
                 "cpu_seconds": { "type": "number", "minimum": 0 },
-                "cpu_percent": { "type": "number", "minimum": 0 }
+                "cpu_percent": { "type": "number", "minimum": 0 },
+                "memory_limit_bytes": {
+                  "type": ["integer", "null"],
+                  "minimum": 1
+                },
+                "swap_limit_bytes": {
+                  "type": ["integer", "null"],
+                  "minimum": 0
+                },
+                "oom_kill_count": { "const": 0 }
               }
             }
           ]
@@ -423,7 +877,8 @@
               }
             }
           ]
-        }
+        },
+        "idle_cpu": { "$ref": "#/$defs/idleCpu" }
       }
     },
     "scenarioSummary": {
@@ -500,11 +955,43 @@
         "workload_exit": { "$ref": "#/$defs/workloadExit" },
         "samples": {
           "type": "array",
-          "minItems": 3,
+          "minItems": 5,
           "items": { "$ref": "#/$defs/sample" }
         },
         "summary": { "$ref": "#/$defs/scenarioSummary" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "id": { "enum": ["native_fastid_idle", "oci_fastid_idle"] }
+            },
+            "required": ["id"]
+          },
+          "then": {
+            "properties": {
+              "samples": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": { "idle_cpu": { "type": "object" } }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "samples": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": { "idle_cpu": { "type": "null" } }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "artifactSizes": {
       "type": "object",
@@ -513,13 +1000,105 @@
         "native_fastid_binary_bytes",
         "oci_fastid_binary_bytes",
         "oci_fasti_cli_binary_bytes",
-        "oci_image_bytes"
+        "oci_image_bytes",
+        "native_runtime_installed_bytes",
+        "native_archive_compressed_bytes",
+        "oci_image_compressed_bytes",
+        "oci_image_compressed_sha256",
+        "contract_pack_compressed_bytes",
+        "contract_pack_compressed_sha256"
       ],
       "properties": {
         "native_fastid_binary_bytes": { "type": "integer", "minimum": 1 },
         "oci_fastid_binary_bytes": { "type": "integer", "minimum": 1 },
         "oci_fasti_cli_binary_bytes": { "type": "integer", "minimum": 1 },
-        "oci_image_bytes": { "type": "integer", "minimum": 1 }
+        "oci_image_bytes": { "type": "integer", "minimum": 1 },
+        "native_runtime_installed_bytes": { "type": "null" },
+        "native_archive_compressed_bytes": { "type": "null" },
+        "oci_image_compressed_bytes": { "type": "integer", "minimum": 1 },
+        "oci_image_compressed_sha256": { "$ref": "#/$defs/sha256" },
+        "contract_pack_compressed_bytes": { "type": "integer", "minimum": 1 },
+        "contract_pack_compressed_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "retainedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^artifacts/sha256/[0-9a-f]{64}\\.tar\\.gz$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size_bytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "retainedArtifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oci_image_compressed", "contract_pack_compressed"],
+      "properties": {
+        "oci_image_compressed": { "$ref": "#/$defs/retainedArtifact" },
+        "contract_pack_compressed": { "$ref": "#/$defs/retainedArtifact" }
+      }
+    },
+    "artifactVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budget",
+        "limit_bytes",
+        "measured_bytes",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "budget": {
+          "enum": [
+            "native_runtime_installed",
+            "native_archive_compressed",
+            "oci_image_compressed",
+            "oci_image_unpacked",
+            "contract_pack_compressed"
+          ]
+        },
+        "limit_bytes": { "type": "integer", "minimum": 1 },
+        "measured_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "status": { "enum": ["pass", "fail", "not_applicable"] },
+        "reason": { "$ref": "#/$defs/nonEmptyString" }
+      }
+    },
+    "idleCpuVerdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario",
+        "warmup_seconds",
+        "measurement_seconds",
+        "average_limit_percent_one_core",
+        "p95_limit_percent_one_core",
+        "measured_worst_average_percent_one_core",
+        "measured_worst_p95_percent_one_core",
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "scenario": { "enum": ["native_fastid_idle", "oci_fastid_idle"] },
+        "warmup_seconds": { "const": 600 },
+        "measurement_seconds": { "const": 900 },
+        "average_limit_percent_one_core": { "const": 0.5 },
+        "p95_limit_percent_one_core": { "const": 1 },
+        "measured_worst_average_percent_one_core": {
+          "type": "number",
+          "minimum": 0
+        },
+        "measured_worst_p95_percent_one_core": {
+          "type": "number",
+          "minimum": 0
+        },
+        "status": { "enum": ["pass", "fail"] },
+        "reason": { "$ref": "#/$defs/nonEmptyString" }
       }
     },
     "verdict": {

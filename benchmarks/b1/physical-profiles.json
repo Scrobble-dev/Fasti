@@ -1,0 +1,63 @@
+{
+  "$schema": "./physical-profiles.schema.json",
+  "schema_version": "fasti.b1.physical-profiles.v1",
+  "hardware_profile_derivation": "physical_profile_policy_v1",
+  "profiles": {
+    "raspberry_pi_5_champion": {
+      "device_tree": {
+        "model_pattern": "^Raspberry Pi 5 Model B Rev [0-9]+\\.[0-9]+$",
+        "required_compatible": ["raspberrypi,5-model-b", "brcm,bcm2712"]
+      },
+      "systemd_detect_virt": "none",
+      "architectures": ["aarch64", "arm64"],
+      "logical_cpu_count": 4,
+      "memory_bytes": {
+        "minimum": 3221225472,
+        "maximum": 5368709120,
+        "label": "4_gb"
+      },
+      "running_os_release": {
+        "id": "raspbian",
+        "version_codename": "trixie",
+        "claim_scope": "runtime_os_release_only"
+      },
+      "approved_image_sha256": [],
+      "os_image_policy_status": "blocking_until_official_digest_pinned",
+      "storage": {
+        "class": "ssd",
+        "transport": "usb",
+        "minimum_link_speed_mbps": 5000,
+        "label": "usb3_ssd"
+      },
+      "cooling_status": "active",
+      "overclock": {
+        "status": "stock_no_overclock_detected",
+        "forbidden_nonzero_prefixes": ["over_voltage"],
+        "allowed_exact_values": {
+          "force_turbo": [0],
+          "arm_freq": [0, 2400],
+          "arm_freq_min": [0, 1500]
+        }
+      },
+      "oci": {
+        "memory_limit_bytes": null,
+        "swap_limit_bytes": null
+      }
+    },
+    "j4125_calibrated": {
+      "cpu_model_pattern": "(?:^|[^A-Za-z0-9])J4125(?:$|[^A-Za-z0-9])",
+      "systemd_detect_virt": "none",
+      "architectures": ["x86_64", "amd64"],
+      "logical_cpu_count": 4,
+      "storage": {
+        "class": "ssd",
+        "accepted_transports": ["ata", "nvme", "sata", "usb"],
+        "label": "verified_ssd_backed"
+      },
+      "oci": {
+        "memory_limit_bytes": 2147483648,
+        "swap_limit_bytes": 0
+      }
+    }
+  }
+}

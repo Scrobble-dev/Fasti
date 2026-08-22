@@ -40,73 +40,7 @@
         "representative_tv"
       ]
     },
-    "runnerFingerprint": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "runner_id",
-        "hardware_profile",
-        "hardware_profile_derivation",
-        "physicality",
-        "os_release",
-        "kernel_release",
-        "architecture",
-        "cpu_model",
-        "device_model",
-        "logical_cpu_count",
-        "total_memory_bytes"
-      ],
-      "properties": {
-        "runner_id": { "$ref": "#/$defs/nonEmptyString" },
-        "hardware_profile": { "$ref": "#/$defs/profile" },
-        "hardware_profile_derivation": { "const": "fingerprint_rule_v1" },
-        "physicality": { "$ref": "#/$defs/physicality" },
-        "os_release": { "$ref": "#/$defs/nonEmptyString" },
-        "kernel_release": { "$ref": "#/$defs/nonEmptyString" },
-        "architecture": { "$ref": "#/$defs/nonEmptyString" },
-        "cpu_model": { "$ref": "#/$defs/nonEmptyString" },
-        "device_model": { "$ref": "#/$defs/nullableString" },
-        "logical_cpu_count": { "type": "integer", "minimum": 1 },
-        "total_memory_bytes": { "type": "integer", "minimum": 1 }
-      }
-    },
-    "physicality": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "status",
-        "mechanism",
-        "systemd_detect_virt",
-        "cpu_hypervisor_flag",
-        "dmi"
-      ],
-      "properties": {
-        "status": { "const": "physical" },
-        "mechanism": {
-          "enum": [
-            "raspberry_pi_device_tree",
-            "j4125_systemd_cpu_dmi_cross_check",
-            "device_tree_model"
-          ]
-        },
-        "systemd_detect_virt": { "$ref": "#/$defs/nullableString" },
-        "cpu_hypervisor_flag": { "const": false },
-        "dmi": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": { "$ref": "#/$defs/nonEmptyString" },
-              "required": ["sys_vendor", "product_name"],
-              "properties": {
-                "sys_vendor": { "$ref": "#/$defs/nonEmptyString" },
-                "product_name": { "$ref": "#/$defs/nonEmptyString" }
-              }
-            },
-            { "type": "null" }
-          ]
-        }
-      }
-    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "artifactRef": {
       "type": "object",
       "additionalProperties": false,
@@ -114,7 +48,11 @@
         "git_commit",
         "git_tree",
         "native_fastid_sha256",
-        "oci_image_id"
+        "oci_image_id",
+        "oci_source_labels",
+        "build_recipe_path",
+        "build_recipe_sha256",
+        "build_context_archive_sha256"
       ],
       "properties": {
         "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
@@ -126,8 +64,54 @@
         "oci_image_id": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
-        }
+        },
+        "oci_source_labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "org.opencontainers.image.revision",
+            "dev.scrobble.fasti.source.tree",
+            "dev.scrobble.fasti.contracts",
+            "dev.scrobble.fasti.build.recipe.sha256",
+            "dev.scrobble.fasti.build.context.archive.sha256"
+          ],
+          "properties": {
+            "org.opencontainers.image.revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.source.tree": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.contracts": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.build.recipe.sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "dev.scrobble.fasti.build.context.archive.sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "build_recipe_path": { "const": "benchmarks/b1/Dockerfile" },
+        "build_recipe_sha256": { "$ref": "#/$defs/sha256" },
+        "build_context_archive_sha256": { "$ref": "#/$defs/sha256" }
       }
+    },
+    "idleCpuStatus": {
+      "enum": ["pass", "fail"]
+    },
+    "evidenceCorrelationState": {
+      "enum": [
+        "blocking_unassigned",
+        "assigned_pending_evidence",
+        "evidence_validated",
+        "qualified",
+        "calibrated"
+      ]
     },
     "evidenceRef": {
       "type": "object",
@@ -144,7 +128,12 @@
     "results": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["budget_statuses", "all_applicable_budgets_passed"],
+      "required": [
+        "budget_statuses",
+        "artifact_budget_statuses",
+        "idle_cpu_statuses",
+        "all_applicable_budgets_passed"
+      ],
       "properties": {
         "budget_statuses": {
           "type": "object",
@@ -160,6 +149,33 @@
             "normal_target": { "const": "not_applicable" },
             "heavy_target": { "const": "not_applicable" },
             "absolute_ceiling": { "enum": ["pass", "fail"] }
+          }
+        },
+        "artifact_budget_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "native_runtime_installed",
+            "native_archive_compressed",
+            "oci_image_compressed",
+            "oci_image_unpacked",
+            "contract_pack_compressed"
+          ],
+          "properties": {
+            "native_runtime_installed": { "const": "not_applicable" },
+            "native_archive_compressed": { "const": "not_applicable" },
+            "oci_image_compressed": { "enum": ["pass", "fail"] },
+            "oci_image_unpacked": { "enum": ["pass", "fail"] },
+            "contract_pack_compressed": { "enum": ["pass", "fail"] }
+          }
+        },
+        "idle_cpu_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["native_fastid_idle", "oci_fastid_idle"],
+          "properties": {
+            "native_fastid_idle": { "$ref": "#/$defs/idleCpuStatus" },
+            "oci_fastid_idle": { "$ref": "#/$defs/idleCpuStatus" }
           }
         },
         "all_applicable_budgets_passed": { "type": "boolean" }
@@ -338,17 +354,16 @@
         },
         "hypothesis": { "$ref": "#/$defs/nonEmptyString" },
         "qualification_state": {
-          "enum": [
-            "blocking_unassigned",
-            "assigned_pending_evidence",
-            "evidence_validated",
-            "qualified",
-            "calibrated"
-          ]
+          "$ref": "#/$defs/evidenceCorrelationState"
         },
         "custodian": { "$ref": "#/$defs/nullableString" },
         "runner_fingerprint": {
-          "oneOf": [{ "$ref": "#/$defs/runnerFingerprint" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json#/$defs/runner"
+            },
+            { "type": "null" }
+          ]
         },
         "artifact_ref": {
           "oneOf": [{ "$ref": "#/$defs/artifactRef" }, { "type": "null" }]

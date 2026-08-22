@@ -6,6 +6,8 @@ Cargo.lock.backup
 # Node / pnpm / frontend
 node_modules/
 dist/
+!benchmarks/b1/tauri-shell/dist/
+!benchmarks/b1/tauri-shell/dist/index.html
 .pnpm-store/
 .next/
 .turbo/
@@ -45,3 +47,7 @@ coverage/
 lcov.info
 *.profdata
 *.profraw
+/benchmarks/b1/evidence/
+/benchmarks/b1/tauri-shell/evidence/
+__pycache__/
+*.py[cod]

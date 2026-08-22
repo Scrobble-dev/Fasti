@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/tauri-shell-fixture-policy.schema.json",
+  "title": "Fasti B1 empty Tauri fixture policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema_version", "tracked_inputs", "invariants"],
+  "properties": {
+    "$schema": { "const": "./fixture-policy.schema.json" },
+    "schema_version": { "const": "fasti.b1.tauri-shell-fixture-policy.v1" },
+    "tracked_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dist/index.html",
+        "src-tauri/Cargo.toml",
+        "src-tauri/Cargo.lock",
+        "src-tauri/build.rs",
+        "src-tauri/src/main.rs",
+        "src-tauri/tauri.conf.json",
+        "src-tauri/icons/icon.png"
+      ],
+      "properties": {
+        "dist/index.html": { "$ref": "#/$defs/sha256" },
+        "src-tauri/Cargo.toml": { "$ref": "#/$defs/sha256" },
+        "src-tauri/Cargo.lock": { "$ref": "#/$defs/sha256" },
+        "src-tauri/build.rs": { "$ref": "#/$defs/sha256" },
+        "src-tauri/src/main.rs": { "$ref": "#/$defs/sha256" },
+        "src-tauri/tauri.conf.json": { "$ref": "#/$defs/sha256" },
+        "src-tauri/icons/icon.png": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "invariants": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_surface",
+        "window_count",
+        "window_visible",
+        "window_resizable",
+        "window_fullscreen",
+        "bundle_active",
+        "frontend_dist",
+        "package_name",
+        "package_publishable",
+        "dependency_keys",
+        "build_dependency_keys",
+        "commands_or_plugins",
+        "interactive_html"
+      ],
+      "properties": {
+        "product_surface": { "const": false },
+        "window_count": { "const": 1 },
+        "window_visible": { "const": false },
+        "window_resizable": { "const": false },
+        "window_fullscreen": { "const": false },
+        "bundle_active": { "const": false },
+        "frontend_dist": { "const": "../dist" },
+        "package_name": { "const": "fasti-b1-tauri-shell" },
+        "package_publishable": { "const": false },
+        "dependency_keys": { "const": ["tauri"] },
+        "build_dependency_keys": { "const": ["tauri-build"] },
+        "commands_or_plugins": { "const": false },
+        "interactive_html": { "const": false }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

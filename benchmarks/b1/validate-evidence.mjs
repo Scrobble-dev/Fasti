@@ -1,8 +1,21 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -13,6 +26,9 @@ const budgetsPath = join(here, "budgets.json");
 const budgetsSchemaPath = join(here, "budgets.schema.json");
 const ledgerPath = join(here, "device-hypotheses.json");
 const ledgerSchemaPath = join(here, "device-hypotheses.schema.json");
+const governedBuildRecipePath = join(here, "Dockerfile");
+const physicalProfilesPath = join(here, "physical-profiles.json");
+const physicalProfilesSchemaPath = join(here, "physical-profiles.schema.json");
 
 function loadJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
@@ -20,6 +36,110 @@ function loadJson(path) {
 
 function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function requireNoFollowSupport(value) {
+  assert(
+    Number.isInteger(value),
+    "retained artifact verification requires O_NOFOLLOW support",
+  );
+  return value;
+}
+
+function containedPath(root, target) {
+  const value = relative(root, target);
+  return value && !value.startsWith("..") && !isAbsolute(value);
+}
+
+function readContainedRegularFileOnce(
+  root,
+  target,
+  label,
+  { afterOpen = () => {} } = {},
+) {
+  const noFollow = requireNoFollowSupport(fsConstants.O_NOFOLLOW);
+  const lexicalRoot = resolve(root);
+  const lexicalTarget = resolve(target);
+  assert(
+    containedPath(lexicalRoot, lexicalTarget),
+    `${label} path escapes its governed directory`,
+  );
+  const realRoot = realpathSync(lexicalRoot);
+  const realParent = realpathSync(dirname(lexicalTarget));
+  assert(
+    realParent === realRoot || containedPath(realRoot, realParent),
+    `${label} parent resolves outside its governed directory`,
+  );
+  let descriptor;
+  try {
+    descriptor = openSync(lexicalTarget, fsConstants.O_RDONLY | noFollow);
+    const metadata = fstatSync(descriptor);
+    assert(metadata.isFile(), `${label} is not a regular file`);
+    afterOpen();
+    const bytes = readFileSync(descriptor);
+    assert(
+      bytes.length === metadata.size,
+      `${label} changed while it was read`,
+    );
+    return {
+      bytes,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+      size: metadata.size,
+    };
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function readRetainedArtifactOnce(receiptPath, reference, label) {
+  const receiptDirectory = dirname(resolve(receiptPath));
+  const target = resolve(receiptDirectory, reference.path);
+  const snapshot = readContainedRegularFileOnce(
+    receiptDirectory,
+    target,
+    `${label} retained artifact`,
+  );
+  assert(
+    snapshot.size === reference.size_bytes &&
+      snapshot.digest === reference.sha256 &&
+      reference.path.endsWith(`/${snapshot.digest}.tar.gz`),
+    `${label} retained artifact bytes, size, digest, and content-addressed path do not match`,
+  );
+  return snapshot.bytes;
+}
+
+function validateRetainedArtifacts(evidence, evidencePath, label) {
+  const image = readRetainedArtifactOnce(
+    evidencePath,
+    evidence.retained_artifacts.oci_image_compressed,
+    `${label} OCI image`,
+  );
+  const contracts = readRetainedArtifactOnce(
+    evidencePath,
+    evidence.retained_artifacts.contract_pack_compressed,
+    `${label} contract pack`,
+  );
+  assert(
+    image.length === evidence.artifact_sizes.oci_image_compressed_bytes &&
+      evidence.retained_artifacts.oci_image_compressed.sha256 ===
+        evidence.artifact_sizes.oci_image_compressed_sha256 &&
+      contracts.length ===
+        evidence.artifact_sizes.contract_pack_compressed_bytes &&
+      evidence.retained_artifacts.contract_pack_compressed.sha256 ===
+        evidence.artifact_sizes.contract_pack_compressed_sha256,
+    `${label} retained artifact references do not correlate to artifact sizes`,
+  );
+}
+
+function canonicalBudgetSnapshot(budgets) {
+  return {
+    source: "benchmarks/b1/budgets.json",
+    sha256: sha256(budgetsPath),
+    memory_bytes: budgets.memory_bytes,
+    idle_cpu_percent_one_core: budgets.idle_cpu_percent_one_core,
+    timing_seconds: budgets.timing_seconds,
+    artifact_bytes: budgets.artifact_bytes,
+  };
 }
 
 const ajv = new Ajv2020({
@@ -32,6 +152,7 @@ const validatorCache = new Map();
 
 function schemaValidator(schemaPath) {
   if (!validatorCache.has(schemaPath)) {
+    if (schemaPath === ledgerSchemaPath) schemaValidator(evidenceSchemaPath);
     validatorCache.set(schemaPath, ajv.compile(loadJson(schemaPath)));
   }
   return validatorCache.get(schemaPath);
@@ -71,6 +192,200 @@ function closeEnough(left, right) {
   return Math.abs(left - right) <= 0.000001;
 }
 
+function round6(value) {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+}
+
+function p95NearestRank(values) {
+  const ordered = [...values].sort((left, right) => left - right);
+  const index = Math.max(
+    0,
+    Math.min(ordered.length - 1, Math.ceil(ordered.length * 0.95) - 1),
+  );
+  return ordered[index];
+}
+
+function assertSampleDerivedFromObservations(
+  sample,
+  scenarioId,
+  withCgroup,
+  idleExpected,
+  budgets,
+) {
+  const observations = sample.observations;
+  observations.forEach((observation, index) => {
+    assert(
+      observation.sequence === index + 1,
+      `${scenarioId} raw observation sequence is not consecutive`,
+    );
+    if (index > 0) {
+      assert(
+        observation.elapsed_ns > observations[index - 1].elapsed_ns,
+        `${scenarioId} raw observations contain a duplicate or non-monotonic timestamp`,
+      );
+      assert(
+        observation.process_tree_cpu_runtime_ns >=
+          observations[index - 1].process_tree_cpu_runtime_ns,
+        `${scenarioId} process schedstat runtime counter regressed`,
+      );
+      if (withCgroup) {
+        assert(
+          observation.cgroup_cpu_runtime_ns >=
+            observations[index - 1].cgroup_cpu_runtime_ns,
+          `${scenarioId} cgroup CPU runtime counter regressed`,
+        );
+      }
+    }
+    assert(
+      observation.steady ===
+        observation.elapsed_ns >= sample.steady_started_elapsed_ns,
+      `${scenarioId} raw observation steady-window marker is forged`,
+    );
+    const cgroupRequiredFields = [
+      "cgroup_memory_current_bytes",
+      "cgroup_memory_peak_bytes",
+      "cgroup_cpu_runtime_ns",
+      "cgroup_oom_kill_count",
+    ];
+    assert(
+      cgroupRequiredFields.every((field) =>
+        withCgroup ? observation[field] !== null : observation[field] === null,
+      ) &&
+        (withCgroup ||
+          (observation.cgroup_memory_limit_bytes === null &&
+            observation.cgroup_swap_limit_bytes === null)),
+      `${scenarioId} raw cgroup observation scope is inconsistent`,
+    );
+  });
+  assert(
+    observations.at(-1).elapsed_ns <= sample.finished_elapsed_ns,
+    `${scenarioId} raw observation exceeds the recorded finish time`,
+  );
+  const steady = observations.filter((observation) => observation.steady);
+  assert(
+    steady.length >= 2,
+    `${scenarioId} has insufficient raw steady observations`,
+  );
+  const steadyRss = steady.map(
+    (observation) => observation.process_tree_rss_bytes,
+  );
+  assertSummary(
+    sample.steady_process_tree_rss_statistics,
+    summarize(steadyRss),
+    `${scenarioId} raw steady process-tree RSS`,
+  );
+  assert(
+    sample.steady_process_tree_rss_bytes === Math.max(...steadyRss) &&
+      sample.peak_process_tree_rss_bytes ===
+        Math.max(
+          ...observations.map(
+            (observation) => observation.process_tree_rss_bytes,
+          ),
+        ) &&
+      sample.process_count_peak ===
+        Math.max(
+          ...observations.map((observation) => observation.process_count),
+        ),
+    `${scenarioId} memory/process aggregates are not derived from raw observations`,
+  );
+  const final = observations.at(-1);
+  const expectedProcessSeconds = round6(
+    final.process_tree_cpu_runtime_ns / 1_000_000_000,
+  );
+  const expectedProcessPercent = round6(
+    (final.process_tree_cpu_runtime_ns / sample.finished_elapsed_ns) * 100,
+  );
+  assert(
+    closeEnough(sample.process_tree_cpu_seconds, expectedProcessSeconds) &&
+      closeEnough(sample.process_tree_cpu_percent, expectedProcessPercent),
+    `${scenarioId} process CPU aggregate is not derived from schedstat nanoseconds`,
+  );
+
+  if (withCgroup) {
+    const steadyMemory = steady.map(
+      (observation) => observation.cgroup_memory_current_bytes,
+    );
+    assertSummary(
+      sample.cgroup.steady_memory_current_statistics,
+      summarize(steadyMemory),
+      `${scenarioId} raw steady cgroup memory`,
+    );
+    assert(
+      sample.cgroup.steady_memory_current_bytes === Math.max(...steadyMemory) &&
+        sample.cgroup.peak_memory_bytes ===
+          Math.max(
+            ...observations.map(
+              (observation) => observation.cgroup_memory_peak_bytes,
+            ),
+          ) &&
+        closeEnough(
+          sample.cgroup.cpu_seconds,
+          round6(final.cgroup_cpu_runtime_ns / 1_000_000_000),
+        ) &&
+        closeEnough(
+          sample.cgroup.cpu_percent,
+          round6(
+            (final.cgroup_cpu_runtime_ns / sample.finished_elapsed_ns) * 100,
+          ),
+        ) &&
+        observations.every(
+          (observation) =>
+            observation.cgroup_memory_limit_bytes ===
+              sample.cgroup.memory_limit_bytes &&
+            observation.cgroup_swap_limit_bytes ===
+              sample.cgroup.swap_limit_bytes,
+        ) &&
+        sample.cgroup.oom_kill_count ===
+          Math.max(
+            ...observations.map(
+              (observation) => observation.cgroup_oom_kill_count,
+            ),
+          ),
+      `${scenarioId} cgroup aggregates are not derived from raw observations`,
+    );
+  }
+
+  if (idleExpected) {
+    const observedWarmupNs =
+      sample.steady_started_elapsed_ns - sample.startup_ms * 1_000_000;
+    assert(
+      observedWarmupNs >=
+        budgets.timing_seconds.idle_warmup * 1_000_000_000 - 1_000_000,
+      `${scenarioId} raw timing does not prove the locked idle warm-up`,
+    );
+    const counter = withCgroup
+      ? "cgroup_cpu_runtime_ns"
+      : "process_tree_cpu_runtime_ns";
+    const intervals = steady.slice(1).map((observation, index) => {
+      const previous = steady[index];
+      return (
+        ((observation[counter] - previous[counter]) /
+          (observation.elapsed_ns - previous.elapsed_ns)) *
+        100
+      );
+    });
+    const measuredNs = steady.at(-1).elapsed_ns - steady[0].elapsed_ns;
+    const totalCpuNs = steady.at(-1)[counter] - steady[0][counter];
+    assert(
+      measuredNs >= budgets.timing_seconds.idle_measurement * 1_000_000_000 &&
+        sample.idle_cpu.interval_count === intervals.length &&
+        closeEnough(
+          sample.idle_cpu.measurement_seconds,
+          round6(measuredNs / 1_000_000_000),
+        ) &&
+        closeEnough(
+          sample.idle_cpu.average_percent_one_core,
+          round6((totalCpuNs / measuredNs) * 100),
+        ) &&
+        closeEnough(
+          sample.idle_cpu.p95_percent_one_core,
+          round6(p95NearestRank(intervals)),
+        ),
+      `${scenarioId} idle CPU result is not derived from raw runtime observations`,
+    );
+  }
+}
+
 function assertSummary(actual, expected, label) {
   for (const key of ["minimum", "median", "maximum"]) {
     assert(
@@ -105,24 +420,23 @@ const ociScenarioIds = new Set([
   "oci_fasti_cli_guard",
 ]);
 
+const physicalProfiles = loadJson(physicalProfilesPath);
+const piProfile = physicalProfiles.profiles.raspberry_pi_5_champion;
+const j4125Profile = physicalProfiles.profiles.j4125_calibrated;
+
 function deriveHardwareProfile(runner) {
-  const cpu = runner.cpu_model.toLowerCase();
-  const device = (runner.device_model ?? "").toLowerCase();
-  if (device.includes("raspberry pi 5")) return "raspberry_pi_5_champion";
-  if (/\bj4125\b/.test(cpu)) return "j4125_calibrated";
-  if (device.includes("ugoos") && device.includes("am6b")) {
-    return "ugoos_am6b_plus";
-  }
+  const tree = runner.physicality?.device_tree;
   if (
-    device.includes("xiaomi") &&
-    ["mi box 3", "mibox3", "mdz-16-ab", "mdz-19-aa"].some((marker) =>
-      device.includes(marker),
+    tree &&
+    new RegExp(piProfile.device_tree.model_pattern).test(tree.model) &&
+    piProfile.device_tree.required_compatible.every((item) =>
+      tree.compatible.includes(item),
     )
   ) {
-    return "xiaomi_box_m3";
+    return "raspberry_pi_5_champion";
   }
-  if (device.includes("nvidia") && device.includes("shield")) {
-    return "nvidia_shield";
+  if (new RegExp(j4125Profile.cpu_model_pattern, "i").test(runner.cpu_model)) {
+    return "j4125_calibrated";
   }
   return "unclassified";
 }
@@ -198,16 +512,29 @@ function runnerFingerprint(evidence) {
   const runner = evidence.runner;
   return {
     runner_id: runner.runner_id,
+    machine_fingerprint_sha256: runner.machine_fingerprint_sha256,
     hardware_profile: runner.hardware_profile,
     hardware_profile_derivation: runner.hardware_profile_derivation,
+    profile_policy_sha256: runner.profile_policy_sha256,
     physicality: runner.physicality,
+    custodian: runner.custodian,
     os_release: runner.os_release,
+    os_image: runner.os_image,
     kernel_release: runner.kernel_release,
     architecture: runner.architecture,
     cpu_model: runner.cpu_model,
     device_model: runner.device_model,
     logical_cpu_count: runner.logical_cpu_count,
     total_memory_bytes: runner.total_memory_bytes,
+    firmware: runner.firmware,
+    root_filesystem: runner.root_filesystem,
+    storage: runner.storage,
+    cpu_governor: runner.cpu_governor,
+    temperature: runner.temperature,
+    profile_requirements: runner.profile_requirements,
+    cgroup_version: runner.cgroup_version,
+    cgroup: runner.cgroup,
+    container_engine: runner.container_engine,
   };
 }
 
@@ -218,6 +545,10 @@ function artifactRef(evidence) {
     git_tree: source.git_tree,
     native_fastid_sha256: source.native_fastid_sha256,
     oci_image_id: source.oci_image_id,
+    oci_source_labels: source.oci_source_labels,
+    build_recipe_path: source.build_recipe_path,
+    build_recipe_sha256: source.build_recipe_sha256,
+    build_context_archive_sha256: source.build_context_archive_sha256,
   };
 }
 
@@ -225,11 +556,30 @@ function evidenceResults(evidence) {
   const budget_statuses = Object.fromEntries(
     evidence.budget_verdicts.map((verdict) => [verdict.budget, verdict.status]),
   );
+  const artifact_budget_statuses = Object.fromEntries(
+    evidence.artifact_budget_verdicts.map((verdict) => [
+      verdict.budget,
+      verdict.status,
+    ]),
+  );
+  const idle_cpu_statuses = Object.fromEntries(
+    evidence.idle_cpu_verdicts.map((verdict) => [
+      verdict.scenario,
+      verdict.status,
+    ]),
+  );
+  const applicableStatuses = [
+    ...Object.values(budget_statuses),
+    ...Object.values(artifact_budget_statuses),
+    ...Object.values(idle_cpu_statuses),
+  ].filter((status) => status !== "not_applicable");
   return {
     budget_statuses,
+    artifact_budget_statuses,
+    idle_cpu_statuses,
     all_applicable_budgets_passed:
-      budget_statuses.idle_target === "pass" &&
-      budget_statuses.absolute_ceiling === "pass",
+      applicableStatuses.length > 0 &&
+      applicableStatuses.every((status) => status === "pass"),
   };
 }
 
@@ -237,10 +587,14 @@ function calibrationSettings(evidence) {
   return {
     git_tree: evidence.source.git_tree,
     contract_ref: evidence.source.contract_ref,
+    build_recipe_sha256: evidence.source.build_recipe_sha256,
+    corpus: evidence.corpus,
     harness: {
       version: evidence.harness.version,
       repetitions: evidence.harness.repetitions,
       steady_window_seconds: evidence.harness.steady_window_seconds,
+      idle_warmup_seconds: evidence.harness.idle_warmup_seconds,
+      idle_measurement_seconds: evidence.harness.idle_measurement_seconds,
       sample_interval_ms: evidence.harness.sample_interval_ms,
       baseline_subtraction: evidence.harness.baseline_subtraction,
     },
@@ -276,6 +630,174 @@ function assertJsonEqual(actual, expected, message) {
   assert(isDeepStrictEqual(actual, expected), message);
 }
 
+const placeholderPattern =
+  /(?:^|[^a-z0-9])(tbd|todo|placeholder|unknown|unassigned|example)(?:$|[^a-z0-9])/i;
+
+function assertNoPlaceholders(value, label) {
+  if (typeof value === "string") {
+    assert(
+      !placeholderPattern.test(value) &&
+        !["n/a", "na", "null", "runner", "custodian", "test"].includes(
+          value.trim().toLowerCase(),
+        ),
+      `${label} contains a placeholder or generic value`,
+    );
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertNoPlaceholders(item, `${label}[${index}]`),
+    );
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (item !== null) assertNoPlaceholders(item, `${label}.${key}`);
+    }
+  }
+}
+
+function validateRunnerEnvironment(runner, label) {
+  const profilePolicySha256 = sha256(physicalProfilesPath);
+  assert(
+    runner.hardware_profile_derivation ===
+      physicalProfiles.hardware_profile_derivation &&
+      runner.profile_policy_sha256 === profilePolicySha256,
+    `${label} runner is not bound to the canonical physical profile policy`,
+  );
+  assert(
+    runner.root_filesystem.source === runner.storage.root_source &&
+      runner.root_filesystem.type === runner.storage.root_filesystem_type &&
+      isDeepStrictEqual(
+        runner.root_filesystem.mount_options,
+        runner.storage.root_mount_options,
+      ),
+    `${label} root filesystem does not correlate to the storage fingerprint`,
+  );
+  assert(
+    runner.cpu_governor.cpu_count_observed === runner.logical_cpu_count,
+    `${label} CPU governor fingerprint does not cover every logical CPU`,
+  );
+  assert(
+    runner.temperature.preflight.source ===
+      runner.temperature.post_capture.source &&
+      runner.temperature.preflight.sensor ===
+        runner.temperature.post_capture.sensor,
+    `${label} thermal readings do not use the same sensor`,
+  );
+  assert(
+    runner.cgroup.version === runner.cgroup_version,
+    `${label} runner cgroup record does not match cgroup_version`,
+  );
+
+  if (runner.hardware_profile === "raspberry_pi_5_champion") {
+    const requirements = runner.profile_requirements;
+    assert(
+      requirements?.profile === "raspberry_pi_5_champion" &&
+        requirements.profile_policy_sha256 === profilePolicySha256 &&
+        piProfile.architectures.includes(runner.architecture) &&
+        runner.logical_cpu_count === piProfile.logical_cpu_count &&
+        runner.total_memory_bytes >= piProfile.memory_bytes.minimum &&
+        runner.total_memory_bytes <= piProfile.memory_bytes.maximum &&
+        runner.os_image.id === piProfile.running_os_release.id &&
+        runner.os_image.version_codename ===
+          piProfile.running_os_release.version_codename &&
+        isDeepStrictEqual(
+          requirements.running_os_release,
+          piProfile.running_os_release,
+        ) &&
+        requirements.retained_os_image_approval ===
+          "approved_by_canonical_digest_policy" &&
+        requirements.memory === piProfile.memory_bytes.label &&
+        requirements.storage === piProfile.storage.label &&
+        runner.storage.storage_class === piProfile.storage.class &&
+        runner.storage.transport === piProfile.storage.transport &&
+        runner.storage.usb_link_speed_mbps >=
+          piProfile.storage.minimum_link_speed_mbps &&
+        requirements.cooling?.status === "active" &&
+        Array.isArray(requirements.cooling.fan_types) &&
+        requirements.cooling.fan_types.length > 0 &&
+        requirements.overclock?.status === piProfile.overclock.status &&
+        requirements.overclock?.policy_sha256 === profilePolicySha256 &&
+        runner.os_image.approval === "approved_by_canonical_digest_policy" &&
+        piProfile.approved_image_sha256.length > 0 &&
+        piProfile.approved_image_sha256.includes(
+          runner.os_image.retained_image.sha256,
+        ) &&
+        runner.cgroup.oci_memory_limit_bytes ===
+          piProfile.oci.memory_limit_bytes &&
+        runner.cgroup.oci_swap_limit_bytes === piProfile.oci.swap_limit_bytes,
+      `${label} does not satisfy the locked Raspberry Pi 5 champion profile`,
+    );
+  } else if (runner.hardware_profile === "j4125_calibrated") {
+    const requirements = runner.profile_requirements;
+    assert(
+      requirements?.profile === "j4125_calibrated" &&
+        requirements.profile_policy_sha256 === profilePolicySha256 &&
+        j4125Profile.architectures.includes(runner.architecture) &&
+        runner.logical_cpu_count === j4125Profile.logical_cpu_count &&
+        requirements.cpu === "physical_j4125_four_core" &&
+        requirements.storage === j4125Profile.storage.label &&
+        requirements.retained_os_image_approval ===
+          "retained_digest_recorded_no_profile_allowlist" &&
+        requirements.oci_memory_limit_bytes ===
+          j4125Profile.oci.memory_limit_bytes &&
+        requirements.oci_swap_limit_bytes ===
+          j4125Profile.oci.swap_limit_bytes &&
+        runner.storage.storage_class === j4125Profile.storage.class &&
+        j4125Profile.storage.accepted_transports.includes(
+          runner.storage.transport,
+        ) &&
+        runner.os_image.approval ===
+          "retained_digest_recorded_no_profile_allowlist" &&
+        runner.cgroup.oci_memory_limit_bytes ===
+          j4125Profile.oci.memory_limit_bytes &&
+        runner.cgroup.oci_swap_limit_bytes ===
+          j4125Profile.oci.swap_limit_bytes,
+      `${label} does not satisfy the locked J4125 calibration profile`,
+    );
+  } else {
+    assert(
+      runner.profile_requirements === null &&
+        runner.cgroup.oci_memory_limit_bytes === null &&
+        runner.cgroup.oci_swap_limit_bytes === null,
+      `${label} test fixture must not claim a physical profile configuration`,
+    );
+  }
+}
+
+function validateAssignedRunnerFingerprint(runner, custodian, label) {
+  assertNoPlaceholders(
+    { custodian, runner_fingerprint: runner },
+    `${label} assignment`,
+  );
+  assert(
+    runner.hardware_profile === deriveHardwareProfile(runner),
+    `${label} assigned hardware profile is not derived from its fingerprint`,
+  );
+  validatePhysicality(runner, `${label} assigned fingerprint`);
+  validateRunnerEnvironment(runner, `${label} assigned fingerprint`);
+}
+
+function validateAssignedArtifactRef(artifact, contractRef, label) {
+  const labels = artifact.oci_source_labels;
+  assert(
+    labels["org.opencontainers.image.revision"] === artifact.git_commit &&
+      labels["dev.scrobble.fasti.source.tree"] === artifact.git_tree &&
+      labels["dev.scrobble.fasti.contracts"] === contractRef &&
+      labels["dev.scrobble.fasti.build.recipe.sha256"] ===
+        artifact.build_recipe_sha256 &&
+      labels["dev.scrobble.fasti.build.context.archive.sha256"] ===
+        artifact.build_context_archive_sha256,
+    `${label} assigned artifact labels do not correlate to source and contract refs`,
+  );
+  assert(
+    artifact.build_recipe_path === "benchmarks/b1/Dockerfile" &&
+      artifact.build_recipe_sha256 === sha256(governedBuildRecipePath),
+    `${label} assigned artifact does not bind the governed build recipe`,
+  );
+}
+
 function validatePhysicality(runner, label) {
   const proof = runner.physicality;
   if (runner.hardware_profile === "unclassified") {
@@ -290,12 +812,18 @@ function validatePhysicality(runner, label) {
     `${label} does not establish non-virtual physical hardware`,
   );
   if (runner.hardware_profile === "raspberry_pi_5_champion") {
+    const tree = proof.device_tree;
     assert(
-      proof.mechanism === "raspberry_pi_device_tree" &&
-        runner.device_model?.toLowerCase().includes("raspberry pi 5") &&
-        proof.systemd_detect_virt === null &&
-        proof.dmi === null,
-      `${label} lacks Raspberry Pi 5 device-tree physicality proof`,
+      proof.mechanism === "raspberry_pi_systemd_device_tree_cross_check" &&
+        proof.systemd_detect_virt === piProfile.systemd_detect_virt &&
+        proof.dmi === null &&
+        tree !== null &&
+        tree.model === runner.device_model &&
+        new RegExp(piProfile.device_tree.model_pattern).test(tree.model) &&
+        piProfile.device_tree.required_compatible.every((item) =>
+          tree.compatible.includes(item),
+        ),
+      `${label} lacks exact physical Raspberry Pi 5 Model B and BCM2712 proof`,
     );
   }
   if (runner.hardware_profile === "j4125_calibrated") {
@@ -315,7 +843,8 @@ function validatePhysicality(runner, label) {
     ];
     assert(
       proof.mechanism === "j4125_systemd_cpu_dmi_cross_check" &&
-        proof.systemd_detect_virt === "none" &&
+        proof.systemd_detect_virt === j4125Profile.systemd_detect_virt &&
+        proof.device_tree === null &&
         proof.dmi?.sys_vendor &&
         proof.dmi?.product_name &&
         !virtualMarkers.some((marker) => dmi.includes(marker)),
@@ -327,11 +856,16 @@ function validatePhysicality(runner, label) {
 function fileEvidenceResolver(reference) {
   const evidenceRoot = resolve(here, "evidence");
   const path = resolve(here, reference.path);
-  assert(
-    path.startsWith(`${evidenceRoot}/`),
-    `device evidence path escapes benchmarks/b1/evidence: ${reference.path}`,
+  const snapshot = readContainedRegularFileOnce(
+    evidenceRoot,
+    path,
+    "device evidence receipt",
   );
-  return { evidence: loadJson(path), digest: sha256(path) };
+  return {
+    evidence: JSON.parse(snapshot.bytes.toString("utf8")),
+    digest: snapshot.digest,
+    path,
+  };
 }
 
 function correlateDeviceEvidence(device, reference, resolver, label) {
@@ -344,7 +878,12 @@ function correlateDeviceEvidence(device, reference, resolver, label) {
     resolved.digest === reference.sha256,
     `${label} evidence digest does not match its referenced bytes`,
   );
-  validateEvidence(resolved.evidence, `${label} evidence`, false);
+  validateEvidence(
+    resolved.evidence,
+    `${label} evidence`,
+    false,
+    resolved.path ?? null,
+  );
   const evidence = resolved.evidence;
   assert(
     evidence.status === "complete",
@@ -525,6 +1064,16 @@ function validateLedgerDocument(ledger, resolver = fileEvidenceResolver) {
       device.runner_fingerprint.hardware_profile === device.profile,
       `${label} assigned fingerprint has the wrong profile`,
     );
+    validateAssignedRunnerFingerprint(
+      device.runner_fingerprint,
+      device.custodian,
+      label,
+    );
+    validateAssignedArtifactRef(
+      device.artifact_ref,
+      device.contract_ref,
+      label,
+    );
 
     if (device.qualification_state === "assigned_pending_evidence") {
       assert(
@@ -594,7 +1143,12 @@ function validateLedgerDocument(ledger, resolver = fileEvidenceResolver) {
       reference.digest === device.calibration.reference_evidence_ref.sha256,
       `${label} champion reference evidence digest does not match`,
     );
-    validateEvidence(reference.evidence, `${label} champion reference`, false);
+    validateEvidence(
+      reference.evidence,
+      `${label} champion reference`,
+      false,
+      reference.path ?? null,
+    );
     assert(
       reference.evidence.runner.hardware_profile ===
         "raspberry_pi_5_champion" &&
@@ -630,42 +1184,112 @@ function validateStaticFiles() {
   const budgets = loadJson(budgetsPath);
   const ledger = loadJson(ledgerPath);
   assertSchema(schemaValidator(budgetsSchemaPath), budgets, "budgets.json");
+  assertSchema(
+    schemaValidator(physicalProfilesSchemaPath),
+    physicalProfiles,
+    "physical-profiles.json",
+  );
+  assert(
+    (piProfile.approved_image_sha256.length === 0 &&
+      piProfile.os_image_policy_status ===
+        "blocking_until_official_digest_pinned") ||
+      (piProfile.approved_image_sha256.length > 0 &&
+        piProfile.os_image_policy_status === "approved_digest_allowlist"),
+    "Raspberry Pi image approval status does not match its exact digest allowlist",
+  );
   validateLedgerDocument(ledger);
 
   return budgets;
 }
 
-function validateEvidence(evidence, label = "evidence", validateStatic = true) {
+function validateEvidence(
+  evidence,
+  label = "evidence",
+  validateStatic = true,
+  evidencePath = null,
+) {
   const budgets = validateStatic
     ? validateStaticFiles()
     : loadJson(budgetsPath);
   assertSchema(schemaValidator(evidenceSchemaPath), evidence, label);
+
+  if (evidence.status === "complete") {
+    assertNoPlaceholders(evidence.runner, `${label}.runner`);
+  }
 
   assert(
     evidence.runner.hardware_profile === deriveHardwareProfile(evidence.runner),
     `${label} hardware profile is not derived from its observed CPU/device fingerprint`,
   );
   validatePhysicality(evidence.runner, label);
+  validateRunnerEnvironment(evidence.runner, label);
+  assert(
+    evidence.source.profile_policy_path ===
+      "benchmarks/b1/physical-profiles.json" &&
+      evidence.source.profile_policy_sha256 === sha256(physicalProfilesPath) &&
+      evidence.runner.profile_policy_sha256 ===
+        evidence.source.profile_policy_sha256,
+    `${label} canonical physical-profile policy binding is stale or substituted`,
+  );
   assert(
     evidence.source.oci_source_labels["org.opencontainers.image.revision"] ===
       evidence.source.git_commit &&
       evidence.source.oci_source_labels["dev.scrobble.fasti.source.tree"] ===
         evidence.source.git_tree &&
       evidence.source.oci_source_labels["dev.scrobble.fasti.contracts"] ===
-        evidence.source.contract_ref,
+        evidence.source.contract_ref &&
+      evidence.source.oci_source_labels[
+        "dev.scrobble.fasti.build.recipe.sha256"
+      ] === evidence.source.build_recipe_sha256 &&
+      evidence.source.oci_source_labels[
+        "dev.scrobble.fasti.build.context.archive.sha256"
+      ] === evidence.source.build_context_archive_sha256,
     `${label} OCI source labels do not bind the recorded commit, tree, and contracts`,
   );
-
   assert(
-    isDeepStrictEqual(
-      evidence.budget_snapshot.memory_bytes,
-      budgets.memory_bytes,
-    ),
-    `${label} budget snapshot differs from the canonical budgets`,
+    evidence.source.build_recipe_path === "benchmarks/b1/Dockerfile" &&
+      evidence.source.build_recipe_sha256 === sha256(governedBuildRecipePath),
+    `${label} governed build-recipe digest is stale or substituted`,
   );
   assert(
-    evidence.budget_snapshot.sha256 === sha256(budgetsPath),
-    `${label} budget digest is stale`,
+    evidence.source.build_context.method ===
+      "verifier_owned_git_archive_head" &&
+      evidence.source.build_context.git_archive_sha256 ===
+        evidence.source.build_context_archive_sha256,
+    `${label} build context is not bound to verifier-owned exact HEAD archive bytes`,
+  );
+  const governedBuild = evidence.harness.governed_build_commands;
+  const dockerBuilds = governedBuild.filter((command) =>
+    command.startsWith("docker build "),
+  );
+  assert(
+    governedBuild.some((command) => command.startsWith("git archive ")) &&
+      dockerBuilds.length === 1 &&
+      dockerBuilds[0].includes("benchmarks/b1/Dockerfile") &&
+      [
+        evidence.source.git_commit,
+        evidence.source.git_tree,
+        evidence.source.contract_ref,
+        evidence.source.build_recipe_sha256,
+        evidence.source.build_context_archive_sha256,
+      ].every((value) => dockerBuilds[0].includes(value)) &&
+      !dockerBuilds[0].endsWith(` ${resolve(here, "../..")}`),
+    `${label} governed build command does not bind the recipe and source identities`,
+  );
+  assert(
+    evidence.corpus.status === "not_applicable" &&
+      evidence.corpus.seed === null &&
+      evidence.corpus.digest === null &&
+      /B1.*(?:empty-process|idle).*(?:no|not).*corpus/i.test(
+        evidence.corpus.reason,
+      ),
+    `${label} must record the B1 corpus as explicitly not applicable`,
+  );
+
+  assertJsonEqual(
+    evidence.budget_snapshot,
+    canonicalBudgetSnapshot(budgets),
+    `${label} budget snapshot differs from the full canonical budgets or has a stale digest`,
   );
 
   const scenarioIds = evidence.scenarios.map((scenario) => scenario.id);
@@ -727,9 +1351,29 @@ function validateEvidence(evidence, label = "evidence", validateStatic = true) {
         ),
         `${scenario.id} State.Pid is not correlated to its exact local container cgroup`,
       );
+      assert(
+        scenario.samples.every(
+          (sample) =>
+            sample.cgroup.memory_limit_bytes ===
+              evidence.runner.cgroup.oci_memory_limit_bytes &&
+            sample.cgroup.swap_limit_bytes ===
+              evidence.runner.cgroup.oci_swap_limit_bytes,
+        ),
+        `${scenario.id} cgroup limits do not correlate to the runner profile`,
+      );
     }
 
     for (const sample of scenario.samples) {
+      const idleExpected =
+        scenario.id === "native_fastid_idle" ||
+        scenario.id === "oci_fastid_idle";
+      assertSampleDerivedFromObservations(
+        sample,
+        scenario.id,
+        ociScenarioIds.has(scenario.id),
+        idleExpected,
+        budgets,
+      );
       assertOrderedSummary(
         sample.steady_process_tree_rss_statistics,
         `${scenario.id} steady process-tree observations`,
@@ -758,6 +1402,23 @@ function validateEvidence(evidence, label = "evidence", validateStatic = true) {
           sample.cgroup.steady_memory_current_bytes <=
             sample.cgroup.peak_memory_bytes,
           `${scenario.id} steady cgroup memory exceeds its peak`,
+        );
+      }
+      if (!idleExpected) {
+        assert(
+          sample.idle_cpu === null,
+          `${scenario.id} must not claim an idle CPU measurement`,
+        );
+      } else {
+        const expectedScope = nativeScenarioIds.has(scenario.id)
+          ? "native_process_tree_schedstat"
+          : "cgroup_v2_usage_usec";
+        assert(
+          sample.idle_cpu !== null &&
+            sample.idle_cpu.counter_scope === expectedScope &&
+            sample.idle_cpu.measurement_seconds >=
+              budgets.timing_seconds.idle_measurement,
+          `${scenario.id} idle CPU measurement has the wrong scope or duration`,
         );
       }
     }
@@ -922,6 +1583,95 @@ function validateEvidence(evidence, label = "evidence", validateStatic = true) {
       `${budget} must explain why it is not applicable`,
     );
   }
+
+  const artifactOrder = [
+    "native_runtime_installed",
+    "native_archive_compressed",
+    "oci_image_compressed",
+    "oci_image_unpacked",
+    "contract_pack_compressed",
+  ];
+  assertJsonEqual(
+    evidence.artifact_budget_verdicts.map((verdict) => verdict.budget),
+    artifactOrder,
+    "artifact budget verdicts must appear once in canonical order",
+  );
+  const artifactMeasurements = {
+    native_runtime_installed:
+      evidence.artifact_sizes.native_runtime_installed_bytes,
+    native_archive_compressed:
+      evidence.artifact_sizes.native_archive_compressed_bytes,
+    oci_image_compressed: evidence.artifact_sizes.oci_image_compressed_bytes,
+    oci_image_unpacked: evidence.artifact_sizes.oci_image_bytes,
+    contract_pack_compressed:
+      evidence.artifact_sizes.contract_pack_compressed_bytes,
+  };
+  if (evidence.status === "complete" && evidencePath !== null) {
+    validateRetainedArtifacts(evidence, evidencePath, label);
+  }
+  for (const verdict of evidence.artifact_budget_verdicts) {
+    const budget = verdict.budget;
+    const measured = artifactMeasurements[budget];
+    assert(
+      verdict.limit_bytes === budgets.artifact_bytes[budget] &&
+        verdict.measured_bytes === measured,
+      `${budget} artifact verdict is not correlated to its budget and measured bytes`,
+    );
+    if (measured === null) {
+      assert(
+        verdict.status === "not_applicable" &&
+          /B1.*(?:does not|benchmark-only)/i.test(verdict.reason),
+        `${budget} must be explicitly not applicable in B1`,
+      );
+    } else {
+      assert(
+        verdict.status ===
+          (measured <= budgets.artifact_bytes[budget] ? "pass" : "fail"),
+        `${budget} artifact verdict is not derived from its limit`,
+      );
+    }
+  }
+
+  const idleCpuOrder = ["native_fastid_idle", "oci_fastid_idle"];
+  assertJsonEqual(
+    evidence.idle_cpu_verdicts.map((verdict) => verdict.scenario),
+    idleCpuOrder,
+    "idle CPU verdicts must appear once in canonical order",
+  );
+  for (const verdict of evidence.idle_cpu_verdicts) {
+    const measurements = byId[verdict.scenario].samples.map(
+      (sample) => sample.idle_cpu,
+    );
+    const worstAverage = Math.max(
+      ...measurements.map(
+        (measurement) => measurement.average_percent_one_core,
+      ),
+    );
+    const worstP95 = Math.max(
+      ...measurements.map((measurement) => measurement.p95_percent_one_core),
+    );
+    const expectedStatus =
+      worstAverage <= budgets.idle_cpu_percent_one_core.average &&
+      worstP95 <= budgets.idle_cpu_percent_one_core.p95
+        ? "pass"
+        : "fail";
+    assert(
+      verdict.warmup_seconds === budgets.timing_seconds.idle_warmup &&
+        verdict.measurement_seconds ===
+          budgets.timing_seconds.idle_measurement &&
+        verdict.average_limit_percent_one_core ===
+          budgets.idle_cpu_percent_one_core.average &&
+        verdict.p95_limit_percent_one_core ===
+          budgets.idle_cpu_percent_one_core.p95 &&
+        closeEnough(
+          verdict.measured_worst_average_percent_one_core,
+          worstAverage,
+        ) &&
+        closeEnough(verdict.measured_worst_p95_percent_one_core, worstP95) &&
+        verdict.status === expectedStatus,
+      `${verdict.scenario} idle CPU verdict is not derived from the worst independent run`,
+    );
+  }
 }
 
 function fixtureSummary(samples, field) {
@@ -931,44 +1681,127 @@ function fixtureSummary(samples, field) {
 function makeSelfTestEvidence() {
   const budgets = loadJson(budgetsPath);
   const imageId = "sha256:" + "4".repeat(64);
-  const samples = (withCgroup) =>
-    [1, 2, 3].map((run) => ({
-      run,
-      startup_ms: 10 + run,
-      steady_process_tree_rss_bytes: 8_000_000 + run,
-      steady_process_tree_rss_statistics: {
-        minimum: 7_000_000 + run,
-        median: 7_500_000 + run,
-        maximum: 8_000_000 + run,
-      },
-      peak_process_tree_rss_bytes: 9_000_000 + run,
-      process_tree_cpu_seconds: 0.01 * run,
-      process_tree_cpu_percent: 0.5 * run,
-      process_count_peak: 1,
-      cgroup: withCgroup
-        ? {
-            steady_memory_current_bytes: 10_000_000 + run,
-            steady_memory_current_statistics: {
-              minimum: 9_000_000 + run,
-              median: 9_500_000 + run,
-              maximum: 10_000_000 + run,
-            },
-            peak_memory_bytes: 11_000_000 + run,
-            cpu_seconds: 0.02 * run,
-            cpu_percent: 0.75 * run,
-          }
-        : null,
-      container_identity: withCgroup
-        ? {
-            container_id: "6".repeat(64),
-            host_pid: 1234 + run,
-            cgroup_path: `/sys/fs/cgroup/system.slice/docker-${"6".repeat(64)}.scope`,
-          }
-        : null,
-    }));
+  const buildRecipeSha256 = sha256(governedBuildRecipePath);
+  const profilePolicySha256 = sha256(physicalProfilesPath);
+  const buildContextArchiveSha256 = "e".repeat(64);
+  const samples = (withCgroup, idle) =>
+    [1, 2, 3, 4, 5].map((run) => {
+      const steadyStart = idle ? 600_020_000_000 : 0;
+      const elapsed = idle
+        ? [
+            0,
+            steadyStart,
+            steadyStart + 450_000_000_000,
+            steadyStart + 900_000_000_000,
+          ]
+        : [0, 1_500_000_000, 3_000_000_000];
+      const processRss = idle
+        ? [9_000_000 + run, 7_000_000 + run, 7_500_000 + run, 8_000_000 + run]
+        : [7_000_000 + run, 7_500_000 + run, 8_000_000 + run];
+      const cgroupCurrent = idle
+        ? [11_000_000 + run, 9_000_000 + run, 9_500_000 + run, 10_000_000 + run]
+        : [9_000_000 + run, 9_500_000 + run, 10_000_000 + run];
+      const observations = elapsed.map((elapsed_ns, index) => ({
+        sequence: index + 1,
+        elapsed_ns,
+        steady: elapsed_ns >= steadyStart,
+        process_tree_rss_bytes: processRss[index],
+        process_tree_cpu_runtime_ns: run * 100_000 + index * 1_000_000,
+        process_count: 1,
+        cgroup_memory_current_bytes: withCgroup ? cgroupCurrent[index] : null,
+        cgroup_memory_peak_bytes: withCgroup ? 11_000_000 + run : null,
+        cgroup_cpu_runtime_ns: withCgroup
+          ? run * 200_000 + index * 2_000_000
+          : null,
+        cgroup_memory_limit_bytes: null,
+        cgroup_swap_limit_bytes: null,
+        cgroup_oom_kill_count: withCgroup ? 0 : null,
+      }));
+      const steady = observations.filter((observation) => observation.steady);
+      const final = observations.at(-1);
+      const idleCounter = withCgroup
+        ? "cgroup_cpu_runtime_ns"
+        : "process_tree_cpu_runtime_ns";
+      const intervals = steady.slice(1).map((observation, index) => {
+        const previous = steady[index];
+        return (
+          ((observation[idleCounter] - previous[idleCounter]) /
+            (observation.elapsed_ns - previous.elapsed_ns)) *
+          100
+        );
+      });
+      return {
+        run,
+        startup_ms: 10 + run,
+        steady_process_tree_rss_bytes: Math.max(
+          ...steady.map((observation) => observation.process_tree_rss_bytes),
+        ),
+        steady_process_tree_rss_statistics: summarize(
+          steady.map((observation) => observation.process_tree_rss_bytes),
+        ),
+        peak_process_tree_rss_bytes: Math.max(...processRss),
+        process_tree_cpu_seconds: round6(
+          final.process_tree_cpu_runtime_ns / 1_000_000_000,
+        ),
+        process_tree_cpu_percent: round6(
+          (final.process_tree_cpu_runtime_ns / final.elapsed_ns) * 100,
+        ),
+        process_count_peak: 1,
+        steady_started_elapsed_ns: steadyStart,
+        finished_elapsed_ns: final.elapsed_ns,
+        observations,
+        cgroup: withCgroup
+          ? {
+              steady_memory_current_bytes: Math.max(
+                ...steady.map(
+                  (observation) => observation.cgroup_memory_current_bytes,
+                ),
+              ),
+              steady_memory_current_statistics: summarize(
+                steady.map(
+                  (observation) => observation.cgroup_memory_current_bytes,
+                ),
+              ),
+              peak_memory_bytes: 11_000_000 + run,
+              cpu_seconds: round6(final.cgroup_cpu_runtime_ns / 1_000_000_000),
+              cpu_percent: round6(
+                (final.cgroup_cpu_runtime_ns / final.elapsed_ns) * 100,
+              ),
+              memory_limit_bytes: null,
+              swap_limit_bytes: null,
+              oom_kill_count: 0,
+            }
+          : null,
+        container_identity: withCgroup
+          ? {
+              container_id: "6".repeat(64),
+              host_pid: 1234 + run,
+              cgroup_path: `/sys/fs/cgroup/system.slice/docker-${"6".repeat(64)}.scope`,
+            }
+          : null,
+        idle_cpu: idle
+          ? {
+              counter_scope: withCgroup
+                ? "cgroup_v2_usage_usec"
+                : "native_process_tree_schedstat",
+              measurement_seconds:
+                (steady.at(-1).elapsed_ns - steady[0].elapsed_ns) /
+                1_000_000_000,
+              average_percent_one_core: round6(
+                ((steady.at(-1)[idleCounter] - steady[0][idleCounter]) /
+                  (steady.at(-1).elapsed_ns - steady[0].elapsed_ns)) *
+                  100,
+              ),
+              p95_percent_one_core: round6(p95NearestRank(intervals)),
+              interval_count: intervals.length,
+            }
+          : null,
+      };
+    });
 
   const scenario = (id, withCgroup, guarded = false) => {
-    const values = samples(withCgroup);
+    const idle = id === "native_fastid_idle" || id === "oci_fastid_idle";
+    const values = samples(withCgroup, idle);
     return {
       id,
       subject: `self-test fixture for ${id}`,
@@ -1040,41 +1873,109 @@ function makeSelfTestEvidence() {
     scenario("oci_fasti_cli_guard", true, true),
   ];
 
-  const idleMeasured = 10_000_003;
-  const absoluteMeasured = 11_000_003;
+  const idleMeasured = 10_000_005;
+  const absoluteMeasured = 11_000_005;
   return {
     $schema:
       "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json",
-    schema_version: "fasti.b1.performance-evidence.v2",
+    schema_version: "fasti.b1.performance-evidence.v3",
     body: "B1",
     status: "test_fixture",
     captured_at: "2026-08-22T00:00:00Z",
     runner: {
-      runner_id: "self-test-fixture",
+      runner_id: "fixture-ci-linux-01",
+      machine_fingerprint_sha256: "a".repeat(64),
       hardware_profile: "unclassified",
-      hardware_profile_derivation: "fingerprint_rule_v1",
+      hardware_profile_derivation: physicalProfiles.hardware_profile_derivation,
+      profile_policy_sha256: profilePolicySha256,
       physicality: {
         status: "test_fixture",
         mechanism: "test_fixture",
         systemd_detect_virt: null,
         cpu_hypervisor_flag: false,
         dmi: null,
+        device_tree: null,
       },
-      custodian: "self-test-fixture",
-      os_release: "self-test Linux",
-      kernel_release: "self-test",
-      architecture: "self-test",
-      cpu_model: "self-test",
+      custodian: "Fasti fixture maintainer",
+      os_release: "Fixture Linux 1",
+      os_image: {
+        pretty_name: "Fixture Linux 1",
+        id: "fixture-linux",
+        version_id: "1",
+        version_codename: "fixture",
+        build_id: null,
+        image_id: null,
+        image_version: null,
+        claim_scope: "runtime_os_release_fields_only",
+        retained_image: {
+          file_name: "fixture.img",
+          size_bytes: 1,
+          sha256: "b".repeat(64),
+        },
+        approval: "retained_digest_recorded_no_profile_allowlist",
+      },
+      kernel_release: "6.12.1-fixture",
+      architecture: "x86_64",
+      cpu_model: "Synthetic CI CPU",
       device_model: null,
       logical_cpu_count: 1,
-      total_memory_bytes: 1,
+      total_memory_bytes: 1_073_741_824,
+      firmware: {
+        source: "/fixture/firmware",
+        description: "Fixture firmware 1",
+        sha256: "c".repeat(64),
+      },
+      root_filesystem: {
+        source: "/dev/vda1",
+        type: "ext4",
+        mount_options: ["rw", "relatime"],
+      },
+      storage: {
+        root_source: "/dev/vda1",
+        root_filesystem_type: "ext4",
+        root_mount_options: ["rw", "relatime"],
+        physical_device: "/dev/vda",
+        device_type: "disk",
+        transport: "virtio",
+        storage_class: "unknown_non_rotational",
+        classification_evidence: ["lsblk.ROTA=0", "no_exact_ssd_marker"],
+        rotational: false,
+        size_bytes: 8_589_934_592,
+        model: "Fixture Disk 1",
+        usb_link_speed_mbps: null,
+        identity_sha256: "d".repeat(64),
+        raw_serial_recorded: false,
+      },
+      cpu_governor: {
+        source: "/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
+        observed: ["performance"],
+        cpu_count_observed: 1,
+      },
+      temperature: {
+        preflight: {
+          source: "/sys/class/thermal/thermal_zone0/temp",
+          sensor: "fixture-cpu",
+          celsius: 40,
+        },
+        post_capture: {
+          source: "/sys/class/thermal/thermal_zone0/temp",
+          sensor: "fixture-cpu",
+          celsius: 41,
+        },
+      },
+      profile_requirements: null,
       cgroup_version: "v2",
+      cgroup: {
+        version: "v2",
+        oci_memory_limit_bytes: null,
+        oci_swap_limit_bytes: null,
+      },
       container_engine: {
         name: "docker",
-        version: "self-test",
-        context: "self-test",
-        endpoint: "unix:///self-test/docker.sock",
-        socket_path: "/self-test/docker.sock",
+        version: "27.1.1",
+        context: "fixture-local",
+        endpoint: "unix:///fixture/docker.sock",
+        socket_path: "/fixture/docker.sock",
         locality: "verified_local_unix_socket",
       },
     },
@@ -1090,20 +1991,46 @@ function makeSelfTestEvidence() {
         "org.opencontainers.image.revision": "1".repeat(40),
         "dev.scrobble.fasti.source.tree": "2".repeat(40),
         "dev.scrobble.fasti.contracts": "5".repeat(40),
+        "dev.scrobble.fasti.build.recipe.sha256": buildRecipeSha256,
+        "dev.scrobble.fasti.build.context.archive.sha256":
+          buildContextArchiveSha256,
       },
       contract_ref: "5".repeat(40),
+      build_recipe_path: "benchmarks/b1/Dockerfile",
+      build_recipe_sha256: buildRecipeSha256,
+      profile_policy_path: "benchmarks/b1/physical-profiles.json",
+      profile_policy_sha256: profilePolicySha256,
+      build_context_archive_sha256: buildContextArchiveSha256,
+      build_context: {
+        method: "verifier_owned_git_archive_head",
+        git_archive_sha256: buildContextArchiveSha256,
+        git_archive_size_bytes: 1,
+        archive_command:
+          "git archive --format=tar --output /verifier/context.tar HEAD",
+        archive_entry_count: 1,
+      },
     },
-    budget_snapshot: {
-      source: "benchmarks/b1/budgets.json",
-      sha256: sha256(budgetsPath),
-      memory_bytes: budgets.memory_bytes,
+    corpus: {
+      status: "not_applicable",
+      seed: null,
+      digest: null,
+      reason:
+        "B1 measures empty-process and idle feasibility baselines; no synthetic or provider corpus is loaded.",
     },
+    budget_snapshot: canonicalBudgetSnapshot(budgets),
     harness: {
-      version: "fasti-b1-benchmark.v2",
-      repetitions: 3,
+      version: "fasti-b1-benchmark.v3",
+      repetitions: 5,
       steady_window_seconds: 3,
-      sample_interval_ms: 10,
+      idle_warmup_seconds: budgets.timing_seconds.idle_warmup,
+      idle_measurement_seconds: budgets.timing_seconds.idle_measurement,
+      sample_interval_ms: budgets.timing_seconds.sample_interval_ms,
       baseline_subtraction: false,
+      capture_command: "python3 scripts/benchmark-b1.py --fixture",
+      governed_build_commands: [
+        "git archive --format=tar --output /verifier/context.tar HEAD",
+        `docker build --file /verifier/context/benchmarks/b1/Dockerfile --build-arg FASTI_SOURCE_COMMIT=${"1".repeat(40)} --build-arg FASTI_SOURCE_TREE=${"2".repeat(40)} --build-arg FASTI_CONTRACT_REF=${"5".repeat(40)} --build-arg FASTI_BUILD_RECIPE_SHA256=${buildRecipeSha256} --build-arg FASTI_BUILD_CONTEXT_ARCHIVE_SHA256=${buildContextArchiveSha256} /verifier/context`,
+      ],
       fingerprint_commands: ["self-test fixture only"],
       native_artifact_commands: [
         `docker create --network none ${imageId}`,
@@ -1120,6 +2047,24 @@ function makeSelfTestEvidence() {
       oci_fastid_binary_bytes: 1,
       oci_fasti_cli_binary_bytes: 1,
       oci_image_bytes: 1,
+      native_runtime_installed_bytes: null,
+      native_archive_compressed_bytes: null,
+      oci_image_compressed_bytes: 2,
+      oci_image_compressed_sha256: "7".repeat(64),
+      contract_pack_compressed_bytes: 3,
+      contract_pack_compressed_sha256: "8".repeat(64),
+    },
+    retained_artifacts: {
+      oci_image_compressed: {
+        path: `artifacts/sha256/${"7".repeat(64)}.tar.gz`,
+        sha256: "7".repeat(64),
+        size_bytes: 2,
+      },
+      contract_pack_compressed: {
+        path: `artifacts/sha256/${"8".repeat(64)}.tar.gz`,
+        sha256: "8".repeat(64),
+        size_bytes: 3,
+      },
     },
     budget_verdicts: [
       {
@@ -1153,6 +2098,62 @@ function makeSelfTestEvidence() {
         reason: "self-test derived absolute fixture",
       },
     ],
+    artifact_budget_verdicts: [
+      {
+        budget: "native_runtime_installed",
+        limit_bytes: budgets.artifact_bytes.native_runtime_installed,
+        measured_bytes: null,
+        status: "not_applicable",
+        reason:
+          "B1 uses a benchmark-only extraction and does not produce an installed native runtime.",
+      },
+      {
+        budget: "native_archive_compressed",
+        limit_bytes: budgets.artifact_bytes.native_archive_compressed,
+        measured_bytes: null,
+        status: "not_applicable",
+        reason: "B1 does not produce a supported native archive.",
+      },
+      ...[
+        ["oci_image_compressed", 2],
+        ["oci_image_unpacked", 1],
+        ["contract_pack_compressed", 3],
+      ].map(([budget, measured_bytes]) => ({
+        budget,
+        limit_bytes: budgets.artifact_bytes[budget],
+        measured_bytes,
+        status: "pass",
+        reason: `Fixture-derived ${budget} size.`,
+      })),
+    ],
+    idle_cpu_verdicts: ["native_fastid_idle", "oci_fastid_idle"].map(
+      (scenarioId) => {
+        const measurements = scenarios
+          .find((scenario) => scenario.id === scenarioId)
+          .samples.map((sample) => sample.idle_cpu);
+        return {
+          scenario: scenarioId,
+          warmup_seconds: budgets.timing_seconds.idle_warmup,
+          measurement_seconds: budgets.timing_seconds.idle_measurement,
+          average_limit_percent_one_core:
+            budgets.idle_cpu_percent_one_core.average,
+          p95_limit_percent_one_core: budgets.idle_cpu_percent_one_core.p95,
+          measured_worst_average_percent_one_core: Math.max(
+            ...measurements.map(
+              (measurement) => measurement.average_percent_one_core,
+            ),
+          ),
+          measured_worst_p95_percent_one_core: Math.max(
+            ...measurements.map(
+              (measurement) => measurement.p95_percent_one_core,
+            ),
+          ),
+          status: "pass",
+          reason:
+            "Worst independent fixture run after the locked warm-up and idle window.",
+        };
+      },
+    ),
   };
 }
 
@@ -1276,35 +2277,134 @@ function assignDeviceFromEvidence(device, evidence, evidence_ref, state) {
   device.blocking_reason = null;
 }
 
-function validateLedgerStateTransitions(validEvidence) {
-  const piEvidence = clone(validEvidence);
-  piEvidence.status = "complete";
-  piEvidence.runner.hardware_profile = "raspberry_pi_5_champion";
-  piEvidence.runner.device_model = "Raspberry Pi 5 Model B Rev 1.0";
-  piEvidence.runner.custodian = "pi-custodian";
-  piEvidence.runner.physicality = {
-    status: "physical",
-    mechanism: "raspberry_pi_device_tree",
-    systemd_detect_virt: null,
-    cpu_hypervisor_flag: false,
-    dmi: null,
+function configureJ4125Fixture(evidence, custodian) {
+  evidence.status = "complete";
+  evidence.runner.hardware_profile = "j4125_calibrated";
+  evidence.runner.cpu_model = "Intel(R) Celeron(R) CPU J4125 @ 2.00GHz";
+  evidence.runner.custodian = custodian;
+  evidence.runner.architecture = j4125Profile.architectures[0];
+  evidence.runner.logical_cpu_count = j4125Profile.logical_cpu_count;
+  evidence.runner.cpu_governor.cpu_count_observed =
+    j4125Profile.logical_cpu_count;
+  evidence.runner.storage.transport =
+    j4125Profile.storage.accepted_transports.find(
+      (transport) => transport === "sata",
+    ) ?? j4125Profile.storage.accepted_transports[0];
+  evidence.runner.storage.storage_class = j4125Profile.storage.class;
+  evidence.runner.storage.classification_evidence = [
+    "lsblk.ROTA=0",
+    "udev.ID_ATA_ROTATION_RATE_RPM=0",
+  ];
+  evidence.runner.os_image.approval =
+    "retained_digest_recorded_no_profile_allowlist";
+  evidence.runner.profile_requirements = {
+    profile: "j4125_calibrated",
+    profile_policy_sha256: sha256(physicalProfilesPath),
+    cpu: "physical_j4125_four_core",
+    retained_os_image_approval: "retained_digest_recorded_no_profile_allowlist",
+    oci_memory_limit_bytes: j4125Profile.oci.memory_limit_bytes,
+    oci_swap_limit_bytes: j4125Profile.oci.swap_limit_bytes,
+    storage: j4125Profile.storage.label,
+    mechanical_scope_note:
+      "Fixture fingerprints only the benchmark root filesystem and no future data path.",
   };
+  evidence.runner.cgroup.oci_memory_limit_bytes =
+    j4125Profile.oci.memory_limit_bytes;
+  evidence.runner.cgroup.oci_swap_limit_bytes =
+    j4125Profile.oci.swap_limit_bytes;
+  for (const scenario of evidence.scenarios.filter((candidate) =>
+    ociScenarioIds.has(candidate.id),
+  )) {
+    for (const sample of scenario.samples) {
+      sample.cgroup.memory_limit_bytes = j4125Profile.oci.memory_limit_bytes;
+      sample.cgroup.swap_limit_bytes = j4125Profile.oci.swap_limit_bytes;
+      for (const observation of sample.observations) {
+        observation.cgroup_memory_limit_bytes =
+          j4125Profile.oci.memory_limit_bytes;
+        observation.cgroup_swap_limit_bytes = j4125Profile.oci.swap_limit_bytes;
+      }
+    }
+  }
+}
 
-  const j4125Evidence = clone(validEvidence);
-  j4125Evidence.status = "complete";
-  j4125Evidence.runner.hardware_profile = "j4125_calibrated";
-  j4125Evidence.runner.cpu_model = "Intel(R) Celeron(R) CPU J4125 @ 2.00GHz";
-  j4125Evidence.runner.custodian = "j4125-custodian";
-  j4125Evidence.runner.physicality = {
+function makeJ4125SelfTestEvidence() {
+  const evidence = makeSelfTestEvidence();
+  configureJ4125Fixture(evidence, "J4125 lab custodian");
+  evidence.runner.physicality = {
     status: "physical",
     mechanism: "j4125_systemd_cpu_dmi_cross_check",
-    systemd_detect_virt: "none",
+    systemd_detect_virt: j4125Profile.systemd_detect_virt,
     cpu_hypervisor_flag: false,
     dmi: {
       sys_vendor: "Physical Lab Vendor",
       product_name: "J4125 Appliance",
     },
+    device_tree: null,
   };
+  return evidence;
+}
+
+function validateLedgerStateTransitions(validEvidence) {
+  const piEvidence = clone(validEvidence);
+  // The checked-in Pi image allowlist is intentionally empty until an official
+  // digest is pinned. This in-memory-only digest exercises ledger mechanics
+  // without turning a fixture digest into repository policy.
+  piProfile.approved_image_sha256.push(
+    piEvidence.runner.os_image.retained_image.sha256,
+  );
+  piEvidence.status = "complete";
+  piEvidence.runner.hardware_profile = "raspberry_pi_5_champion";
+  piEvidence.runner.device_model = "Raspberry Pi 5 Model B Rev 1.0";
+  piEvidence.runner.custodian = "Pi lab custodian";
+  piEvidence.runner.architecture = piProfile.architectures[0];
+  piEvidence.runner.logical_cpu_count = piProfile.logical_cpu_count;
+  piEvidence.runner.total_memory_bytes = 4_294_967_296;
+  piEvidence.runner.os_image.id = piProfile.running_os_release.id;
+  piEvidence.runner.os_image.version_codename =
+    piProfile.running_os_release.version_codename;
+  piEvidence.runner.storage.transport = piProfile.storage.transport;
+  piEvidence.runner.storage.storage_class = piProfile.storage.class;
+  piEvidence.runner.storage.classification_evidence = [
+    "lsblk.ROTA=0",
+    "udev.ID_ATA_ROTATION_RATE_RPM=0",
+  ];
+  piEvidence.runner.storage.usb_link_speed_mbps =
+    piProfile.storage.minimum_link_speed_mbps;
+  piEvidence.runner.os_image.approval = "approved_by_canonical_digest_policy";
+  piEvidence.runner.cpu_governor.cpu_count_observed =
+    piProfile.logical_cpu_count;
+  piEvidence.runner.profile_requirements = {
+    profile: "raspberry_pi_5_champion",
+    profile_policy_sha256: sha256(physicalProfilesPath),
+    running_os_release: piProfile.running_os_release,
+    retained_os_image_approval: "approved_by_canonical_digest_policy",
+    memory: piProfile.memory_bytes.label,
+    storage: piProfile.storage.label,
+    cooling: { status: piProfile.cooling_status, fan_types: ["pwm-fan"] },
+    overclock: {
+      status: piProfile.overclock.status,
+      policy_sha256: sha256(physicalProfilesPath),
+      checked_keys: [
+        ...Object.keys(piProfile.overclock.allowed_exact_values),
+        ...piProfile.overclock.forbidden_nonzero_prefixes,
+      ].sort(),
+    },
+    mechanical_scope_note: "Fixture exercises every champion correlation.",
+  };
+  piEvidence.runner.physicality = {
+    status: "physical",
+    mechanism: "raspberry_pi_systemd_device_tree_cross_check",
+    systemd_detect_virt: piProfile.systemd_detect_virt,
+    cpu_hypervisor_flag: false,
+    dmi: null,
+    device_tree: {
+      source: "/proc/device-tree",
+      model: "Raspberry Pi 5 Model B Rev 1.0",
+      compatible: ["raspberrypi,5-model-b", "brcm,bcm2712"],
+    },
+  };
+
+  const j4125Evidence = makeJ4125SelfTestEvidence();
 
   validateEvidence(piEvidence, "assigned Pi fixture", false);
   validateEvidence(j4125Evidence, "assigned J4125 fixture", false);
@@ -1315,6 +2415,26 @@ function validateLedgerStateTransitions(validEvidence) {
     [j4125Ref.path, { evidence: j4125Evidence, digest: j4125Ref.sha256 }],
   ]);
   const resolver = (reference) => fixtures.get(reference.path);
+
+  const pendingLedger = loadJson(ledgerPath);
+  const pendingPi = pendingLedger.devices[0];
+  pendingPi.qualification_state = "assigned_pending_evidence";
+  pendingPi.custodian = piEvidence.runner.custodian;
+  pendingPi.runner_fingerprint = runnerFingerprint(piEvidence);
+  pendingPi.artifact_ref = artifactRef(piEvidence);
+  pendingPi.contract_ref = piEvidence.source.contract_ref;
+  pendingPi.blocking_reason =
+    "Assigned physical runner and artifacts still require a validated receipt.";
+  validateLedgerDocument(pendingLedger, resolver);
+
+  const mismatchedPendingArtifact = clone(pendingLedger);
+  mismatchedPendingArtifact.devices[0].artifact_ref.oci_source_labels[
+    "dev.scrobble.fasti.contracts"
+  ] = "9".repeat(40);
+  expectLedgerFailure(
+    mismatchedPendingArtifact,
+    "assigned-pending artifact correlation",
+  );
 
   const ledger = loadJson(ledgerPath);
   const pi = ledger.devices[0];
@@ -1349,7 +2469,7 @@ function validateLedgerStateTransitions(validEvidence) {
   validateLedgerDocument(reorderedKeys, resolver);
 
   const mismatchedSettingsEvidence = clone(j4125Evidence);
-  mismatchedSettingsEvidence.harness.sample_interval_ms = 20;
+  mismatchedSettingsEvidence.harness.steady_window_seconds = 4;
   const mismatchedSettingsRef = fixtureReference(
     "self-test-j4125-mismatched-settings",
     mismatchedSettingsEvidence,
@@ -1405,16 +2525,76 @@ function validateLedgerStateTransitions(validEvidence) {
       error.message.includes("artifact reference does not match"),
       `unexpected ledger-correlation failure: ${error.message}`,
     );
+    piProfile.approved_image_sha256.pop();
     return;
   }
+  piProfile.approved_image_sha256.pop();
   throw new Error(
     "ledger accepted an artifact reference unrelated to evidence",
   );
 }
 
+function validateContainedReceiptReaderSentinels() {
+  const root = mkdtempSync(join(tmpdir(), "fasti-b1-receipt-reader-"));
+  try {
+    const receipt = join(root, "receipt.json");
+    const openedReceipt = join(root, "opened-receipt.json");
+    const original = Buffer.from('{"value":"descriptor-owned"}\n');
+    writeFileSync(receipt, original, { mode: 0o600 });
+    const snapshot = readContainedRegularFileOnce(
+      root,
+      receipt,
+      "self-test receipt",
+      {
+        afterOpen: () => {
+          renameSync(receipt, openedReceipt);
+          writeFileSync(receipt, '{"value":"swapped-path"}\n', {
+            mode: 0o600,
+          });
+        },
+      },
+    );
+    assert(
+      snapshot.bytes.equals(original) &&
+        snapshot.digest === createHash("sha256").update(original).digest("hex"),
+      "receipt reader did not derive JSON bytes and digest from one descriptor snapshot",
+    );
+
+    const linkedReceipt = join(root, "linked-receipt.json");
+    symlinkSync(openedReceipt, linkedReceipt);
+    let symlinkRejected = false;
+    try {
+      readContainedRegularFileOnce(root, linkedReceipt, "symlinked receipt");
+    } catch {
+      symlinkRejected = true;
+    }
+    assert(
+      symlinkRejected,
+      "ledger receipt reader followed a symlinked evidence path",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 function runSelfTest() {
+  let missingNoFollowRejected = false;
+  try {
+    requireNoFollowSupport(undefined);
+  } catch (error) {
+    assert(
+      error.message.includes("requires O_NOFOLLOW"),
+      `unexpected O_NOFOLLOW sentinel failure: ${error.message}`,
+    );
+    missingNoFollowRejected = true;
+  }
+  assert(
+    missingNoFollowRejected,
+    "retained artifact verifier accepted a platform without O_NOFOLLOW",
+  );
   const valid = makeSelfTestEvidence();
   validateEvidence(valid, "valid in-memory self-test fixture");
+  validateContainedReceiptReaderSentinels();
   const packagingRemovalSentinels = validatePackagingSpikeRemovalSentinels();
   validateLedgerStateTransitions(valid);
 
@@ -1430,6 +2610,27 @@ function runSelfTest() {
   staleBudget.budget_snapshot.memory_bytes.idle_target += 1;
   expectFailure(staleBudget, "budget snapshot differs");
 
+  const staleArtifactBudget = clone(valid);
+  staleArtifactBudget.budget_snapshot.artifact_bytes.oci_image_compressed += 1;
+  expectFailure(staleArtifactBudget, "JSON Schema validation");
+
+  const staleBudgetDigest = clone(valid);
+  staleBudgetDigest.budget_snapshot.sha256 = "9".repeat(64);
+  expectFailure(staleBudgetDigest, "stale digest");
+
+  const missingWarmup = clone(valid);
+  const idleSample = missingWarmup.scenarios.find(
+    (scenario) => scenario.id === "native_fastid_idle",
+  ).samples[0];
+  idleSample.steady_started_elapsed_ns = Math.round(
+    idleSample.startup_ms * 1_000_000,
+  );
+  for (const observation of idleSample.observations) {
+    observation.steady =
+      observation.elapsed_ns >= idleSample.steady_started_elapsed_ns;
+  }
+  expectFailure(missingWarmup, "locked idle warm-up");
+
   const inventedWorkload = clone(valid);
   inventedWorkload.budget_verdicts[1].status = "pass";
   inventedWorkload.budget_verdicts[1].measured_bytes = 1;
@@ -1440,15 +2641,14 @@ function runSelfTest() {
   expectFailure(assertedHardware, "JSON Schema validation");
 
   const virtualJ4125 = clone(valid);
-  virtualJ4125.status = "complete";
-  virtualJ4125.runner.hardware_profile = "j4125_calibrated";
-  virtualJ4125.runner.cpu_model = "Intel Celeron J4125";
+  configureJ4125Fixture(virtualJ4125, "Virtualization sentinel custodian");
   virtualJ4125.runner.physicality = {
     status: "physical",
     mechanism: "j4125_systemd_cpu_dmi_cross_check",
     systemd_detect_virt: "kvm",
     cpu_hypervisor_flag: true,
     dmi: { sys_vendor: "QEMU", product_name: "Standard PC" },
+    device_tree: null,
   };
   expectFailure(
     virtualJ4125,
@@ -1473,6 +2673,29 @@ function runSelfTest() {
   ] = "9".repeat(40);
   expectFailure(staleImageLabel, "OCI source labels do not bind");
 
+  const staleBuildLabel = clone(valid);
+  staleBuildLabel.source.oci_source_labels[
+    "dev.scrobble.fasti.build.recipe.sha256"
+  ] = "9".repeat(64);
+  expectFailure(staleBuildLabel, "OCI source labels do not bind");
+
+  const substitutedBuildRecipe = clone(valid);
+  substitutedBuildRecipe.source.build_recipe_sha256 = "9".repeat(64);
+  substitutedBuildRecipe.source.oci_source_labels[
+    "dev.scrobble.fasti.build.recipe.sha256"
+  ] = "9".repeat(64);
+  expectFailure(substitutedBuildRecipe, "build-recipe digest");
+
+  const detachedBuildCommand = clone(valid);
+  detachedBuildCommand.harness.governed_build_commands = [
+    "docker build --file benchmarks/b1/Dockerfile .",
+  ];
+  expectFailure(detachedBuildCommand, "governed build command");
+
+  const inventedCorpus = clone(valid);
+  inventedCorpus.corpus.reason = "A corpus was loaded for this fixture.";
+  expectFailure(inventedCorpus, "corpus as explicitly not applicable");
+
   const mutableImageRun = clone(valid);
   mutableImageRun.scenarios[3].commands = [
     "docker run --network none fasti:mutable self-test",
@@ -1482,26 +2705,126 @@ function runSelfTest() {
   const medianIdleGate = clone(valid);
   medianIdleGate.scenarios[1].samples[0].steady_process_tree_rss_bytes =
     medianIdleGate.scenarios[1].samples[0].steady_process_tree_rss_statistics.median;
-  expectFailure(medianIdleGate, "gate must use the maximum observation");
+  expectFailure(medianIdleGate, "memory/process aggregates");
+
+  const mutatedRawMemory = clone(valid);
+  mutatedRawMemory.scenarios[1].samples[0].observations.at(
+    -1,
+  ).process_tree_rss_bytes += 1;
+  expectFailure(mutatedRawMemory, "raw steady process-tree RSS");
+
+  const duplicatedRawObservation = clone(valid);
+  duplicatedRawObservation.scenarios[1].samples[0].observations[2].elapsed_ns =
+    duplicatedRawObservation.scenarios[1].samples[0].observations[1].elapsed_ns;
+  expectFailure(
+    duplicatedRawObservation,
+    "duplicate or non-monotonic timestamp",
+  );
+
+  assert(
+    valid.scenarios[1].samples.every(
+      (sample) =>
+        sample.idle_cpu.p95_percent_one_core > 0 &&
+        sample.idle_cpu.p95_percent_one_core < 1,
+    ),
+    "schedstat fixture does not exercise measurable sub-1% native CPU p95",
+  );
+
+  const reorderedScenarios = clone(valid);
+  [reorderedScenarios.scenarios[0], reorderedScenarios.scenarios[1]] = [
+    reorderedScenarios.scenarios[1],
+    reorderedScenarios.scenarios[0],
+  ];
+  expectFailure(reorderedScenarios, "canonical order");
+
+  const reorderedMemoryVerdicts = clone(valid);
+  [
+    reorderedMemoryVerdicts.budget_verdicts[0],
+    reorderedMemoryVerdicts.budget_verdicts[1],
+  ] = [
+    reorderedMemoryVerdicts.budget_verdicts[1],
+    reorderedMemoryVerdicts.budget_verdicts[0],
+  ];
+  expectFailure(reorderedMemoryVerdicts, "canonical order");
+
+  const reorderedArtifactVerdicts = clone(valid);
+  [
+    reorderedArtifactVerdicts.artifact_budget_verdicts[2],
+    reorderedArtifactVerdicts.artifact_budget_verdicts[3],
+  ] = [
+    reorderedArtifactVerdicts.artifact_budget_verdicts[3],
+    reorderedArtifactVerdicts.artifact_budget_verdicts[2],
+  ];
+  expectFailure(reorderedArtifactVerdicts, "canonical order");
+
+  const forgedArtifactMeasurement = clone(valid);
+  forgedArtifactMeasurement.artifact_budget_verdicts[2].measured_bytes += 1;
+  expectFailure(forgedArtifactMeasurement, "measured bytes");
+
+  const forgedArtifactStatus = clone(valid);
+  forgedArtifactStatus.artifact_budget_verdicts[2].status = "fail";
+  expectFailure(forgedArtifactStatus, "not derived from its limit");
+
+  const reorderedIdleCpuVerdicts = clone(valid);
+  reorderedIdleCpuVerdicts.idle_cpu_verdicts.reverse();
+  expectFailure(reorderedIdleCpuVerdicts, "canonical order");
+
+  const forgedIdleCpuWorst = clone(valid);
+  forgedIdleCpuWorst.idle_cpu_verdicts[0].measured_worst_p95_percent_one_core = 0.2;
+  expectFailure(forgedIdleCpuWorst, "worst independent run");
+
+  const idleCpuOnNonIdleScenario = clone(valid);
+  idleCpuOnNonIdleScenario.scenarios[0].samples[0].idle_cpu = clone(
+    valid.scenarios[1].samples[0].idle_cpu,
+  );
+  expectFailure(idleCpuOnNonIdleScenario, "JSON Schema validation");
+
+  const placeholderEnvironment = clone(valid);
+  configureJ4125Fixture(
+    placeholderEnvironment,
+    "Environment sentinel custodian",
+  );
+  placeholderEnvironment.runner.physicality = {
+    status: "physical",
+    mechanism: "j4125_systemd_cpu_dmi_cross_check",
+    systemd_detect_virt: "none",
+    cpu_hypervisor_flag: false,
+    dmi: {
+      sys_vendor: "Physical Lab Vendor",
+      product_name: "J4125 Appliance",
+    },
+    device_tree: null,
+  };
+  placeholderEnvironment.runner.os_release = "unknown";
+  expectFailure(placeholderEnvironment, "placeholder or generic value");
+
+  const mismatchedJ4125Cgroup = clone(placeholderEnvironment);
+  mismatchedJ4125Cgroup.runner.os_release = "Fixture Linux 1";
+  mismatchedJ4125Cgroup.scenarios[3].samples[0].cgroup.memory_limit_bytes = 1;
+  expectFailure(mismatchedJ4125Cgroup, "cgroup limits do not correlate");
 
   console.log(
-    `PASS: static schemas, assignable device ledger, evidence semantics, twelve evidence sentinels, and ${packagingRemovalSentinels} packaging-ledger removal sentinels`,
+    `PASS: static schemas, assignable device ledger, v3 evidence sentinels, and ${packagingRemovalSentinels} packaging-ledger removal sentinels`,
   );
 }
 
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === "--self-test") {
   runSelfTest();
+} else if (args.length === 1 && args[0] === "--emit-j4125-test-fixture") {
+  process.stdout.write(
+    `${JSON.stringify(makeJ4125SelfTestEvidence(), null, 2)}\n`,
+  );
 } else if (args.length === 1 && args[0] === "--static") {
   validateStaticFiles();
   console.log("PASS: B1 benchmark budgets and device hypothesis ledger");
 } else if (args.length === 1 && !args[0].startsWith("--")) {
   const path = resolve(args[0]);
-  validateEvidence(loadJson(path), path);
+  validateEvidence(loadJson(path), path, true, path);
   console.log(`PASS: ${path}`);
 } else {
   console.error(
-    "Usage: node benchmarks/b1/validate-evidence.mjs --static|--self-test|<evidence.json>",
+    "Usage: node benchmarks/b1/validate-evidence.mjs --static|--self-test|--emit-j4125-test-fixture|<evidence.json>",
   );
   process.exit(2);
 }

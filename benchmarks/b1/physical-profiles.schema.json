@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/physical-profiles.schema.json",
+  "title": "Fasti B1 canonical physical runner profiles",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "hardware_profile_derivation",
+    "profiles"
+  ],
+  "properties": {
+    "$schema": { "const": "./physical-profiles.schema.json" },
+    "schema_version": { "const": "fasti.b1.physical-profiles.v1" },
+    "hardware_profile_derivation": { "const": "physical_profile_policy_v1" },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raspberry_pi_5_champion", "j4125_calibrated"],
+      "properties": {
+        "raspberry_pi_5_champion": { "$ref": "#/$defs/pi" },
+        "j4125_calibrated": { "$ref": "#/$defs/j4125" }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "nullableLimit": {
+      "oneOf": [{ "$ref": "#/$defs/positiveInteger" }, { "type": "null" }]
+    },
+    "oci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory_limit_bytes", "swap_limit_bytes"],
+      "properties": {
+        "memory_limit_bytes": { "$ref": "#/$defs/nullableLimit" },
+        "swap_limit_bytes": {
+          "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }]
+        }
+      }
+    },
+    "pi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_tree",
+        "systemd_detect_virt",
+        "architectures",
+        "logical_cpu_count",
+        "memory_bytes",
+        "running_os_release",
+        "approved_image_sha256",
+        "os_image_policy_status",
+        "storage",
+        "cooling_status",
+        "overclock",
+        "oci"
+      ],
+      "properties": {
+        "device_tree": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model_pattern", "required_compatible"],
+          "properties": {
+            "model_pattern": { "$ref": "#/$defs/nonEmptyString" },
+            "required_compatible": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            }
+          }
+        },
+        "systemd_detect_virt": { "$ref": "#/$defs/nonEmptyString" },
+        "architectures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "logical_cpu_count": { "$ref": "#/$defs/positiveInteger" },
+        "memory_bytes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minimum", "maximum", "label"],
+          "properties": {
+            "minimum": { "$ref": "#/$defs/positiveInteger" },
+            "maximum": { "$ref": "#/$defs/positiveInteger" },
+            "label": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "running_os_release": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version_codename", "claim_scope"],
+          "properties": {
+            "id": { "$ref": "#/$defs/nonEmptyString" },
+            "version_codename": { "$ref": "#/$defs/nonEmptyString" },
+            "claim_scope": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "approved_image_sha256": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "os_image_policy_status": {
+          "enum": [
+            "blocking_until_official_digest_pinned",
+            "approved_digest_allowlist"
+          ]
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "class",
+            "transport",
+            "minimum_link_speed_mbps",
+            "label"
+          ],
+          "properties": {
+            "class": {
+              "enum": ["ssd", "hdd", "emmc_or_flash", "unknown_non_rotational"]
+            },
+            "transport": { "$ref": "#/$defs/nonEmptyString" },
+            "minimum_link_speed_mbps": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "label": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "cooling_status": { "$ref": "#/$defs/nonEmptyString" },
+        "overclock": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "forbidden_nonzero_prefixes",
+            "allowed_exact_values"
+          ],
+          "properties": {
+            "status": { "$ref": "#/$defs/nonEmptyString" },
+            "forbidden_nonzero_prefixes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            },
+            "allowed_exact_values": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "oci": { "$ref": "#/$defs/oci" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "os_image_policy_status": {
+                "const": "blocking_until_official_digest_pinned"
+              }
+            },
+            "required": ["os_image_policy_status"]
+          },
+          "then": {
+            "properties": {
+              "approved_image_sha256": { "type": "array", "maxItems": 0 }
+            }
+          },
+          "else": {
+            "properties": {
+              "approved_image_sha256": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "j4125": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_model_pattern",
+        "systemd_detect_virt",
+        "architectures",
+        "logical_cpu_count",
+        "storage",
+        "oci"
+      ],
+      "properties": {
+        "cpu_model_pattern": { "$ref": "#/$defs/nonEmptyString" },
+        "systemd_detect_virt": { "$ref": "#/$defs/nonEmptyString" },
+        "architectures": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "logical_cpu_count": { "$ref": "#/$defs/positiveInteger" },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class", "accepted_transports", "label"],
+          "properties": {
+            "class": {
+              "enum": ["ssd", "hdd", "emmc_or_flash", "unknown_non_rotational"]
+            },
+            "accepted_transports": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            },
+            "label": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "oci": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["memory_limit_bytes", "swap_limit_bytes"],
+          "properties": {
+            "memory_limit_bytes": { "$ref": "#/$defs/positiveInteger" },
+            "swap_limit_bytes": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "./fixture-policy.schema.json",
+  "schema_version": "fasti.b1.tauri-shell-fixture-policy.v1",
+  "tracked_inputs": {
+    "dist/index.html": "15133223df6986c716ebac01077b262cea14f69a84a506cd23029bf1f0511f78",
+    "src-tauri/Cargo.toml": "124607875284154a387a3a799d177beaad70d3ebadd5604c917f8b13864f72be",
+    "src-tauri/Cargo.lock": "ff109fbc17aa5c8251864130014a644990456f88d67e9ae2d6f68c2253888d20",
+    "src-tauri/build.rs": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+    "src-tauri/src/main.rs": "2561846dd651a9a3f7421e05efd02a21b6b7b8b5031af8061dd7f264d9ace17a",
+    "src-tauri/tauri.conf.json": "dfd5faac2ac2b4c57282ca9a2264ebb50e2a0fc43319126082a18f0b7ee4dec1",
+    "src-tauri/icons/icon.png": "4fd68fc279d6d88884267dded4e1ca079b22c39e0806114b0a318d7e3484373f"
+  },
+  "invariants": {
+    "product_surface": false,
+    "window_count": 1,
+    "window_visible": false,
+    "window_resizable": false,
+    "window_fullscreen": false,
+    "bundle_active": false,
+    "frontend_dist": "../dist",
+    "package_name": "fasti-b1-tauri-shell",
+    "package_publishable": false,
+    "dependency_keys": ["tauri"],
+    "build_dependency_keys": ["tauri-build"],
+    "commands_or_plugins": false,
+    "interactive_html": false
+  }
+}

@@ -1,10 +1,26 @@
 {
   "$schema": "./budgets.schema.json",
-  "schema_version": "fasti.performance-budgets.v1",
+  "schema_version": "fasti.performance-budgets.v2",
   "memory_bytes": {
     "idle_target": 67108864,
     "normal_target": 100663296,
     "heavy_target": 167772160,
     "absolute_ceiling": 201326592
+  },
+  "idle_cpu_percent_one_core": {
+    "average": 0.5,
+    "p95": 1.0
+  },
+  "timing_seconds": {
+    "idle_warmup": 600,
+    "idle_measurement": 900,
+    "sample_interval_ms": 1000
+  },
+  "artifact_bytes": {
+    "native_runtime_installed": 33554432,
+    "native_archive_compressed": 20971520,
+    "oci_image_compressed": 52428800,
+    "oci_image_unpacked": 104857600,
+    "contract_pack_compressed": 5242880
   }
 }

@@ -4,10 +4,17 @@
   "title": "Fasti performance budgets",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "schema_version", "memory_bytes"],
+  "required": [
+    "$schema",
+    "schema_version",
+    "memory_bytes",
+    "idle_cpu_percent_one_core",
+    "timing_seconds",
+    "artifact_bytes"
+  ],
   "properties": {
     "$schema": { "const": "./budgets.schema.json" },
-    "schema_version": { "const": "fasti.performance-budgets.v1" },
+    "schema_version": { "const": "fasti.performance-budgets.v2" },
     "memory_bytes": {
       "type": "object",
       "additionalProperties": false,
@@ -22,6 +29,43 @@
         "normal_target": { "const": 100663296 },
         "heavy_target": { "const": 167772160 },
         "absolute_ceiling": { "const": 201326592 }
+      }
+    },
+    "idle_cpu_percent_one_core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["average", "p95"],
+      "properties": {
+        "average": { "const": 0.5 },
+        "p95": { "const": 1.0 }
+      }
+    },
+    "timing_seconds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idle_warmup", "idle_measurement", "sample_interval_ms"],
+      "properties": {
+        "idle_warmup": { "const": 600 },
+        "idle_measurement": { "const": 900 },
+        "sample_interval_ms": { "const": 1000 }
+      }
+    },
+    "artifact_bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "native_runtime_installed",
+        "native_archive_compressed",
+        "oci_image_compressed",
+        "oci_image_unpacked",
+        "contract_pack_compressed"
+      ],
+      "properties": {
+        "native_runtime_installed": { "const": 33554432 },
+        "native_archive_compressed": { "const": 20971520 },
+        "oci_image_compressed": { "const": 52428800 },
+        "oci_image_unpacked": { "const": 104857600 },
+        "contract_pack_compressed": { "const": 5242880 }
       }
     }
   }
