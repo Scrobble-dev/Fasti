@@ -1,21 +1,23 @@
 name: Reconcile merged Rust source once
 
 on:
-  push:
+  pull_request:
     branches:
-      - "security/b1-evidence-hardening-20260822"
+      - "release"
+    types:
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   reconcile:
-    if: startsWith(github.event.head_commit.message, 'ci(repair): run merged source reconciliation')
+    if: github.event.pull_request.number == 14 && github.event.pull_request.head.ref == 'security/b1-evidence-hardening-20260822' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: security/b1-evidence-hardening-20260822
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 1
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
         with:
@@ -24,7 +26,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          test "$(git log -1 --format=%s)" = "ci(repair): activate PR-bound merged source reconciliation"
 
           cargo fetch
           cargo fmt --all
