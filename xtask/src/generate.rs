@@ -12,6 +12,7 @@ use crate::registry;
 pub(crate) type Artifacts = BTreeMap<PathBuf, Vec<u8>>;
 
 const OPENAPI_PATH: &str = "contracts/generated/v1/openapi.json";
+const CONFORMANCE_OPENAPI_PATH: &str = "contracts/generated/v1/conformance-openapi.json";
 const CAPABILITY_REGISTRY_PATH: &str = "contracts/generated/v1/capabilities.json";
 const HEALTH_SCHEMA_PATH: &str = "packages/schemas/schemas/health-response.json";
 const PROBLEM_SCHEMA_PATH: &str = "packages/schemas/schemas/problem-details.json";
@@ -20,6 +21,121 @@ const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_cap
 const ASYNCAPI_PATH: &str = "contracts/asyncapi/v1/transport.yaml";
 const GENERATED_ONLY_DIRECTORIES: [&str; 2] =
     ["contracts/generated/v1", "packages/schemas/schemas"];
+
+#[derive(Clone, Copy)]
+struct ConformanceOperation {
+    alias: &'static str,
+    operation_id: &'static str,
+    method: &'static str,
+    path: &'static str,
+    capability_id: &'static str,
+    authenticated: bool,
+    request: Option<&'static str>,
+    response: Option<&'static str>,
+    retry: &'static str,
+}
+
+const CONFORMANCE_OPERATIONS: [ConformanceOperation; 9] = [
+    ConformanceOperation {
+        alias: "discoverCapabilities",
+        operation_id: "discover_capabilities",
+        method: "get",
+        path: "/api/v1/capabilities",
+        capability_id: "system.capabilities.discover",
+        authenticated: true,
+        request: None,
+        response: Some("CapabilityDiscoveryResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "selectProfile",
+        operation_id: "select_profile_unavailable",
+        method: "put",
+        path: "/api/v1/profile-selection",
+        capability_id: "profile.select",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "rotateCredential",
+        operation_id: "rotate_credential_unavailable",
+        method: "post",
+        path: "/api/v1/credential-rotations",
+        capability_id: "credential.rotate",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "revokeCredential",
+        operation_id: "revoke_credential_unavailable",
+        method: "post",
+        path: "/api/v1/credential-revocations",
+        capability_id: "credential.revoke",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "configureListener",
+        operation_id: "configure_listener_unavailable",
+        method: "put",
+        path: "/api/v1/listener-configuration",
+        capability_id: "listener.configure",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "initializeNode",
+        operation_id: "initialize_node",
+        method: "post",
+        path: "/api/v1/node/initialization",
+        capability_id: "node.initialize",
+        authenticated: false,
+        request: Some("InitializeNodeRequest"),
+        response: Some("InitializeNodeResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "enrollFirstClient",
+        operation_id: "enroll_first_client",
+        method: "post",
+        path: "/api/v1/client-enrollments",
+        capability_id: "client.enroll",
+        authenticated: false,
+        request: Some("EnrollFirstClientRequest"),
+        response: Some("EnrollFirstClientResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "acceptObservation",
+        operation_id: "accept_observation",
+        method: "post",
+        path: "/api/v1/observations",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("AcceptObservationRequest"),
+        response: Some("AcceptObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "replayReceipt",
+        operation_id: "replay_receipt",
+        method: "get",
+        path: "/api/v1/receipts/{receipt_id}",
+        capability_id: "receipt.replay",
+        authenticated: true,
+        request: None,
+        response: Some("ReplayReceiptResponse"),
+        retry: "safe",
+    },
+];
 
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     generate_to(workspace_root, workspace_root)
@@ -97,6 +213,9 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let health_schema = draft_2020_12_schema::<HealthResponse>()?;
     let problem_schema = draft_2020_12_schema::<ProblemDetails>()?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
+    let mut conformance_openapi = serde_json::to_value(fasti_api::b1_conformance_openapi())
+        .context("B1 conformance OpenAPI is not serializable")?;
+    enrich_conformance_openapi(&mut conformance_openapi, &public_registry)?;
     insert(
         &mut artifacts,
         OPENAPI_PATH,
@@ -107,12 +226,24 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         CAPABILITY_REGISTRY_PATH,
         public_registry.clone(),
     )?;
+    insert(
+        &mut artifacts,
+        CONFORMANCE_OPENAPI_PATH,
+        conformance_openapi.clone(),
+    )?;
     insert(&mut artifacts, HEALTH_SCHEMA_PATH, health_schema.clone())?;
     insert(&mut artifacts, PROBLEM_SCHEMA_PATH, problem_schema.clone())?;
     insert_bytes(
         &mut artifacts,
         SDK_GENERATED_PATH,
-        typescript_sdk(&public_registry, &health_schema, &problem_schema, &asyncapi)?.into_bytes(),
+        typescript_sdk(
+            &public_registry,
+            &health_schema,
+            &problem_schema,
+            &asyncapi,
+            &conformance_openapi,
+        )?
+        .into_bytes(),
     )?;
     insert_bytes(
         &mut artifacts,
@@ -164,6 +295,48 @@ fn pretty_json(value: Value) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn enrich_conformance_openapi(openapi: &mut Value, public_registry: &Value) -> anyhow::Result<()> {
+    let capabilities = array_at(public_registry, "/capabilities")?;
+    for expected in CONFORMANCE_OPERATIONS {
+        let capability = capabilities
+            .iter()
+            .find(|capability| string_at(capability, "/id").ok() == Some(expected.capability_id))
+            .with_context(|| {
+                format!(
+                    "conformance operation {} references absent registry capability {}",
+                    expected.operation_id, expected.capability_id
+                )
+            })?;
+        let scopes = array_at(capability, "/scopes")?.to_vec();
+        let runtime_availability =
+            string_at(capability, "/lifecycle/runtime_availability")?.to_owned();
+        let pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = openapi
+            .pointer_mut(&pointer)
+            .and_then(Value::as_object_mut)
+            .with_context(|| {
+                format!(
+                    "conformance OpenAPI omits {} {}",
+                    expected.method, expected.path
+                )
+            })?;
+        operation.insert(
+            "x-fasti-capability-id".to_owned(),
+            Value::String(expected.capability_id.to_owned()),
+        );
+        operation.insert("x-fasti-required-scopes".to_owned(), Value::Array(scopes));
+        operation.insert(
+            "x-fasti-runtime-availability".to_owned(),
+            Value::String(runtime_availability),
+        );
+    }
+    Ok(())
+}
+
 fn sort_json(value: Value) -> Value {
     match value {
         Value::Object(object) => {
@@ -207,6 +380,7 @@ fn typescript_sdk(
     health_schema: &Value,
     problem_schema: &Value,
     asyncapi: &Value,
+    conformance_openapi: &Value,
 ) -> anyhow::Result<String> {
     let mut output = String::from(
         "/* This file is generated by `cargo xtask contract generate`. Do not edit. */\n\n",
@@ -239,8 +413,9 @@ fn typescript_sdk(
         "export interface ReceiptCommittedEnvelope {\n  readonly id: string;\n  readonly event: \"receiptCommitted\";\n  readonly data: ReceiptCommittedEvent;\n}\n\n",
     );
 
+    output.push_str(&render_conformance_contract(conformance_openapi)?);
+
     let capabilities = array_at(public_registry, "/capabilities")?;
-    let mut capability_rows = Vec::with_capacity(capabilities.len());
     let mut capability_ids = BTreeSet::new();
     let mut problem_codes = BTreeSet::new();
     let mut runtime_availabilities = BTreeSet::new();
@@ -252,7 +427,6 @@ fn typescript_sdk(
         let runtime_body = string_at(capability, "/runtime_body")?;
         let contract_state = string_at(capability, "/lifecycle/contract_state")?;
         let runtime_availability = string_at(capability, "/lifecycle/runtime_availability")?;
-        let surface_profile = string_at(capability, "/surface_profile")?;
         capability_ids.insert(id.to_owned());
         bodies.insert(contract_body.to_owned());
         bodies.insert(runtime_body.to_owned());
@@ -265,41 +439,21 @@ fn typescript_sdk(
                     .to_owned(),
             );
         }
-        capability_rows.push((
-            id.to_owned(),
-            contract_body.to_owned(),
-            runtime_body.to_owned(),
-            contract_state.to_owned(),
-            runtime_availability.to_owned(),
-            surface_profile.to_owned(),
-        ));
     }
-    capability_rows.sort();
 
     render_string_union(&mut output, "CapabilityId", &capability_ids)?;
     render_string_union(&mut output, "CapabilityBody", &bodies)?;
     render_string_union(&mut output, "ContractState", &contract_states)?;
     render_string_union(&mut output, "RuntimeAvailability", &runtime_availabilities)?;
     render_string_union(&mut output, "ProblemCode", &problem_codes)?;
+    let public_registry_json = serde_json::to_string_pretty(&sort_json(public_registry.clone()))?;
+    writeln!(
+        output,
+        "// prettier-ignore\nexport const PUBLIC_CAPABILITY_REGISTRY = {public_registry_json} as const;\n"
+    )?;
     output.push_str(
-        "export interface CapabilityMetadata {\n  readonly id: CapabilityId;\n  readonly contractBody: CapabilityBody;\n  readonly runtimeBody: CapabilityBody;\n  readonly contractState: ContractState;\n  readonly runtimeAvailability: RuntimeAvailability;\n  readonly surfaceProfile: string;\n}\n\n",
+        "export const CAPABILITY_REGISTRY = PUBLIC_CAPABILITY_REGISTRY.capabilities;\nexport const SURFACE_PROFILES = PUBLIC_CAPABILITY_REGISTRY.surface_profiles;\nexport type CapabilityMetadata = (typeof CAPABILITY_REGISTRY)[number];\nexport type SurfaceProfileMetadata = typeof SURFACE_PROFILES;\n\n",
     );
-    output.push_str("export const CAPABILITY_REGISTRY = [\n");
-    for (id, contract_body, runtime_body, contract_state, runtime_availability, profile) in
-        capability_rows
-    {
-        writeln!(
-            output,
-            "  {{\n    id: {},\n    contractBody: {},\n    runtimeBody: {},\n    contractState: {},\n    runtimeAvailability: {},\n    surfaceProfile: {},\n  }},",
-            json_string(&id)?,
-            json_string(&contract_body)?,
-            json_string(&runtime_body)?,
-            json_string(&contract_state)?,
-            json_string(&runtime_availability)?,
-            json_string(&profile)?,
-        )?;
-    }
-    output.push_str("] as const satisfies ReadonlyArray<CapabilityMetadata>;\n\n");
 
     let stream_path = string_at(asyncapi, "/channels/receiptEvents/address")?;
     let event_name = string_at(asyncapi, "/components/messages/receiptCommitted/name")?;
@@ -315,13 +469,40 @@ fn typescript_sdk(
         capability_ids.contains(capability_id),
         "AsyncAPI receipt capability {capability_id} is absent from the public registry"
     );
-    let scope = array_at(
+    let async_scopes = array_at(
         asyncapi,
         "/operations/sendReceiptCommitted/x-fasti-required-scopes",
     )?
-    .first()
-    .and_then(Value::as_str)
-    .context("receipt stream must declare one required scope")?;
+    .iter()
+    .map(|value| {
+        value
+            .as_str()
+            .context("receipt stream scope must be a string")
+            .map(ToOwned::to_owned)
+    })
+    .collect::<anyhow::Result<BTreeSet<_>>>()?;
+    ensure!(
+        !async_scopes.is_empty(),
+        "receipt stream must declare required scopes"
+    );
+    let registry_capability = capabilities
+        .iter()
+        .find(|capability| string_at(capability, "/id").ok() == Some(capability_id))
+        .context("AsyncAPI receipt capability is absent from the public registry")?;
+    let registry_scopes = array_at(registry_capability, "/scopes")?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .context("registry capability scope must be a string")
+                .map(ToOwned::to_owned)
+        })
+        .collect::<anyhow::Result<BTreeSet<_>>>()?;
+    ensure!(
+        async_scopes == registry_scopes,
+        "AsyncAPI receipt scopes must exactly equal the registry-owned scope set"
+    );
+    let scopes_json = serde_json::to_string(&async_scopes)?;
     let maximum_replay = u64_at(
         asyncapi,
         "/operations/sendReceiptCommitted/x-fasti-replay/maximumBatch",
@@ -340,11 +521,11 @@ fn typescript_sdk(
     );
     writeln!(
         output,
-        "export const RECEIPT_STREAM_CONTRACT = {{\n  path: {},\n  eventName: {},\n  capabilityId: {},\n  requiredScope: {},\n  runtimeAvailability: {},\n  maximumReplayBatch: {},\n  retryPolicy: {},\n}} as const;\n",
+        "export const RECEIPT_STREAM_CONTRACT = {{\n  path: {},\n  eventName: {},\n  capabilityId: {},\n  requiredScopes: {},\n  runtimeAvailability: {},\n  maximumReplayBatch: {},\n  retryPolicy: {},\n}} as const;\n",
         json_string(stream_path)?,
         json_string(event_name)?,
         json_string(capability_id)?,
-        json_string(scope)?,
+        scopes_json,
         json_string(runtime_availability)?,
         maximum_replay,
         json_string(retry_policy)?,
@@ -442,7 +623,7 @@ const RECEIPT_ID = new RegExp({receipt_pattern});
 const OPERATION_ID = new RegExp({operation_pattern});
 const OBSERVATION_ID = new RegExp({observation_pattern});
 // prettier-ignore
-const RFC3339_INSTANT = /^\d{{4}}-\d{{2}}-\d{{2}}T\d{{2}}:\d{{2}}:\d{{2}}(?:\.\d+)?(?:Z|[+-]\d{{2}}:\d{{2}})$/;
+const RFC3339_INSTANT = /^(\d{{4}})-(\d{{2}})-(\d{{2}})T(\d{{2}}):(\d{{2}}):(\d{{2}})(?:\.\d+)?(Z|[+-](\d{{2}}):(\d{{2}}))$/;
 
 // prettier-ignore
 export function parseHealthResponse(value: unknown): HealthResponse {{
@@ -486,7 +667,7 @@ export function parseReceiptCommittedEvent(value: unknown): ReceiptCommittedEven
   patternString(object, "receipt_id", RECEIPT_ID, "ReceiptCommittedEvent");
   patternString(object, "operation_id", OPERATION_ID, "ReceiptCommittedEvent");
   patternString(object, "observation_id", OBSERVATION_ID, "ReceiptCommittedEvent");
-  patternString(object, "committed_at", RFC3339_INSTANT, "ReceiptCommittedEvent");
+  rfc3339InstantField(object, "committed_at", "ReceiptCommittedEvent");
   return object as unknown as ReceiptCommittedEvent;
 }}
 
@@ -515,8 +696,8 @@ function exactObject(
   required: readonly string[],
   label: string,
 ): JsonObject {{
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {{
-    throw new FastiContractParseError(`${{label}} must be an object`);
+  if (!isPlainObject(value)) {{
+    throw new FastiContractParseError(`${{label}} must be a plain object`);
   }}
   const object = value as JsonObject;
   for (const key of Object.keys(object)) {{
@@ -525,11 +706,17 @@ function exactObject(
     }}
   }}
   for (const key of required) {{
-    if (!(key in object)) {{
+    if (!Object.hasOwn(object, key)) {{
       throw new FastiContractParseError(`${{label}} is missing required field ${{key}}`);
     }}
   }}
   return object;
+}}
+
+// prettier-ignore
+function isPlainObject(value: unknown): value is Record<string, unknown> {{
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.getPrototypeOf(value) === Object.prototype;
 }}
 
 function stringField(object: JsonObject, field: string, label: string): string {{
@@ -573,6 +760,14 @@ function patternString(
 ): void {{
   if (!pattern.test(stringField(object, field, label))) {{
     throw new FastiContractParseError(`${{label}}.${{field}} has an invalid format`);
+  }}
+}}
+
+// prettier-ignore
+function rfc3339InstantField(object: JsonObject, field: string, label: string): void {{
+  const value = stringField(object, field, label);
+  if (!isRealRfc3339Instant(value)) {{
+    throw new FastiContractParseError(`${{label}}.${{field}} is not a real RFC3339 calendar instant`);
   }}
 }}
 
@@ -633,6 +828,328 @@ function arrayField(object: JsonObject, field: string, label: string): unknown[]
     Ok(output)
 }
 
+fn render_conformance_contract(openapi: &Value) -> anyhow::Result<String> {
+    ensure!(
+        string_at(openapi, "/openapi")? == "3.1.0",
+        "B1 conformance OpenAPI must remain 3.1.0"
+    );
+    let expected_paths: BTreeSet<_> = CONFORMANCE_OPERATIONS
+        .iter()
+        .map(|operation| operation.path)
+        .collect();
+    let actual_paths: BTreeSet<_> = object_at(openapi, "/paths")?
+        .keys()
+        .map(String::as_str)
+        .collect();
+    ensure!(
+        actual_paths == expected_paths,
+        "B1 conformance OpenAPI route inventory changed: expected {expected_paths:?}, found {actual_paths:?}"
+    );
+
+    let mut output = String::new();
+    let schemas = object_at(openapi, "/components/schemas")?;
+    let shared = ["ProblemActionDto", "ProblemDetails", "ViolationDto"];
+    for (name, schema) in schemas {
+        if shared.contains(&name.as_str()) {
+            continue;
+        }
+        if schema.get("enum").is_some() {
+            writeln!(
+                output,
+                "// prettier-ignore\nexport type {name} = {};\n",
+                typescript_type(schema)?
+            )?;
+        } else {
+            output.push_str(&render_interface(name, schema)?);
+            output.push('\n');
+        }
+    }
+
+    output.push_str("// prettier-ignore\nexport const B1_CONFORMANCE_OPERATIONS = {\n");
+    for expected in CONFORMANCE_OPERATIONS {
+        let ConformanceOperation {
+            alias,
+            operation_id,
+            method,
+            path,
+            capability_id,
+            authenticated,
+            request,
+            response,
+            retry,
+        } = expected;
+        let operation_pointer = format!("/paths/{}/{method}", escape_pointer(path));
+        let operation = value_at(openapi, &operation_pointer)?;
+        ensure!(
+            string_at(operation, "/operationId")? == operation_id,
+            "conformance operation ID changed for {method} {path}"
+        );
+        let has_security = operation
+            .get("security")
+            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
+        ensure!(
+            has_security == authenticated,
+            "conformance security declaration changed for {method} {path}"
+        );
+        ensure!(
+            string_at(operation, "/x-fasti-capability-id")? == capability_id,
+            "conformance capability annotation changed for {method} {path}"
+        );
+        let required_scopes = array_at(operation, "/x-fasti-required-scopes")?;
+        let required_scopes_json = serde_json::to_string(required_scopes)?;
+        let runtime_availability = string_at(operation, "/x-fasti-runtime-availability")?;
+        match request {
+            Some(request_name) => ensure!(
+                string_at(
+                    operation,
+                    "/requestBody/content/application~1json/schema/$ref"
+                )? == format!("#/components/schemas/{request_name}"),
+                "conformance request schema changed for {method} {path}"
+            ),
+            None => ensure!(
+                operation.get("requestBody").is_none(),
+                "unexpected request body for {method} {path}"
+            ),
+        }
+        match response {
+            Some(response_name) => ensure!(
+                string_at(
+                    operation,
+                    "/responses/200/content/application~1json/schema/$ref"
+                )? == format!("#/components/schemas/{response_name}"),
+                "conformance success schema changed for {method} {path}"
+            ),
+            None => ensure!(
+                operation.pointer("/responses/200").is_none(),
+                "problem-only conformance binding gained a success for {method} {path}"
+            ),
+        }
+        writeln!(
+            output,
+            "  {alias}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, requiredScopes: {required_scopes_json}, authenticated: {authenticated}, runtimeAvailability: {}, durability: \"none\", retry: {}, requestSchema: {}, responseSchema: {} }},",
+            json_string(operation_id)?,
+            json_string(&method.to_ascii_uppercase())?,
+            json_string(path)?,
+            json_string(capability_id)?,
+            json_string(runtime_availability)?,
+            json_string(retry)?,
+            request.map(json_string).transpose()?.unwrap_or_else(|| "null".to_owned()),
+            response
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+        )?;
+    }
+    output.push_str("} as const;\n\n");
+
+    let schemas_json = serde_json::to_string_pretty(&sort_json(Value::Object(schemas.clone())))?;
+    writeln!(
+        output,
+        "// prettier-ignore\nconst B1_CONFORMANCE_SCHEMAS = {schemas_json} as const;\n"
+    )?;
+    output.push_str(
+        r##"// prettier-ignore
+export function parseInitializeNodeRequest(value: unknown): InitializeNodeRequest {
+  return parseConformanceDto("InitializeNodeRequest", value);
+}
+
+// prettier-ignore
+export function parseInitializeNodeResponse(value: unknown): InitializeNodeResponse {
+  return parseConformanceDto("InitializeNodeResponse", value);
+}
+
+// prettier-ignore
+export function parseEnrollFirstClientRequest(value: unknown): EnrollFirstClientRequest {
+  return parseConformanceDto("EnrollFirstClientRequest", value);
+}
+
+// prettier-ignore
+export function parseEnrollFirstClientResponse(value: unknown): EnrollFirstClientResponse {
+  return parseConformanceDto("EnrollFirstClientResponse", value);
+}
+
+// prettier-ignore
+export function parseAcceptObservationRequest(value: unknown): AcceptObservationRequest {
+  return parseConformanceDto("AcceptObservationRequest", value);
+}
+
+// prettier-ignore
+export function parseAcceptObservationResponse(value: unknown): AcceptObservationResponse {
+  return parseConformanceDto("AcceptObservationResponse", value);
+}
+
+// prettier-ignore
+export function parseCapabilityDiscoveryResponse(value: unknown): CapabilityDiscoveryResponse {
+  return parseConformanceDto("CapabilityDiscoveryResponse", value);
+}
+
+// prettier-ignore
+export function parseReplayReceiptResponse(value: unknown): ReplayReceiptResponse {
+  return parseConformanceDto("ReplayReceiptResponse", value);
+}
+
+// prettier-ignore
+function parseConformanceDto<T>(schemaName: string, value: unknown): T {
+  const schema = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[schemaName];
+  if (schema === undefined) {
+    throw new FastiContractParseError(`Unknown conformance schema ${schemaName}`);
+  }
+  validateOpenApiValue(value, schema, schemaName);
+  return value as T;
+}
+
+// prettier-ignore
+function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string): void {
+  const schema = schemaValue as Record<string, unknown>;
+  if (typeof schema.$ref === "string") {
+    const prefix = "#/components/schemas/";
+    if (!schema.$ref.startsWith(prefix)) {
+      throw new FastiContractParseError(`${path} has an unsupported schema reference`);
+    }
+    const name = schema.$ref.slice(prefix.length);
+    const target = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[name];
+    if (target === undefined) {
+      throw new FastiContractParseError(`${path} references an unknown schema`);
+    }
+    validateOpenApiValue(value, target, path);
+    return;
+  }
+  if (Array.isArray(schema.oneOf)) {
+    let matches = 0;
+    for (const candidate of schema.oneOf) {
+      try {
+        validateOpenApiValue(value, candidate, path);
+        matches += 1;
+      } catch (error) {
+        if (!(error instanceof FastiContractParseError)) throw error;
+      }
+    }
+    if (matches !== 1) {
+      throw new FastiContractParseError(`${path} must match exactly one contract shape`);
+    }
+    return;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    throw new FastiContractParseError(`${path} has an unsupported enum value`);
+  }
+  const schemaTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (schemaTypes.includes("null") && value === null) return;
+  if (schemaTypes.includes("string")) {
+    if (typeof value !== "string") {
+      throw new FastiContractParseError(`${path} must be a string`);
+    }
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+      throw new FastiContractParseError(`${path} is shorter than its minimum length`);
+    }
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) {
+      throw new FastiContractParseError(`${path} exceeds its maximum length`);
+    }
+    if (typeof schema.pattern === "string" && !new RegExp(schema.pattern).test(value)) {
+      throw new FastiContractParseError(`${path} has an invalid format`);
+    }
+    if (schema.format === "date-time" && !isRealRfc3339Instant(value)) {
+      throw new FastiContractParseError(`${path} is not a real RFC3339 instant`);
+    }
+    if (schema.format === "iso-date-or-rfc3339" && !isRealIsoDateOrRfc3339(value)) {
+      throw new FastiContractParseError(`${path} is not a real ISO date or RFC3339 instant`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("integer")) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+      throw new FastiContractParseError(`${path} must be a safe integer`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new FastiContractParseError(`${path} is below its minimum`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("array")) {
+    if (!Array.isArray(value)) {
+      throw new FastiContractParseError(`${path} must be an array`);
+    }
+    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
+    return;
+  }
+  if (schemaTypes.includes("object")) {
+    if (!isPlainObject(value)) {
+      throw new FastiContractParseError(`${path} must be a plain object`);
+    }
+    const object = value as Record<string, unknown>;
+    const properties = isPlainObject(schema.properties)
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(object)) {
+        if (!Object.hasOwn(properties, key)) {
+          throw new FastiContractParseError(`${path} contains unknown field ${key}`);
+        }
+      }
+    }
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const field of required) {
+      if (typeof field !== "string" || !Object.hasOwn(object, field)) {
+        throw new FastiContractParseError(`${path} is missing a required field`);
+      }
+    }
+    for (const [field, fieldSchema] of Object.entries(properties)) {
+      if (Object.hasOwn(object, field)) {
+        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`);
+      }
+    }
+    return;
+  }
+  throw new FastiContractParseError(`${path} uses an unsupported schema shape`);
+}
+
+// prettier-ignore
+function isRealIsoDateOrRfc3339(value: string): boolean {
+  const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (date !== null) {
+    return isRealCalendarDate(Number(date[1]), Number(date[2]), Number(date[3]));
+  }
+  return isRealRfc3339Instant(value);
+}
+
+// prettier-ignore
+function isRealRfc3339Instant(value: string): boolean {
+  const match = RFC3339_INSTANT.exec(value);
+  if (match === null) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHourText, offsetMinuteText] = match;
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText);
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText);
+  return (
+    isRealCalendarDate(Number(yearText), Number(monthText), Number(dayText)) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59
+  );
+}
+
+// prettier-ignore
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]!;
+}
+
+"##,
+    );
+    Ok(output)
+}
+
+fn escape_pointer(value: &str) -> String {
+    value.replace('~', "~0").replace('/', "~1")
+}
+
 fn render_interface(name: &str, schema: &Value) -> anyhow::Result<String> {
     render_interface_with_overrides(name, schema, &[])
 }
@@ -646,32 +1163,69 @@ fn render_interface_with_overrides(
         schema.get("additionalProperties").and_then(Value::as_bool) == Some(false),
         "{name} must reject unknown fields before SDK generation"
     );
-    let properties = object_at(schema, "/properties")?;
+    let properties = schema
+        .get("properties")
+        .map(|value| {
+            value
+                .as_object()
+                .context("schema properties must be an object")
+        })
+        .transpose()?;
+    if match properties {
+        Some(properties) => properties.is_empty(),
+        None => true,
+    } {
+        return Ok(format!("export interface {name} {{}}\n"));
+    }
     let required = required_names(schema)?;
     let mut output = format!("export interface {name} {{\n");
-    for (property_name, property_schema) in properties {
-        let optional = if required.contains(property_name) {
-            ""
-        } else {
-            "?"
-        };
-        writeln!(
-            output,
-            "  readonly {property_name}{optional}: {};",
-            overrides
-                .iter()
-                .find_map(|(field, replacement)| {
-                    (*field == property_name).then_some((*replacement).to_owned())
-                })
-                .map(Ok)
-                .unwrap_or_else(|| typescript_type(property_schema))?
-        )?;
+    if let Some(properties) = properties {
+        for (property_name, property_schema) in properties {
+            let optional = if required.contains(property_name) {
+                ""
+            } else {
+                "?"
+            };
+            writeln!(
+                output,
+                "  readonly {property_name}{optional}: {};",
+                overrides
+                    .iter()
+                    .find_map(|(field, replacement)| {
+                        (*field == property_name).then_some((*replacement).to_owned())
+                    })
+                    .map(Ok)
+                    .unwrap_or_else(|| typescript_type(property_schema))?
+            )?;
+        }
     }
     output.push_str("}\n");
     Ok(output)
 }
 
 fn typescript_type(schema: &Value) -> anyhow::Result<String> {
+    if let Some(values) = schema.get("enum").and_then(Value::as_array) {
+        let mut rendered = values
+            .iter()
+            .map(|value| match value {
+                Value::String(value) => json_string(value),
+                Value::Bool(_) | Value::Number(_) | Value::Null => Ok(value.to_string()),
+                _ => anyhow::bail!("unsupported structured schema enum value"),
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        rendered.sort();
+        rendered.dedup();
+        return Ok(rendered.join(" | "));
+    }
+    if let Some(choices) = schema.get("oneOf").and_then(Value::as_array) {
+        let mut rendered = choices
+            .iter()
+            .map(typescript_type)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        rendered.sort();
+        rendered.dedup();
+        return Ok(rendered.join(" | "));
+    }
     if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
         return reference
             .rsplit('/')
@@ -733,7 +1287,13 @@ fn property_names(schema: &Value) -> anyhow::Result<BTreeSet<String>> {
 
 fn required_names(schema: &Value) -> anyhow::Result<BTreeSet<String>> {
     let mut required = BTreeSet::new();
-    for value in array_at(schema, "/required")? {
+    let Some(values) = schema.get("required") else {
+        return Ok(required);
+    };
+    let values = values
+        .as_array()
+        .context("schema required must be an array")?;
+    for value in values {
         required.insert(
             value
                 .as_str()
@@ -862,6 +1422,7 @@ mod tests {
         let actual: BTreeSet<_> = artifacts.keys().map(|path| path.as_path()).collect();
         let expected: BTreeSet<_> = [
             Path::new(OPENAPI_PATH),
+            Path::new(CONFORMANCE_OPENAPI_PATH),
             Path::new(CAPABILITY_REGISTRY_PATH),
             Path::new(HEALTH_SCHEMA_PATH),
             Path::new(PROBLEM_SCHEMA_PATH),
@@ -910,7 +1471,42 @@ mod tests {
         )
         .expect("SDK is UTF-8");
         assert!(sdk.contains("runtimeAvailability: \"fixture_only\""));
-        assert!(sdk.contains("runtimeAvailability: \"implemented\""));
+        assert!(sdk.contains("\"bounded_context\""));
+        assert!(sdk.contains("\"scopes\""));
+        assert!(sdk.contains("\"problems\""));
+        assert!(sdk.contains("\"surface_profiles\""));
+    }
+
+    #[test]
+    fn every_conformance_operation_carries_registry_parity_annotations() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CONFORMANCE_OPENAPI_PATH))
+                .expect("conformance OpenAPI generated"),
+        )
+        .expect("conformance OpenAPI is JSON");
+        for expected in CONFORMANCE_OPERATIONS {
+            let pointer = format!(
+                "/paths/{}/{}",
+                escape_pointer(expected.path),
+                expected.method
+            );
+            let operation = value_at(&openapi, &pointer).expect("operation is present");
+            assert_eq!(
+                string_at(operation, "/x-fasti-capability-id")
+                    .expect("capability annotation is present"),
+                expected.capability_id
+            );
+            assert!(!array_at(operation, "/x-fasti-required-scopes")
+                .expect("scope annotation is present")
+                .is_empty());
+            assert_eq!(
+                string_at(operation, "/x-fasti-runtime-availability")
+                    .expect("runtime annotation is present"),
+                "fixture_only"
+            );
+        }
     }
 
     fn workspace_root() -> &'static Path {

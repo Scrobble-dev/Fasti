@@ -1,12 +1,29 @@
 import {
+  B1_CONFORMANCE_OPERATIONS,
   FastiContractParseError,
+  parseAcceptObservationRequest,
+  parseAcceptObservationResponse,
+  parseCapabilityDiscoveryResponse,
+  parseEnrollFirstClientRequest,
+  parseEnrollFirstClientResponse,
   parseHealthResponse,
+  parseInitializeNodeRequest,
+  parseInitializeNodeResponse,
   parseProblemDetails,
   parseReceiptCommittedEvent,
+  parseReplayReceiptResponse,
   RECEIPT_STREAM_CONTRACT,
+  type AcceptObservationRequest,
+  type AcceptObservationResponse,
+  type CapabilityDiscoveryResponse,
+  type EnrollFirstClientRequest,
+  type EnrollFirstClientResponse,
   type HealthResponse,
+  type InitializeNodeRequest,
+  type InitializeNodeResponse,
   type ProblemDetails,
   type ReceiptCommittedEnvelope,
+  type ReplayReceiptResponse,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -93,7 +110,6 @@ export class FastiProtocolError extends Error {
 interface AbortScope {
   readonly signal: AbortSignal;
   readonly timedOut: () => boolean;
-  readonly clearTimeout: () => void;
   readonly dispose: () => void;
 }
 
@@ -103,18 +119,24 @@ interface ParsedSseEvent {
   readonly data: string;
 }
 
-interface ScopedResponse {
-  readonly response: Response;
-  readonly scope: AbortScope;
-}
+type JsonParser<T> = (value: unknown) => T;
+type RetryMode = "safe" | "never" | "stable-idempotency";
+
+class NetworkRequestError extends Error {}
+class ResponseReadError extends Error {}
+class SseNetworkReadError extends Error {}
+class CredentialProviderError extends Error {}
+class ScopedAbortError extends Error {}
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_ATTEMPTS = 10;
 const MAX_RETRY_DELAY_MS = 60_000;
-const MAX_SSE_CHUNK_BYTES = 64 * 1_024;
-const MAX_SSE_BUFFER_CHARACTERS = 128 * 1_024;
-const MAX_SSE_EVENT_CHARACTERS = 256 * 1_024;
+const MAX_JSON_RESPONSE_BYTES = 512 * 1_024;
+const MAX_SSE_LINE_BYTES = 64 * 1_024;
+const MAX_SSE_EVENT_BYTES = 256 * 1_024;
+const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
+const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 
 export class FastiClient {
   readonly #baseUrl: URL;
@@ -137,38 +159,162 @@ export class FastiClient {
     }
   }
 
-  async health(options: CallOptions = {}): Promise<HealthResponse> {
-    const { response, scope } = await this.#getWithRetry(
-      "/api/v1/health",
+  health(options: CallOptions = {}): Promise<HealthResponse> {
+    return this.#jsonOperation({
+      method: "GET",
+      path: "/api/v1/health",
+      authenticated: false,
+      retryMode: "safe",
+      responseParser: parseHealthResponse,
+      responseLabel: "Health response",
       options,
-      normalizeRetryPolicy(options.retryPolicy, this.#retryPolicy),
-      false,
+    });
+  }
+
+  discoverCapabilities(
+    options: CallOptions = {},
+  ): Promise<CapabilityDiscoveryResponse> {
+    const operation = B1_CONFORMANCE_OPERATIONS.discoverCapabilities;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      retryMode: "safe",
+      responseParser: parseCapabilityDiscoveryResponse,
+      responseLabel: "Capability discovery response",
+      options,
+    });
+  }
+
+  /** Finalized B1 binding whose successful semantics remain unavailable until B2. */
+  selectProfile(options: CallOptions = {}): Promise<never> {
+    return this.#problemOnlyOperation(
+      B1_CONFORMANCE_OPERATIONS.selectProfile,
+      "Profile-selection binding",
+      options,
     );
-    try {
-      if (!response.ok) {
-        throw await problemOrTransportError(response);
-      }
-      if (!contentTypeIs(response, "application/json")) {
-        throw new FastiProtocolError(
-          "Health response must use application/json",
-        );
-      }
-      return parseHealthResponse(await parseJson(response));
-    } catch (error) {
-      if (scope.timedOut()) throw new FastiTimeoutError();
-      if (options.signal?.aborted) throw new FastiAbortError();
-      throw protocolError(
-        error,
-        "Health response violates the generated contract",
-      );
-    } finally {
-      scope.dispose();
-    }
+  }
+
+  /** Finalized B1 binding whose successful semantics remain unavailable until B2. */
+  rotateCredential(options: CallOptions = {}): Promise<never> {
+    return this.#problemOnlyOperation(
+      B1_CONFORMANCE_OPERATIONS.rotateCredential,
+      "Credential-rotation binding",
+      options,
+    );
+  }
+
+  /** Finalized B1 binding whose successful semantics remain unavailable until B2. */
+  revokeCredential(options: CallOptions = {}): Promise<never> {
+    return this.#problemOnlyOperation(
+      B1_CONFORMANCE_OPERATIONS.revokeCredential,
+      "Credential-revocation binding",
+      options,
+    );
+  }
+
+  /** Finalized B1 binding whose successful semantics remain unavailable until B2. */
+  configureListener(options: CallOptions = {}): Promise<never> {
+    return this.#problemOnlyOperation(
+      B1_CONFORMANCE_OPERATIONS.configureListener,
+      "Listener-configuration binding",
+      options,
+    );
+  }
+
+  initializeNode(
+    request: InitializeNodeRequest = {},
+    options: CallOptions = {},
+  ): Promise<InitializeNodeResponse> {
+    const operation = B1_CONFORMANCE_OPERATIONS.initializeNode;
+    const body = parseOutgoing(
+      parseInitializeNodeRequest,
+      request,
+      "Initialize-node request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      retryMode: "never",
+      body,
+      responseParser: parseInitializeNodeResponse,
+      responseLabel: "Initialize-node response",
+      options,
+    });
+  }
+
+  enrollFirstClient(
+    request: EnrollFirstClientRequest,
+    options: CallOptions = {},
+  ): Promise<EnrollFirstClientResponse> {
+    const operation = B1_CONFORMANCE_OPERATIONS.enrollFirstClient;
+    const body = parseOutgoing(
+      parseEnrollFirstClientRequest,
+      request,
+      "First-client enrollment request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      retryMode: "never",
+      body,
+      responseParser: parseEnrollFirstClientResponse,
+      responseLabel: "First-client enrollment response",
+      options,
+    });
+  }
+
+  acceptObservation(
+    request: AcceptObservationRequest,
+    options: CallOptions = {},
+  ): Promise<AcceptObservationResponse> {
+    const operation = B1_CONFORMANCE_OPERATIONS.acceptObservation;
+    const body = parseOutgoing(
+      parseAcceptObservationRequest,
+      request,
+      "Accept-observation request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: parseAcceptObservationResponse,
+      responseLabel: "Accept-observation response",
+      options,
+    });
+  }
+
+  replayReceipt(
+    receiptId: string,
+    options: CallOptions = {},
+  ): Promise<ReplayReceiptResponse> {
+    const operation = B1_CONFORMANCE_OPERATIONS.replayReceipt;
+    const safeReceiptId = contractPathIdentifier(
+      receiptId,
+      RECEIPT_ID,
+      "receiptId",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{receipt_id}",
+        encodeURIComponent(safeReceiptId),
+      ),
+      authenticated: operation.authenticated,
+      retryMode: "safe",
+      responseParser: parseReplayReceiptResponse,
+      responseLabel: "Receipt replay response",
+      options,
+    });
   }
 
   /**
    * Opens the governed receipt SSE fixture and performs bounded reconnects.
-   * This never persists, queues, or retries a mutation.
+   * This never persists or queues events, and only reconnects the safe stream.
    */
   async *receiptEvents(
     options: ReceiptStreamOptions = {},
@@ -178,52 +324,40 @@ export class FastiClient {
       options.retryPolicy,
       this.#retryPolicy,
     );
-    let attempts = 0;
 
-    while (attempts < retryPolicy.maxAttempts) {
-      attempts += 1;
+    for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
       const scope = createAbortScope(
         options.signal,
         options.timeoutMs ?? this.#timeoutMs,
       );
       try {
-        const headers = await this.#headers("text/event-stream");
-        if (cursor !== undefined) {
-          headers.set("Last-Event-ID", cursor);
-        }
+        const headers = await this.#headers(
+          "text/event-stream",
+          true,
+          scope.signal,
+        );
+        if (cursor !== undefined) headers.set("Last-Event-ID", cursor);
+
         let response: Response;
         try {
           response = await this.#fetch(
             this.#url(RECEIPT_STREAM_CONTRACT.path),
-            {
-              method: "GET",
-              headers,
-              signal: scope.signal,
-            },
+            { method: "GET", headers, signal: scope.signal },
           );
-        } catch (error) {
-          if (scope.timedOut()) throw new FastiTimeoutError();
-          if (options.signal?.aborted) throw new FastiAbortError();
-          if (
-            retryPolicy.retryNetworkErrors &&
-            attempts < retryPolicy.maxAttempts
-          ) {
-            await delay(retryDelayMs(retryPolicy, attempts), options.signal);
-            continue;
-          }
-          throw new FastiTransportError("Receipt stream connection failed");
+        } catch {
+          throw new NetworkRequestError();
         }
 
-        scope.clearTimeout();
         if (!response.ok) {
           if (
             retryPolicy.transientStatusCodes.includes(response.status) &&
-            attempts < retryPolicy.maxAttempts
+            attempt < retryPolicy.maxAttempts
           ) {
             const retryAfter = retryAfterMs(response, retryPolicy.maxDelayMs);
             await response.body?.cancel();
+            scope.dispose();
             await delay(
-              retryAfter ?? retryDelayMs(retryPolicy, attempts),
+              retryAfter ?? retryDelayMs(retryPolicy, attempt),
               options.signal,
             );
             continue;
@@ -272,13 +406,30 @@ export class FastiClient {
       } catch (error) {
         if (scope.timedOut()) throw new FastiTimeoutError();
         if (options.signal?.aborted) throw new FastiAbortError();
+        const reconnectable =
+          error instanceof NetworkRequestError ||
+          error instanceof SseNetworkReadError;
+        if (
+          reconnectable &&
+          retryPolicy.retryNetworkErrors &&
+          attempt < retryPolicy.maxAttempts
+        ) {
+          await delay(retryDelayMs(retryPolicy, attempt), options.signal);
+          continue;
+        }
+        if (reconnectable) {
+          throw new FastiTransportError("Receipt stream connection failed");
+        }
+        if (error instanceof CredentialProviderError) {
+          throw new FastiTransportError("Credential provider failed");
+        }
         throw error;
       } finally {
         scope.dispose();
       }
 
-      if (attempts < retryPolicy.maxAttempts) {
-        await delay(retryDelayMs(retryPolicy, attempts), options.signal);
+      if (attempt < retryPolicy.maxAttempts) {
+        await delay(retryDelayMs(retryPolicy, attempt), options.signal);
       }
     }
 
@@ -287,65 +438,138 @@ export class FastiClient {
     );
   }
 
-  async #getWithRetry(
-    path: string,
+  #problemOnlyOperation(
+    operation: {
+      readonly method: "POST" | "PUT";
+      readonly path: string;
+      readonly authenticated: true;
+    },
+    responseLabel: string,
     options: CallOptions,
-    retryPolicy: RetryPolicy,
-    authenticated: boolean,
-  ): Promise<ScopedResponse> {
-    for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
-      const headers = await this.#headers("application/json", authenticated);
+  ): Promise<never> {
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      retryMode: "never",
+      responseParser: unexpectedProblemOnlySuccess,
+      responseLabel,
+      options,
+    });
+  }
+
+  async #jsonOperation<T>(input: {
+    readonly method: "GET" | "POST" | "PUT";
+    readonly path: string;
+    readonly authenticated: boolean;
+    readonly retryMode: RetryMode;
+    readonly body?: unknown;
+    readonly responseParser: JsonParser<T>;
+    readonly responseLabel: string;
+    readonly options: CallOptions;
+  }): Promise<T> {
+    const retryPolicy = normalizeRetryPolicy(
+      input.options.retryPolicy,
+      this.#retryPolicy,
+    );
+    const maximumAttempts =
+      input.retryMode === "never" ? 1 : retryPolicy.maxAttempts;
+    const serializedBody =
+      input.body === undefined ? undefined : JSON.stringify(input.body);
+
+    for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
       const scope = createAbortScope(
-        options.signal,
-        options.timeoutMs ?? this.#timeoutMs,
+        input.options.signal,
+        input.options.timeoutMs ?? this.#timeoutMs,
       );
-      let transferredScope = false;
       try {
-        const response = await this.#fetch(this.#url(path), {
-          method: "GET",
-          headers,
-          signal: scope.signal,
-        });
+        const headers = await this.#headers(
+          "application/json",
+          input.authenticated,
+          scope.signal,
+        );
+        if (serializedBody !== undefined) {
+          headers.set("Content-Type", "application/json");
+        }
+
+        let response: Response;
+        try {
+          response = await this.#fetch(this.#url(input.path), {
+            method: input.method,
+            headers,
+            body: serializedBody,
+            signal: scope.signal,
+          });
+        } catch {
+          throw new NetworkRequestError();
+        }
+
         if (
           retryPolicy.transientStatusCodes.includes(response.status) &&
-          attempt < retryPolicy.maxAttempts
+          attempt < maximumAttempts
         ) {
           const retryAfter = retryAfterMs(response, retryPolicy.maxDelayMs);
           await response.body?.cancel();
+          scope.dispose();
           await delay(
             retryAfter ?? retryDelayMs(retryPolicy, attempt),
-            options.signal,
+            input.options.signal,
           );
           continue;
         }
-        transferredScope = true;
-        return { response, scope };
+        if (!response.ok) throw await problemOrTransportError(response);
+        if (!contentTypeIs(response, "application/json")) {
+          throw new FastiProtocolError(
+            `${input.responseLabel} must use application/json`,
+          );
+        }
+        const value = await parseJson(response);
+        try {
+          return input.responseParser(value);
+        } catch (error) {
+          throw protocolError(
+            error,
+            `${input.responseLabel} violates the generated contract`,
+          );
+        }
       } catch (error) {
         if (scope.timedOut()) throw new FastiTimeoutError();
-        if (options.signal?.aborted) throw new FastiAbortError();
+        if (input.options.signal?.aborted) throw new FastiAbortError();
+        const retryableNetworkFailure =
+          error instanceof NetworkRequestError ||
+          error instanceof ResponseReadError;
         if (
-          !retryPolicy.retryNetworkErrors ||
-          attempt === retryPolicy.maxAttempts
+          retryableNetworkFailure &&
+          retryPolicy.retryNetworkErrors &&
+          attempt < maximumAttempts
         ) {
+          await delay(retryDelayMs(retryPolicy, attempt), input.options.signal);
+          continue;
+        }
+        if (retryableNetworkFailure) {
           throw new FastiTransportError("Fasti request failed");
         }
-        await delay(retryDelayMs(retryPolicy, attempt), options.signal);
+        if (error instanceof CredentialProviderError) {
+          throw new FastiTransportError("Credential provider failed");
+        }
+        throw error;
       } finally {
-        if (!transferredScope) scope.dispose();
+        scope.dispose();
       }
     }
     throw new FastiTransportError("Fasti request exhausted its retry policy");
   }
 
-  async #headers(accept: string, authenticated = true): Promise<Headers> {
+  async #headers(
+    accept: string,
+    authenticated: boolean,
+    signal: AbortSignal,
+  ): Promise<Headers> {
     const headers = new Headers({ Accept: accept });
     if (authenticated && this.#credential !== undefined) {
-      const credential =
-        typeof this.#credential === "function"
-          ? await this.#credential()
-          : this.#credential;
+      const credential = await resolveCredential(this.#credential, signal);
       if (!/^[\x21-\x7e]+$/.test(credential)) {
-        throw new TypeError(
+        throw new CredentialProviderError(
           "Credential must be a non-empty visible ASCII value",
         );
       }
@@ -355,8 +579,29 @@ export class FastiClient {
   }
 
   #url(path: string): URL {
+    if (!path.startsWith("/") || path.startsWith("//")) {
+      throw new TypeError("Contract paths must be absolute origin paths");
+    }
     return new URL(path, this.#baseUrl);
   }
+}
+
+function parseOutgoing<T>(
+  parser: JsonParser<T>,
+  value: unknown,
+  label: string,
+): T {
+  try {
+    return parser(value);
+  } catch (error) {
+    throw protocolError(error, `${label} violates the generated contract`);
+  }
+}
+
+function unexpectedProblemOnlySuccess(_value: unknown): never {
+  throw new FastiProtocolError(
+    "Problem-only fixture binding returned an undocumented success",
+  );
 }
 
 function normalizeBaseUrl(value: string): URL {
@@ -370,7 +615,11 @@ function normalizeBaseUrl(value: string): URL {
   if (url.search !== "" || url.hash !== "") {
     throw new TypeError("baseUrl must not contain a query or fragment");
   }
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
+  if (url.pathname !== "/") {
+    throw new TypeError(
+      "baseUrl must be an origin URL without an application path",
+    );
+  }
   return url;
 }
 
@@ -442,22 +691,56 @@ function createAbortScope(
     },
     positiveInteger(timeoutMs, "timeoutMs"),
   );
-  let timeoutCleared = false;
-  const clearRequestTimeout = () => {
-    if (!timeoutCleared) {
-      clearTimeout(timer);
-      timeoutCleared = true;
-    }
-  };
   return {
     signal: controller.signal,
     timedOut: () => didTimeOut,
-    clearTimeout: clearRequestTimeout,
     dispose: () => {
-      clearRequestTimeout();
+      clearTimeout(timer);
       externalSignal?.removeEventListener("abort", onAbort);
     },
   };
+}
+
+async function resolveCredential(
+  provider: CredentialProvider,
+  signal: AbortSignal,
+): Promise<string> {
+  let credential: string | Promise<string>;
+  try {
+    credential = typeof provider === "function" ? provider() : provider;
+  } catch {
+    throw new CredentialProviderError("Credential provider failed");
+  }
+  try {
+    return await abortable(Promise.resolve(credential), signal);
+  } catch (error) {
+    if (error instanceof ScopedAbortError) throw error;
+    throw new CredentialProviderError("Credential provider failed");
+  }
+}
+
+async function abortable<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) throw new ScopedAbortError();
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(new ScopedAbortError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        reject(new CredentialProviderError("Credential provider failed"));
+      },
+    );
+  });
 }
 
 async function problemOrTransportError(response: Response): Promise<Error> {
@@ -467,6 +750,7 @@ async function problemOrTransportError(response: Response): Promise<Error> {
         parseProblemDetails(await parseJson(response)),
       );
     } catch (error) {
+      if (error instanceof ResponseReadError) throw error;
       return protocolError(
         error,
         "Problem response violates RFC 9457 contract",
@@ -480,8 +764,58 @@ async function problemOrTransportError(response: Response): Promise<Error> {
 }
 
 async function parseJson(response: Response): Promise<unknown> {
+  if (response.body === null) {
+    throw new FastiProtocolError("JSON response has no body");
+  }
+  const contentLength = response.headers.get("content-length");
+  if (
+    contentLength !== null &&
+    /^\d+$/.test(contentLength) &&
+    Number(contentLength) > MAX_JSON_RESPONSE_BYTES
+  ) {
+    await response.body.cancel().catch(() => undefined);
+    throw new FastiProtocolError("JSON response exceeds the bounded body size");
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
   try {
-    return await response.json();
+    while (true) {
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch {
+        throw new ResponseReadError();
+      }
+      if (result.done) break;
+      totalBytes += result.value.byteLength;
+      if (totalBytes > MAX_JSON_RESPONSE_BYTES) {
+        throw new FastiProtocolError(
+          "JSON response exceeds the bounded body size",
+        );
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    throw new FastiProtocolError("JSON response is not valid UTF-8", {
+      cause: error,
+    });
+  }
+  try {
+    return JSON.parse(text);
   } catch (error) {
     throw new FastiProtocolError("Response body is not valid JSON", {
       cause: error,
@@ -549,29 +883,49 @@ async function* parseSse(
 ): AsyncGenerator<ParsedSseEvent, void, void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
+  const encoder = new TextEncoder();
   let buffer = "";
+  let currentLineBytes = 0;
   let id: string | undefined;
   let event = "message";
   let data: string[] = [];
-  let dataCharacters = 0;
+  let eventBytes = 0;
+  let eventLines = 0;
 
   const dispatch = (): ParsedSseEvent | undefined => {
-    if (data.length === 0) return undefined;
-    if (id === undefined || id === "") {
-      throw new FastiProtocolError(
-        "Receipt SSE event must include a cursor id",
-      );
-    }
-    const parsed = { id, event, data: data.join("\n") };
+    const parsed =
+      data.length === 0
+        ? undefined
+        : (() => {
+            if (id === undefined || id === "") {
+              throw new FastiProtocolError(
+                "Receipt SSE event must include a cursor id",
+              );
+            }
+            return { id, event, data: data.join("\n") };
+          })();
     id = undefined;
     event = "message";
     data = [];
-    dataCharacters = 0;
+    eventBytes = 0;
+    eventLines = 0;
     return parsed;
   };
 
   const consumeLine = (line: string): ParsedSseEvent | undefined => {
     if (line === "") return dispatch();
+    eventLines += 1;
+    eventBytes += encoder.encode(line).byteLength + 1;
+    if (eventLines > MAX_SSE_EVENT_LINES) {
+      throw new FastiProtocolError(
+        "Receipt SSE event exceeds the bounded line count",
+      );
+    }
+    if (eventBytes > MAX_SSE_EVENT_BYTES) {
+      throw new FastiProtocolError(
+        "Receipt SSE event exceeds the bounded aggregate size",
+      );
+    }
     if (line.startsWith(":")) return undefined;
     const separator = line.indexOf(":");
     const field = separator === -1 ? line : line.slice(0, separator);
@@ -585,12 +939,6 @@ async function* parseSse(
         event = value;
         return undefined;
       case "data":
-        dataCharacters += value.length;
-        if (dataCharacters > MAX_SSE_EVENT_CHARACTERS) {
-          throw new FastiProtocolError(
-            "Receipt SSE event exceeds the bounded payload size",
-          );
-        }
         data.push(value);
         return undefined;
       default:
@@ -602,19 +950,34 @@ async function* parseSse(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
-      if (!done && value.byteLength > MAX_SSE_CHUNK_BYTES) {
-        throw new FastiProtocolError(
-          "Receipt SSE chunk exceeds the bounded transport size",
-        );
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch {
+        throw new SseNetworkReadError();
       }
-      buffer += done
-        ? decoder.decode()
-        : decoder.decode(value, { stream: true });
-      if (buffer.length > MAX_SSE_BUFFER_CHARACTERS) {
-        throw new FastiProtocolError(
-          "Receipt SSE line exceeds the bounded transport size",
-        );
+      if (!result.done) {
+        for (const byte of result.value) {
+          if (byte === 0x0a) {
+            currentLineBytes = 0;
+          } else {
+            currentLineBytes += 1;
+            if (currentLineBytes > MAX_SSE_LINE_BYTES) {
+              throw new FastiProtocolError(
+                "Receipt SSE line exceeds the bounded transport size",
+              );
+            }
+          }
+        }
+      }
+      try {
+        buffer += result.done
+          ? decoder.decode()
+          : decoder.decode(result.value, { stream: true });
+      } catch (error) {
+        throw new FastiProtocolError("Receipt SSE stream is not valid UTF-8", {
+          cause: error,
+        });
       }
       let newline = buffer.indexOf("\n");
       while (newline !== -1) {
@@ -626,7 +989,7 @@ async function* parseSse(
         if (parsed !== undefined) yield parsed;
         newline = buffer.indexOf("\n");
       }
-      if (done) break;
+      if (result.done) break;
     }
     if (buffer !== "") {
       const parsed = consumeLine(
@@ -636,11 +999,6 @@ async function* parseSse(
     }
     const finalEvent = dispatch();
     if (finalEvent !== undefined) yield finalEvent;
-  } catch (error) {
-    if (error instanceof FastiProtocolError) throw error;
-    throw new FastiProtocolError("Receipt SSE stream is not valid UTF-8", {
-      cause: error,
-    });
   } finally {
     await reader.cancel().catch(() => undefined);
     reader.releaseLock();
@@ -658,6 +1016,17 @@ function validateCursor(value: string | undefined): string | undefined {
     /[\r\n\0]/.test(value)
   ) {
     throw new TypeError("SSE cursor must be a non-empty single-line value");
+  }
+  return value;
+}
+
+function contractPathIdentifier(
+  value: string,
+  pattern: RegExp,
+  label: string,
+): string {
+  if (!pattern.test(value)) {
+    throw new TypeError(`${label} does not match the generated contract`);
   }
   return value;
 }

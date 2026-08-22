@@ -50,6 +50,959 @@ export interface ReceiptCommittedEnvelope {
   readonly data: ReceiptCommittedEvent;
 }
 
+export interface AcceptObservationRequest {
+  readonly evidence: EvidenceReferenceDto;
+  readonly observed_at: ObservedTimeDto;
+  readonly occurred_at?: OccurredTimeDto | null;
+  readonly operation_id: string;
+}
+
+export interface AcceptObservationResponse {
+  readonly conformance: ConformanceMarkerDto;
+  readonly disposition: ReceiptDispositionDto;
+  readonly receipt: ObservationReceiptDto;
+}
+
+export interface CapabilityDescriptorDto {
+  readonly bounded_context: string;
+  readonly contract_body: string;
+  readonly examples: ReadonlyArray<string>;
+  readonly id: string;
+  readonly lifecycle: CapabilityLifecycleDto;
+  readonly problems: ReadonlyArray<string>;
+  readonly runtime_body: string;
+  readonly scopes: ReadonlyArray<string>;
+  readonly surface_profile: string;
+  readonly uat: ReadonlyArray<CapabilityUatDto>;
+}
+
+export interface CapabilityDiscoveryResponse {
+  readonly capabilities: ReadonlyArray<CapabilityDescriptorDto>;
+  readonly conformance: ConformanceMarkerDto;
+}
+
+export interface CapabilityLifecycleDto {
+  readonly contract_state: string;
+  readonly introduced_in: string;
+  readonly runtime_availability: string;
+}
+
+export interface CapabilityUatDto {
+  readonly id: string;
+  readonly owner_body: string;
+  readonly reason: string;
+  readonly relationship: string;
+}
+
+// prettier-ignore
+export type ClaimedPrecisionDto = "date" | "microsecond" | "millisecond" | "nanosecond" | "second";
+
+// prettier-ignore
+export type ClaimedTrustDto = "device_observed" | "inferred" | "source_claim" | "user_entered";
+
+export interface ConformanceMarkerDto {
+  readonly availability: RuntimeAvailabilityDto;
+  readonly durability: DurabilityDto;
+}
+
+// prettier-ignore
+export type CredentialSchemeDto = "Bearer";
+
+// prettier-ignore
+export type DurabilityDto = "none";
+
+export interface EnrollFirstClientRequest {
+  readonly initialization_proof: string;
+}
+
+export interface EnrollFirstClientResponse {
+  readonly conformance: ConformanceMarkerDto;
+  readonly credential: string;
+  readonly credential_scheme: CredentialSchemeDto;
+}
+
+export interface EvidenceReferenceDto {
+  readonly byte_length: number;
+  readonly digest: string;
+  readonly evidence_id: string;
+}
+
+export interface InitializeNodeRequest {}
+
+export interface InitializeNodeResponse {
+  readonly conformance: ConformanceMarkerDto;
+  readonly initialization_proof: string;
+}
+
+export interface ObservationReceiptDto {
+  readonly committed_at: string;
+  readonly evidence_id: string;
+  readonly observation_id: string;
+  readonly operation_id: string;
+  readonly payload_digest: string;
+  readonly profile_id: string;
+  readonly receipt_id: string;
+  readonly received_at: string;
+  readonly resolution: ObservationResolutionDto;
+  readonly source_client_id: string;
+  readonly workspace_id: string;
+}
+
+// prettier-ignore
+export type ObservationResolutionDto = "unresolved";
+
+export interface ObservedTimeDto {
+  readonly original: string;
+  readonly precision: ClaimedPrecisionDto;
+  readonly trust: ClaimedTrustDto;
+}
+
+export interface OccurredTimeDto {
+  readonly original: string;
+  readonly precision: ClaimedPrecisionDto;
+  readonly trust: ClaimedTrustDto;
+}
+
+// prettier-ignore
+export type ReceiptDispositionDto = "committed" | "replayed";
+
+export interface ReplayReceiptResponse {
+  readonly conformance: ConformanceMarkerDto;
+  readonly receipt: ObservationReceiptDto;
+}
+
+// prettier-ignore
+export type RuntimeAvailabilityDto = "fixture_only";
+
+// prettier-ignore
+export const B1_CONFORMANCE_OPERATIONS = {
+  discoverCapabilities: { operationId: "discover_capabilities", method: "GET", path: "/api/v1/capabilities", capabilityId: "system.capabilities.discover", requiredScopes: ["capability_read"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "CapabilityDiscoveryResponse" },
+  selectProfile: { operationId: "select_profile_unavailable", method: "PUT", path: "/api/v1/profile-selection", capabilityId: "profile.select", requiredScopes: ["profile_select"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  rotateCredential: { operationId: "rotate_credential_unavailable", method: "POST", path: "/api/v1/credential-rotations", capabilityId: "credential.rotate", requiredScopes: ["credential_manage"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  revokeCredential: { operationId: "revoke_credential_unavailable", method: "POST", path: "/api/v1/credential-revocations", capabilityId: "credential.revoke", requiredScopes: ["credential_manage"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  configureListener: { operationId: "configure_listener_unavailable", method: "PUT", path: "/api/v1/listener-configuration", capabilityId: "listener.configure", requiredScopes: ["listener_configure"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  initializeNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", requiredScopes: ["node_initialize"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "InitializeNodeResponse" },
+  enrollFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", requiredScopes: ["client_enroll"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "EnrollFirstClientResponse" },
+  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", requiredScopes: ["observation_accept"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
+  replayReceipt: { operationId: "replay_receipt", method: "GET", path: "/api/v1/receipts/{receipt_id}", capabilityId: "receipt.replay", requiredScopes: ["receipt_read"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "ReplayReceiptResponse" },
+} as const;
+
+// prettier-ignore
+const B1_CONFORMANCE_SCHEMAS = {
+  "AcceptObservationRequest": {
+    "additionalProperties": false,
+    "description": "Source client identity and server-owned timestamps are deliberately absent.",
+    "properties": {
+      "evidence": {
+        "$ref": "#/components/schemas/EvidenceReferenceDto"
+      },
+      "observed_at": {
+        "$ref": "#/components/schemas/ObservedTimeDto"
+      },
+      "occurred_at": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/OccurredTimeDto"
+          }
+        ]
+      },
+      "operation_id": {
+        "format": "fasti-operation-id",
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "operation_id",
+      "observed_at",
+      "evidence"
+    ],
+    "type": "object"
+  },
+  "AcceptObservationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "conformance": {
+        "$ref": "#/components/schemas/ConformanceMarkerDto"
+      },
+      "disposition": {
+        "$ref": "#/components/schemas/ReceiptDispositionDto"
+      },
+      "receipt": {
+        "$ref": "#/components/schemas/ObservationReceiptDto"
+      }
+    },
+    "required": [
+      "conformance",
+      "disposition",
+      "receipt"
+    ],
+    "type": "object"
+  },
+  "CapabilityDescriptorDto": {
+    "additionalProperties": false,
+    "description": "Registry-owned public capability descriptor. Internal application keys are\nintentionally not exposed at the transport boundary.",
+    "properties": {
+      "bounded_context": {
+        "type": "string"
+      },
+      "contract_body": {
+        "type": "string"
+      },
+      "examples": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "id": {
+        "type": "string"
+      },
+      "lifecycle": {
+        "$ref": "#/components/schemas/CapabilityLifecycleDto"
+      },
+      "problems": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "runtime_body": {
+        "type": "string"
+      },
+      "scopes": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "surface_profile": {
+        "type": "string"
+      },
+      "uat": {
+        "items": {
+          "$ref": "#/components/schemas/CapabilityUatDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "bounded_context",
+      "contract_body",
+      "runtime_body",
+      "lifecycle",
+      "surface_profile",
+      "scopes",
+      "problems",
+      "examples",
+      "uat"
+    ],
+    "type": "object"
+  },
+  "CapabilityDiscoveryResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/CapabilityDescriptorDto"
+        },
+        "type": "array"
+      },
+      "conformance": {
+        "$ref": "#/components/schemas/ConformanceMarkerDto"
+      }
+    },
+    "required": [
+      "conformance",
+      "capabilities"
+    ],
+    "type": "object"
+  },
+  "CapabilityLifecycleDto": {
+    "additionalProperties": false,
+    "properties": {
+      "contract_state": {
+        "type": "string"
+      },
+      "introduced_in": {
+        "type": "string"
+      },
+      "runtime_availability": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "introduced_in",
+      "contract_state",
+      "runtime_availability"
+    ],
+    "type": "object"
+  },
+  "CapabilityUatDto": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "owner_body": {
+        "type": "string"
+      },
+      "reason": {
+        "type": "string"
+      },
+      "relationship": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "relationship",
+      "owner_body",
+      "reason"
+    ],
+    "type": "object"
+  },
+  "ClaimedPrecisionDto": {
+    "enum": [
+      "date",
+      "second",
+      "millisecond",
+      "microsecond",
+      "nanosecond"
+    ],
+    "type": "string"
+  },
+  "ClaimedTrustDto": {
+    "enum": [
+      "source_claim",
+      "device_observed",
+      "user_entered",
+      "inferred"
+    ],
+    "type": "string"
+  },
+  "ConformanceMarkerDto": {
+    "additionalProperties": false,
+    "description": "Required on every successful conformance response so fixture state cannot\nbe mistaken for durable production state.",
+    "properties": {
+      "availability": {
+        "$ref": "#/components/schemas/RuntimeAvailabilityDto"
+      },
+      "durability": {
+        "$ref": "#/components/schemas/DurabilityDto"
+      }
+    },
+    "required": [
+      "availability",
+      "durability"
+    ],
+    "type": "object"
+  },
+  "CredentialSchemeDto": {
+    "enum": [
+      "Bearer"
+    ],
+    "type": "string"
+  },
+  "DurabilityDto": {
+    "enum": [
+      "none"
+    ],
+    "type": "string"
+  },
+  "EnrollFirstClientRequest": {
+    "additionalProperties": false,
+    "description": "Bootstrap proof is body-only. It must never be placed in a URL or log.",
+    "properties": {
+      "initialization_proof": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "EnrollFirstClientResponse": {
+    "additionalProperties": false,
+    "description": "Credential plaintext is returned only by the first successful enrollment.\nDeliberately omits `Debug` and `Clone`.",
+    "properties": {
+      "conformance": {
+        "$ref": "#/components/schemas/ConformanceMarkerDto"
+      },
+      "credential": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "credential_scheme": {
+        "$ref": "#/components/schemas/CredentialSchemeDto"
+      }
+    },
+    "required": [
+      "conformance",
+      "credential_scheme",
+      "credential"
+    ],
+    "type": "object"
+  },
+  "EvidenceReferenceDto": {
+    "additionalProperties": false,
+    "properties": {
+      "byte_length": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "digest": {
+        "format": "sha256",
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "evidence_id": {
+        "format": "fasti-evidence-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^evd_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "evidence_id",
+      "digest",
+      "byte_length"
+    ],
+    "type": "object"
+  },
+  "InitializeNodeRequest": {
+    "additionalProperties": false,
+    "type": "object"
+  },
+  "InitializeNodeResponse": {
+    "additionalProperties": false,
+    "description": "Opaque bootstrap proof. It is delivered in a JSON body exactly once and is\nintentionally not `Debug` so diagnostics cannot print it accidentally.",
+    "properties": {
+      "conformance": {
+        "$ref": "#/components/schemas/ConformanceMarkerDto"
+      },
+      "initialization_proof": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "conformance",
+      "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "ObservationReceiptDto": {
+    "additionalProperties": false,
+    "description": "A capability-bound receipt. Record and occurrence IDs are impossible in\nthis shape because identity resolution does not occur during acceptance.",
+    "properties": {
+      "committed_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})$",
+        "type": "string"
+      },
+      "evidence_id": {
+        "format": "fasti-evidence-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^evd_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "observation_id": {
+        "format": "fasti-observation-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^obs_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "operation_id": {
+        "format": "fasti-operation-id",
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "payload_digest": {
+        "format": "sha256",
+        "maxLength": 71,
+        "minLength": 71,
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "profile_id": {
+        "format": "fasti-profile-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^prf_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "receipt_id": {
+        "format": "fasti-receipt-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "received_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})$",
+        "type": "string"
+      },
+      "resolution": {
+        "$ref": "#/components/schemas/ObservationResolutionDto"
+      },
+      "source_client_id": {
+        "format": "fasti-client-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^cli_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "workspace_id": {
+        "format": "fasti-workspace-id",
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "receipt_id",
+      "operation_id",
+      "workspace_id",
+      "profile_id",
+      "source_client_id",
+      "observation_id",
+      "evidence_id",
+      "payload_digest",
+      "resolution",
+      "received_at",
+      "committed_at"
+    ],
+    "type": "object"
+  },
+  "ObservationResolutionDto": {
+    "enum": [
+      "unresolved"
+    ],
+    "type": "string"
+  },
+  "ObservedTimeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "original": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})$",
+        "type": "string"
+      },
+      "precision": {
+        "$ref": "#/components/schemas/ClaimedPrecisionDto"
+      },
+      "trust": {
+        "$ref": "#/components/schemas/ClaimedTrustDto"
+      }
+    },
+    "required": [
+      "original",
+      "precision",
+      "trust"
+    ],
+    "type": "object"
+  },
+  "OccurredTimeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "original": {
+        "format": "iso-date-or-rfc3339",
+        "maxLength": 35,
+        "minLength": 10,
+        "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2}))$",
+        "type": "string"
+      },
+      "precision": {
+        "$ref": "#/components/schemas/ClaimedPrecisionDto"
+      },
+      "trust": {
+        "$ref": "#/components/schemas/ClaimedTrustDto"
+      }
+    },
+    "required": [
+      "original",
+      "precision",
+      "trust"
+    ],
+    "type": "object"
+  },
+  "ProblemActionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "label": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "label"
+    ],
+    "type": "object"
+  },
+  "ProblemDetails": {
+    "additionalProperties": false,
+    "description": "RFC 9457 representation of the one application problem model.",
+    "properties": {
+      "actual": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "capability_id": {
+        "type": "string"
+      },
+      "code": {
+        "type": "string"
+      },
+      "correlation_id": {
+        "type": "string"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "next_actions": {
+        "items": {
+          "$ref": "#/components/schemas/ProblemActionDto"
+        },
+        "type": "array"
+      },
+      "param": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "retryability": {
+        "type": "string"
+      },
+      "safe_state": {
+        "type": "string"
+      },
+      "status": {
+        "format": "int32",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "type": "string"
+      },
+      "type": {
+        "type": "string"
+      },
+      "violations": {
+        "items": {
+          "$ref": "#/components/schemas/ViolationDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "type",
+      "title",
+      "status",
+      "detail",
+      "code",
+      "capability_id",
+      "safe_state",
+      "retryability",
+      "next_actions",
+      "correlation_id",
+      "violations"
+    ],
+    "type": "object"
+  },
+  "ReceiptDispositionDto": {
+    "enum": [
+      "committed",
+      "replayed"
+    ],
+    "type": "string"
+  },
+  "ReplayReceiptResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "conformance": {
+        "$ref": "#/components/schemas/ConformanceMarkerDto"
+      },
+      "receipt": {
+        "$ref": "#/components/schemas/ObservationReceiptDto"
+      }
+    },
+    "required": [
+      "conformance",
+      "receipt"
+    ],
+    "type": "object"
+  },
+  "RuntimeAvailabilityDto": {
+    "enum": [
+      "fixture_only"
+    ],
+    "type": "string"
+  },
+  "ViolationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "actual": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "code": {
+        "type": "string"
+      },
+      "expected": {
+        "type": "string"
+      },
+      "pointer": {
+        "type": "string"
+      },
+      "reason": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "pointer",
+      "reason",
+      "expected"
+    ],
+    "type": "object"
+  }
+} as const;
+
+// prettier-ignore
+export function parseInitializeNodeRequest(value: unknown): InitializeNodeRequest {
+  return parseConformanceDto("InitializeNodeRequest", value);
+}
+
+// prettier-ignore
+export function parseInitializeNodeResponse(value: unknown): InitializeNodeResponse {
+  return parseConformanceDto("InitializeNodeResponse", value);
+}
+
+// prettier-ignore
+export function parseEnrollFirstClientRequest(value: unknown): EnrollFirstClientRequest {
+  return parseConformanceDto("EnrollFirstClientRequest", value);
+}
+
+// prettier-ignore
+export function parseEnrollFirstClientResponse(value: unknown): EnrollFirstClientResponse {
+  return parseConformanceDto("EnrollFirstClientResponse", value);
+}
+
+// prettier-ignore
+export function parseAcceptObservationRequest(value: unknown): AcceptObservationRequest {
+  return parseConformanceDto("AcceptObservationRequest", value);
+}
+
+// prettier-ignore
+export function parseAcceptObservationResponse(value: unknown): AcceptObservationResponse {
+  return parseConformanceDto("AcceptObservationResponse", value);
+}
+
+// prettier-ignore
+export function parseCapabilityDiscoveryResponse(value: unknown): CapabilityDiscoveryResponse {
+  return parseConformanceDto("CapabilityDiscoveryResponse", value);
+}
+
+// prettier-ignore
+export function parseReplayReceiptResponse(value: unknown): ReplayReceiptResponse {
+  return parseConformanceDto("ReplayReceiptResponse", value);
+}
+
+// prettier-ignore
+function parseConformanceDto<T>(schemaName: string, value: unknown): T {
+  const schema = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[schemaName];
+  if (schema === undefined) {
+    throw new FastiContractParseError(`Unknown conformance schema ${schemaName}`);
+  }
+  validateOpenApiValue(value, schema, schemaName);
+  return value as T;
+}
+
+// prettier-ignore
+function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string): void {
+  const schema = schemaValue as Record<string, unknown>;
+  if (typeof schema.$ref === "string") {
+    const prefix = "#/components/schemas/";
+    if (!schema.$ref.startsWith(prefix)) {
+      throw new FastiContractParseError(`${path} has an unsupported schema reference`);
+    }
+    const name = schema.$ref.slice(prefix.length);
+    const target = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[name];
+    if (target === undefined) {
+      throw new FastiContractParseError(`${path} references an unknown schema`);
+    }
+    validateOpenApiValue(value, target, path);
+    return;
+  }
+  if (Array.isArray(schema.oneOf)) {
+    let matches = 0;
+    for (const candidate of schema.oneOf) {
+      try {
+        validateOpenApiValue(value, candidate, path);
+        matches += 1;
+      } catch (error) {
+        if (!(error instanceof FastiContractParseError)) throw error;
+      }
+    }
+    if (matches !== 1) {
+      throw new FastiContractParseError(`${path} must match exactly one contract shape`);
+    }
+    return;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    throw new FastiContractParseError(`${path} has an unsupported enum value`);
+  }
+  const schemaTypes = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (schemaTypes.includes("null") && value === null) return;
+  if (schemaTypes.includes("string")) {
+    if (typeof value !== "string") {
+      throw new FastiContractParseError(`${path} must be a string`);
+    }
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) {
+      throw new FastiContractParseError(`${path} is shorter than its minimum length`);
+    }
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) {
+      throw new FastiContractParseError(`${path} exceeds its maximum length`);
+    }
+    if (typeof schema.pattern === "string" && !new RegExp(schema.pattern).test(value)) {
+      throw new FastiContractParseError(`${path} has an invalid format`);
+    }
+    if (schema.format === "date-time" && !isRealRfc3339Instant(value)) {
+      throw new FastiContractParseError(`${path} is not a real RFC3339 instant`);
+    }
+    if (schema.format === "iso-date-or-rfc3339" && !isRealIsoDateOrRfc3339(value)) {
+      throw new FastiContractParseError(`${path} is not a real ISO date or RFC3339 instant`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("integer")) {
+    if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+      throw new FastiContractParseError(`${path} must be a safe integer`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new FastiContractParseError(`${path} is below its minimum`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("array")) {
+    if (!Array.isArray(value)) {
+      throw new FastiContractParseError(`${path} must be an array`);
+    }
+    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
+    return;
+  }
+  if (schemaTypes.includes("object")) {
+    if (!isPlainObject(value)) {
+      throw new FastiContractParseError(`${path} must be a plain object`);
+    }
+    const object = value as Record<string, unknown>;
+    const properties = isPlainObject(schema.properties)
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(object)) {
+        if (!Object.hasOwn(properties, key)) {
+          throw new FastiContractParseError(`${path} contains unknown field ${key}`);
+        }
+      }
+    }
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const field of required) {
+      if (typeof field !== "string" || !Object.hasOwn(object, field)) {
+        throw new FastiContractParseError(`${path} is missing a required field`);
+      }
+    }
+    for (const [field, fieldSchema] of Object.entries(properties)) {
+      if (Object.hasOwn(object, field)) {
+        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`);
+      }
+    }
+    return;
+  }
+  throw new FastiContractParseError(`${path} uses an unsupported schema shape`);
+}
+
+// prettier-ignore
+function isRealIsoDateOrRfc3339(value: string): boolean {
+  const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (date !== null) {
+    return isRealCalendarDate(Number(date[1]), Number(date[2]), Number(date[3]));
+  }
+  return isRealRfc3339Instant(value);
+}
+
+// prettier-ignore
+function isRealRfc3339Instant(value: string): boolean {
+  const match = RFC3339_INSTANT.exec(value);
+  if (match === null) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHourText, offsetMinuteText] = match;
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText);
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText);
+  return (
+    isRealCalendarDate(Number(yearText), Number(monthText), Number(dayText)) &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    offsetHour <= 23 &&
+    offsetMinute <= 59
+  );
+}
+
+// prettier-ignore
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]!;
+}
+
 // prettier-ignore
 export type CapabilityId =
   | "client.enroll"
@@ -71,6 +1024,7 @@ export type CapabilityId =
   | "portability.workspace.verify"
   | "profile.select"
   | "receipt.replay"
+  | "receipt.stream"
   | "system.capabilities.discover"
   | "system.health";
 
@@ -96,6 +1050,7 @@ export type RuntimeAvailability =
 // prettier-ignore
 export type ProblemCode =
   | "capability_unavailable"
+  | "capacity_exceeded"
   | "contract_drift"
   | "forbidden"
   | "idempotency_conflict"
@@ -105,191 +1060,930 @@ export type ProblemCode =
   | "receipt_not_found"
   | "validation_failed";
 
-export interface CapabilityMetadata {
-  readonly id: CapabilityId;
-  readonly contractBody: CapabilityBody;
-  readonly runtimeBody: CapabilityBody;
-  readonly contractState: ContractState;
-  readonly runtimeAvailability: RuntimeAvailability;
-  readonly surfaceProfile: string;
-}
+// prettier-ignore
+export const PUBLIC_CAPABILITY_REGISTRY = {
+  "capabilities": [
+    {
+      "bounded_context": "client.enrollment",
+      "contract_body": "b1",
+      "examples": [
+        "client.enroll.forbidden"
+      ],
+      "id": "client.enroll",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "client_enroll"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "correction.history",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "correction.chain.append",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "correction_write"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "correction.history",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "correction.chain.inspect",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "correction_read"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "credential.administration",
+      "contract_body": "b1",
+      "examples": [
+        "credential.revoke.unavailable"
+      ],
+      "id": "credential.revoke",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "credential_manage"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "credential.administration",
+      "contract_body": "b1",
+      "examples": [
+        "credential.rotate.unavailable"
+      ],
+      "id": "credential.rotate",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "credential_manage"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.identifiers",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.identifier.attach",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "invalid_identifier",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.records",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.record.create",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "invalid_identifier",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.defer",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.inspect",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_read"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.resolve",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.resume",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "listener.configure.unavailable"
+      ],
+      "id": "listener.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "listener_configure"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "node.administration",
+      "contract_body": "b1",
+      "examples": [
+        "node.initialize.validation_failed"
+      ],
+      "id": "node.initialize",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "node_initialize"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "observation.accept.capacity_exceeded",
+        "observation.accept.receipt",
+        "observation.accept.validation_failed"
+      ],
+      "id": "observation.accept",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "capacity_exceeded",
+        "forbidden",
+        "idempotency_conflict",
+        "invalid_identifier",
+        "invalid_observation",
+        "invalid_time",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "observation_accept"
+      ],
+      "surface_profile": "b1_observation_accept",
+      "uat": [
+        {
+          "id": "ID-003",
+          "owner_body": "b2",
+          "reason": "B1 fixes the unresolved-safe contract trace; B2 owns durable behavior.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-005",
+          "owner_body": "b2",
+          "reason": "B1 fixes the conflict problem shape; B2 owns no-mutation persistence proof.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-055",
+          "owner_body": "b2",
+          "reason": "B1 fixes a network-independent contract; B2 owns the durable write.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-057",
+          "owner_body": "b2",
+          "reason": "B1 fixes receipt and retry semantics; B2 owns idempotency evidence.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-064",
+          "owner_body": "b2",
+          "reason": "B1 fixes structured problem fields; B2 owns exact-ID conflict behavior.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "portability.workspace",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "portability.workspace.export",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "workspace_export"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "portability.workspace",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "portability.workspace.restore",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "workspace_restore"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "portability.workspace",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "portability.workspace.verify",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "workspace_verify"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "profile.preferences",
+      "contract_body": "b1",
+      "examples": [
+        "profile.select.unavailable"
+      ],
+      "id": "profile.select",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_select"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "observation.receipts",
+      "contract_body": "b1",
+      "examples": [
+        "receipt.replay.not_found"
+      ],
+      "id": "receipt.replay",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "receipt_not_found",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "receipt_read"
+      ],
+      "surface_profile": "b1_receipt_replay",
+      "uat": [
+        {
+          "id": "ID-057",
+          "owner_body": "b2",
+          "reason": "B1 fixes replay contract semantics; B2 owns durable duplicate detection.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "observation.receipts",
+      "contract_body": "b1",
+      "examples": [
+        "receipt.stream.not_found"
+      ],
+      "id": "receipt.stream",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "receipt_not_found",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "receipt_read"
+      ],
+      "surface_profile": "b1_receipt_stream",
+      "uat": [
+        {
+          "id": "ID-057",
+          "owner_body": "b2",
+          "reason": "B1 fixes bounded cursor and reconnect semantics; B2 owns durable stream delivery.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "system.contracts",
+      "contract_body": "b1",
+      "examples": [
+        "system.capabilities.forbidden",
+        "system.capabilities.success"
+      ],
+      "id": "system.capabilities.discover",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "contract_drift",
+        "forbidden"
+      ],
+      "runtime_body": "b1",
+      "scopes": [
+        "capability_read"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": [
+        {
+          "id": "ID-065",
+          "owner_body": "b1",
+          "reason": "B1 owns executable capability discovery contract evidence.",
+          "relationship": "direct"
+        },
+        {
+          "id": "ID-078",
+          "owner_body": "b2",
+          "reason": "B1 binds registry knowledge links while identity-error recovery remains later.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "system.operations",
+      "contract_body": "b1",
+      "examples": [
+        "system.health.success"
+      ],
+      "id": "system.health",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b0",
+        "runtime_availability": "implemented"
+      },
+      "problems": [],
+      "runtime_body": "b0",
+      "scopes": [],
+      "surface_profile": "health",
+      "uat": []
+    }
+  ],
+  "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
+  "contract_version": "1.0.0",
+  "surface_profiles": {
+    "b1_http_fixture": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Operational access and administration are not linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "This capability has no server-sent event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_observation_accept": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Observation acceptance is a finite mutation with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_receipt_replay": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Receipt replay is a finite lookup rather than an event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_receipt_stream": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "reason": "The transport operation is governed by AsyncAPI rather than the finite HTTP API contract.",
+        "state": "not_applicable"
+      },
+      "json_ld": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "binding": "asyncapi:{capability_id}",
+        "state": "required"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "health": {
+      "cli": {
+        "reason": "Health is exposed as the process HTTP probe.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Operational health is not linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Health is a finite request and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "later_b2": {
+      "cli": {
+        "body": "b2",
+        "reason": "Command behavior belongs to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "body": "b2",
+        "reason": "Request and response semantics belong to B2.",
+        "state": "later_body"
+      },
+      "json_ld": {
+        "body": "b2",
+        "reason": "Linked-data meaning belongs to B2.",
+        "state": "later_body"
+      },
+      "json_schema": {
+        "body": "b2",
+        "reason": "Public data shapes belong to B2.",
+        "state": "later_body"
+      },
+      "knowledge": {
+        "body": "b2",
+        "reason": "Recovery knowledge belongs to B2.",
+        "state": "later_body"
+      },
+      "okf": {
+        "body": "b2",
+        "reason": "Knowledge meaning belongs to B2.",
+        "state": "later_body"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "Executable package evidence belongs to B2.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b2",
+        "reason": "Generated client behavior belongs to B2.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "body": "b2",
+        "reason": "Event applicability and semantics belong to B2.",
+        "state": "later_body"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "later_b3": {
+      "cli": {
+        "body": "b3",
+        "reason": "Successful command behavior belongs to B3.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "body": "b3",
+        "reason": "Request and response semantics belong to B3.",
+        "state": "later_body"
+      },
+      "json_ld": {
+        "body": "b3",
+        "reason": "Linked-data meaning belongs to B3.",
+        "state": "later_body"
+      },
+      "json_schema": {
+        "body": "b3",
+        "reason": "Public data shapes belong to B3.",
+        "state": "later_body"
+      },
+      "knowledge": {
+        "body": "b3",
+        "reason": "Recovery knowledge belongs to B3.",
+        "state": "later_body"
+      },
+      "okf": {
+        "body": "b3",
+        "reason": "Knowledge meaning belongs to B3.",
+        "state": "later_body"
+      },
+      "package_smoke": {
+        "body": "b3",
+        "reason": "Executable package evidence belongs to B3.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b3",
+        "reason": "Generated client behavior belongs to B3.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "body": "b3",
+        "reason": "Event applicability and semantics belong to B3.",
+        "state": "later_body"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    }
+  }
+} as const;
 
-export const CAPABILITY_REGISTRY = [
-  {
-    id: "client.enroll",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "correction.chain.append",
-    contractBody: "b3",
-    runtimeBody: "b3",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b3",
-  },
-  {
-    id: "correction.chain.inspect",
-    contractBody: "b3",
-    runtimeBody: "b3",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b3",
-  },
-  {
-    id: "credential.revoke",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "credential.rotate",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "identity.identifier.attach",
-    contractBody: "b2",
-    runtimeBody: "b2",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b2",
-  },
-  {
-    id: "identity.record.create",
-    contractBody: "b2",
-    runtimeBody: "b2",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b2",
-  },
-  {
-    id: "identity.review.defer",
-    contractBody: "b2",
-    runtimeBody: "b2",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b2",
-  },
-  {
-    id: "identity.review.inspect",
-    contractBody: "b2",
-    runtimeBody: "b2",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b2",
-  },
-  {
-    id: "identity.review.resolve",
-    contractBody: "b2",
-    runtimeBody: "b2",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b2",
-  },
-  {
-    id: "identity.review.resume",
-    contractBody: "b2",
-    runtimeBody: "b2",
-    contractState: "reserved",
-    runtimeAvailability: "later_body",
-    surfaceProfile: "later_b2",
-  },
-  {
-    id: "listener.configure",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_listener",
-  },
-  {
-    id: "node.initialize",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "observation.accept",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "portability.workspace.export",
-    contractBody: "b3",
-    runtimeBody: "b3",
-    contractState: "reserved",
-    runtimeAvailability: "guarded",
-    surfaceProfile: "later_b3",
-  },
-  {
-    id: "portability.workspace.restore",
-    contractBody: "b3",
-    runtimeBody: "b3",
-    contractState: "reserved",
-    runtimeAvailability: "guarded",
-    surfaceProfile: "later_b3",
-  },
-  {
-    id: "portability.workspace.verify",
-    contractBody: "b3",
-    runtimeBody: "b3",
-    contractState: "reserved",
-    runtimeAvailability: "guarded",
-    surfaceProfile: "later_b3",
-  },
-  {
-    id: "profile.select",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "receipt.replay",
-    contractBody: "b1",
-    runtimeBody: "b2",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_receipt_replay",
-  },
-  {
-    id: "system.capabilities.discover",
-    contractBody: "b1",
-    runtimeBody: "b1",
-    contractState: "finalized",
-    runtimeAvailability: "fixture_only",
-    surfaceProfile: "b1_http_fixture",
-  },
-  {
-    id: "system.health",
-    contractBody: "b1",
-    runtimeBody: "b0",
-    contractState: "finalized",
-    runtimeAvailability: "implemented",
-    surfaceProfile: "health",
-  },
-] as const satisfies ReadonlyArray<CapabilityMetadata>;
+export const CAPABILITY_REGISTRY = PUBLIC_CAPABILITY_REGISTRY.capabilities;
+export const SURFACE_PROFILES = PUBLIC_CAPABILITY_REGISTRY.surface_profiles;
+export type CapabilityMetadata = (typeof CAPABILITY_REGISTRY)[number];
+export type SurfaceProfileMetadata = typeof SURFACE_PROFILES;
 
 export const RECEIPT_STREAM_CONTRACT = {
   path: "/api/v1/receipts/stream",
   eventName: "receiptCommitted",
-  capabilityId: "listener.configure",
-  requiredScope: "receipt_read",
+  capabilityId: "receipt.stream",
+  requiredScopes: ["receipt_read"],
   runtimeAvailability: "fixture_only",
   maximumReplayBatch: 100,
   retryPolicy: "bounded_client_backoff",
@@ -307,9 +2001,9 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["capability_unavailable", "contract_drift", "forbidden", "idempotency_conflict", "invalid_identifier", "invalid_observation", "invalid_time", "receipt_not_found", "validation_failed"] as const;
+const PROBLEM_CODES = ["capability_unavailable", "capacity_exceeded", "contract_drift", "forbidden", "idempotency_conflict", "invalid_identifier", "invalid_observation", "invalid_time", "receipt_not_found", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore
@@ -328,7 +2022,7 @@ const RECEIPT_ID = new RegExp("^rcp_[0-9a-f]{32}$");
 const OPERATION_ID = new RegExp("^op_[0-9a-f]{32}$");
 const OBSERVATION_ID = new RegExp("^obs_[0-9a-f]{32}$");
 // prettier-ignore
-const RFC3339_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const RFC3339_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
 
 // prettier-ignore
 export function parseHealthResponse(value: unknown): HealthResponse {
@@ -372,7 +2066,7 @@ export function parseReceiptCommittedEvent(value: unknown): ReceiptCommittedEven
   patternString(object, "receipt_id", RECEIPT_ID, "ReceiptCommittedEvent");
   patternString(object, "operation_id", OPERATION_ID, "ReceiptCommittedEvent");
   patternString(object, "observation_id", OBSERVATION_ID, "ReceiptCommittedEvent");
-  patternString(object, "committed_at", RFC3339_INSTANT, "ReceiptCommittedEvent");
+  rfc3339InstantField(object, "committed_at", "ReceiptCommittedEvent");
   return object as unknown as ReceiptCommittedEvent;
 }
 
@@ -401,8 +2095,8 @@ function exactObject(
   required: readonly string[],
   label: string,
 ): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new FastiContractParseError(`${label} must be an object`);
+  if (!isPlainObject(value)) {
+    throw new FastiContractParseError(`${label} must be a plain object`);
   }
   const object = value as JsonObject;
   for (const key of Object.keys(object)) {
@@ -411,11 +2105,17 @@ function exactObject(
     }
   }
   for (const key of required) {
-    if (!(key in object)) {
+    if (!Object.hasOwn(object, key)) {
       throw new FastiContractParseError(`${label} is missing required field ${key}`);
     }
   }
   return object;
+}
+
+// prettier-ignore
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return Object.getPrototypeOf(value) === Object.prototype;
 }
 
 function stringField(object: JsonObject, field: string, label: string): string {
@@ -459,6 +2159,14 @@ function patternString(
 ): void {
   if (!pattern.test(stringField(object, field, label))) {
     throw new FastiContractParseError(`${label}.${field} has an invalid format`);
+  }
+}
+
+// prettier-ignore
+function rfc3339InstantField(object: JsonObject, field: string, label: string): void {
+  const value = stringField(object, field, label);
+  if (!isRealRfc3339Instant(value)) {
+    throw new FastiContractParseError(`${label}.${field} is not a real RFC3339 calendar instant`);
   }
 }
 

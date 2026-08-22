@@ -4,7 +4,7 @@
       "bounded_context": "client.enrollment",
       "contract_body": "b1",
       "examples": [
-        "client.enroll.unavailable"
+        "client.enroll.forbidden"
       ],
       "id": "client.enroll",
       "lifecycle": {
@@ -267,14 +267,14 @@
       "scopes": [
         "listener_configure"
       ],
-      "surface_profile": "b1_listener",
+      "surface_profile": "b1_http_fixture",
       "uat": []
     },
     {
       "bounded_context": "node.administration",
       "contract_body": "b1",
       "examples": [
-        "node.initialize.unavailable"
+        "node.initialize.validation_failed"
       ],
       "id": "node.initialize",
       "lifecycle": {
@@ -298,7 +298,8 @@
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
       "examples": [
-        "observation.accept.unavailable",
+        "observation.accept.capacity_exceeded",
+        "observation.accept.receipt",
         "observation.accept.validation_failed"
       ],
       "id": "observation.accept",
@@ -309,6 +310,7 @@
       },
       "problems": [
         "capability_unavailable",
+        "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
         "invalid_identifier",
@@ -320,7 +322,7 @@
       "scopes": [
         "observation_accept"
       ],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_observation_accept",
       "uat": [
         {
           "id": "ID-003",
@@ -447,7 +449,7 @@
       "bounded_context": "observation.receipts",
       "contract_body": "b1",
       "examples": [
-        "receipt.replay.unavailable"
+        "receipt.replay.not_found"
       ],
       "id": "receipt.replay",
       "lifecycle": {
@@ -471,6 +473,38 @@
           "id": "ID-057",
           "owner_body": "b2",
           "reason": "B1 fixes replay contract semantics; B2 owns durable duplicate detection.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "observation.receipts",
+      "contract_body": "b1",
+      "examples": [
+        "receipt.stream.not_found"
+      ],
+      "id": "receipt.stream",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "receipt_not_found",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "receipt_read"
+      ],
+      "surface_profile": "b1_receipt_stream",
+      "uat": [
+        {
+          "id": "ID-057",
+          "owner_body": "b2",
+          "reason": "B1 fixes bounded cursor and reconnect semantics; B2 owns durable stream delivery.",
           "relationship": "split"
         }
       ]
@@ -547,9 +581,9 @@
         "binding": "openapi:{capability_id}",
         "state": "required"
       },
-      "json_ld_okf": {
-        "binding": "json-ld:{capability_id}",
-        "state": "required"
+      "json_ld": {
+        "reason": "Operational access and administration are not linked-data domain state.",
+        "state": "not_applicable"
       },
       "json_schema": {
         "binding": "schema:{capability_id}",
@@ -557,6 +591,10 @@
       },
       "knowledge": {
         "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
         "state": "required"
       },
       "package_smoke": {
@@ -576,7 +614,7 @@
         "state": "not_applicable"
       }
     },
-    "b1_listener": {
+    "b1_observation_accept": {
       "cli": {
         "binding": "cli:{capability_id}",
         "state": "required"
@@ -589,7 +627,7 @@
         "binding": "openapi:{capability_id}",
         "state": "required"
       },
-      "json_ld_okf": {
+      "json_ld": {
         "binding": "json-ld:{capability_id}",
         "state": "required"
       },
@@ -601,6 +639,10 @@
         "binding": "knowledge:{capability_id}",
         "state": "required"
       },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
       "package_smoke": {
         "binding": "package-smoke:{capability_id}",
         "state": "required"
@@ -610,8 +652,8 @@
         "state": "required"
       },
       "sse_asyncapi": {
-        "binding": "asyncapi:{capability_id}",
-        "state": "required"
+        "reason": "Observation acceptance is a finite mutation with no event channel.",
+        "state": "not_applicable"
       },
       "ui": {
         "reason": "Fasti is headless through B3.",
@@ -631,7 +673,7 @@
         "binding": "openapi:{capability_id}",
         "state": "required"
       },
-      "json_ld_okf": {
+      "json_ld": {
         "binding": "json-ld:{capability_id}",
         "state": "required"
       },
@@ -641,6 +683,10 @@
       },
       "knowledge": {
         "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
         "state": "required"
       },
       "package_smoke": {
@@ -660,6 +706,52 @@
         "state": "not_applicable"
       }
     },
+    "b1_receipt_stream": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "reason": "The transport operation is governed by AsyncAPI rather than the finite HTTP API contract.",
+        "state": "not_applicable"
+      },
+      "json_ld": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "binding": "asyncapi:{capability_id}",
+        "state": "required"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
     "health": {
       "cli": {
         "reason": "Health is exposed as the process HTTP probe.",
@@ -673,7 +765,7 @@
         "binding": "openapi:{capability_id}",
         "state": "required"
       },
-      "json_ld_okf": {
+      "json_ld": {
         "reason": "Operational health is not linked-data domain state.",
         "state": "not_applicable"
       },
@@ -683,6 +775,10 @@
       },
       "knowledge": {
         "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:{capability_id}",
         "state": "required"
       },
       "package_smoke": {
@@ -717,7 +813,7 @@
         "reason": "Request and response semantics belong to B2.",
         "state": "later_body"
       },
-      "json_ld_okf": {
+      "json_ld": {
         "body": "b2",
         "reason": "Linked-data meaning belongs to B2.",
         "state": "later_body"
@@ -730,6 +826,11 @@
       "knowledge": {
         "body": "b2",
         "reason": "Recovery knowledge belongs to B2.",
+        "state": "later_body"
+      },
+      "okf": {
+        "body": "b2",
+        "reason": "Knowledge meaning belongs to B2.",
         "state": "later_body"
       },
       "package_smoke": {
@@ -767,7 +868,7 @@
         "reason": "Request and response semantics belong to B3.",
         "state": "later_body"
       },
-      "json_ld_okf": {
+      "json_ld": {
         "body": "b3",
         "reason": "Linked-data meaning belongs to B3.",
         "state": "later_body"
@@ -780,6 +881,11 @@
       "knowledge": {
         "body": "b3",
         "reason": "Recovery knowledge belongs to B3.",
+        "state": "later_body"
+      },
+      "okf": {
+        "body": "b3",
+        "reason": "Knowledge meaning belongs to B3.",
         "state": "later_body"
       },
       "package_smoke": {

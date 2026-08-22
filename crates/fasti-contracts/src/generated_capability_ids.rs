@@ -24,6 +24,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::RevokeCredential => "credential.revoke",
         CapabilityKey::RotateCredential => "credential.rotate",
         CapabilityKey::SelectProfile => "profile.select",
+        CapabilityKey::StreamReceipts => "receipt.stream",
         CapabilityKey::SystemHealth => "system.health",
         CapabilityKey::VerifyWorkspace => "portability.workspace.verify",
     }
