@@ -10,7 +10,6 @@ identifiers:
   - client_enroll
   - credential_manage
   - listener_configure
-  - node_initialize
   - observation_accept
   - profile_select
   - receipt_read
@@ -22,10 +21,12 @@ sources:
 
 # B1 authorization scopes
 
-Scopes are capability-specific grants, not roles and not proof that a runtime
+Scopes apply only to capabilities whose authorization posture is `scoped`.
+They are capability-specific grants, not roles and not proof that a runtime
 exists. The authorization decision also evaluates workspace, profile, client,
 credential, grant, and capability context; possession of a scope string alone
-does not authorize a request.
+does not authorize a request. `system.health` is `unauthenticated`, and
+`node.initialize` is `bootstrap_only` with no scope grant.
 
 | Scope                | Capability use                                               |
 | -------------------- | ------------------------------------------------------------ |
@@ -33,10 +34,9 @@ does not authorize a request.
 | `client_enroll`      | Enroll the first client through the governed bootstrap flow. |
 | `credential_manage`  | Rotate or revoke a credential.                               |
 | `listener_configure` | Configure the observation listener.                          |
-| `node_initialize`    | Initialize an empty node.                                    |
 | `observation_accept` | Submit an observation for governed acceptance.               |
 | `profile_select`     | Select a profile explicitly.                                 |
-| `receipt_read`       | Replay an authorized receipt.                                |
+| `receipt_read`       | Replay receipts or subscribe to their authorized event stream. |
 
 The exact capability-to-scope bindings live in the
 [capability registry](../../registry/v1/capabilities.yaml). Read their runtime

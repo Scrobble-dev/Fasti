@@ -65,6 +65,7 @@ pub struct CapabilityDescriptorDto {
     pub bounded_context: String,
     pub contract_body: String,
     pub runtime_body: String,
+    pub authorization: String,
     pub lifecycle: CapabilityLifecycleDto,
     pub surface_profile: String,
     pub scopes: Vec<String>,
@@ -77,8 +78,13 @@ pub struct CapabilityDescriptorDto {
 #[serde(deny_unknown_fields)]
 pub struct CapabilitySurfaceDispositionDto {
     pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_visibility: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
 }
 
@@ -95,6 +101,9 @@ pub struct GeneratedCapabilitiesDto {
 #[serde(deny_unknown_fields)]
 pub struct CapabilityDiscoveryResponse {
     pub conformance: ConformanceMarkerDto,
+    pub contract_version: String,
+    pub capability_base_uri: String,
+    pub surface_profiles: BTreeMap<String, BTreeMap<String, CapabilitySurfaceDispositionDto>>,
     pub capabilities: Vec<CapabilityDescriptorDto>,
 }
 

@@ -27,11 +27,11 @@ const repositoryRoot = path.resolve(
 );
 
 const ids = {
-  correlation: `req_${"1".repeat(32)}`,
-  observation: `obs_${"2".repeat(32)}`,
-  operation: `op_${"3".repeat(32)}`,
-  receiptA: `rcp_${"4".repeat(32)}`,
-  receiptB: `rcp_${"5".repeat(32)}`,
+  correlation: v7("req", "1"),
+  observation: v7("obs", "2"),
+  operation: v7("op", "3"),
+  receiptA: v7("rcp", "4"),
+  receiptB: v7("rcp", "5"),
 };
 
 const contractIds = {
@@ -67,12 +67,17 @@ test("RFC 9457 responses become typed Fasti problem errors", async () => {
     type: "https://fasti.scrobble.dev/v1/problems/forbidden",
     title: "Forbidden",
     status: 403,
-    detail: "the request is not authorized",
+    detail: "request is not authorized for this capability",
     code: "forbidden",
-    capability_id: "system.health",
+    capability_id: "system.capabilities.discover",
     safe_state: "no_mutation",
     retryability: "not_retryable",
-    next_actions: [{ id: "authenticate", label: "Authenticate" }],
+    next_actions: [
+      {
+        id: "verify_request_authorization",
+        label: "Verify the request context and local grant",
+      },
+    ],
     correlation_id: ids.correlation,
     param: null,
     actual: null,
@@ -85,13 +90,82 @@ test("RFC 9457 responses become typed Fasti problem errors", async () => {
     },
     async (baseUrl) => {
       const client = new FastiClient({ baseUrl });
-      await assert.rejects(client.health(), (error) => {
+      await assert.rejects(client.discoverCapabilities(), (error) => {
         assert.ok(error instanceof FastiProblemError);
         assert.deepEqual(error.problem, problem);
         return true;
       });
     },
   );
+});
+
+test("problem parsing is operation-bound and canonical", async () => {
+  const canonical = {
+    type: "https://fasti.scrobble.dev/v1/problems/forbidden",
+    title: "Forbidden",
+    status: 403,
+    detail: "request is not authorized for this capability",
+    code: "forbidden",
+    capability_id: "system.capabilities.discover",
+    safe_state: "no_mutation",
+    retryability: "not_retryable",
+    next_actions: [
+      {
+        id: "verify_request_authorization",
+        label: "Verify the request context and local grant",
+      },
+    ],
+    correlation_id: ids.correlation,
+    param: null,
+    actual: null,
+    violations: [],
+  };
+  const mutations = [
+    (problem) =>
+      (problem.type = "https://fasti.scrobble.dev/v1/problems/wrong"),
+    (problem) => (problem.title = "Denied"),
+    (problem) => (problem.status = 404),
+    (problem) => (problem.detail = "different detail"),
+    (problem) => (problem.code = "validation_failed"),
+    (problem) => (problem.capability_id = "profile.select"),
+    (problem) => (problem.safe_state = "prior_state_retained"),
+    (problem) => (problem.retryability = "retry_safe"),
+    (problem) => (problem.next_actions[0].id = "authenticate"),
+    (problem) => (problem.next_actions = []),
+    (problem) => problem.next_actions.push(problem.next_actions[0]),
+    (problem) => (problem.param = "/credential"),
+    (problem) => (problem.actual = "echoed-secret"),
+    (problem) => (problem.correlation_id = `req_${"1".repeat(32)}`),
+    (problem) =>
+      problem.violations.push({
+        code: "invalid_value",
+        pointer: "/field",
+        reason: "field is invalid",
+        expected: "valid field",
+        actual: "echoed-value",
+      }),
+    (problem) =>
+      (problem.violations = Array.from({ length: 33 }, () => ({
+        code: "invalid_value",
+        pointer: "/field",
+        reason: "field is invalid",
+        expected: "valid field",
+        actual: null,
+      }))),
+  ];
+  for (const mutate of mutations) {
+    const problem = structuredClone(canonical);
+    mutate(problem);
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      fetch: async () =>
+        new Response(JSON.stringify(problem), {
+          status: 403,
+          headers: { "content-type": "application/problem+json" },
+        }),
+    });
+    await assert.rejects(client.discoverCapabilities(), FastiProtocolError);
+  }
 });
 
 test("health honors caller cancellation and its declared timeout", async (context) => {
@@ -180,7 +254,7 @@ test("transient health retries are bounded by the declared policy", async () => 
   );
 });
 
-test("receipt SSE reconnects with Last-Event-ID and exact parsed events", async () => {
+test("receipt SSE treats clean finite fixture EOF as successful completion", async () => {
   let connections = 0;
   const credential = "receipt-reader-secret";
   await withServer(
@@ -190,13 +264,8 @@ test("receipt SSE reconnects with Last-Event-ID and exact parsed events", async 
       assert.equal(request.headers.authorization, `Bearer ${credential}`);
       connections += 1;
       response.writeHead(200, { "content-type": "text/event-stream" });
-      if (connections === 1) {
-        assert.equal(request.headers["last-event-id"], undefined);
-        response.end(sse(ids.receiptA, receipt(ids.receiptA)));
-        return;
-      }
-      assert.equal(request.headers["last-event-id"], ids.receiptA);
-      response.end(sse(ids.receiptB, receipt(ids.receiptB)));
+      assert.equal(request.headers["last-event-id"], undefined);
+      response.end(sse(ids.receiptA, receipt(ids.receiptA)));
     },
     async (baseUrl) => {
       const client = new FastiClient({ baseUrl, credential });
@@ -212,10 +281,9 @@ test("receipt SSE reconnects with Last-Event-ID and exact parsed events", async 
       assert.equal(first.done, false);
       assert.equal(first.value.id, ids.receiptA);
       assert.deepEqual(first.value.data, receipt(ids.receiptA));
-      assert.equal(second.done, false);
-      assert.equal(second.value.id, ids.receiptB);
-      await events.return();
-      assert.equal(connections, 2);
+      assert.equal(second.done, true);
+      assert.equal(second.value, undefined);
+      assert.equal(connections, 1);
     },
   );
 });
@@ -238,6 +306,21 @@ test("receipt SSE refuses malformed events instead of widening the contract", as
         },
       });
       await assert.rejects(events.next(), FastiProtocolError);
+    },
+  );
+});
+
+test("receipt SSE refuses a cursor that differs from the governed receipt id", async () => {
+  await withServer(
+    (_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(sse(ids.receiptB, receipt(ids.receiptA)));
+    },
+    async (baseUrl) => {
+      const events = new FastiClient({ baseUrl }).receiptEvents({
+        retryPolicy: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
+      });
+      await assert.rejects(events.next(), /cursor must equal.*receipt_id/);
     },
   );
 });
@@ -294,6 +377,9 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         return new Response(
           JSON.stringify({
             conformance: conformanceMarker(),
+            contract_version: PUBLIC_CAPABILITY_REGISTRY.contract_version,
+            capability_base_uri: PUBLIC_CAPABILITY_REGISTRY.capability_base_uri,
+            surface_profiles: PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
             capabilities: PUBLIC_CAPABILITY_REGISTRY.capabilities,
           }),
           { headers: { "content-type": "application/json" } },
@@ -351,6 +437,14 @@ test("exact generated parsers reject inherited fields, class instances, and impo
     () =>
       parseReceiptCommittedEvent({
         ...receipt(ids.receiptA),
+        correlation_id: `req_${"1".repeat(32)}`,
+      }),
+    /invalid format/,
+  );
+  assert.throws(
+    () =>
+      parseReceiptCommittedEvent({
+        ...receipt(ids.receiptA),
         committed_at: "2026-02-30T03:00:00Z",
       }),
     /real RFC3339/,
@@ -402,14 +496,58 @@ test("generated public metadata preserves complete registry and surface disposit
   assert.ok(stream.uat.length > 0);
   const profile = PUBLIC_CAPABILITY_REGISTRY.surface_profiles.b1_receipt_stream;
   assert.deepEqual(profile.json_ld, {
-    binding: "json-ld:{capability_id}",
-    state: "required",
+    reason:
+      "Receipt stream events are transport envelopes governed by AsyncAPI; their referenced receipt semantics reuse the observation receipt contract rather than a second linked-data class.",
+    state: "not_applicable",
   });
   assert.deepEqual(profile.okf, {
-    binding: "okf:{capability_id}",
+    binding: "okf:capability-catalog",
+    binding_visibility: "public",
     state: "required",
   });
   assert.notStrictEqual(profile.json_ld, profile.okf);
+  assert.equal(RECEIPT_STREAM_CONTRACT.runtimeAvailability, "fixture_only");
+  assert.equal(RECEIPT_STREAM_CONTRACT.durability, "none");
+  assert.equal(
+    RECEIPT_STREAM_CONTRACT.fixtureDelivery,
+    "finite_replay_then_close",
+  );
+  assert.equal(
+    RECEIPT_STREAM_CONTRACT.sseIdPointer,
+    "$message.payload#/receipt_id",
+  );
+});
+
+test("capability discovery rejects bogus map keys, values, and collection bounds", async () => {
+  const response = () => ({
+    conformance: conformanceMarker(),
+    contract_version: PUBLIC_CAPABILITY_REGISTRY.contract_version,
+    capability_base_uri: PUBLIC_CAPABILITY_REGISTRY.capability_base_uri,
+    surface_profiles: structuredClone(
+      PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
+    ),
+    capabilities: structuredClone(PUBLIC_CAPABILITY_REGISTRY.capabilities),
+  });
+  const mutations = [
+    (value) => (value.surface_profiles.bogus = value.surface_profiles.health),
+    (value) =>
+      (value.surface_profiles.health.bogus = value.surface_profiles.health.sdk),
+    (value) => (value.surface_profiles.health.sdk = "bogus"),
+    (value) => value.capabilities.pop(),
+    (value) => value.capabilities.push(value.capabilities[0]),
+  ];
+  for (const mutate of mutations) {
+    const value = response();
+    mutate(value);
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      fetch: async () =>
+        new Response(JSON.stringify(value), {
+          headers: { "content-type": "application/json" },
+        }),
+    });
+    await assert.rejects(client.discoverCapabilities(), FastiProtocolError);
+  }
 });
 
 test("async credential resolution honors timeout and caller cancellation", async (context) => {
@@ -621,6 +759,18 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
     });
     const discovery = await client.discoverCapabilities();
     assert.deepEqual(discovery.conformance, conformanceMarker());
+    assert.equal(
+      discovery.contract_version,
+      PUBLIC_CAPABILITY_REGISTRY.contract_version,
+    );
+    assert.equal(
+      discovery.capability_base_uri,
+      PUBLIC_CAPABILITY_REGISTRY.capability_base_uri,
+    );
+    assert.deepEqual(
+      discovery.surface_profiles,
+      PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
+    );
     assert.equal(discovery.capabilities.length, 22);
     assert.ok(
       discovery.capabilities.some(
@@ -656,6 +806,28 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
     const replayed = await client.replayReceipt(accepted.receipt.receipt_id);
     assert.deepEqual(replayed.conformance, conformanceMarker());
     assert.deepEqual(replayed.receipt, accepted.receipt);
+
+    const events = client.receiptEvents({
+      retryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
+    });
+    const event = await events.next();
+    assert.equal(event.done, false);
+    assert.equal(event.value.id, accepted.receipt.receipt_id);
+    assert.equal(event.value.data.receipt_id, accepted.receipt.receipt_id);
+    assert.equal(event.value.data.operation_id, contractIds.operation);
+    assert.equal(RECEIPT_STREAM_CONTRACT.durability, "none");
+    assert.equal(
+      RECEIPT_STREAM_CONTRACT.fixtureDelivery,
+      "finite_replay_then_close",
+    );
+    const completed = await events.next();
+    assert.equal(completed.done, true);
+
+    const afterCursor = client.receiptEvents({
+      cursor: event.value.id,
+      retryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
+    });
+    assert.equal((await afterCursor.next()).done, true);
   });
 });
 

@@ -9,19 +9,21 @@ import {
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
-  parseProblemDetails,
+  parseProblemDetailsForOperation,
   parseReceiptCommittedEvent,
   parseReplayReceiptResponse,
   RECEIPT_STREAM_CONTRACT,
   type AcceptObservationRequest,
   type AcceptObservationResponse,
   type CapabilityDiscoveryResponse,
+  type CapabilityId,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ProblemDetails,
+  type ProblemCode,
   type ReceiptCommittedEnvelope,
   type ReplayReceiptResponse,
 } from "./generated.js";
@@ -122,6 +124,11 @@ interface ParsedSseEvent {
 type JsonParser<T> = (value: unknown) => T;
 type RetryMode = "safe" | "never" | "stable-idempotency";
 
+interface ProblemContractBinding {
+  readonly capabilityId: CapabilityId;
+  readonly problemCodes: readonly ProblemCode[];
+}
+
 class NetworkRequestError extends Error {}
 class ResponseReadError extends Error {}
 class SseNetworkReadError extends Error {}
@@ -137,6 +144,10 @@ const MAX_SSE_EVENT_BYTES = 256 * 1_024;
 const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const HEALTH_PROBLEM_CONTRACT = {
+  capabilityId: "system.health",
+  problemCodes: [],
+} as const satisfies ProblemContractBinding;
 
 export class FastiClient {
   readonly #baseUrl: URL;
@@ -164,6 +175,7 @@ export class FastiClient {
       method: "GET",
       path: "/api/v1/health",
       authenticated: false,
+      problemContract: HEALTH_PROBLEM_CONTRACT,
       retryMode: "safe",
       responseParser: parseHealthResponse,
       responseLabel: "Health response",
@@ -179,6 +191,7 @@ export class FastiClient {
       method: operation.method,
       path: operation.path,
       authenticated: operation.authenticated,
+      problemContract: operation,
       retryMode: "safe",
       responseParser: parseCapabilityDiscoveryResponse,
       responseLabel: "Capability discovery response",
@@ -236,6 +249,7 @@ export class FastiClient {
       method: operation.method,
       path: operation.path,
       authenticated: operation.authenticated,
+      problemContract: operation,
       retryMode: "never",
       body,
       responseParser: parseInitializeNodeResponse,
@@ -258,6 +272,7 @@ export class FastiClient {
       method: operation.method,
       path: operation.path,
       authenticated: operation.authenticated,
+      problemContract: operation,
       retryMode: "never",
       body,
       responseParser: parseEnrollFirstClientResponse,
@@ -280,6 +295,7 @@ export class FastiClient {
       method: operation.method,
       path: operation.path,
       authenticated: operation.authenticated,
+      problemContract: operation,
       retryMode: "stable-idempotency",
       body,
       responseParser: parseAcceptObservationResponse,
@@ -305,6 +321,7 @@ export class FastiClient {
         encodeURIComponent(safeReceiptId),
       ),
       authenticated: operation.authenticated,
+      problemContract: operation,
       retryMode: "safe",
       responseParser: parseReplayReceiptResponse,
       responseLabel: "Receipt replay response",
@@ -362,7 +379,10 @@ export class FastiClient {
             );
             continue;
           }
-          throw await problemOrTransportError(response);
+          throw await problemOrTransportError(
+            response,
+            RECEIPT_STREAM_CONTRACT,
+          );
         }
         if (!contentTypeIs(response, "text/event-stream")) {
           throw new FastiProtocolError(
@@ -397,12 +417,22 @@ export class FastiClient {
             );
           }
           cursor = validateCursor(event.id);
+          if (
+            RECEIPT_STREAM_CONTRACT.sseIdPointer !==
+              "$message.payload#/receipt_id" ||
+            cursor !== data.receipt_id
+          ) {
+            throw new FastiProtocolError(
+              "Receipt SSE cursor must equal the governed payload receipt_id",
+            );
+          }
           yield {
             id: cursor,
             event: RECEIPT_STREAM_CONTRACT.eventName,
             data,
           };
         }
+        return;
       } catch (error) {
         if (scope.timedOut()) throw new FastiTimeoutError();
         if (options.signal?.aborted) throw new FastiAbortError();
@@ -443,6 +473,8 @@ export class FastiClient {
       readonly method: "POST" | "PUT";
       readonly path: string;
       readonly authenticated: true;
+      readonly capabilityId: CapabilityId;
+      readonly problemCodes: readonly ProblemCode[];
     },
     responseLabel: string,
     options: CallOptions,
@@ -451,6 +483,7 @@ export class FastiClient {
       method: operation.method,
       path: operation.path,
       authenticated: operation.authenticated,
+      problemContract: operation,
       retryMode: "never",
       responseParser: unexpectedProblemOnlySuccess,
       responseLabel,
@@ -462,6 +495,7 @@ export class FastiClient {
     readonly method: "GET" | "POST" | "PUT";
     readonly path: string;
     readonly authenticated: boolean;
+    readonly problemContract: ProblemContractBinding;
     readonly retryMode: RetryMode;
     readonly body?: unknown;
     readonly responseParser: JsonParser<T>;
@@ -517,7 +551,9 @@ export class FastiClient {
           );
           continue;
         }
-        if (!response.ok) throw await problemOrTransportError(response);
+        if (!response.ok) {
+          throw await problemOrTransportError(response, input.problemContract);
+        }
         if (!contentTypeIs(response, "application/json")) {
           throw new FastiProtocolError(
             `${input.responseLabel} must use application/json`,
@@ -743,12 +779,23 @@ async function abortable<T>(
   });
 }
 
-async function problemOrTransportError(response: Response): Promise<Error> {
+async function problemOrTransportError(
+  response: Response,
+  contract: ProblemContractBinding,
+): Promise<Error> {
   if (contentTypeIs(response, "application/problem+json")) {
     try {
-      return new FastiProblemError(
-        parseProblemDetails(await parseJson(response)),
+      const problem = parseProblemDetailsForOperation(
+        await parseJson(response),
+        contract.capabilityId,
+        contract.problemCodes,
       );
+      if (problem.status !== response.status) {
+        throw new FastiContractParseError(
+          "ProblemDetails status does not match the HTTP response",
+        );
+      }
+      return new FastiProblemError(problem);
     } catch (error) {
       if (error instanceof ResponseReadError) throw error;
       return protocolError(

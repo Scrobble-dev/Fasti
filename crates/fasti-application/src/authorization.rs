@@ -4,7 +4,7 @@
 //! [`RequestAccessContext`]. This module decides only whether the capability
 //! may proceed; it deliberately does not know how either value was obtained.
 
-use crate::{CapabilityKey, ScopeKey};
+use crate::{AuthorizationKind, CapabilityKey, ScopeKey};
 use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use std::{collections::HashSet, error::Error, fmt};
 
@@ -228,25 +228,16 @@ impl AccessSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthorizationRequirement {
     capability: CapabilityKey,
-    kind: RequirementKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RequirementKind {
-    Unauthenticated,
-    BootstrapOnly,
-    Scoped(&'static [ScopeKey]),
+    kind: AuthorizationKind,
 }
 
 impl AuthorizationRequirement {
     /// Derive policy from the capability table; callers cannot weaken it.
     pub const fn for_capability(capability: CapabilityKey) -> Self {
-        let kind = match capability {
-            CapabilityKey::SystemHealth => RequirementKind::Unauthenticated,
-            CapabilityKey::InitializeNode => RequirementKind::BootstrapOnly,
-            _ => RequirementKind::Scoped(capability.required_scopes()),
-        };
-        Self { capability, kind }
+        Self {
+            capability,
+            kind: capability.authorization_kind(),
+        }
     }
 
     pub const fn capability(&self) -> CapabilityKey {
@@ -254,17 +245,17 @@ impl AuthorizationRequirement {
     }
 
     pub const fn is_unauthenticated(&self) -> bool {
-        matches!(self.kind, RequirementKind::Unauthenticated)
+        matches!(self.kind, AuthorizationKind::Unauthenticated)
     }
 
     pub const fn is_bootstrap_only(&self) -> bool {
-        matches!(self.kind, RequirementKind::BootstrapOnly)
+        matches!(self.kind, AuthorizationKind::BootstrapOnly)
     }
 
     pub const fn required_scopes(&self) -> &'static [ScopeKey] {
         match self.kind {
-            RequirementKind::Scoped(scopes) => scopes,
-            RequirementKind::Unauthenticated | RequirementKind::BootstrapOnly => &[],
+            AuthorizationKind::Scoped => self.capability.required_scopes(),
+            AuthorizationKind::Unauthenticated | AuthorizationKind::BootstrapOnly => &[],
         }
     }
 }
@@ -300,9 +291,10 @@ pub fn authorize(
     snapshot: Option<&AccessSnapshot>,
 ) -> Result<AuthorizedCapability, AuthorizationDenied> {
     let allowed = match requirement.kind {
-        RequirementKind::Unauthenticated => true,
-        RequirementKind::BootstrapOnly => snapshot.is_some_and(AccessSnapshot::is_bootstrap_open),
-        RequirementKind::Scoped(required_scopes) => {
+        AuthorizationKind::Unauthenticated => true,
+        AuthorizationKind::BootstrapOnly => snapshot.is_some_and(AccessSnapshot::is_bootstrap_open),
+        AuthorizationKind::Scoped => {
+            let required_scopes = requirement.capability.required_scopes();
             match (
                 request,
                 snapshot.and_then(AccessSnapshot::established_access),
@@ -444,7 +436,7 @@ mod tests {
             CredentialStatus::Active,
             GrantStatus::Active,
             1,
-            [ScopeKey::NodeInitialize],
+            [],
         );
         assert!(authorize(&initialize, None, Some(&established)).is_err());
     }

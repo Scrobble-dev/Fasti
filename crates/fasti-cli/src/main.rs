@@ -91,9 +91,8 @@ fn main() -> ExitCode {
             if writeln!(io::stdout().lock(), "{output}").is_ok() {
                 ExitCode::SUCCESS
             } else {
-                let error = CliFailure::new(
+                let error = CliFailure::local(
                     "output_failed",
-                    "system.capabilities.discover",
                     "The capability result could not be written to stdout.",
                     "Check the output destination and retry the command.",
                 );

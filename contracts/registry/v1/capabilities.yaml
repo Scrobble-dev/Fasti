@@ -18,15 +18,21 @@ surface_profiles:
         state: not_applicable,
         reason: Health is exposed as the process HTTP probe.,
       }
-    json_schema: { state: required, binding: "schema:{capability_id}" }
-    json_ld_okf:
+    json_schema: { state: required, binding: "schema:health-response" }
+    json_ld:
       {
         state: not_applicable,
         reason: Operational health is not linked-data domain state.,
       }
-    sdk: { state: required, binding: "sdk:{capability_id}" }
-    knowledge: { state: required, binding: "knowledge:{capability_id}" }
-    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:system.health" }
+    knowledge:
+      {
+        state: not_applicable,
+        reason: Healthy process state has no governed recovery problem.,
+      }
+    package_smoke:
+      { state: required, binding: "package-smoke:production-health" }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
   b1_http_fixture:
@@ -38,12 +44,39 @@ surface_profiles:
         state: not_applicable,
         reason: This capability has no server-sent event channel.,
       }
-    cli: { state: required, binding: "cli:{capability_id}" }
-    json_schema: { state: required, binding: "schema:{capability_id}" }
-    json_ld_okf: { state: required, binding: "json-ld:{capability_id}" }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      { state: required, binding: "schema:openapi-operation:{capability_id}" }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Operational access and administration are not linked-data domain state.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
     sdk: { state: required, binding: "sdk:{capability_id}" }
-    knowledge: { state: required, binding: "knowledge:{capability_id}" }
-    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:b1-conformance-fixture" }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+  b1_observation_accept:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Observation acceptance is a finite mutation with no event channel.,
+      }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      { state: required, binding: "schema:openapi-operation:{capability_id}" }
+    json_ld: { state: required, binding: "json-ld:observation-receipt" }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:b1-conformance-fixture" }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
   b1_receipt_replay:
@@ -55,25 +88,39 @@ surface_profiles:
         state: not_applicable,
         reason: Receipt replay is a finite lookup rather than an event stream.,
       }
-    cli: { state: required, binding: "cli:{capability_id}" }
-    json_schema: { state: required, binding: "schema:{capability_id}" }
-    json_ld_okf: { state: required, binding: "json-ld:{capability_id}" }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      { state: required, binding: "schema:openapi-operation:{capability_id}" }
+    json_ld: { state: required, binding: "json-ld:observation-receipt" }
+    okf: { state: required, binding: "okf:capability-catalog" }
     sdk: { state: required, binding: "sdk:{capability_id}" }
-    knowledge: { state: required, binding: "knowledge:{capability_id}" }
-    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:b1-conformance-fixture" }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
-  b1_listener:
+  b1_receipt_stream:
     domain_application:
       { state: required, binding: "application:{application_key}" }
-    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    http_openapi:
+      {
+        state: not_applicable,
+        reason: The transport operation is governed by AsyncAPI rather than the finite HTTP API contract.,
+      }
     sse_asyncapi: { state: required, binding: "asyncapi:{capability_id}" }
-    cli: { state: required, binding: "cli:{capability_id}" }
-    json_schema: { state: required, binding: "schema:{capability_id}" }
-    json_ld_okf: { state: required, binding: "json-ld:{capability_id}" }
+    cli: { state: required, binding: "cli:capability-discovery" }
+    json_schema:
+      { state: required, binding: "schema:asyncapi-message:receiptCommitted" }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Receipt stream events are transport envelopes governed by AsyncAPI; their referenced receipt semantics reuse the observation receipt contract rather than a second linked-data class.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
     sdk: { state: required, binding: "sdk:{capability_id}" }
-    knowledge: { state: required, binding: "knowledge:{capability_id}" }
-    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:b1-conformance-fixture" }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
   later_b2:
@@ -95,12 +142,14 @@ surface_profiles:
       { state: later_body, body: b2, reason: Command behavior belongs to B2. }
     json_schema:
       { state: later_body, body: b2, reason: Public data shapes belong to B2. }
-    json_ld_okf:
+    json_ld:
       {
         state: later_body,
         body: b2,
         reason: Linked-data meaning belongs to B2.,
       }
+    okf:
+      { state: later_body, body: b2, reason: Knowledge meaning belongs to B2. }
     sdk:
       {
         state: later_body,
@@ -140,12 +189,14 @@ surface_profiles:
       }
     json_schema:
       { state: later_body, body: b3, reason: Public data shapes belong to B3. }
-    json_ld_okf:
+    json_ld:
       {
         state: later_body,
         body: b3,
         reason: Linked-data meaning belongs to B3.,
       }
+    okf:
+      { state: later_body, body: b3, reason: Knowledge meaning belongs to B3. }
     sdk:
       {
         state: later_body,
@@ -168,6 +219,7 @@ capabilities:
     bounded_context: system.operations
     contract_body: b1
     runtime_body: b0
+    authorization: unauthenticated
     lifecycle:
       {
         introduced_in: b0,
@@ -185,6 +237,7 @@ capabilities:
     bounded_context: system.contracts
     contract_body: b1
     runtime_body: b1
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -193,7 +246,7 @@ capabilities:
       }
     surface_profile: b1_http_fixture
     scopes: [capability_read]
-    problems: [contract_drift, forbidden]
+    problems: [forbidden]
     examples: [system.capabilities.success, system.capabilities.forbidden]
     uat:
       - {
@@ -214,6 +267,7 @@ capabilities:
     bounded_context: node.administration
     contract_body: b1
     runtime_body: b2
+    authorization: bootstrap_only
     lifecycle:
       {
         introduced_in: b1,
@@ -221,9 +275,16 @@ capabilities:
         runtime_availability: fixture_only,
       }
     surface_profile: b1_http_fixture
-    scopes: [node_initialize]
-    problems: [capability_unavailable, forbidden, validation_failed]
-    examples: [node.initialize.unavailable]
+    scopes: []
+    problems:
+      [
+        forbidden,
+        malformed_json,
+        payload_too_large,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [node.initialize.validation_failed]
     uat: []
 
   - application_key: enroll_first_client
@@ -231,6 +292,7 @@ capabilities:
     bounded_context: client.enrollment
     contract_body: b1
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -239,8 +301,15 @@ capabilities:
       }
     surface_profile: b1_http_fixture
     scopes: [client_enroll]
-    problems: [capability_unavailable, forbidden, validation_failed]
-    examples: [client.enroll.unavailable]
+    problems:
+      [
+        forbidden,
+        malformed_json,
+        payload_too_large,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [client.enroll.forbidden]
     uat: []
 
   - application_key: select_profile
@@ -248,6 +317,7 @@ capabilities:
     bounded_context: profile.preferences
     contract_body: b1
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -256,8 +326,8 @@ capabilities:
       }
     surface_profile: b1_http_fixture
     scopes: [profile_select]
-    problems: [capability_unavailable, forbidden, validation_failed]
-    examples: [profile.select.unavailable]
+    problems: [capability_unavailable, forbidden]
+    examples: [profile.select.capability_unavailable]
     uat: []
 
   - application_key: rotate_credential
@@ -265,6 +335,7 @@ capabilities:
     bounded_context: credential.administration
     contract_body: b1
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -273,8 +344,8 @@ capabilities:
       }
     surface_profile: b1_http_fixture
     scopes: [credential_manage]
-    problems: [capability_unavailable, forbidden, validation_failed]
-    examples: [credential.rotate.unavailable]
+    problems: [capability_unavailable, forbidden]
+    examples: [credential.rotate.capability_unavailable]
     uat: []
 
   - application_key: revoke_credential
@@ -282,6 +353,7 @@ capabilities:
     bounded_context: credential.administration
     contract_body: b1
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -290,8 +362,8 @@ capabilities:
       }
     surface_profile: b1_http_fixture
     scopes: [credential_manage]
-    problems: [capability_unavailable, forbidden, validation_failed]
-    examples: [credential.revoke.unavailable]
+    problems: [capability_unavailable, forbidden]
+    examples: [credential.revoke.capability_unavailable]
     uat: []
 
   - application_key: configure_listener
@@ -299,23 +371,7 @@ capabilities:
     bounded_context: observation.ingress
     contract_body: b1
     runtime_body: b2
-    lifecycle:
-      {
-        introduced_in: b1,
-        contract_state: finalized,
-        runtime_availability: fixture_only,
-      }
-    surface_profile: b1_listener
-    scopes: [listener_configure]
-    problems: [capability_unavailable, forbidden, validation_failed]
-    examples: [listener.configure.unavailable]
-    uat: []
-
-  - application_key: accept_observation
-    id: observation.accept
-    bounded_context: observation.ingress
-    contract_body: b1
-    runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -323,20 +379,42 @@ capabilities:
         runtime_availability: fixture_only,
       }
     surface_profile: b1_http_fixture
+    scopes: [listener_configure]
+    problems: [capability_unavailable, forbidden]
+    examples: [listener.configure.capability_unavailable]
+    uat: []
+
+  - application_key: accept_observation
+    id: observation.accept
+    bounded_context: observation.ingress
+    contract_body: b1
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b1,
+        contract_state: finalized,
+        runtime_availability: fixture_only,
+      }
+    surface_profile: b1_observation_accept
     scopes: [observation_accept]
     problems:
       [
-        capability_unavailable,
         capacity_exceeded,
         forbidden,
         idempotency_conflict,
-        invalid_identifier,
         invalid_observation,
-        invalid_time,
+        malformed_json,
+        payload_too_large,
+        unsupported_media_type,
         validation_failed,
       ]
     examples:
-      [observation.accept.unavailable, observation.accept.validation_failed]
+      [
+        observation.accept.receipt,
+        observation.accept.capacity_exceeded,
+        observation.accept.validation_failed,
+      ]
     uat:
       - {
           id: ID-003,
@@ -374,6 +452,7 @@ capabilities:
     bounded_context: observation.receipts
     contract_body: b1
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -382,9 +461,8 @@ capabilities:
       }
     surface_profile: b1_receipt_replay
     scopes: [receipt_read]
-    problems:
-      [capability_unavailable, forbidden, receipt_not_found, validation_failed]
-    examples: [receipt.replay.unavailable]
+    problems: [forbidden, receipt_not_found]
+    examples: [receipt.replay.receipt_not_found]
     uat:
       - {
           id: ID-057,
@@ -393,11 +471,36 @@ capabilities:
           reason: B1 fixes replay contract semantics; B2 owns durable duplicate detection.,
         }
 
+  - application_key: stream_receipts
+    id: receipt.stream
+    bounded_context: observation.receipts
+    contract_body: b1
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b1,
+        contract_state: finalized,
+        runtime_availability: fixture_only,
+      }
+    surface_profile: b1_receipt_stream
+    scopes: [receipt_read]
+    problems: [forbidden, receipt_not_found]
+    examples: [receipt.stream.event, receipt.stream.receipt_not_found]
+    uat:
+      - {
+          id: ID-057,
+          relationship: split,
+          owner_body: b2,
+          reason: B1 fixes bounded cursor and reconnect semantics; B2 owns durable stream delivery.,
+        }
+
   - application_key: create_record
     id: identity.record.create
     bounded_context: identity.records
     contract_body: b2
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -415,6 +518,7 @@ capabilities:
     bounded_context: identity.identifiers
     contract_body: b2
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -432,6 +536,7 @@ capabilities:
     bounded_context: identity.review
     contract_body: b2
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -449,6 +554,7 @@ capabilities:
     bounded_context: identity.review
     contract_body: b2
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -466,6 +572,7 @@ capabilities:
     bounded_context: identity.review
     contract_body: b2
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -483,6 +590,7 @@ capabilities:
     bounded_context: identity.review
     contract_body: b2
     runtime_body: b2
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -500,6 +608,7 @@ capabilities:
     bounded_context: correction.history
     contract_body: b3
     runtime_body: b3
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -517,6 +626,7 @@ capabilities:
     bounded_context: correction.history
     contract_body: b3
     runtime_body: b3
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -534,6 +644,7 @@ capabilities:
     bounded_context: portability.workspace
     contract_body: b3
     runtime_body: b3
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -551,6 +662,7 @@ capabilities:
     bounded_context: portability.workspace
     contract_body: b3
     runtime_body: b3
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
@@ -568,6 +680,7 @@ capabilities:
     bounded_context: portability.workspace
     contract_body: b3
     runtime_body: b3
+    authorization: scoped
     lifecycle:
       {
         introduced_in: b1,

@@ -60,19 +60,76 @@
         "additionalProperties": false,
         "description": "Registry-owned public capability descriptor. Internal application keys are\nintentionally not exposed at the transport boundary.",
         "properties": {
+          "authorization": {
+            "enum": [
+              "bootstrap_only",
+              "scoped",
+              "unauthenticated"
+            ],
+            "type": "string"
+          },
           "bounded_context": {
+            "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
             "type": "string"
           },
           "contract_body": {
+            "enum": [
+              "b1",
+              "b2",
+              "b3"
+            ],
             "type": "string"
           },
           "examples": {
             "items": {
+              "enum": [
+                "client.enroll.forbidden",
+                "credential.revoke.capability_unavailable",
+                "credential.rotate.capability_unavailable",
+                "listener.configure.capability_unavailable",
+                "node.initialize.validation_failed",
+                "observation.accept.capacity_exceeded",
+                "observation.accept.receipt",
+                "observation.accept.validation_failed",
+                "profile.select.capability_unavailable",
+                "receipt.replay.receipt_not_found",
+                "receipt.stream.event",
+                "receipt.stream.receipt_not_found",
+                "system.capabilities.forbidden",
+                "system.capabilities.success",
+                "system.health.success"
+              ],
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "id": {
+            "enum": [
+              "client.enroll",
+              "correction.chain.append",
+              "correction.chain.inspect",
+              "credential.revoke",
+              "credential.rotate",
+              "identity.identifier.attach",
+              "identity.record.create",
+              "identity.review.defer",
+              "identity.review.inspect",
+              "identity.review.resolve",
+              "identity.review.resume",
+              "listener.configure",
+              "node.initialize",
+              "observation.accept",
+              "portability.workspace.export",
+              "portability.workspace.restore",
+              "portability.workspace.verify",
+              "profile.select",
+              "receipt.replay",
+              "receipt.stream",
+              "system.capabilities.discover",
+              "system.health"
+            ],
+            "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
             "type": "string"
           },
           "lifecycle": {
@@ -80,20 +137,67 @@
           },
           "problems": {
             "items": {
+              "enum": [
+                "capability_unavailable",
+                "capacity_exceeded",
+                "forbidden",
+                "idempotency_conflict",
+                "invalid_identifier",
+                "invalid_observation",
+                "malformed_json",
+                "payload_too_large",
+                "receipt_not_found",
+                "unsupported_media_type",
+                "validation_failed"
+              ],
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "runtime_body": {
+            "enum": [
+              "b0",
+              "b1",
+              "b2",
+              "b3"
+            ],
             "type": "string"
           },
           "scopes": {
             "items": {
+              "enum": [
+                "capability_read",
+                "client_enroll",
+                "correction_read",
+                "correction_write",
+                "credential_manage",
+                "identity_write",
+                "listener_configure",
+                "observation_accept",
+                "profile_select",
+                "receipt_read",
+                "review_read",
+                "review_write",
+                "workspace_export",
+                "workspace_restore",
+                "workspace_verify"
+              ],
               "type": "string"
             },
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "surface_profile": {
+            "enum": [
+              "b1_http_fixture",
+              "b1_observation_accept",
+              "b1_receipt_replay",
+              "b1_receipt_stream",
+              "health",
+              "later_b2",
+              "later_b3"
+            ],
             "type": "string"
           },
           "uat": {
@@ -108,6 +212,7 @@
           "bounded_context",
           "contract_body",
           "runtime_body",
+          "authorization",
           "lifecycle",
           "surface_profile",
           "scopes",
@@ -124,14 +229,67 @@
             "items": {
               "$ref": "#/components/schemas/CapabilityDescriptorDto"
             },
-            "type": "array"
+            "maxItems": 22,
+            "minItems": 22,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "capability_base_uri": {
+            "type": "string"
           },
           "conformance": {
             "$ref": "#/components/schemas/ConformanceMarkerDto"
+          },
+          "contract_version": {
+            "type": "string"
+          },
+          "surface_profiles": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/CapabilitySurfaceDispositionDto"
+              },
+              "maxProperties": 11,
+              "minProperties": 11,
+              "propertyNames": {
+                "enum": [
+                  "cli",
+                  "domain_application",
+                  "http_openapi",
+                  "json_ld",
+                  "json_schema",
+                  "knowledge",
+                  "okf",
+                  "package_smoke",
+                  "sdk",
+                  "sse_asyncapi",
+                  "ui"
+                ],
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "maxProperties": 7,
+            "minProperties": 7,
+            "propertyNames": {
+              "enum": [
+                "b1_http_fixture",
+                "b1_observation_accept",
+                "b1_receipt_replay",
+                "b1_receipt_stream",
+                "health",
+                "later_b2",
+                "later_b3"
+              ],
+              "type": "string"
+            },
+            "type": "object"
           }
         },
         "required": [
           "conformance",
+          "contract_version",
+          "capability_base_uri",
+          "surface_profiles",
           "capabilities"
         ],
         "type": "object"
@@ -140,12 +298,26 @@
         "additionalProperties": false,
         "properties": {
           "contract_state": {
+            "enum": [
+              "finalized",
+              "reserved"
+            ],
             "type": "string"
           },
           "introduced_in": {
+            "enum": [
+              "b0",
+              "b1"
+            ],
             "type": "string"
           },
           "runtime_availability": {
+            "enum": [
+              "fixture_only",
+              "guarded",
+              "implemented",
+              "later_body"
+            ],
             "type": "string"
           }
         },
@@ -156,19 +328,81 @@
         ],
         "type": "object"
       },
+      "CapabilitySurfaceDispositionDto": {
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "binding_visibility": {
+            "enum": [
+              "internal",
+              "public"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "enum": [
+              "b0",
+              "b1",
+              "b2",
+              "b3"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "later_body",
+              "not_applicable",
+              "required"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
       "CapabilityUatDto": {
         "additionalProperties": false,
         "properties": {
           "id": {
+            "pattern": "^ID-[0-9]{3}$",
             "type": "string"
           },
           "owner_body": {
+            "enum": [
+              "b1",
+              "b2",
+              "b3"
+            ],
             "type": "string"
           },
           "reason": {
             "type": "string"
           },
           "relationship": {
+            "enum": [
+              "deferred",
+              "direct",
+              "split"
+            ],
             "type": "string"
           }
         },
@@ -493,10 +727,7 @@
         "description": "RFC 9457 representation of the one application problem model.",
         "properties": {
           "actual": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "null"
           },
           "capability_id": {
             "type": "string"
@@ -505,6 +736,7 @@
             "type": "string"
           },
           "correlation_id": {
+            "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
             "type": "string"
           },
           "detail": {
@@ -514,6 +746,8 @@
             "items": {
               "$ref": "#/components/schemas/ProblemActionDto"
             },
+            "maxItems": 1,
+            "minItems": 1,
             "type": "array"
           },
           "param": {
@@ -529,7 +763,8 @@
             "type": "string"
           },
           "status": {
-            "format": "int32",
+            "format": "uint16",
+            "maximum": 65535,
             "minimum": 0,
             "type": "integer"
           },
@@ -543,6 +778,7 @@
             "items": {
               "$ref": "#/components/schemas/ViolationDto"
             },
+            "maxItems": 32,
             "type": "array"
           }
         },
@@ -557,6 +793,7 @@
           "retryability",
           "next_actions",
           "correlation_id",
+          "actual",
           "violations"
         ],
         "type": "object"
@@ -594,10 +831,7 @@
         "additionalProperties": false,
         "properties": {
           "actual": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "null"
           },
           "code": {
             "type": "string"
@@ -616,7 +850,8 @@
           "code",
           "pointer",
           "reason",
-          "expected"
+          "expected",
+          "actual"
         ],
         "type": "object"
       }
@@ -652,6 +887,977 @@
           "200": {
             "content": {
               "application/json": {
+                "examples": {
+                  "system.capabilities.success": {
+                    "value": {
+                      "capabilities": [
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "client.enrollment",
+                          "contract_body": "b1",
+                          "examples": [
+                            "client.enroll.forbidden"
+                          ],
+                          "id": "client.enroll",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "forbidden",
+                            "malformed_json",
+                            "payload_too_large",
+                            "unsupported_media_type",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "client_enroll"
+                          ],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "correction.history",
+                          "contract_body": "b3",
+                          "examples": [],
+                          "id": "correction.chain.append",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b3",
+                          "scopes": [
+                            "correction_write"
+                          ],
+                          "surface_profile": "later_b3",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "correction.history",
+                          "contract_body": "b3",
+                          "examples": [],
+                          "id": "correction.chain.inspect",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b3",
+                          "scopes": [
+                            "correction_read"
+                          ],
+                          "surface_profile": "later_b3",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "credential.administration",
+                          "contract_body": "b1",
+                          "examples": [
+                            "credential.revoke.capability_unavailable"
+                          ],
+                          "id": "credential.revoke",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "credential_manage"
+                          ],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "credential.administration",
+                          "contract_body": "b1",
+                          "examples": [
+                            "credential.rotate.capability_unavailable"
+                          ],
+                          "id": "credential.rotate",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "credential_manage"
+                          ],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.identifiers",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.identifier.attach",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "invalid_identifier",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "identity_write"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.records",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.record.create",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "invalid_identifier",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "identity_write"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.review",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.review.defer",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "review_write"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.review",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.review.inspect",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "review_read"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.review",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.review.resolve",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "review_write"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.review",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.review.resume",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "review_write"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "observation.ingress",
+                          "contract_body": "b1",
+                          "examples": [
+                            "listener.configure.capability_unavailable"
+                          ],
+                          "id": "listener.configure",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "listener_configure"
+                          ],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "bootstrap_only",
+                          "bounded_context": "node.administration",
+                          "contract_body": "b1",
+                          "examples": [
+                            "node.initialize.validation_failed"
+                          ],
+                          "id": "node.initialize",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "forbidden",
+                            "malformed_json",
+                            "payload_too_large",
+                            "unsupported_media_type",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "observation.ingress",
+                          "contract_body": "b1",
+                          "examples": [
+                            "observation.accept.capacity_exceeded",
+                            "observation.accept.receipt",
+                            "observation.accept.validation_failed"
+                          ],
+                          "id": "observation.accept",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "capacity_exceeded",
+                            "forbidden",
+                            "idempotency_conflict",
+                            "invalid_observation",
+                            "malformed_json",
+                            "payload_too_large",
+                            "unsupported_media_type",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "observation_accept"
+                          ],
+                          "surface_profile": "b1_observation_accept",
+                          "uat": [
+                            {
+                              "id": "ID-003",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes the unresolved-safe contract trace; B2 owns durable behavior.",
+                              "relationship": "split"
+                            },
+                            {
+                              "id": "ID-005",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes the conflict problem shape; B2 owns no-mutation persistence proof.",
+                              "relationship": "split"
+                            },
+                            {
+                              "id": "ID-055",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes a network-independent contract; B2 owns the durable write.",
+                              "relationship": "split"
+                            },
+                            {
+                              "id": "ID-057",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes receipt and retry semantics; B2 owns idempotency evidence.",
+                              "relationship": "split"
+                            },
+                            {
+                              "id": "ID-064",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes structured problem fields; B2 owns exact-ID conflict behavior.",
+                              "relationship": "split"
+                            }
+                          ]
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "portability.workspace",
+                          "contract_body": "b3",
+                          "examples": [],
+                          "id": "portability.workspace.export",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "guarded"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b3",
+                          "scopes": [
+                            "workspace_export"
+                          ],
+                          "surface_profile": "later_b3",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "portability.workspace",
+                          "contract_body": "b3",
+                          "examples": [],
+                          "id": "portability.workspace.restore",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "guarded"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b3",
+                          "scopes": [
+                            "workspace_restore"
+                          ],
+                          "surface_profile": "later_b3",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "portability.workspace",
+                          "contract_body": "b3",
+                          "examples": [],
+                          "id": "portability.workspace.verify",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "guarded"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "b3",
+                          "scopes": [
+                            "workspace_verify"
+                          ],
+                          "surface_profile": "later_b3",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "profile.preferences",
+                          "contract_body": "b1",
+                          "examples": [
+                            "profile.select.capability_unavailable"
+                          ],
+                          "id": "profile.select",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "profile_select"
+                          ],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "observation.receipts",
+                          "contract_body": "b1",
+                          "examples": [
+                            "receipt.replay.receipt_not_found"
+                          ],
+                          "id": "receipt.replay",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "forbidden",
+                            "receipt_not_found"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "receipt_read"
+                          ],
+                          "surface_profile": "b1_receipt_replay",
+                          "uat": [
+                            {
+                              "id": "ID-057",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes replay contract semantics; B2 owns durable duplicate detection.",
+                              "relationship": "split"
+                            }
+                          ]
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "observation.receipts",
+                          "contract_body": "b1",
+                          "examples": [
+                            "receipt.stream.event",
+                            "receipt.stream.receipt_not_found"
+                          ],
+                          "id": "receipt.stream",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "forbidden",
+                            "receipt_not_found"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "receipt_read"
+                          ],
+                          "surface_profile": "b1_receipt_stream",
+                          "uat": [
+                            {
+                              "id": "ID-057",
+                              "owner_body": "b2",
+                              "reason": "B1 fixes bounded cursor and reconnect semantics; B2 owns durable stream delivery.",
+                              "relationship": "split"
+                            }
+                          ]
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "system.contracts",
+                          "contract_body": "b1",
+                          "examples": [
+                            "system.capabilities.forbidden",
+                            "system.capabilities.success"
+                          ],
+                          "id": "system.capabilities.discover",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "forbidden"
+                          ],
+                          "runtime_body": "b1",
+                          "scopes": [
+                            "capability_read"
+                          ],
+                          "surface_profile": "b1_http_fixture",
+                          "uat": [
+                            {
+                              "id": "ID-065",
+                              "owner_body": "b1",
+                              "reason": "B1 owns executable capability discovery contract evidence.",
+                              "relationship": "direct"
+                            },
+                            {
+                              "id": "ID-078",
+                              "owner_body": "b2",
+                              "reason": "B1 binds registry knowledge links while identity-error recovery remains later.",
+                              "relationship": "split"
+                            }
+                          ]
+                        },
+                        {
+                          "authorization": "unauthenticated",
+                          "bounded_context": "system.operations",
+                          "contract_body": "b1",
+                          "examples": [
+                            "system.health.success"
+                          ],
+                          "id": "system.health",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "b0",
+                            "runtime_availability": "implemented"
+                          },
+                          "problems": [],
+                          "runtime_body": "b0",
+                          "scopes": [],
+                          "surface_profile": "health",
+                          "uat": []
+                        }
+                      ],
+                      "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
+                      "conformance": {
+                        "availability": "fixture_only",
+                        "durability": "none"
+                      },
+                      "contract_version": "1.0.0",
+                      "surface_profiles": {
+                        "b1_http_fixture": {
+                          "cli": {
+                            "binding": "cli:capability-discovery",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "reason": "Operational access and administration are not linked-data domain state.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "binding": "package-smoke:b1-conformance-fixture",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "This capability has no server-sent event channel.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        },
+                        "b1_observation_accept": {
+                          "cli": {
+                            "binding": "cli:capability-discovery",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "binding": "json-ld:observation-receipt",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_schema": {
+                            "binding": "schema:openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "binding": "package-smoke:b1-conformance-fixture",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Observation acceptance is a finite mutation with no event channel.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        },
+                        "b1_receipt_replay": {
+                          "cli": {
+                            "binding": "cli:capability-discovery",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "binding": "json-ld:observation-receipt",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_schema": {
+                            "binding": "schema:openapi-operation:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "binding": "package-smoke:b1-conformance-fixture",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Receipt replay is a finite lookup rather than an event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        },
+                        "b1_receipt_stream": {
+                          "cli": {
+                            "binding": "cli:capability-discovery",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "reason": "The transport operation is governed by AsyncAPI rather than the finite HTTP API contract.",
+                            "state": "not_applicable"
+                          },
+                          "json_ld": {
+                            "reason": "Receipt stream events are transport envelopes governed by AsyncAPI; their referenced receipt semantics reuse the observation receipt contract rather than a second linked-data class.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:asyncapi-message:receiptCommitted",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "binding": "package-smoke:b1-conformance-fixture",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sdk": {
+                            "binding": "sdk:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "binding": "asyncapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        },
+                        "health": {
+                          "cli": {
+                            "reason": "Health is exposed as the process HTTP probe.",
+                            "state": "not_applicable"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "binding": "openapi:{capability_id}",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "json_ld": {
+                            "reason": "Operational health is not linked-data domain state.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "binding": "schema:health-response",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "knowledge": {
+                            "reason": "Healthy process state has no governed recovery problem.",
+                            "state": "not_applicable"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "binding": "package-smoke:production-health",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sdk": {
+                            "binding": "sdk:system.health",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Health is a finite request and has no event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        },
+                        "later_b2": {
+                          "cli": {
+                            "body": "b2",
+                            "reason": "Command behavior belongs to B2.",
+                            "state": "later_body"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "body": "b2",
+                            "reason": "Request and response semantics belong to B2.",
+                            "state": "later_body"
+                          },
+                          "json_ld": {
+                            "body": "b2",
+                            "reason": "Linked-data meaning belongs to B2.",
+                            "state": "later_body"
+                          },
+                          "json_schema": {
+                            "body": "b2",
+                            "reason": "Public data shapes belong to B2.",
+                            "state": "later_body"
+                          },
+                          "knowledge": {
+                            "body": "b2",
+                            "reason": "Recovery knowledge belongs to B2.",
+                            "state": "later_body"
+                          },
+                          "okf": {
+                            "body": "b2",
+                            "reason": "Knowledge meaning belongs to B2.",
+                            "state": "later_body"
+                          },
+                          "package_smoke": {
+                            "body": "b2",
+                            "reason": "Executable package evidence belongs to B2.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "body": "b2",
+                            "reason": "Generated client behavior belongs to B2.",
+                            "state": "later_body"
+                          },
+                          "sse_asyncapi": {
+                            "body": "b2",
+                            "reason": "Event applicability and semantics belong to B2.",
+                            "state": "later_body"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        },
+                        "later_b3": {
+                          "cli": {
+                            "body": "b3",
+                            "reason": "Successful command behavior belongs to B3.",
+                            "state": "later_body"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "body": "b3",
+                            "reason": "Request and response semantics belong to B3.",
+                            "state": "later_body"
+                          },
+                          "json_ld": {
+                            "body": "b3",
+                            "reason": "Linked-data meaning belongs to B3.",
+                            "state": "later_body"
+                          },
+                          "json_schema": {
+                            "body": "b3",
+                            "reason": "Public data shapes belong to B3.",
+                            "state": "later_body"
+                          },
+                          "knowledge": {
+                            "body": "b3",
+                            "reason": "Recovery knowledge belongs to B3.",
+                            "state": "later_body"
+                          },
+                          "okf": {
+                            "body": "b3",
+                            "reason": "Knowledge meaning belongs to B3.",
+                            "state": "later_body"
+                          },
+                          "package_smoke": {
+                            "body": "b3",
+                            "reason": "Executable package evidence belongs to B3.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "body": "b3",
+                            "reason": "Generated client behavior belongs to B3.",
+                            "state": "later_body"
+                          },
+                          "sse_asyncapi": {
+                            "body": "b3",
+                            "reason": "Event applicability and semantics belong to B3.",
+                            "state": "later_body"
+                          },
+                          "ui": {
+                            "reason": "Fasti is headless through B3.",
+                            "state": "not_applicable"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/CapabilityDiscoveryResponse"
                 }
@@ -662,6 +1868,30 @@
           "403": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "system.capabilities.forbidden": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "system.capabilities.discover",
+                      "code": "forbidden",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000009",
+                      "detail": "request is not authorized for this capability",
+                      "next_actions": [
+                        {
+                          "id": "verify_request_authorization",
+                          "label": "Verify the request context and local grant"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -678,7 +1908,15 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "system.capabilities.discover",
+        "x-fasti-example-ids": [
+          "system.capabilities.forbidden",
+          "system.capabilities.success"
+        ],
+        "x-fasti-problem-codes": [
+          "forbidden"
+        ],
         "x-fasti-required-scopes": [
           "capability_read"
         ],
@@ -723,6 +1961,30 @@
           "403": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "client.enroll.forbidden": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "client.enroll",
+                      "code": "forbidden",
+                      "correlation_id": "req_018f0e0e7f7b7000800000000000000b",
+                      "detail": "request is not authorized for this capability",
+                      "next_actions": [
+                        {
+                          "id": "verify_request_authorization",
+                          "label": "Verify the request context and local grant"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -764,7 +2026,18 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "client.enroll",
+        "x-fasti-example-ids": [
+          "client.enroll.forbidden"
+        ],
+        "x-fasti-problem-codes": [
+          "forbidden",
+          "malformed_json",
+          "payload_too_large",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
         "x-fasti-required-scopes": [
           "client_enroll"
         ],
@@ -789,6 +2062,30 @@
           "501": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "credential.revoke.capability_unavailable": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "credential.revoke",
+                      "code": "capability_unavailable",
+                      "correlation_id": "req_018f0e0e7f7b7000800000000000001e",
+                      "detail": "requested capability is not available in this body; it is owned by b2",
+                      "next_actions": [
+                        {
+                          "id": "review_capability_status",
+                          "label": "Review the local capability registry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 501,
+                      "title": "Capability unavailable",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -805,7 +2102,15 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "credential.revoke",
+        "x-fasti-example-ids": [
+          "credential.revoke.capability_unavailable"
+        ],
+        "x-fasti-problem-codes": [
+          "capability_unavailable",
+          "forbidden"
+        ],
         "x-fasti-required-scopes": [
           "credential_manage"
         ],
@@ -830,6 +2135,30 @@
           "501": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "credential.rotate.capability_unavailable": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "credential.rotate",
+                      "code": "capability_unavailable",
+                      "correlation_id": "req_018f0e0e7f7b7000800000000000001d",
+                      "detail": "requested capability is not available in this body; it is owned by b2",
+                      "next_actions": [
+                        {
+                          "id": "review_capability_status",
+                          "label": "Review the local capability registry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 501,
+                      "title": "Capability unavailable",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -846,7 +2175,15 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "credential.rotate",
+        "x-fasti-example-ids": [
+          "credential.rotate.capability_unavailable"
+        ],
+        "x-fasti-problem-codes": [
+          "capability_unavailable",
+          "forbidden"
+        ],
         "x-fasti-required-scopes": [
           "credential_manage"
         ],
@@ -871,6 +2208,30 @@
           "501": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "listener.configure.capability_unavailable": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "listener.configure",
+                      "code": "capability_unavailable",
+                      "correlation_id": "req_018f0e0e7f7b7000800000000000001f",
+                      "detail": "requested capability is not available in this body; it is owned by b2",
+                      "next_actions": [
+                        {
+                          "id": "review_capability_status",
+                          "label": "Review the local capability registry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 501,
+                      "title": "Capability unavailable",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -887,7 +2248,15 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "listener.configure",
+        "x-fasti-example-ids": [
+          "listener.configure.capability_unavailable"
+        ],
+        "x-fasti-problem-codes": [
+          "capability_unavailable",
+          "forbidden"
+        ],
         "x-fasti-required-scopes": [
           "listener_configure"
         ],
@@ -962,6 +2331,38 @@
           "422": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "node.initialize.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "node.initialize",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b7000800000000000000a",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -973,10 +2374,19 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "bootstrap_only",
         "x-fasti-capability-id": "node.initialize",
-        "x-fasti-required-scopes": [
-          "node_initialize"
+        "x-fasti-example-ids": [
+          "node.initialize.validation_failed"
         ],
+        "x-fasti-problem-codes": [
+          "forbidden",
+          "malformed_json",
+          "payload_too_large",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
         "x-fasti-runtime-availability": "fixture_only"
       }
     },
@@ -1058,6 +2468,38 @@
           "422": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -1068,6 +2510,30 @@
           "507": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -1084,7 +2550,23 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
         "x-fasti-required-scopes": [
           "observation_accept"
         ],
@@ -1109,6 +2591,30 @@
           "501": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "profile.select.capability_unavailable": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "profile.select",
+                      "code": "capability_unavailable",
+                      "correlation_id": "req_018f0e0e7f7b7000800000000000001c",
+                      "detail": "requested capability is not available in this body; it is owned by b2",
+                      "next_actions": [
+                        {
+                          "id": "review_capability_status",
+                          "label": "Review the local capability registry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 501,
+                      "title": "Capability unavailable",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -1125,7 +2631,15 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "profile.select",
+        "x-fasti-example-ids": [
+          "profile.select.capability_unavailable"
+        ],
+        "x-fasti-problem-codes": [
+          "capability_unavailable",
+          "forbidden"
+        ],
         "x-fasti-required-scopes": [
           "profile_select"
         ],
@@ -1171,6 +2685,30 @@
           "404": {
             "content": {
               "application/problem+json": {
+                "examples": {
+                  "receipt.replay.receipt_not_found": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "receipt.replay",
+                      "code": "receipt_not_found",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000022",
+                      "detail": "no receipt is available for the requested identifier",
+                      "next_actions": [
+                        {
+                          "id": "verify_receipt_id",
+                          "label": "Verify the receipt ID and request context"
+                        }
+                      ],
+                      "param": "/receipt_id",
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 404,
+                      "title": "Receipt not found",
+                      "type": "https://fasti.scrobble.dev/v1/problems/receipt-not-found",
+                      "violations": []
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ProblemDetails"
                 }
@@ -1187,7 +2725,15 @@
         "tags": [
           "b1-conformance-fixture"
         ],
+        "x-fasti-authorization": "scoped",
         "x-fasti-capability-id": "receipt.replay",
+        "x-fasti-example-ids": [
+          "receipt.replay.receipt_not_found"
+        ],
+        "x-fasti-problem-codes": [
+          "forbidden",
+          "receipt_not_found"
+        ],
         "x-fasti-required-scopes": [
           "receipt_read"
         ],

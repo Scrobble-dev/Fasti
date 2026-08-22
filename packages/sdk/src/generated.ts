@@ -11,7 +11,7 @@ export interface ProblemActionDto {
 }
 
 export interface ViolationDto {
-  readonly actual?: null | string;
+  readonly actual: null;
   readonly code: string;
   readonly expected: string;
   readonly pointer: string;
@@ -19,7 +19,7 @@ export interface ViolationDto {
 }
 
 export interface ProblemDetails {
-  readonly actual?: null | string;
+  readonly actual: null;
   readonly capability_id: CapabilityId;
   readonly code: ProblemCode;
   readonly correlation_id: string;
@@ -64,34 +64,46 @@ export interface AcceptObservationResponse {
 }
 
 export interface CapabilityDescriptorDto {
+  readonly authorization: "bootstrap_only" | "scoped" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: string;
-  readonly examples: ReadonlyArray<string>;
-  readonly id: string;
+  readonly contract_body: "b1" | "b2" | "b3";
+  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<string>;
-  readonly runtime_body: string;
-  readonly scopes: ReadonlyArray<string>;
-  readonly surface_profile: string;
+  readonly problems: ReadonlyArray<"capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "unsupported_media_type" | "validation_failed">;
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3";
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_restore" | "workspace_verify">;
+  readonly surface_profile: "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
 export interface CapabilityDiscoveryResponse {
   readonly capabilities: ReadonlyArray<CapabilityDescriptorDto>;
+  readonly capability_base_uri: string;
   readonly conformance: ConformanceMarkerDto;
+  readonly contract_version: string;
+  readonly surface_profiles: Readonly<Record<string, Readonly<Record<string, CapabilitySurfaceDispositionDto>>>>;
 }
 
 export interface CapabilityLifecycleDto {
-  readonly contract_state: string;
-  readonly introduced_in: string;
-  readonly runtime_availability: string;
+  readonly contract_state: "finalized" | "reserved";
+  readonly introduced_in: "b0" | "b1";
+  readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
+}
+
+export interface CapabilitySurfaceDispositionDto {
+  readonly binding?: null | string;
+  readonly binding_visibility?: "internal" | "public";
+  readonly body?: "b0" | "b1" | "b2" | "b3";
+  readonly reason?: null | string;
+  readonly state: "later_body" | "not_applicable" | "required";
 }
 
 export interface CapabilityUatDto {
   readonly id: string;
-  readonly owner_body: string;
+  readonly owner_body: "b1" | "b2" | "b3";
   readonly reason: string;
-  readonly relationship: string;
+  readonly relationship: "deferred" | "direct" | "split";
 }
 
 // prettier-ignore
@@ -176,15 +188,15 @@ export type RuntimeAvailabilityDto = "fixture_only";
 
 // prettier-ignore
 export const B1_CONFORMANCE_OPERATIONS = {
-  discoverCapabilities: { operationId: "discover_capabilities", method: "GET", path: "/api/v1/capabilities", capabilityId: "system.capabilities.discover", requiredScopes: ["capability_read"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "CapabilityDiscoveryResponse" },
-  selectProfile: { operationId: "select_profile_unavailable", method: "PUT", path: "/api/v1/profile-selection", capabilityId: "profile.select", requiredScopes: ["profile_select"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
-  rotateCredential: { operationId: "rotate_credential_unavailable", method: "POST", path: "/api/v1/credential-rotations", capabilityId: "credential.rotate", requiredScopes: ["credential_manage"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
-  revokeCredential: { operationId: "revoke_credential_unavailable", method: "POST", path: "/api/v1/credential-revocations", capabilityId: "credential.revoke", requiredScopes: ["credential_manage"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
-  configureListener: { operationId: "configure_listener_unavailable", method: "PUT", path: "/api/v1/listener-configuration", capabilityId: "listener.configure", requiredScopes: ["listener_configure"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
-  initializeNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", requiredScopes: ["node_initialize"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "InitializeNodeResponse" },
-  enrollFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", requiredScopes: ["client_enroll"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "EnrollFirstClientResponse" },
-  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", requiredScopes: ["observation_accept"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
-  replayReceipt: { operationId: "replay_receipt", method: "GET", path: "/api/v1/receipts/{receipt_id}", capabilityId: "receipt.replay", requiredScopes: ["receipt_read"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "ReplayReceiptResponse" },
+  discoverCapabilities: { operationId: "discover_capabilities", method: "GET", path: "/api/v1/capabilities", capabilityId: "system.capabilities.discover", authorization: "scoped", requiredScopes: ["capability_read"], problemCodes: ["forbidden"], exampleIds: ["system.capabilities.forbidden","system.capabilities.success"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "CapabilityDiscoveryResponse" },
+  selectProfile: { operationId: "select_profile_unavailable", method: "PUT", path: "/api/v1/profile-selection", capabilityId: "profile.select", authorization: "scoped", requiredScopes: ["profile_select"], problemCodes: ["capability_unavailable","forbidden"], exampleIds: ["profile.select.capability_unavailable"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  rotateCredential: { operationId: "rotate_credential_unavailable", method: "POST", path: "/api/v1/credential-rotations", capabilityId: "credential.rotate", authorization: "scoped", requiredScopes: ["credential_manage"], problemCodes: ["capability_unavailable","forbidden"], exampleIds: ["credential.rotate.capability_unavailable"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  revokeCredential: { operationId: "revoke_credential_unavailable", method: "POST", path: "/api/v1/credential-revocations", capabilityId: "credential.revoke", authorization: "scoped", requiredScopes: ["credential_manage"], problemCodes: ["capability_unavailable","forbidden"], exampleIds: ["credential.revoke.capability_unavailable"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  configureListener: { operationId: "configure_listener_unavailable", method: "PUT", path: "/api/v1/listener-configuration", capabilityId: "listener.configure", authorization: "scoped", requiredScopes: ["listener_configure"], problemCodes: ["capability_unavailable","forbidden"], exampleIds: ["listener.configure.capability_unavailable"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
+  initializeNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", authorization: "bootstrap_only", requiredScopes: [], problemCodes: ["forbidden","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["node.initialize.validation_failed"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "InitializeNodeResponse" },
+  enrollFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", authorization: "scoped", requiredScopes: ["client_enroll"], problemCodes: ["forbidden","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["client.enroll.forbidden"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "EnrollFirstClientResponse" },
+  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["capacity_exceeded","forbidden","idempotency_conflict","invalid_observation","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
+  replayReceipt: { operationId: "replay_receipt", method: "GET", path: "/api/v1/receipts/{receipt_id}", capabilityId: "receipt.replay", authorization: "scoped", requiredScopes: ["receipt_read"], problemCodes: ["forbidden","receipt_not_found"], exampleIds: ["receipt.replay.receipt_not_found"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "ReplayReceiptResponse" },
 } as const;
 
 // prettier-ignore
@@ -248,19 +260,76 @@ const B1_CONFORMANCE_SCHEMAS = {
     "additionalProperties": false,
     "description": "Registry-owned public capability descriptor. Internal application keys are\nintentionally not exposed at the transport boundary.",
     "properties": {
+      "authorization": {
+        "enum": [
+          "bootstrap_only",
+          "scoped",
+          "unauthenticated"
+        ],
+        "type": "string"
+      },
       "bounded_context": {
+        "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
         "type": "string"
       },
       "contract_body": {
+        "enum": [
+          "b1",
+          "b2",
+          "b3"
+        ],
         "type": "string"
       },
       "examples": {
         "items": {
+          "enum": [
+            "client.enroll.forbidden",
+            "credential.revoke.capability_unavailable",
+            "credential.rotate.capability_unavailable",
+            "listener.configure.capability_unavailable",
+            "node.initialize.validation_failed",
+            "observation.accept.capacity_exceeded",
+            "observation.accept.receipt",
+            "observation.accept.validation_failed",
+            "profile.select.capability_unavailable",
+            "receipt.replay.receipt_not_found",
+            "receipt.stream.event",
+            "receipt.stream.receipt_not_found",
+            "system.capabilities.forbidden",
+            "system.capabilities.success",
+            "system.health.success"
+          ],
           "type": "string"
         },
-        "type": "array"
+        "type": "array",
+        "uniqueItems": true
       },
       "id": {
+        "enum": [
+          "client.enroll",
+          "correction.chain.append",
+          "correction.chain.inspect",
+          "credential.revoke",
+          "credential.rotate",
+          "identity.identifier.attach",
+          "identity.record.create",
+          "identity.review.defer",
+          "identity.review.inspect",
+          "identity.review.resolve",
+          "identity.review.resume",
+          "listener.configure",
+          "node.initialize",
+          "observation.accept",
+          "portability.workspace.export",
+          "portability.workspace.restore",
+          "portability.workspace.verify",
+          "profile.select",
+          "receipt.replay",
+          "receipt.stream",
+          "system.capabilities.discover",
+          "system.health"
+        ],
+        "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
         "type": "string"
       },
       "lifecycle": {
@@ -268,20 +337,67 @@ const B1_CONFORMANCE_SCHEMAS = {
       },
       "problems": {
         "items": {
+          "enum": [
+            "capability_unavailable",
+            "capacity_exceeded",
+            "forbidden",
+            "idempotency_conflict",
+            "invalid_identifier",
+            "invalid_observation",
+            "malformed_json",
+            "payload_too_large",
+            "receipt_not_found",
+            "unsupported_media_type",
+            "validation_failed"
+          ],
           "type": "string"
         },
-        "type": "array"
+        "type": "array",
+        "uniqueItems": true
       },
       "runtime_body": {
+        "enum": [
+          "b0",
+          "b1",
+          "b2",
+          "b3"
+        ],
         "type": "string"
       },
       "scopes": {
         "items": {
+          "enum": [
+            "capability_read",
+            "client_enroll",
+            "correction_read",
+            "correction_write",
+            "credential_manage",
+            "identity_write",
+            "listener_configure",
+            "observation_accept",
+            "profile_select",
+            "receipt_read",
+            "review_read",
+            "review_write",
+            "workspace_export",
+            "workspace_restore",
+            "workspace_verify"
+          ],
           "type": "string"
         },
-        "type": "array"
+        "type": "array",
+        "uniqueItems": true
       },
       "surface_profile": {
+        "enum": [
+          "b1_http_fixture",
+          "b1_observation_accept",
+          "b1_receipt_replay",
+          "b1_receipt_stream",
+          "health",
+          "later_b2",
+          "later_b3"
+        ],
         "type": "string"
       },
       "uat": {
@@ -296,6 +412,7 @@ const B1_CONFORMANCE_SCHEMAS = {
       "bounded_context",
       "contract_body",
       "runtime_body",
+      "authorization",
       "lifecycle",
       "surface_profile",
       "scopes",
@@ -312,14 +429,67 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "type": "array"
+        "maxItems": 22,
+        "minItems": 22,
+        "type": "array",
+        "uniqueItems": true
+      },
+      "capability_base_uri": {
+        "type": "string"
       },
       "conformance": {
         "$ref": "#/components/schemas/ConformanceMarkerDto"
+      },
+      "contract_version": {
+        "type": "string"
+      },
+      "surface_profiles": {
+        "additionalProperties": {
+          "additionalProperties": {
+            "$ref": "#/components/schemas/CapabilitySurfaceDispositionDto"
+          },
+          "maxProperties": 11,
+          "minProperties": 11,
+          "propertyNames": {
+            "enum": [
+              "cli",
+              "domain_application",
+              "http_openapi",
+              "json_ld",
+              "json_schema",
+              "knowledge",
+              "okf",
+              "package_smoke",
+              "sdk",
+              "sse_asyncapi",
+              "ui"
+            ],
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "maxProperties": 7,
+        "minProperties": 7,
+        "propertyNames": {
+          "enum": [
+            "b1_http_fixture",
+            "b1_observation_accept",
+            "b1_receipt_replay",
+            "b1_receipt_stream",
+            "health",
+            "later_b2",
+            "later_b3"
+          ],
+          "type": "string"
+        },
+        "type": "object"
       }
     },
     "required": [
       "conformance",
+      "contract_version",
+      "capability_base_uri",
+      "surface_profiles",
       "capabilities"
     ],
     "type": "object"
@@ -328,12 +498,26 @@ const B1_CONFORMANCE_SCHEMAS = {
     "additionalProperties": false,
     "properties": {
       "contract_state": {
+        "enum": [
+          "finalized",
+          "reserved"
+        ],
         "type": "string"
       },
       "introduced_in": {
+        "enum": [
+          "b0",
+          "b1"
+        ],
         "type": "string"
       },
       "runtime_availability": {
+        "enum": [
+          "fixture_only",
+          "guarded",
+          "implemented",
+          "later_body"
+        ],
         "type": "string"
       }
     },
@@ -344,19 +528,81 @@ const B1_CONFORMANCE_SCHEMAS = {
     ],
     "type": "object"
   },
+  "CapabilitySurfaceDispositionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "binding": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "binding_visibility": {
+        "enum": [
+          "internal",
+          "public"
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "body": {
+        "enum": [
+          "b0",
+          "b1",
+          "b2",
+          "b3"
+        ],
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "reason": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "state": {
+        "enum": [
+          "later_body",
+          "not_applicable",
+          "required"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "state"
+    ],
+    "type": "object"
+  },
   "CapabilityUatDto": {
     "additionalProperties": false,
     "properties": {
       "id": {
+        "pattern": "^ID-[0-9]{3}$",
         "type": "string"
       },
       "owner_body": {
+        "enum": [
+          "b1",
+          "b2",
+          "b3"
+        ],
         "type": "string"
       },
       "reason": {
         "type": "string"
       },
       "relationship": {
+        "enum": [
+          "deferred",
+          "direct",
+          "split"
+        ],
         "type": "string"
       }
     },
@@ -681,10 +927,7 @@ const B1_CONFORMANCE_SCHEMAS = {
     "description": "RFC 9457 representation of the one application problem model.",
     "properties": {
       "actual": {
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "null"
       },
       "capability_id": {
         "type": "string"
@@ -693,6 +936,7 @@ const B1_CONFORMANCE_SCHEMAS = {
         "type": "string"
       },
       "correlation_id": {
+        "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
         "type": "string"
       },
       "detail": {
@@ -702,6 +946,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/ProblemActionDto"
         },
+        "maxItems": 1,
+        "minItems": 1,
         "type": "array"
       },
       "param": {
@@ -717,7 +963,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "type": "string"
       },
       "status": {
-        "format": "int32",
+        "format": "uint16",
+        "maximum": 65535,
         "minimum": 0,
         "type": "integer"
       },
@@ -731,6 +978,7 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/ViolationDto"
         },
+        "maxItems": 32,
         "type": "array"
       }
     },
@@ -745,6 +993,7 @@ const B1_CONFORMANCE_SCHEMAS = {
       "retryability",
       "next_actions",
       "correlation_id",
+      "actual",
       "violations"
     ],
     "type": "object"
@@ -782,10 +1031,7 @@ const B1_CONFORMANCE_SCHEMAS = {
     "additionalProperties": false,
     "properties": {
       "actual": {
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "null"
       },
       "code": {
         "type": "string"
@@ -804,7 +1050,8 @@ const B1_CONFORMANCE_SCHEMAS = {
       "code",
       "pointer",
       "reason",
-      "expected"
+      "expected",
+      "actual"
     ],
     "type": "object"
   }
@@ -842,7 +1089,16 @@ export function parseAcceptObservationResponse(value: unknown): AcceptObservatio
 
 // prettier-ignore
 export function parseCapabilityDiscoveryResponse(value: unknown): CapabilityDiscoveryResponse {
-  return parseConformanceDto("CapabilityDiscoveryResponse", value);
+  const response = parseConformanceDto<CapabilityDiscoveryResponse>("CapabilityDiscoveryResponse", value);
+  if (
+    response.contract_version !== PUBLIC_CAPABILITY_REGISTRY.contract_version ||
+    response.capability_base_uri !== PUBLIC_CAPABILITY_REGISTRY.capability_base_uri ||
+    !contractJsonEqual(response.surface_profiles, PUBLIC_CAPABILITY_REGISTRY.surface_profiles) ||
+    !contractJsonEqual(response.capabilities, PUBLIC_CAPABILITY_REGISTRY.capabilities)
+  ) {
+    throw new FastiContractParseError("CapabilityDiscoveryResponse differs from the complete generated registry handshake");
+  }
+  return response;
 }
 
 // prettier-ignore
@@ -933,6 +1189,12 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (!Array.isArray(value)) {
       throw new FastiContractParseError(`${path} must be an array`);
     }
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      throw new FastiContractParseError(`${path} has fewer than its bounded items`);
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      throw new FastiContractParseError(`${path} exceeds its bounded items`);
+    }
     value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
     return;
   }
@@ -941,13 +1203,26 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       throw new FastiContractParseError(`${path} must be a plain object`);
     }
     const object = value as Record<string, unknown>;
+    const keys = Object.keys(object);
+    if (typeof schema.minProperties === "number" && keys.length < schema.minProperties) {
+      throw new FastiContractParseError(`${path} has fewer than its bounded properties`);
+    }
+    if (typeof schema.maxProperties === "number" && keys.length > schema.maxProperties) {
+      throw new FastiContractParseError(`${path} exceeds its bounded properties`);
+    }
     const properties = isPlainObject(schema.properties)
       ? (schema.properties as Record<string, unknown>)
       : {};
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(object)) {
-        if (!Object.hasOwn(properties, key)) {
+    for (const key of keys) {
+      if (isPlainObject(schema.propertyNames)) {
+        validateOpenApiValue(key, schema.propertyNames, `${path} property name`);
+      }
+      if (!Object.hasOwn(properties, key)) {
+        if (schema.additionalProperties === false) {
           throw new FastiContractParseError(`${path} contains unknown field ${key}`);
+        }
+        if (isPlainObject(schema.additionalProperties)) {
+          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`);
         }
       }
     }
@@ -965,6 +1240,20 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     return;
   }
   throw new FastiContractParseError(`${path} uses an unsupported schema shape`);
+}
+
+// prettier-ignore
+function contractJsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((value, index) => contractJsonEqual(value, right[index]));
+  }
+  if (!isPlainObject(left) || !isPlainObject(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) => key === rightKeys[index] && contractJsonEqual(left[key], right[key]));
 }
 
 // prettier-ignore
@@ -1051,19 +1340,21 @@ export type RuntimeAvailability =
 export type ProblemCode =
   | "capability_unavailable"
   | "capacity_exceeded"
-  | "contract_drift"
   | "forbidden"
   | "idempotency_conflict"
   | "invalid_identifier"
   | "invalid_observation"
-  | "invalid_time"
+  | "malformed_json"
+  | "payload_too_large"
   | "receipt_not_found"
+  | "unsupported_media_type"
   | "validation_failed";
 
 // prettier-ignore
 export const PUBLIC_CAPABILITY_REGISTRY = {
   "capabilities": [
     {
+      "authorization": "scoped",
       "bounded_context": "client.enrollment",
       "contract_body": "b1",
       "examples": [
@@ -1076,8 +1367,10 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "runtime_availability": "fixture_only"
       },
       "problems": [
-        "capability_unavailable",
         "forbidden",
+        "malformed_json",
+        "payload_too_large",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
@@ -1088,6 +1381,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "correction.history",
       "contract_body": "b3",
       "examples": [],
@@ -1110,6 +1404,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "correction.history",
       "contract_body": "b3",
       "examples": [],
@@ -1131,10 +1426,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "credential.administration",
       "contract_body": "b1",
       "examples": [
-        "credential.revoke.unavailable"
+        "credential.revoke.capability_unavailable"
       ],
       "id": "credential.revoke",
       "lifecycle": {
@@ -1144,8 +1440,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "capability_unavailable",
-        "forbidden",
-        "validation_failed"
+        "forbidden"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -1155,10 +1450,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "credential.administration",
       "contract_body": "b1",
       "examples": [
-        "credential.rotate.unavailable"
+        "credential.rotate.capability_unavailable"
       ],
       "id": "credential.rotate",
       "lifecycle": {
@@ -1168,8 +1464,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "capability_unavailable",
-        "forbidden",
-        "validation_failed"
+        "forbidden"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -1179,6 +1474,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "identity.identifiers",
       "contract_body": "b2",
       "examples": [],
@@ -1201,6 +1497,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "identity.records",
       "contract_body": "b2",
       "examples": [],
@@ -1223,6 +1520,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "identity.review",
       "contract_body": "b2",
       "examples": [],
@@ -1245,6 +1543,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "identity.review",
       "contract_body": "b2",
       "examples": [],
@@ -1266,6 +1565,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "identity.review",
       "contract_body": "b2",
       "examples": [],
@@ -1288,6 +1588,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "identity.review",
       "contract_body": "b2",
       "examples": [],
@@ -1310,10 +1611,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
       "examples": [
-        "listener.configure.unavailable"
+        "listener.configure.capability_unavailable"
       ],
       "id": "listener.configure",
       "lifecycle": {
@@ -1323,8 +1625,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "capability_unavailable",
-        "forbidden",
-        "validation_failed"
+        "forbidden"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -1334,6 +1635,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "bootstrap_only",
       "bounded_context": "node.administration",
       "contract_body": "b1",
       "examples": [
@@ -1346,18 +1648,19 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "runtime_availability": "fixture_only"
       },
       "problems": [
-        "capability_unavailable",
         "forbidden",
+        "malformed_json",
+        "payload_too_large",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
-      "scopes": [
-        "node_initialize"
-      ],
+      "scopes": [],
       "surface_profile": "b1_http_fixture",
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
       "examples": [
@@ -1372,13 +1675,13 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "runtime_availability": "fixture_only"
       },
       "problems": [
-        "capability_unavailable",
         "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
-        "invalid_identifier",
         "invalid_observation",
-        "invalid_time",
+        "malformed_json",
+        "payload_too_large",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
@@ -1420,6 +1723,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       ]
     },
     {
+      "authorization": "scoped",
       "bounded_context": "portability.workspace",
       "contract_body": "b3",
       "examples": [],
@@ -1441,6 +1745,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "portability.workspace",
       "contract_body": "b3",
       "examples": [],
@@ -1463,6 +1768,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "portability.workspace",
       "contract_body": "b3",
       "examples": [],
@@ -1485,10 +1791,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "profile.preferences",
       "contract_body": "b1",
       "examples": [
-        "profile.select.unavailable"
+        "profile.select.capability_unavailable"
       ],
       "id": "profile.select",
       "lifecycle": {
@@ -1498,8 +1805,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "capability_unavailable",
-        "forbidden",
-        "validation_failed"
+        "forbidden"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -1509,10 +1815,11 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
+      "authorization": "scoped",
       "bounded_context": "observation.receipts",
       "contract_body": "b1",
       "examples": [
-        "receipt.replay.not_found"
+        "receipt.replay.receipt_not_found"
       ],
       "id": "receipt.replay",
       "lifecycle": {
@@ -1521,10 +1828,8 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "runtime_availability": "fixture_only"
       },
       "problems": [
-        "capability_unavailable",
         "forbidden",
-        "receipt_not_found",
-        "validation_failed"
+        "receipt_not_found"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -1541,10 +1846,12 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       ]
     },
     {
+      "authorization": "scoped",
       "bounded_context": "observation.receipts",
       "contract_body": "b1",
       "examples": [
-        "receipt.stream.not_found"
+        "receipt.stream.event",
+        "receipt.stream.receipt_not_found"
       ],
       "id": "receipt.stream",
       "lifecycle": {
@@ -1553,10 +1860,8 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "runtime_availability": "fixture_only"
       },
       "problems": [
-        "capability_unavailable",
         "forbidden",
-        "receipt_not_found",
-        "validation_failed"
+        "receipt_not_found"
       ],
       "runtime_body": "b2",
       "scopes": [
@@ -1573,6 +1878,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       ]
     },
     {
+      "authorization": "scoped",
       "bounded_context": "system.contracts",
       "contract_body": "b1",
       "examples": [
@@ -1586,7 +1892,6 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "runtime_availability": "fixture_only"
       },
       "problems": [
-        "contract_drift",
         "forbidden"
       ],
       "runtime_body": "b1",
@@ -1610,6 +1915,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       ]
     },
     {
+      "authorization": "unauthenticated",
       "bounded_context": "system.operations",
       "contract_body": "b1",
       "examples": [
@@ -1633,15 +1939,17 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
   "surface_profiles": {
     "b1_http_fixture": {
       "cli": {
-        "binding": "cli:{capability_id}",
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
         "state": "required"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
         "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "json_ld": {
@@ -1649,23 +1957,28 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "json_schema": {
-        "binding": "schema:{capability_id}",
+        "binding": "schema:openapi-operation:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "knowledge": {
-        "binding": "knowledge:{capability_id}",
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "okf": {
-        "binding": "okf:{capability_id}",
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "package_smoke": {
-        "binding": "package-smoke:{capability_id}",
+        "binding": "package-smoke:b1-conformance-fixture",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sdk": {
         "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sse_asyncapi": {
@@ -1679,39 +1992,47 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
     },
     "b1_observation_accept": {
       "cli": {
-        "binding": "cli:{capability_id}",
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
         "state": "required"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
         "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "json_ld": {
-        "binding": "json-ld:{capability_id}",
+        "binding": "json-ld:observation-receipt",
+        "binding_visibility": "public",
         "state": "required"
       },
       "json_schema": {
-        "binding": "schema:{capability_id}",
+        "binding": "schema:openapi-operation:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "knowledge": {
-        "binding": "knowledge:{capability_id}",
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "okf": {
-        "binding": "okf:{capability_id}",
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "package_smoke": {
-        "binding": "package-smoke:{capability_id}",
+        "binding": "package-smoke:b1-conformance-fixture",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sdk": {
         "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sse_asyncapi": {
@@ -1725,39 +2046,47 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
     },
     "b1_receipt_replay": {
       "cli": {
-        "binding": "cli:{capability_id}",
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
         "state": "required"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
         "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "json_ld": {
-        "binding": "json-ld:{capability_id}",
+        "binding": "json-ld:observation-receipt",
+        "binding_visibility": "public",
         "state": "required"
       },
       "json_schema": {
-        "binding": "schema:{capability_id}",
+        "binding": "schema:openapi-operation:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "knowledge": {
-        "binding": "knowledge:{capability_id}",
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "okf": {
-        "binding": "okf:{capability_id}",
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "package_smoke": {
-        "binding": "package-smoke:{capability_id}",
+        "binding": "package-smoke:b1-conformance-fixture",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sdk": {
         "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sse_asyncapi": {
@@ -1771,11 +2100,12 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
     },
     "b1_receipt_stream": {
       "cli": {
-        "binding": "cli:{capability_id}",
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
         "state": "required"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
@@ -1783,31 +2113,37 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "json_ld": {
-        "binding": "json-ld:{capability_id}",
-        "state": "required"
+        "reason": "Receipt stream events are transport envelopes governed by AsyncAPI; their referenced receipt semantics reuse the observation receipt contract rather than a second linked-data class.",
+        "state": "not_applicable"
       },
       "json_schema": {
-        "binding": "schema:{capability_id}",
+        "binding": "schema:asyncapi-message:receiptCommitted",
+        "binding_visibility": "public",
         "state": "required"
       },
       "knowledge": {
-        "binding": "knowledge:{capability_id}",
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "okf": {
-        "binding": "okf:{capability_id}",
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "package_smoke": {
-        "binding": "package-smoke:{capability_id}",
+        "binding": "package-smoke:b1-conformance-fixture",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sdk": {
         "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sse_asyncapi": {
         "binding": "asyncapi:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "ui": {
@@ -1821,11 +2157,12 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
         "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
         "state": "required"
       },
       "json_ld": {
@@ -1833,23 +2170,27 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "json_schema": {
-        "binding": "schema:{capability_id}",
+        "binding": "schema:health-response",
+        "binding_visibility": "public",
         "state": "required"
       },
       "knowledge": {
-        "binding": "knowledge:{capability_id}",
-        "state": "required"
+        "reason": "Healthy process state has no governed recovery problem.",
+        "state": "not_applicable"
       },
       "okf": {
-        "binding": "okf:{capability_id}",
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
         "state": "required"
       },
       "package_smoke": {
-        "binding": "package-smoke:{capability_id}",
+        "binding": "package-smoke:production-health",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sdk": {
-        "binding": "sdk:{capability_id}",
+        "binding": "sdk:system.health",
+        "binding_visibility": "public",
         "state": "required"
       },
       "sse_asyncapi": {
@@ -1868,7 +2209,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "later_body"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
@@ -1923,7 +2264,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "later_body"
       },
       "domain_application": {
-        "binding": "application:{application_key}",
+        "binding_visibility": "internal",
         "state": "required"
       },
       "http_openapi": {
@@ -1974,17 +2315,1128 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
   }
 } as const;
 
+// prettier-ignore
+export const PUBLIC_PROBLEM_CATALOG = {
+  "contract_version": "1.0.0",
+  "documentation_base": "https://fasti.scrobble.dev",
+  "problems": [
+    {
+      "capability_id": "client.enroll",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_json_media_type",
+          "label": "Use Content-Type application/json and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "correction.chain.append",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "correction.chain.append",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "correction.chain.append",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "correction.chain.inspect",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "correction.chain.inspect",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "credential.revoke",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "credential.revoke",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "credential.rotate",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "credential.rotate",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "invalid_identifier",
+      "detail": "identifier does not satisfy the governed format",
+      "next_actions": [
+        {
+          "id": "correct_identifier",
+          "label": "Correct the identifier and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Invalid identifier",
+      "type": "https://fasti.scrobble.dev/v1/problems/invalid-identifier"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "invalid_identifier",
+      "detail": "identifier does not satisfy the governed format",
+      "next_actions": [
+        {
+          "id": "correct_identifier",
+          "label": "Correct the identifier and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Invalid identifier",
+      "type": "https://fasti.scrobble.dev/v1/problems/invalid-identifier"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.review.defer",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.review.defer",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.review.defer",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.review.inspect",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.review.inspect",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.review.resolve",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.review.resolve",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.review.resolve",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.review.resume",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.review.resume",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.review.resume",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "listener.configure",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "listener.configure",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_json_media_type",
+          "label": "Use Content-Type application/json and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "capacity_exceeded",
+      "detail": "bounded application capacity has been reached",
+      "next_actions": [
+        {
+          "id": "release_capacity",
+          "label": "Release retained capacity before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 507,
+      "title": "Capacity exceeded",
+      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "invalid_observation",
+      "detail": "observation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_observation",
+          "label": "Correct the reported fields and submit again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Invalid observation",
+      "type": "https://fasti.scrobble.dev/v1/problems/invalid-observation"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_json_media_type",
+          "label": "Use Content-Type application/json and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "portability.workspace.export",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "portability.workspace.export",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "portability.workspace.restore",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "portability.workspace.restore",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "portability.workspace.restore",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "portability.workspace.verify",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b3",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "portability.workspace.verify",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "portability.workspace.verify",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "profile.select",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.select",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "receipt.replay",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "receipt.replay",
+      "code": "receipt_not_found",
+      "detail": "no receipt is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_receipt_id",
+          "label": "Verify the receipt ID and request context"
+        }
+      ],
+      "param": "/receipt_id",
+      "param_policy": "receipt_identifier_by_capability",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Receipt not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/receipt-not-found"
+    },
+    {
+      "capability_id": "receipt.stream",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "receipt.stream",
+      "code": "receipt_not_found",
+      "detail": "no receipt is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_receipt_id",
+          "label": "Verify the receipt ID and request context"
+        }
+      ],
+      "param": "/last_event_id",
+      "param_policy": "receipt_identifier_by_capability",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Receipt not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/receipt-not-found"
+    },
+    {
+      "capability_id": "system.capabilities.discover",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    }
+  ]
+} as const;
+
 export const CAPABILITY_REGISTRY = PUBLIC_CAPABILITY_REGISTRY.capabilities;
 export const SURFACE_PROFILES = PUBLIC_CAPABILITY_REGISTRY.surface_profiles;
 export type CapabilityMetadata = (typeof CAPABILITY_REGISTRY)[number];
 export type SurfaceProfileMetadata = typeof SURFACE_PROFILES;
+export type CanonicalProblemMetadata = (typeof PUBLIC_PROBLEM_CATALOG.problems)[number];
 
 export const RECEIPT_STREAM_CONTRACT = {
   path: "/api/v1/receipts/stream",
   eventName: "receiptCommitted",
+  sseIdPointer: "$message.payload#/receipt_id",
   capabilityId: "receipt.stream",
   requiredScopes: ["receipt_read"],
+  problemCodes: ["forbidden","receipt_not_found"],
   runtimeAvailability: "fixture_only",
+  durability: "none",
+  fixtureDelivery: "finite_replay_then_close",
   maximumReplayBatch: 100,
   retryPolicy: "bounded_client_backoff",
 } as const;
@@ -2003,24 +3455,24 @@ const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
 const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["capability_unavailable", "capacity_exceeded", "contract_drift", "forbidden", "idempotency_conflict", "invalid_identifier", "invalid_observation", "invalid_time", "receipt_not_found", "validation_failed"] as const;
+const PROBLEM_CODES = ["capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore
-const PROBLEM_REQUIRED = ["capability_id", "code", "correlation_id", "detail", "next_actions", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
+const PROBLEM_REQUIRED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 const ACTION_ALLOWED = ["id", "label"] as const;
 const ACTION_REQUIRED = ["id", "label"] as const;
 // prettier-ignore
 const VIOLATION_ALLOWED = ["actual", "code", "expected", "pointer", "reason"] as const;
-const VIOLATION_REQUIRED = ["code", "expected", "pointer", "reason"] as const;
+const VIOLATION_REQUIRED = ["actual", "code", "expected", "pointer", "reason"] as const;
 // prettier-ignore
 const RECEIPT_ALLOWED = ["capability_id", "committed_at", "correlation_id", "observation_id", "operation_id", "receipt_id", "resolution"] as const;
 // prettier-ignore
 const RECEIPT_REQUIRED = ["capability_id", "committed_at", "correlation_id", "observation_id", "operation_id", "receipt_id", "resolution"] as const;
-const CORRELATION_ID = new RegExp("^req_[0-9a-f]{32}$");
-const RECEIPT_ID = new RegExp("^rcp_[0-9a-f]{32}$");
-const OPERATION_ID = new RegExp("^op_[0-9a-f]{32}$");
-const OBSERVATION_ID = new RegExp("^obs_[0-9a-f]{32}$");
+const CORRELATION_ID = new RegExp("^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$");
+const RECEIPT_ID = new RegExp("^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$");
+const OPERATION_ID = new RegExp("^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$");
+const OBSERVATION_ID = new RegExp("^obs_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$");
 // prettier-ignore
 const RFC3339_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
 
@@ -2049,12 +3501,59 @@ export function parseProblemDetails(value: unknown): ProblemDetails {
   }
   knownStringField(object, "capability_id", CAPABILITY_IDS, "ProblemDetails");
   knownStringField(object, "code", PROBLEM_CODES, "ProblemDetails");
+  patternString(object, "correlation_id", CORRELATION_ID, "ProblemDetails");
   integerField(object, "status", "ProblemDetails", 0, 65_535);
   nullableStringField(object, "param", "ProblemDetails");
-  nullableStringField(object, "actual", "ProblemDetails");
-  arrayField(object, "next_actions", "ProblemDetails").forEach(parseProblemAction);
-  arrayField(object, "violations", "ProblemDetails").forEach(parseViolation);
+  exactNullField(object, "actual", "ProblemDetails");
+  const actions = arrayField(object, "next_actions", "ProblemDetails");
+  if (actions.length !== 1) {
+    throw new FastiContractParseError("ProblemDetails.next_actions must contain exactly one canonical action");
+  }
+  actions.forEach(parseProblemAction);
+  const violations = arrayField(object, "violations", "ProblemDetails");
+  if (violations.length > 32) {
+    throw new FastiContractParseError("ProblemDetails.violations exceeds the bounded violation count");
+  }
+  violations.forEach(parseViolation);
   return object as unknown as ProblemDetails;
+}
+
+// prettier-ignore
+export function parseProblemDetailsForOperation(
+  value: unknown,
+  capabilityId: CapabilityId,
+  allowedCodes: readonly ProblemCode[],
+): ProblemDetails {
+  const problem = parseProblemDetails(value);
+  if (problem.capability_id !== capabilityId) {
+    throw new FastiContractParseError("ProblemDetails capability does not match the requested operation");
+  }
+  if (!allowedCodes.includes(problem.code)) {
+    throw new FastiContractParseError("ProblemDetails code is not governed for the requested operation");
+  }
+  const canonical = PUBLIC_PROBLEM_CATALOG.problems.find(
+    (entry) => entry.capability_id === capabilityId && entry.code === problem.code,
+  );
+  if (canonical === undefined) {
+    throw new FastiContractParseError("ProblemDetails has no canonical capability problem contract");
+  }
+  if (
+    problem.type !== canonical.type ||
+    problem.title !== canonical.title ||
+    problem.status !== canonical.status ||
+    problem.detail !== canonical.detail ||
+    problem.safe_state !== canonical.safe_state ||
+    problem.retryability !== canonical.retryability ||
+    (problem.param ?? null) !== canonical.param ||
+    problem.next_actions.length !== canonical.next_actions.length ||
+    problem.next_actions.some((action, index) =>
+      action.id !== canonical.next_actions[index]?.id ||
+      action.label !== canonical.next_actions[index]?.label
+    )
+  ) {
+    throw new FastiContractParseError("ProblemDetails differs from its canonical application contract");
+  }
+  return problem;
 }
 
 // prettier-ignore
@@ -2084,7 +3583,7 @@ function parseViolation(value: unknown): ViolationDto {
   for (const field of ["code", "pointer", "reason", "expected"] as const) {
     stringField(object, field, "ViolationDto");
   }
-  nullableStringField(object, "actual", "ViolationDto");
+  exactNullField(object, "actual", "ViolationDto");
   return object as unknown as ViolationDto;
 }
 
@@ -2175,6 +3674,13 @@ function nullableStringField(object: JsonObject, field: string, label: string): 
   const value = object[field];
   if (value !== undefined && value !== null && typeof value !== "string") {
     throw new FastiContractParseError(`${label}.${field} must be a string or null`);
+  }
+}
+
+// prettier-ignore
+function exactNullField(object: JsonObject, field: string, label: string): void {
+  if (object[field] !== null) {
+    throw new FastiContractParseError(`${label}.${field} must be null`);
   }
 }
 

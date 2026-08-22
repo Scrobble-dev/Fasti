@@ -38,10 +38,7 @@
         "description": "RFC 9457 representation of the one application problem model.",
         "properties": {
           "actual": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "null"
           },
           "capability_id": {
             "type": "string"
@@ -50,6 +47,7 @@
             "type": "string"
           },
           "correlation_id": {
+            "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
             "type": "string"
           },
           "detail": {
@@ -59,6 +57,8 @@
             "items": {
               "$ref": "#/components/schemas/ProblemActionDto"
             },
+            "maxItems": 1,
+            "minItems": 1,
             "type": "array"
           },
           "param": {
@@ -74,7 +74,8 @@
             "type": "string"
           },
           "status": {
-            "format": "int32",
+            "format": "uint16",
+            "maximum": 65535,
             "minimum": 0,
             "type": "integer"
           },
@@ -88,6 +89,7 @@
             "items": {
               "$ref": "#/components/schemas/ViolationDto"
             },
+            "maxItems": 32,
             "type": "array"
           }
         },
@@ -102,6 +104,7 @@
           "retryability",
           "next_actions",
           "correlation_id",
+          "actual",
           "violations"
         ],
         "type": "object"
@@ -110,10 +113,7 @@
         "additionalProperties": false,
         "properties": {
           "actual": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "null"
           },
           "code": {
             "type": "string"
@@ -132,7 +132,8 @@
           "code",
           "pointer",
           "reason",
-          "expected"
+          "expected",
+          "actual"
         ],
         "type": "object"
       }
@@ -160,6 +161,14 @@
           "200": {
             "content": {
               "application/json": {
+                "examples": {
+                  "system.health.success": {
+                    "value": {
+                      "status": "healthy",
+                      "version": "0.1.0"
+                    }
+                  }
+                },
                 "schema": {
                   "$ref": "#/components/schemas/HealthResponse"
                 }
@@ -170,7 +179,15 @@
         },
         "tags": [
           "system"
-        ]
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "system.health",
+        "x-fasti-example-ids": [
+          "system.health.success"
+        ],
+        "x-fasti-problem-codes": [],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
       }
     }
   }

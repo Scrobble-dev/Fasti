@@ -26,7 +26,9 @@ channels:
     address: /api/v1/receipts/stream
     description: >-
       Server-sent receipt events. Reconnect presents Last-Event-ID; the server
-      performs a bounded replay before waiting for new committed receipts.
+      contract permits bounded replay before waiting for new committed receipts.
+      The B1 fixture performs only a finite bounded replay and then closes; it
+      does not wait for future receipts.
     servers:
       - $ref: "#/servers/local"
     messages:
@@ -52,7 +54,7 @@ operations:
     bindings:
       http:
         method: GET
-    x-fasti-capability-id: listener.configure
+    x-fasti-capability-id: receipt.stream
     x-fasti-required-scopes:
       - receipt_read
     x-fasti-replay:
@@ -61,6 +63,16 @@ operations:
       transaction: short_lived
       retryPolicy: bounded_client_backoff
     x-fasti-runtime-availability: fixture_only
+    x-fasti-durability: none
+    x-fasti-fixture-delivery: finite_replay_then_close
+    x-fasti-example-ids:
+      - receipt.stream.event
+      - receipt.stream.receipt_not_found
+    x-fasti-http-problems:
+      contentType: application/problem+json
+      responses:
+        - { status: 403, code: forbidden }
+        - { status: 404, code: receipt_not_found }
 components:
   messages:
     receiptCommitted:
@@ -70,8 +82,9 @@ components:
       contentType: application/json
       correlationId:
         location: $message.payload#/correlation_id
+      x-fasti-sse-id-pointer: $message.payload#/receipt_id
       payload:
-        schemaFormat: application/schema+json;version=draft-07
+        schemaFormat: application/schema+json;version=draft-2020-12
         schema:
           type: object
           additionalProperties: false
@@ -89,19 +102,33 @@ components:
               const: observation.accept
             correlation_id:
               type: string
-              pattern: ^req_[0-9a-f]{32}$
+              pattern: ^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$
             receipt_id:
               type: string
-              pattern: ^rcp_[0-9a-f]{32}$
+              format: fasti-receipt-id
+              minLength: 36
+              maxLength: 36
+              pattern: ^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$
             operation_id:
               type: string
-              pattern: ^op_[0-9a-f]{32}$
+              format: fasti-operation-id
+              minLength: 35
+              maxLength: 35
+              pattern: ^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$
             observation_id:
               type: string
-              pattern: ^obs_[0-9a-f]{32}$
+              format: fasti-observation-id
+              minLength: 36
+              maxLength: 36
+              pattern: ^obs_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$
             resolution:
               type: string
               const: unresolved
             committed_at:
               type: string
               format: date-time
+              minLength: 20
+              maxLength: 35
+              pattern: ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})$
+      x-fasti-example-ids:
+        - receipt.stream.event

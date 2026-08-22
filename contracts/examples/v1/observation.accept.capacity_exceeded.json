@@ -1,0 +1,20 @@
+{
+  "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+  "title": "Capacity exceeded",
+  "status": 507,
+  "detail": "bounded application capacity has been reached",
+  "code": "capacity_exceeded",
+  "capability_id": "observation.accept",
+  "safe_state": "no_mutation",
+  "retryability": "retry_after_correction",
+  "next_actions": [
+    {
+      "id": "release_capacity",
+      "label": "Release retained capacity before retrying"
+    }
+  ],
+  "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+  "param": null,
+  "actual": null,
+  "violations": []
+}

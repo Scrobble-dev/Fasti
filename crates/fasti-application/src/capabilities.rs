@@ -1,4 +1,4 @@
-use crate::ScopeKey;
+use crate::{ProblemCode, ScopeKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -37,8 +37,18 @@ pub enum RuntimeAvailability {
     LaterBody,
 }
 
+/// Application-owned authorization posture for a capability. Adapter-facing
+/// authentication schemes are derived from this policy; they do not redefine it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthorizationKind {
+    Unauthenticated,
+    BootstrapOnly,
+    Scoped,
+}
+
 macro_rules! define_capabilities {
-    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, [$($scope:ident),*])),+ $(,)?) => {
+    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*])),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum CapabilityKey {
@@ -72,9 +82,21 @@ macro_rules! define_capabilities {
                 }
             }
 
+            pub const fn authorization_kind(self) -> AuthorizationKind {
+                match self {
+                    $(Self::$variant => AuthorizationKind::$authorization),+
+                }
+            }
+
             pub const fn required_scopes(self) -> &'static [ScopeKey] {
                 match self {
                     $(Self::$variant => &[$(ScopeKey::$scope),*]),+
+                }
+            }
+
+            pub const fn allowed_problem_codes(self) -> &'static [ProblemCode] {
+                match self {
+                    $(Self::$variant => &[$(ProblemCode::$problem),*]),+
                 }
             }
 
@@ -89,14 +111,25 @@ macro_rules! define_capabilities {
 // registry maps each key to one external stable ID and all surface metadata;
 // application code never owns adapter-facing route or schema strings.
 define_capabilities!(
-    (SystemHealth, B1, B0, Finalized, Implemented, []),
+    (
+        SystemHealth,
+        B1,
+        B0,
+        Finalized,
+        Implemented,
+        Unauthenticated,
+        [],
+        []
+    ),
     (
         DiscoverCapabilities,
         B1,
         B1,
         Finalized,
         FixtureOnly,
-        [CapabilityRead]
+        Scoped,
+        [CapabilityRead],
+        [Forbidden]
     ),
     (
         InitializeNode,
@@ -104,7 +137,15 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [NodeInitialize]
+        BootstrapOnly,
+        [],
+        [
+            Forbidden,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
+            ValidationFailed
+        ]
     ),
     (
         EnrollFirstClient,
@@ -112,7 +153,15 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [ClientEnroll]
+        Scoped,
+        [ClientEnroll],
+        [
+            Forbidden,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
+            ValidationFailed
+        ]
     ),
     (
         SelectProfile,
@@ -120,7 +169,9 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [ProfileSelect]
+        Scoped,
+        [ProfileSelect],
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         RotateCredential,
@@ -128,7 +179,9 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [CredentialManage]
+        Scoped,
+        [CredentialManage],
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         RevokeCredential,
@@ -136,7 +189,9 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [CredentialManage]
+        Scoped,
+        [CredentialManage],
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         ConfigureListener,
@@ -144,7 +199,9 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [ListenerConfigure]
+        Scoped,
+        [ListenerConfigure],
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         AcceptObservation,
@@ -152,29 +209,108 @@ define_capabilities!(
         B2,
         Finalized,
         FixtureOnly,
-        [ObservationAccept]
+        Scoped,
+        [ObservationAccept],
+        [
+            CapacityExceeded,
+            Forbidden,
+            IdempotencyConflict,
+            InvalidObservation,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
+            ValidationFailed
+        ]
     ),
-    (ReplayReceipt, B1, B2, Finalized, FixtureOnly, [ReceiptRead]),
-    (CreateRecord, B2, B2, Reserved, LaterBody, [IdentityWrite]),
+    (
+        ReplayReceipt,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [ReceiptRead],
+        [Forbidden, ReceiptNotFound]
+    ),
+    (
+        StreamReceipts,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [ReceiptRead],
+        [Forbidden, ReceiptNotFound]
+    ),
+    (
+        CreateRecord,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [IdentityWrite],
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
+    ),
     (
         AttachIdentifier,
         B2,
         B2,
         Reserved,
         LaterBody,
-        [IdentityWrite]
+        Scoped,
+        [IdentityWrite],
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
     ),
-    (InspectReview, B2, B2, Reserved, LaterBody, [ReviewRead]),
-    (DeferReview, B2, B2, Reserved, LaterBody, [ReviewWrite]),
-    (ResumeReview, B2, B2, Reserved, LaterBody, [ReviewWrite]),
-    (ResolveReview, B2, B2, Reserved, LaterBody, [ReviewWrite]),
+    (
+        InspectReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewRead],
+        [CapabilityUnavailable, Forbidden]
+    ),
+    (
+        DeferReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
+    ),
+    (
+        ResumeReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
+    ),
+    (
+        ResolveReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
+    ),
     (
         AppendCorrection,
         B3,
         B3,
         Reserved,
         LaterBody,
-        [CorrectionWrite]
+        Scoped,
+        [CorrectionWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
     ),
     (
         InspectCorrectionChain,
@@ -182,7 +318,9 @@ define_capabilities!(
         B3,
         Reserved,
         LaterBody,
-        [CorrectionRead]
+        Scoped,
+        [CorrectionRead],
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         ExportWorkspace,
@@ -190,7 +328,9 @@ define_capabilities!(
         B3,
         Reserved,
         Guarded,
-        [WorkspaceExport]
+        Scoped,
+        [WorkspaceExport],
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         RestoreWorkspace,
@@ -198,7 +338,9 @@ define_capabilities!(
         B3,
         Reserved,
         Guarded,
-        [WorkspaceRestore]
+        Scoped,
+        [WorkspaceRestore],
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
     ),
     (
         VerifyWorkspace,
@@ -206,7 +348,9 @@ define_capabilities!(
         B3,
         Reserved,
         Guarded,
-        [WorkspaceVerify]
+        Scoped,
+        [WorkspaceVerify],
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
     ),
 );
 
@@ -297,6 +441,7 @@ mod tests {
                 CapabilityKey::ConfigureListener,
                 CapabilityKey::AcceptObservation,
                 CapabilityKey::ReplayReceipt,
+                CapabilityKey::StreamReceipts,
             ])
         );
         assert_eq!(

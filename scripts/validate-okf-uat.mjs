@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseYaml } from "yaml";
 
+import { readStrictJson } from "./lib/strict-json.mjs";
+
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const okfRoot = resolve(repositoryRoot, "contracts/okf/v1");
 const registryPath = resolve(
@@ -311,6 +313,30 @@ async function validateOkf(registry) {
     }
   }
 
+  const capabilityCatalogue = documents.get(
+    resolve(okfRoot, "capabilities.md"),
+  );
+  const governedAuthorization = Object.fromEntries(
+    finalizedB1.map(({ id, authorization }) => [id, authorization]),
+  );
+  assertSameSet(
+    capabilityCatalogue.frontmatter.authorization_postures,
+    [...new Set(Object.values(governedAuthorization))].sort(),
+    "capabilities.md authorization_postures",
+  );
+  assert.deepEqual(
+    capabilityCatalogue.frontmatter.authorization_assignments,
+    governedAuthorization,
+    "capabilities.md authorization assignments must exactly match finalized B1 registry capabilities",
+  );
+  for (const [id, authorization] of Object.entries(governedAuthorization)) {
+    assert.ok(
+      capabilityCatalogue.body.includes(`| \`${id}\``) &&
+        capabilityCatalogue.body.includes(`\`${authorization}\``),
+      `capabilities.md body must explain ${id} authorization ${authorization}`,
+    );
+  }
+
   return { conceptCount: concepts.length };
 }
 
@@ -380,7 +406,7 @@ async function validateUat(registry) {
     "source UAT IDs must be the complete ordered ID-001 through ID-080 set",
   );
 
-  const ownership = JSON.parse(await readFile(uatOwnershipPath, "utf8"));
+  const ownership = await readStrictJson(uatOwnershipPath);
   assert.match(ownership.version, /^\d+\.\d+\.\d+$/u);
   assert.equal(ownership.source, "uat-matrix.csv");
   assert.ok(

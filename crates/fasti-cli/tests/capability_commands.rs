@@ -111,14 +111,15 @@ fn json_output_is_deterministic_sorted_and_private() {
 }
 
 #[test]
-fn unknown_id_is_typed_actionable_and_stderr_only() {
+fn unknown_id_is_an_actionable_cli_local_diagnostic() {
     let output = run(&["capability", "show", "not.a.capability"]);
     assert!(!output.status.success());
     assert!(output.stdout.is_empty(), "failure must not write stdout");
     let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-    assert!(stderr.contains("code=capability_not_found"));
-    assert!(stderr.contains("capability_id=system.capabilities.discover"));
-    assert!(stderr.contains("safe_state=no_mutation"));
+    assert!(stderr.contains("diagnostic=resource_not_found"));
+    assert!(stderr.contains("scope=cli_local"));
+    assert!(!stderr.contains("capability_id="));
+    assert!(!stderr.contains("code="));
     assert!(stderr.contains("fasti capability list"));
 }
 

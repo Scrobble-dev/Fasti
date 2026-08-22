@@ -582,6 +582,10 @@
     }
   ],
   "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
+  "conformance": {
+    "availability": "fixture_only",
+    "durability": "none"
+  },
   "contract_version": "1.0.0",
   "surface_profiles": {
     "b1_http_fixture": {

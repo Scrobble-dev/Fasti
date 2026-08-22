@@ -1,0 +1,28 @@
+{
+  "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+  "title": "Validation failed",
+  "status": 422,
+  "detail": "request representation does not satisfy the governed contract",
+  "code": "validation_failed",
+  "capability_id": "node.initialize",
+  "safe_state": "no_mutation",
+  "retryability": "retry_after_correction",
+  "next_actions": [
+    {
+      "id": "correct_request",
+      "label": "Correct the request representation and retry"
+    }
+  ],
+  "correlation_id": "req_018f0e0e7f7b7000800000000000000a",
+  "param": null,
+  "actual": null,
+  "violations": [
+    {
+      "code": "invalid_representation",
+      "pointer": "/",
+      "reason": "request JSON does not match the governed schema",
+      "expected": "the documented request schema",
+      "actual": null
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 use crate::CapabilityKey;
 use fasti_domain::RequestCorrelationId;
 use serde::Serialize;
+use std::borrow::Cow;
 use std::fmt;
 
 macro_rules! define_string_enum {
@@ -22,19 +23,6 @@ macro_rules! define_string_enum {
     };
 }
 
-define_string_enum!(ProblemCode {
-    CapacityExceeded => "capacity_exceeded",
-    CapabilityUnavailable => "capability_unavailable",
-    ContractDrift => "contract_drift",
-    Forbidden => "forbidden",
-    IdempotencyConflict => "idempotency_conflict",
-    InvalidIdentifier => "invalid_identifier",
-    InvalidObservation => "invalid_observation",
-    InvalidTime => "invalid_time",
-    ReceiptNotFound => "receipt_not_found",
-    ValidationFailed => "validation_failed",
-});
-
 define_string_enum!(SafeState {
     NoMutation => "no_mutation",
     PriorStateRetained => "prior_state_retained",
@@ -47,6 +35,333 @@ define_string_enum!(Retryability {
     RetrySafe => "retry_safe",
 });
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProblemDetail {
+    Static(&'static str),
+    RuntimeBodyOwner,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProblemParamPolicy {
+    None,
+    Fixed(&'static str),
+    ReceiptIdentifierByCapability,
+}
+
+impl ProblemParamPolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Fixed(_) => "fixed",
+            Self::ReceiptIdentifierByCapability => "receipt_identifier_by_capability",
+        }
+    }
+
+    pub const fn resolve(self, capability: CapabilityKey) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::Fixed(pointer) => Some(pointer),
+            Self::ReceiptIdentifierByCapability => Some(match capability {
+                CapabilityKey::StreamReceipts => "/last_event_id",
+                _ => "/receipt_id",
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NextActionContract {
+    id: &'static str,
+    label: &'static str,
+}
+
+impl NextActionContract {
+    pub const fn id(self) -> &'static str {
+        self.id
+    }
+
+    pub const fn label(self) -> &'static str {
+        self.label
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProblemContract {
+    title: &'static str,
+    status: u16,
+    detail: ProblemDetail,
+    documentation_path: &'static str,
+    safe_state: SafeState,
+    retryability: Retryability,
+    default_next_action: NextActionContract,
+    param_policy: ProblemParamPolicy,
+}
+
+/// Canonical transport-representation violation metadata. Adapters select the
+/// problem code from their transport rejection and consume this descriptor;
+/// they do not own alternate user-facing strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepresentationViolationContract {
+    code: &'static str,
+    pointer: &'static str,
+    reason: &'static str,
+    expected: &'static str,
+}
+
+impl RepresentationViolationContract {
+    pub const fn code(self) -> &'static str {
+        self.code
+    }
+
+    pub const fn pointer(self) -> &'static str {
+        self.pointer
+    }
+
+    pub const fn reason(self) -> &'static str {
+        self.reason
+    }
+
+    pub const fn expected(self) -> &'static str {
+        self.expected
+    }
+}
+
+impl ProblemContract {
+    pub const fn title(self) -> &'static str {
+        self.title
+    }
+
+    pub const fn status(self) -> u16 {
+        self.status
+    }
+
+    pub fn detail(self, capability: CapabilityKey) -> Cow<'static, str> {
+        match self.detail {
+            ProblemDetail::Static(detail) => Cow::Borrowed(detail),
+            ProblemDetail::RuntimeBodyOwner => Cow::Owned(format!(
+                "requested capability is not available in this body; it is owned by {}",
+                capability.runtime_body().as_str().to_ascii_lowercase()
+            )),
+        }
+    }
+
+    pub const fn documentation_path(self) -> &'static str {
+        self.documentation_path
+    }
+
+    pub const fn safe_state(self) -> SafeState {
+        self.safe_state
+    }
+
+    pub const fn retryability(self) -> Retryability {
+        self.retryability
+    }
+
+    pub const fn default_next_action(self) -> NextActionContract {
+        self.default_next_action
+    }
+
+    pub const fn param_policy(self) -> ProblemParamPolicy {
+        self.param_policy
+    }
+}
+
+macro_rules! define_problem_catalog {
+    ($($variant:ident => $code:literal {
+        title: $title:literal,
+        status: $status:literal,
+        detail: $detail:expr,
+        documentation_path: $documentation_path:literal,
+        safe_state: $safe_state:ident,
+        retryability: $retryability:ident,
+        default_next_action: ($action_id:literal, $action_label:literal),
+        param_policy: $param_policy:expr
+    }),+ $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+        pub enum ProblemCode {
+            $(#[serde(rename = $code)] $variant),+
+        }
+
+        impl ProblemCode {
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $code),+
+                }
+            }
+
+            pub fn from_code(value: &str) -> Option<Self> {
+                match value {
+                    $($code => Some(Self::$variant)),+,
+                    _ => None,
+                }
+            }
+
+            pub const fn contract(self) -> ProblemContract {
+                match self {
+                    $(Self::$variant => ProblemContract {
+                        title: $title,
+                        status: $status,
+                        detail: $detail,
+                        documentation_path: $documentation_path,
+                        safe_state: SafeState::$safe_state,
+                        retryability: Retryability::$retryability,
+                        default_next_action: NextActionContract {
+                            id: $action_id,
+                            label: $action_label,
+                        },
+                        param_policy: $param_policy,
+                    }),+
+                }
+            }
+
+            pub const fn representation_violation(self) -> Option<RepresentationViolationContract> {
+                match self {
+                    Self::MalformedJson => Some(RepresentationViolationContract {
+                        code: "invalid_representation",
+                        pointer: "/",
+                        reason: "request JSON is malformed",
+                        expected: "well-formed JSON",
+                    }),
+                    Self::PayloadTooLarge => Some(RepresentationViolationContract {
+                        code: "invalid_representation",
+                        pointer: "/",
+                        reason: "request body exceeds the bounded fixture limit",
+                        expected: "a JSON body no larger than 4096 bytes",
+                    }),
+                    Self::UnsupportedMediaType => Some(RepresentationViolationContract {
+                        code: "invalid_representation",
+                        pointer: "/",
+                        reason: "request media type is unsupported",
+                        expected: "Content-Type application/json",
+                    }),
+                    Self::ValidationFailed => Some(RepresentationViolationContract {
+                        code: "invalid_representation",
+                        pointer: "/",
+                        reason: "request JSON does not match the governed schema",
+                        expected: "the documented request schema",
+                    }),
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+define_problem_catalog!(
+    CapacityExceeded => "capacity_exceeded" {
+        title: "Capacity exceeded",
+        status: 507,
+        detail: ProblemDetail::Static("bounded application capacity has been reached"),
+        documentation_path: "v1/problems/capacity-exceeded",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("release_capacity", "Release retained capacity before retrying"),
+        param_policy: ProblemParamPolicy::None
+    },
+    CapabilityUnavailable => "capability_unavailable" {
+        title: "Capability unavailable",
+        status: 501,
+        detail: ProblemDetail::RuntimeBodyOwner,
+        documentation_path: "v1/problems/capability-unavailable",
+        safe_state: NoMutation,
+        retryability: NotRetryable,
+        default_next_action: ("review_capability_status", "Review the local capability registry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    Forbidden => "forbidden" {
+        title: "Forbidden",
+        status: 403,
+        detail: ProblemDetail::Static("request is not authorized for this capability"),
+        documentation_path: "v1/problems/forbidden",
+        safe_state: NoMutation,
+        retryability: NotRetryable,
+        default_next_action: ("verify_request_authorization", "Verify the request context and local grant"),
+        param_policy: ProblemParamPolicy::None
+    },
+    IdempotencyConflict => "idempotency_conflict" {
+        title: "Idempotency conflict",
+        status: 409,
+        detail: ProblemDetail::Static("operation ID was already used with different request semantics"),
+        documentation_path: "v1/problems/idempotency-conflict",
+        safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("use_new_operation_id", "Use a new operation ID for a distinct observation"),
+        param_policy: ProblemParamPolicy::Fixed("/operation_id")
+    },
+    InvalidIdentifier => "invalid_identifier" {
+        title: "Invalid identifier",
+        status: 422,
+        detail: ProblemDetail::Static("identifier does not satisfy the governed format"),
+        documentation_path: "v1/problems/invalid-identifier",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("correct_identifier", "Correct the identifier and retry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    MalformedJson => "malformed_json" {
+        title: "Malformed JSON",
+        status: 400,
+        detail: ProblemDetail::Static("request JSON is malformed"),
+        documentation_path: "v1/problems/malformed-json",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("correct_json", "Correct the JSON syntax and retry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    InvalidObservation => "invalid_observation" {
+        title: "Invalid observation",
+        status: 422,
+        detail: ProblemDetail::Static("observation does not satisfy the governed contract"),
+        documentation_path: "v1/problems/invalid-observation",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("correct_observation", "Correct the reported fields and submit again"),
+        param_policy: ProblemParamPolicy::None
+    },
+    PayloadTooLarge => "payload_too_large" {
+        title: "Payload too large",
+        status: 413,
+        detail: ProblemDetail::Static("request body exceeds the bounded transport limit"),
+        documentation_path: "v1/problems/payload-too-large",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("reduce_request_body", "Reduce the request body and retry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    ReceiptNotFound => "receipt_not_found" {
+        title: "Receipt not found",
+        status: 404,
+        detail: ProblemDetail::Static("no receipt is available for the requested identifier"),
+        documentation_path: "v1/problems/receipt-not-found",
+        safe_state: NoMutation,
+        retryability: NotRetryable,
+        default_next_action: ("verify_receipt_id", "Verify the receipt ID and request context"),
+        param_policy: ProblemParamPolicy::ReceiptIdentifierByCapability
+    },
+    ValidationFailed => "validation_failed" {
+        title: "Validation failed",
+        status: 422,
+        detail: ProblemDetail::Static("request representation does not satisfy the governed contract"),
+        documentation_path: "v1/problems/validation-failed",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("correct_request", "Correct the request representation and retry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    UnsupportedMediaType => "unsupported_media_type" {
+        title: "Unsupported media type",
+        status: 415,
+        detail: ProblemDetail::Static("request media type is unsupported"),
+        documentation_path: "v1/problems/unsupported-media-type",
+        safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("use_json_media_type", "Use Content-Type application/json and retry"),
+        param_policy: ProblemParamPolicy::None
+    }
+);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextAction {
     id: String,
@@ -54,16 +369,11 @@ pub struct NextAction {
 }
 
 impl NextAction {
-    pub fn try_new(
-        id: impl Into<String>,
-        label: impl Into<String>,
-    ) -> Result<Self, ProblemBuildError> {
-        let id = id.into();
-        let label = label.into();
-        if id.trim().is_empty() || label.trim().is_empty() {
-            return Err(ProblemBuildError::EmptyAction);
+    fn from_contract(contract: NextActionContract) -> Self {
+        Self {
+            id: contract.id().to_owned(),
+            label: contract.label().to_owned(),
         }
-        Ok(Self { id, label })
     }
 
     pub fn id(&self) -> &str {
@@ -81,7 +391,6 @@ pub struct Violation {
     pointer: String,
     reason: String,
     expected: String,
-    actual: Option<String>,
 }
 
 impl Violation {
@@ -107,7 +416,6 @@ impl Violation {
             pointer,
             reason,
             expected,
-            actual: None,
         })
     }
 
@@ -124,7 +432,7 @@ impl Violation {
         &self.expected
     }
     pub fn actual(&self) -> Option<&str> {
-        self.actual.as_deref()
+        None
     }
 }
 
@@ -144,8 +452,6 @@ fn is_valid_json_pointer(pointer: &str) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProblemBuildError {
-    EmptyAction,
-    TooManyActions,
     TooManyViolations,
     InvalidViolation,
 }
@@ -153,8 +459,6 @@ pub enum ProblemBuildError {
 impl fmt::Display for ProblemBuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
-            Self::EmptyAction => "problem action ID and label must not be empty",
-            Self::TooManyActions => "a problem may expose no more than three ordered next actions",
             Self::TooManyViolations => "a problem may expose no more than 32 validation violations",
             Self::InvalidViolation => {
                 "violation fields must be non-empty and pointer must be a JSON Pointer"
@@ -170,18 +474,41 @@ impl std::error::Error for ProblemBuildError {}
 pub struct FastiProblem {
     code: ProblemCode,
     capability: CapabilityKey,
-    message: String,
-    safe_state: SafeState,
-    retryability: Retryability,
     next_actions: Vec<NextAction>,
     correlation_id: RequestCorrelationId,
-    param: Option<String>,
-    actual: Option<String>,
-    documentation_path: Option<&'static str>,
     violations: Vec<Violation>,
 }
 
 impl FastiProblem {
+    fn new(
+        code: ProblemCode,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        assert!(
+            capability.allowed_problem_codes().contains(&code),
+            "problem {} is not allowed for capability {capability:?}",
+            code.as_str()
+        );
+        let default_action = code.contract().default_next_action();
+        Self {
+            code,
+            capability,
+            next_actions: vec![NextAction::from_contract(default_action)],
+            correlation_id,
+            violations: Vec::new(),
+        }
+    }
+
+    fn with_violations(
+        code: ProblemCode,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::new(code, capability, correlation_id).try_with_violations(violations)
+    }
+
     /// The bounded application resource cannot accept another distinct item.
     /// Callers may retry only after capacity has been released; no mutation has
     /// occurred for the rejected request.
@@ -189,88 +516,29 @@ impl FastiProblem {
         capability: CapabilityKey,
         correlation_id: RequestCorrelationId,
     ) -> Self {
-        Self {
-            code: ProblemCode::CapacityExceeded,
-            capability,
-            message: "bounded application capacity has been reached".to_owned(),
-            safe_state: SafeState::NoMutation,
-            retryability: Retryability::RetryAfterCorrection,
-            next_actions: vec![NextAction {
-                id: "release_capacity".to_owned(),
-                label: "Release retained capacity before retrying".to_owned(),
-            }],
-            correlation_id,
-            param: None,
-            actual: None,
-            documentation_path: Some("v1/problems/capacity-exceeded"),
-            violations: Vec::new(),
-        }
+        Self::new(ProblemCode::CapacityExceeded, capability, correlation_id)
     }
 
     pub fn capability_unavailable(
         capability: CapabilityKey,
         correlation_id: RequestCorrelationId,
     ) -> Self {
-        let owner = capability.runtime_body().as_str();
-        Self {
-            code: ProblemCode::CapabilityUnavailable,
+        Self::new(
+            ProblemCode::CapabilityUnavailable,
             capability,
-            message: format!(
-                "requested capability is not available in this body; it is owned by {owner}"
-            ),
-            safe_state: SafeState::NoMutation,
-            retryability: Retryability::NotRetryable,
-            next_actions: vec![NextAction {
-                id: "review_capability_status".to_owned(),
-                label: "Review the local capability registry".to_owned(),
-            }],
             correlation_id,
-            param: None,
-            actual: None,
-            documentation_path: Some("v1/problems/capability-unavailable"),
-            violations: Vec::new(),
-        }
+        )
     }
 
     pub fn forbidden(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self {
-        Self {
-            code: ProblemCode::Forbidden,
-            capability,
-            message: "request is not authorized for this capability".to_owned(),
-            safe_state: SafeState::NoMutation,
-            retryability: Retryability::NotRetryable,
-            next_actions: vec![NextAction {
-                id: "verify_request_authorization".to_owned(),
-                label: "Verify the request context and local grant".to_owned(),
-            }],
-            correlation_id,
-            param: None,
-            actual: None,
-            documentation_path: Some("v1/problems/forbidden"),
-            violations: Vec::new(),
-        }
+        Self::new(ProblemCode::Forbidden, capability, correlation_id)
     }
 
     pub fn idempotency_conflict(
         capability: CapabilityKey,
         correlation_id: RequestCorrelationId,
     ) -> Self {
-        Self {
-            code: ProblemCode::IdempotencyConflict,
-            capability,
-            message: "operation ID was already used with different request semantics".to_owned(),
-            safe_state: SafeState::PriorStateRetained,
-            retryability: Retryability::RetryAfterCorrection,
-            next_actions: vec![NextAction {
-                id: "use_new_operation_id".to_owned(),
-                label: "Use a new operation ID for a distinct observation".to_owned(),
-            }],
-            correlation_id,
-            param: Some("/operation_id".to_owned()),
-            actual: None,
-            documentation_path: Some("v1/problems/idempotency-conflict"),
-            violations: Vec::new(),
-        }
+        Self::new(ProblemCode::IdempotencyConflict, capability, correlation_id)
     }
 
     pub fn receipt_not_found(
@@ -281,51 +549,58 @@ impl FastiProblem {
             capability,
             CapabilityKey::ReplayReceipt | CapabilityKey::StreamReceipts
         ));
-        Self {
-            code: ProblemCode::ReceiptNotFound,
-            capability,
-            message: "no receipt is available for the requested identifier".to_owned(),
-            safe_state: SafeState::NoMutation,
-            retryability: Retryability::NotRetryable,
-            next_actions: vec![NextAction {
-                id: "verify_receipt_id".to_owned(),
-                label: "Verify the receipt ID and request context".to_owned(),
-            }],
-            correlation_id,
-            param: Some(
-                match capability {
-                    CapabilityKey::StreamReceipts => "/last_event_id",
-                    _ => "/receipt_id",
-                }
-                .to_owned(),
-            ),
-            actual: None,
-            documentation_path: Some("v1/problems/receipt-not-found"),
-            violations: Vec::new(),
-        }
+        Self::new(ProblemCode::ReceiptNotFound, capability, correlation_id)
     }
 
     pub fn invalid_observation(
         correlation_id: RequestCorrelationId,
         violations: Vec<Violation>,
     ) -> Result<Self, ProblemBuildError> {
-        Self {
-            code: ProblemCode::InvalidObservation,
-            capability: CapabilityKey::AcceptObservation,
-            message: "observation does not satisfy the governed contract".to_owned(),
-            safe_state: SafeState::NoMutation,
-            retryability: Retryability::RetryAfterCorrection,
-            next_actions: vec![NextAction {
-                id: "correct_observation".to_owned(),
-                label: "Correct the reported fields and submit again".to_owned(),
-            }],
+        Self::with_violations(
+            ProblemCode::InvalidObservation,
+            CapabilityKey::AcceptObservation,
             correlation_id,
-            param: None,
-            actual: None,
-            documentation_path: Some("v1/problems/invalid-observation"),
-            violations: Vec::new(),
-        }
-        .try_with_violations(violations)
+            violations,
+        )
+    }
+
+    pub fn malformed_json(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::MalformedJson,
+            capability,
+            correlation_id,
+            violations,
+        )
+    }
+
+    pub fn payload_too_large(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::PayloadTooLarge,
+            capability,
+            correlation_id,
+            violations,
+        )
+    }
+
+    pub fn unsupported_media_type(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::UnsupportedMediaType,
+            capability,
+            correlation_id,
+            violations,
+        )
     }
 
     /// Transport or representation validation failed before the capability
@@ -335,34 +610,12 @@ impl FastiProblem {
         correlation_id: RequestCorrelationId,
         violations: Vec<Violation>,
     ) -> Result<Self, ProblemBuildError> {
-        Self {
-            code: ProblemCode::ValidationFailed,
+        Self::with_violations(
+            ProblemCode::ValidationFailed,
             capability,
-            message: "request representation does not satisfy the governed contract".to_owned(),
-            safe_state: SafeState::NoMutation,
-            retryability: Retryability::RetryAfterCorrection,
-            next_actions: vec![NextAction {
-                id: "correct_request".to_owned(),
-                label: "Correct the request representation and retry".to_owned(),
-            }],
             correlation_id,
-            param: None,
-            actual: None,
-            documentation_path: Some("v1/problems/validation-failed"),
-            violations: Vec::new(),
-        }
-        .try_with_violations(violations)
-    }
-
-    pub fn try_with_next_actions(
-        mut self,
-        next_actions: Vec<NextAction>,
-    ) -> Result<Self, ProblemBuildError> {
-        if next_actions.len() > 3 {
-            return Err(ProblemBuildError::TooManyActions);
-        }
-        self.next_actions = next_actions;
-        Ok(self)
+            violations,
+        )
     }
 
     pub fn try_with_violations(
@@ -379,17 +632,26 @@ impl FastiProblem {
     pub fn code(&self) -> ProblemCode {
         self.code
     }
+    pub const fn contract(&self) -> ProblemContract {
+        self.code.contract()
+    }
     pub fn capability(&self) -> CapabilityKey {
         self.capability
     }
-    pub fn message(&self) -> &str {
-        &self.message
+    pub fn title(&self) -> &'static str {
+        self.contract().title()
+    }
+    pub fn status(&self) -> u16 {
+        self.contract().status()
+    }
+    pub fn message(&self) -> Cow<'static, str> {
+        self.contract().detail(self.capability)
     }
     pub fn safe_state(&self) -> SafeState {
-        self.safe_state
+        self.contract().safe_state()
     }
     pub fn retryability(&self) -> Retryability {
-        self.retryability
+        self.contract().retryability()
     }
     pub fn next_actions(&self) -> &[NextAction] {
         &self.next_actions
@@ -398,13 +660,13 @@ impl FastiProblem {
         self.correlation_id
     }
     pub fn param(&self) -> Option<&str> {
-        self.param.as_deref()
+        self.contract().param_policy().resolve(self.capability)
     }
     pub fn actual(&self) -> Option<&str> {
-        self.actual.as_deref()
+        None
     }
-    pub fn documentation_path(&self) -> Option<&str> {
-        self.documentation_path
+    pub fn documentation_path(&self) -> &'static str {
+        self.contract().documentation_path()
     }
     pub fn violations(&self) -> &[Violation] {
         &self.violations
@@ -430,6 +692,88 @@ mod tests {
             Retryability::RetryAfterCorrection.as_str(),
             "retry_after_correction"
         );
+        assert_eq!(
+            ProblemCode::from_code("unsupported_media_type"),
+            Some(ProblemCode::UnsupportedMediaType)
+        );
+        assert_eq!(ProblemCode::from_code("unknown"), None);
+    }
+
+    #[test]
+    fn every_problem_code_has_one_complete_canonical_descriptor() {
+        let mut codes = std::collections::BTreeSet::new();
+        let mut documentation_paths = std::collections::BTreeSet::new();
+        for code in ProblemCode::ALL {
+            let contract = code.contract();
+            assert!(codes.insert(code.as_str()));
+            assert!(documentation_paths.insert(contract.documentation_path()));
+            assert!((400..=599).contains(&contract.status()));
+            assert!(!contract.title().is_empty());
+            assert!(!contract.detail(CapabilityKey::AcceptObservation).is_empty());
+            assert!(!contract.default_next_action().id().is_empty());
+            assert!(!contract.default_next_action().label().is_empty());
+        }
+    }
+
+    #[test]
+    fn representation_failures_preserve_distinct_http_semantics() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let violation = || {
+            Violation::try_new(
+                "invalid_representation",
+                "/",
+                "representation is invalid",
+                "a governed JSON representation",
+            )
+            .expect("valid violation")
+        };
+        let cases = [
+            (
+                FastiProblem::malformed_json(
+                    CapabilityKey::InitializeNode,
+                    correlation_id,
+                    vec![violation()],
+                )
+                .expect("bounded problem"),
+                ProblemCode::MalformedJson,
+                400,
+            ),
+            (
+                FastiProblem::payload_too_large(
+                    CapabilityKey::InitializeNode,
+                    correlation_id,
+                    vec![violation()],
+                )
+                .expect("bounded problem"),
+                ProblemCode::PayloadTooLarge,
+                413,
+            ),
+            (
+                FastiProblem::unsupported_media_type(
+                    CapabilityKey::InitializeNode,
+                    correlation_id,
+                    vec![violation()],
+                )
+                .expect("bounded problem"),
+                ProblemCode::UnsupportedMediaType,
+                415,
+            ),
+            (
+                FastiProblem::validation_failed(
+                    CapabilityKey::InitializeNode,
+                    correlation_id,
+                    vec![violation()],
+                )
+                .expect("bounded problem"),
+                ProblemCode::ValidationFailed,
+                422,
+            ),
+        ];
+        for (problem, code, status) in cases {
+            assert_eq!(problem.code(), code);
+            assert_eq!(problem.status(), status);
+            assert_eq!(problem.violations().len(), 1);
+        }
     }
 
     #[test]
@@ -440,19 +784,6 @@ mod tests {
         );
         assert_eq!(problem.safe_state(), SafeState::NoMutation);
         assert_eq!(problem.next_actions().len(), 1);
-    }
-
-    #[test]
-    fn construction_enforces_action_and_violation_limits() {
-        let action = || NextAction::try_new("review", "Review status").expect("valid action");
-        let problem = FastiProblem::capability_unavailable(
-            CapabilityKey::RestoreWorkspace,
-            RequestCorrelationId::new_v7(),
-        );
-        assert_eq!(
-            problem.try_with_next_actions(vec![action(), action(), action(), action()]),
-            Err(ProblemBuildError::TooManyActions)
-        );
     }
 
     #[test]
@@ -524,5 +855,12 @@ mod tests {
         assert_eq!(problem.safe_state(), SafeState::PriorStateRetained);
         assert_eq!(problem.param(), Some("/operation_id"));
         assert_eq!(problem.actual(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "problem forbidden is not allowed for capability SystemHealth")]
+    fn problem_construction_rejects_cross_capability_semantics() {
+        let _ =
+            FastiProblem::forbidden(CapabilityKey::SystemHealth, RequestCorrelationId::new_v7());
     }
 }

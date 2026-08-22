@@ -1,0 +1,20 @@
+{
+  "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "request is not authorized for this capability",
+  "code": "forbidden",
+  "capability_id": "system.capabilities.discover",
+  "safe_state": "no_mutation",
+  "retryability": "not_retryable",
+  "next_actions": [
+    {
+      "id": "verify_request_authorization",
+      "label": "Verify the request context and local grant"
+    }
+  ],
+  "correlation_id": "req_018f0e0e7f7b70008000000000000009",
+  "param": null,
+  "actual": null,
+  "violations": []
+}

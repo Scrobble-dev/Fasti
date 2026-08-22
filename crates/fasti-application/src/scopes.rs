@@ -17,7 +17,6 @@ macro_rules! define_scope_keys {
 }
 
 define_scope_keys!(
-    NodeInitialize,
     CapabilityRead,
     ClientEnroll,
     ProfileSelect,

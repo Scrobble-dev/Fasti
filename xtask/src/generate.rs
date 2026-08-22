@@ -1,4 +1,5 @@
 use anyhow::{ensure, Context};
+use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy};
 use fasti_contracts::{HealthResponse, ProblemDetails};
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde_json::{Map, Value};
@@ -14,11 +15,16 @@ pub(crate) type Artifacts = BTreeMap<PathBuf, Vec<u8>>;
 const OPENAPI_PATH: &str = "contracts/generated/v1/openapi.json";
 const CONFORMANCE_OPENAPI_PATH: &str = "contracts/generated/v1/conformance-openapi.json";
 const CAPABILITY_REGISTRY_PATH: &str = "contracts/generated/v1/capabilities.json";
+const PROBLEM_CATALOG_PATH: &str = "contracts/generated/v1/problems.json";
+const CAPABILITY_DISCOVERY_EXAMPLE_PATH: &str =
+    "contracts/examples/v1/system.capabilities.success.json";
 const HEALTH_SCHEMA_PATH: &str = "packages/schemas/schemas/health-response.json";
 const PROBLEM_SCHEMA_PATH: &str = "packages/schemas/schemas/problem-details.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const ASYNCAPI_PATH: &str = "contracts/asyncapi/v1/transport.yaml";
+const EXAMPLES_DIRECTORY: &str = "contracts/examples/v1";
+const DOCUMENTATION_BASE: &str = "https://fasti.scrobble.dev";
 const GENERATED_ONLY_DIRECTORIES: [&str; 2] =
     ["contracts/generated/v1", "packages/schemas/schemas"];
 
@@ -210,21 +216,52 @@ pub(crate) fn compare_outputs(
 fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let mut artifacts = BTreeMap::new();
     let public_registry = registry::normalized_public_json(workspace_root)?;
+    let capability_keys: BTreeMap<_, _> = registry::internal_key_id_pairs(workspace_root)?
+        .into_iter()
+        .map(|(key, id)| (id, key))
+        .collect();
+    let problem_catalog = canonical_problem_catalog(&public_registry, &capability_keys)?;
+    let capability_discovery_example = capability_discovery_example(&public_registry)?;
     let health_schema = draft_2020_12_schema::<HealthResponse>()?;
     let problem_schema = draft_2020_12_schema::<ProblemDetails>()?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
+    let mut production_openapi = serde_json::to_value(fasti_api::openapi())
+        .context("production OpenAPI is not serializable")?;
+    enrich_production_health_openapi(workspace_root, &mut production_openapi, &public_registry)?;
     let mut conformance_openapi = serde_json::to_value(fasti_api::b1_conformance_openapi())
         .context("B1 conformance OpenAPI is not serializable")?;
-    enrich_conformance_openapi(&mut conformance_openapi, &public_registry)?;
-    insert(
-        &mut artifacts,
-        OPENAPI_PATH,
-        serde_json::to_value(fasti_api::openapi()).context("OpenAPI is not serializable")?,
+    enrich_conformance_openapi(
+        workspace_root,
+        &mut conformance_openapi,
+        &public_registry,
+        &capability_keys,
+        &capability_discovery_example,
     )?;
+    validate_problem_schema_parity(&problem_schema, &conformance_openapi)?;
+    validate_required_b1_bindings(
+        workspace_root,
+        &capability_keys,
+        &production_openapi,
+        &conformance_openapi,
+        &asyncapi,
+        &problem_catalog,
+        &health_schema,
+    )?;
+    insert(&mut artifacts, OPENAPI_PATH, production_openapi)?;
     insert(
         &mut artifacts,
         CAPABILITY_REGISTRY_PATH,
         public_registry.clone(),
+    )?;
+    insert(
+        &mut artifacts,
+        PROBLEM_CATALOG_PATH,
+        problem_catalog.clone(),
+    )?;
+    insert(
+        &mut artifacts,
+        CAPABILITY_DISCOVERY_EXAMPLE_PATH,
+        capability_discovery_example,
     )?;
     insert(
         &mut artifacts,
@@ -238,6 +275,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         SDK_GENERATED_PATH,
         typescript_sdk(
             &public_registry,
+            &problem_catalog,
             &health_schema,
             &problem_schema,
             &asyncapi,
@@ -295,7 +333,101 @@ fn pretty_json(value: Value) -> anyhow::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn enrich_conformance_openapi(openapi: &mut Value, public_registry: &Value) -> anyhow::Result<()> {
+fn canonical_problem_catalog(
+    public_registry: &Value,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+) -> anyhow::Result<Value> {
+    let mut entries = Vec::new();
+    for capability in array_at(public_registry, "/capabilities")? {
+        let capability_id = string_at(capability, "/id")?;
+        let capability_key = *capability_keys.get(capability_id).with_context(|| {
+            format!("registry capability {capability_id} has no application key")
+        })?;
+        for problem in array_at(capability, "/problems")? {
+            let code = problem
+                .as_str()
+                .context("registry problem code must be a string")?;
+            let code = ProblemCode::from_code(code).with_context(|| {
+                format!("registry problem code {code} has no canonical contract")
+            })?;
+            let contract = code.contract();
+            let param_policy = contract.param_policy();
+            if param_policy == ProblemParamPolicy::ReceiptIdentifierByCapability {
+                ensure!(
+                    matches!(
+                        capability_key,
+                        CapabilityKey::ReplayReceipt | CapabilityKey::StreamReceipts
+                    ),
+                    "{} cannot resolve receipt identifier parameters for {capability_id}",
+                    code.as_str()
+                );
+            }
+            let action = contract.default_next_action();
+            entries.push(serde_json::json!({
+                "capability_id": capability_id,
+                "code": code.as_str(),
+                "type": format!(
+                    "{DOCUMENTATION_BASE}/{}",
+                    contract.documentation_path()
+                ),
+                "title": contract.title(),
+                "status": contract.status(),
+                "detail": contract.detail(capability_key),
+                "safe_state": contract.safe_state().as_str(),
+                "retryability": contract.retryability().as_str(),
+                "next_actions": [{
+                    "id": action.id(),
+                    "label": action.label(),
+                }],
+                "param_policy": param_policy.as_str(),
+                "param": param_policy.resolve(capability_key),
+            }));
+        }
+    }
+    ensure!(
+        !entries.is_empty(),
+        "canonical problem catalog cannot be empty"
+    );
+    Ok(serde_json::json!({
+        "contract_version": string_at(public_registry, "/contract_version")?,
+        "documentation_base": DOCUMENTATION_BASE,
+        "problems": entries,
+    }))
+}
+
+fn capability_discovery_example(public_registry: &Value) -> anyhow::Result<Value> {
+    let capabilities = array_at(public_registry, "/capabilities")?;
+    ensure!(
+        capabilities.len() == CapabilityKey::ALL.len(),
+        "capability discovery example must expose every application capability"
+    );
+    let ids: Vec<_> = capabilities
+        .iter()
+        .map(|capability| string_at(capability, "/id"))
+        .collect::<anyhow::Result<_>>()?;
+    ensure!(
+        ids.windows(2).all(|pair| pair[0] < pair[1]),
+        "capability discovery example must remain canonically sorted"
+    );
+    Ok(serde_json::json!({
+        "conformance": {
+            "availability": "fixture_only",
+            "durability": "none",
+        },
+        "contract_version": string_at(public_registry, "/contract_version")?,
+        "capability_base_uri": string_at(public_registry, "/capability_base_uri")?,
+        "surface_profiles": object_at(public_registry, "/surface_profiles")?,
+        "capabilities": capabilities,
+    }))
+}
+
+fn enrich_conformance_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+    capability_discovery_example: &Value,
+) -> anyhow::Result<()> {
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in CONFORMANCE_OPERATIONS {
         let capability = capabilities
@@ -308,6 +440,8 @@ fn enrich_conformance_openapi(openapi: &mut Value, public_registry: &Value) -> a
                 )
             })?;
         let scopes = array_at(capability, "/scopes")?.to_vec();
+        let problems = array_at(capability, "/problems")?.to_vec();
+        let examples = array_at(capability, "/examples")?.to_vec();
         let runtime_availability =
             string_at(capability, "/lifecycle/runtime_availability")?.to_owned();
         let pointer = format!(
@@ -330,10 +464,859 @@ fn enrich_conformance_openapi(openapi: &mut Value, public_registry: &Value) -> a
         );
         operation.insert("x-fasti-required-scopes".to_owned(), Value::Array(scopes));
         operation.insert(
+            "x-fasti-authorization".to_owned(),
+            Value::String(string_at(capability, "/authorization")?.to_owned()),
+        );
+        operation.insert(
+            "x-fasti-problem-codes".to_owned(),
+            Value::Array(problems.clone()),
+        );
+        operation.insert(
+            "x-fasti-example-ids".to_owned(),
+            Value::Array(examples.clone()),
+        );
+        operation.insert(
             "x-fasti-runtime-availability".to_owned(),
             Value::String(runtime_availability),
         );
+        validate_problem_responses(operation, expected, capability_keys, &problems)?;
+        bind_governed_examples(
+            workspace_root,
+            operation,
+            public_registry,
+            capability,
+            expected,
+            capability_keys,
+            &examples,
+            capability_discovery_example,
+        )?;
     }
+    enrich_discovery_collection_schema(openapi, public_registry)?;
+    Ok(())
+}
+
+fn enrich_discovery_collection_schema(
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    let capabilities = array_at(public_registry, "/capabilities")?;
+    let capability_vocabulary = |pointer: &str| -> anyhow::Result<Vec<Value>> {
+        let values: BTreeSet<_> = capabilities
+            .iter()
+            .map(|capability| string_at(capability, pointer).map(ToOwned::to_owned))
+            .collect::<anyhow::Result<_>>()?;
+        Ok(values.into_iter().map(Value::String).collect())
+    };
+    let array_vocabulary = |pointer: &str| -> anyhow::Result<Vec<Value>> {
+        let mut values = BTreeSet::new();
+        for capability in capabilities {
+            for value in array_at(capability, pointer)? {
+                values.insert(
+                    value
+                        .as_str()
+                        .with_context(|| format!("{pointer} vocabulary must contain strings"))?
+                        .to_owned(),
+                );
+            }
+        }
+        Ok(values.into_iter().map(Value::String).collect())
+    };
+    let profile_names: Vec<_> = object_at(public_registry, "/surface_profiles")?
+        .keys()
+        .cloned()
+        .map(Value::String)
+        .collect();
+    let surface_names: Vec<_> = [
+        "cli",
+        "domain_application",
+        "http_openapi",
+        "json_ld",
+        "json_schema",
+        "knowledge",
+        "okf",
+        "package_smoke",
+        "sdk",
+        "sse_asyncapi",
+        "ui",
+    ]
+    .into_iter()
+    .map(|value| Value::String(value.to_owned()))
+    .collect();
+    let profile_count = profile_names.len();
+    let surface_count = surface_names.len();
+    let profiles_schema = openapi
+        .pointer_mut("/components/schemas/CapabilityDiscoveryResponse/properties/surface_profiles")
+        .and_then(Value::as_object_mut)
+        .context("CapabilityDiscoveryResponse surface_profiles schema is absent")?;
+    profiles_schema.insert("minProperties".to_owned(), profile_count.into());
+    profiles_schema.insert("maxProperties".to_owned(), profile_count.into());
+    profiles_schema.insert(
+        "propertyNames".to_owned(),
+        serde_json::json!({ "type": "string", "enum": profile_names }),
+    );
+    let disposition_map = profiles_schema
+        .get_mut("additionalProperties")
+        .and_then(Value::as_object_mut)
+        .context("surface profile values must have a schema")?;
+    disposition_map.insert("minProperties".to_owned(), surface_count.into());
+    disposition_map.insert("maxProperties".to_owned(), surface_count.into());
+    disposition_map.insert(
+        "propertyNames".to_owned(),
+        serde_json::json!({ "type": "string", "enum": surface_names }),
+    );
+
+    let capability_count = capabilities.len();
+    let capabilities_schema = openapi
+        .pointer_mut("/components/schemas/CapabilityDiscoveryResponse/properties/capabilities")
+        .and_then(Value::as_object_mut)
+        .context("CapabilityDiscoveryResponse capabilities schema is absent")?;
+    capabilities_schema.insert("minItems".to_owned(), capability_count.into());
+    capabilities_schema.insert("maxItems".to_owned(), capability_count.into());
+    capabilities_schema.insert("uniqueItems".to_owned(), Value::Bool(true));
+
+    for (pointer, values) in [
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/id",
+            capability_vocabulary("/id")?,
+        ),
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/authorization",
+            capability_vocabulary("/authorization")?,
+        ),
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/contract_body",
+            capability_vocabulary("/contract_body")?,
+        ),
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/runtime_body",
+            capability_vocabulary("/runtime_body")?,
+        ),
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/surface_profile",
+            profile_names.clone(),
+        ),
+        (
+            "/components/schemas/CapabilityLifecycleDto/properties/introduced_in",
+            capability_vocabulary("/lifecycle/introduced_in")?,
+        ),
+        (
+            "/components/schemas/CapabilityLifecycleDto/properties/contract_state",
+            capability_vocabulary("/lifecycle/contract_state")?,
+        ),
+        (
+            "/components/schemas/CapabilityLifecycleDto/properties/runtime_availability",
+            capability_vocabulary("/lifecycle/runtime_availability")?,
+        ),
+    ] {
+        openapi
+            .pointer_mut(pointer)
+            .and_then(Value::as_object_mut)
+            .with_context(|| format!("discovery schema omits {pointer}"))?
+            .insert("enum".to_owned(), Value::Array(values));
+    }
+    for (field, values) in [
+        ("scopes", array_vocabulary("/scopes")?),
+        ("problems", array_vocabulary("/problems")?),
+        ("examples", array_vocabulary("/examples")?),
+    ] {
+        let schema = openapi
+            .pointer_mut(&format!(
+                "/components/schemas/CapabilityDescriptorDto/properties/{field}"
+            ))
+            .and_then(Value::as_object_mut)
+            .with_context(|| format!("capability {field} schema is absent"))?;
+        schema.insert("uniqueItems".to_owned(), Value::Bool(true));
+        schema.insert(
+            "items".to_owned(),
+            serde_json::json!({ "type": "string", "enum": values }),
+        );
+    }
+    for (pointer, pattern) in [
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/id",
+            r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$",
+        ),
+        (
+            "/components/schemas/CapabilityDescriptorDto/properties/bounded_context",
+            r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$",
+        ),
+        (
+            "/components/schemas/CapabilityUatDto/properties/id",
+            r"^ID-[0-9]{3}$",
+        ),
+    ] {
+        openapi
+            .pointer_mut(pointer)
+            .and_then(Value::as_object_mut)
+            .with_context(|| format!("discovery schema omits {pointer}"))?
+            .insert("pattern".to_owned(), Value::String(pattern.to_owned()));
+    }
+    for (pointer, values) in [
+        (
+            "/components/schemas/CapabilitySurfaceDispositionDto/properties/state",
+            vec!["later_body", "not_applicable", "required"],
+        ),
+        (
+            "/components/schemas/CapabilitySurfaceDispositionDto/properties/binding_visibility",
+            vec!["internal", "public"],
+        ),
+        (
+            "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
+            vec!["b0", "b1", "b2", "b3"],
+        ),
+        (
+            "/components/schemas/CapabilityUatDto/properties/relationship",
+            vec!["deferred", "direct", "split"],
+        ),
+        (
+            "/components/schemas/CapabilityUatDto/properties/owner_body",
+            vec!["b1", "b2", "b3"],
+        ),
+    ] {
+        openapi
+            .pointer_mut(pointer)
+            .and_then(Value::as_object_mut)
+            .with_context(|| format!("discovery schema omits {pointer}"))?
+            .insert(
+                "enum".to_owned(),
+                Value::Array(
+                    values
+                        .into_iter()
+                        .map(|value| Value::String(value.to_owned()))
+                        .collect(),
+                ),
+            );
+    }
+    Ok(())
+}
+
+fn validate_problem_schema_parity(
+    json_schema: &Value,
+    conformance_openapi: &Value,
+) -> anyhow::Result<()> {
+    let openapi_problem = value_at(conformance_openapi, "/components/schemas/ProblemDetails")?;
+    let openapi_violation = value_at(conformance_openapi, "/components/schemas/ViolationDto")?;
+    for (label, draft_pointer, openapi_schema, openapi_pointer) in [
+        (
+            "ProblemDetails.actual",
+            "/properties/actual/type",
+            openapi_problem,
+            "/properties/actual/type",
+        ),
+        (
+            "ViolationDto.actual",
+            "/$defs/ViolationDto/properties/actual/type",
+            openapi_violation,
+            "/properties/actual/type",
+        ),
+    ] {
+        ensure!(
+            string_at(json_schema, draft_pointer)? == "null"
+                && string_at(openapi_schema, openapi_pointer)? == "null",
+            "{label} must be explicit JSON null in JSON Schema and OpenAPI"
+        );
+    }
+    let draft_status = value_at(json_schema, "/properties/status")?;
+    let openapi_status = value_at(openapi_problem, "/properties/status")?;
+    for (label, pointer) in [("minimum", "/minimum"), ("maximum", "/maximum")] {
+        ensure!(
+            u64_at(draft_status, pointer)? == u64_at(openapi_status, pointer)?,
+            "ProblemDetails.status {label} differs between JSON Schema and OpenAPI"
+        );
+    }
+    ensure!(
+        string_at(draft_status, "/type")? == "integer"
+            && string_at(openapi_status, "/type")? == "integer"
+            && string_at(draft_status, "/format")? == "uint16"
+            && string_at(openapi_status, "/format")? == "uint16",
+        "ProblemDetails.status type/format differs between JSON Schema and OpenAPI"
+    );
+    Ok(())
+}
+
+fn enrich_production_health_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    let capability = array_at(public_registry, "/capabilities")?
+        .iter()
+        .find(|capability| string_at(capability, "/id").ok() == Some("system.health"))
+        .context("public registry omits system.health")?;
+    let operation = openapi
+        .pointer_mut("/paths/~1api~1v1~1health/get")
+        .and_then(Value::as_object_mut)
+        .context("production OpenAPI omits GET /api/v1/health")?;
+    operation.insert(
+        "x-fasti-capability-id".to_owned(),
+        Value::String("system.health".to_owned()),
+    );
+    operation.insert(
+        "x-fasti-required-scopes".to_owned(),
+        Value::Array(array_at(capability, "/scopes")?.clone()),
+    );
+    operation.insert(
+        "x-fasti-authorization".to_owned(),
+        Value::String(string_at(capability, "/authorization")?.to_owned()),
+    );
+    operation.insert(
+        "x-fasti-problem-codes".to_owned(),
+        Value::Array(array_at(capability, "/problems")?.clone()),
+    );
+    let example_ids = array_at(capability, "/examples")?.clone();
+    operation.insert(
+        "x-fasti-example-ids".to_owned(),
+        Value::Array(example_ids.clone()),
+    );
+    operation.insert(
+        "x-fasti-runtime-availability".to_owned(),
+        Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
+    );
+    ensure!(
+        example_ids.len() == 1 && example_ids[0].as_str() == Some("system.health.success"),
+        "production health must own exactly the governed health success example"
+    );
+    let example = load_governed_example(workspace_root, "system.health.success", &Value::Null)?;
+    ensure!(
+        example.media_type == "application/json",
+        "system.health.success must be an application/json example"
+    );
+    let media = operation
+        .get_mut("responses")
+        .and_then(Value::as_object_mut)
+        .and_then(|responses| responses.get_mut("200"))
+        .and_then(|response| response.get_mut("content"))
+        .and_then(Value::as_object_mut)
+        .and_then(|content| content.get_mut("application/json"))
+        .and_then(Value::as_object_mut)
+        .context("production health 200 response omits application/json")?;
+    media.insert(
+        "examples".to_owned(),
+        serde_json::json!({
+            "system.health.success": { "value": example.payload }
+        }),
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_required_b1_bindings(
+    workspace_root: &Path,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+    production_openapi: &Value,
+    conformance_openapi: &Value,
+    asyncapi: &Value,
+    problem_catalog: &Value,
+    health_schema: &Value,
+) -> anyhow::Result<()> {
+    for required in registry::finalized_b1_required_bindings(workspace_root)? {
+        resolve_required_binding(
+            workspace_root,
+            required.surface,
+            &required.binding,
+            &required.capability_id,
+            capability_keys,
+            production_openapi,
+            conformance_openapi,
+            asyncapi,
+            problem_catalog,
+            health_schema,
+        )
+        .with_context(|| {
+            format!(
+                "required binding {} does not resolve for {}.{}",
+                required.binding, required.capability_id, required.surface
+            )
+        })?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_required_binding(
+    workspace_root: &Path,
+    surface: &str,
+    binding: &str,
+    capability_id: &str,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+    production_openapi: &Value,
+    conformance_openapi: &Value,
+    asyncapi: &Value,
+    problem_catalog: &Value,
+    health_schema: &Value,
+) -> anyhow::Result<()> {
+    match surface {
+        "domain_application" => {
+            ensure!(
+                binding == "application:{application_key}"
+                    && capability_keys.contains_key(capability_id),
+                "application capability key is absent"
+            );
+        }
+        "http_openapi" => {
+            ensure!(
+                binding == "openapi:{capability_id}",
+                "unknown OpenAPI binding"
+            );
+            ensure!(
+                openapi_has_capability(production_openapi, capability_id)?
+                    || openapi_has_capability(conformance_openapi, capability_id)?,
+                "OpenAPI operation is absent"
+            );
+        }
+        "sse_asyncapi" => {
+            ensure!(
+                binding == "asyncapi:{capability_id}",
+                "unknown AsyncAPI binding"
+            );
+            ensure!(
+                object_at(asyncapi, "/operations")?
+                    .values()
+                    .any(|operation| {
+                        string_at(operation, "/x-fasti-capability-id").ok() == Some(capability_id)
+                    }),
+                "AsyncAPI operation is absent"
+            );
+        }
+        "cli" => {
+            ensure!(binding == "cli:capability-discovery", "unknown CLI binding");
+            let source =
+                fs::read_to_string(workspace_root.join("crates/fasti-cli/src/capabilities.rs"))?;
+            let main_source =
+                fs::read_to_string(workspace_root.join("crates/fasti-cli/src/main.rs"))?;
+            let tests = fs::read_to_string(
+                workspace_root.join("crates/fasti-cli/tests/capability_commands.rs"),
+            )?;
+            ensure!(
+                source.contains("PUBLIC_REGISTRY")
+                    && source.contains("CapabilityCatalog")
+                    && source.contains("public_capability_id(CapabilityKey::DiscoverCapabilities)")
+                    && !source.contains("\"system.capabilities.discover\"")
+                    && source.contains("scope=cli_local")
+                    && !source.contains("CliFailure::new(")
+                    && main_source.matches("CliFailure::new(").count() == 1
+                    && main_source.contains("fn unavailable(")
+                    && tests.contains("for resource in resources")
+                    && tests.contains("document[\"resource_count\"]")
+                    && capability_keys.contains_key(capability_id),
+                "CLI capability discovery does not generically cover this capability or still claims local failures as capability problems"
+            );
+        }
+        "json_schema" => match binding {
+            "schema:health-response" => ensure!(
+                health_schema.get("$schema").is_some(),
+                "health response schema is absent"
+            ),
+            "schema:openapi-operation:{capability_id}" => ensure!(
+                openapi_has_capability(conformance_openapi, capability_id)?,
+                "conformance operation schema is absent"
+            ),
+            "schema:asyncapi-message:receiptCommitted" => ensure!(
+                asyncapi
+                    .pointer("/components/messages/receiptCommitted/payload/schema")
+                    .is_some(),
+                "receiptCommitted AsyncAPI message schema is absent"
+            ),
+            _ => anyhow::bail!("unknown JSON Schema binding"),
+        },
+        "json_ld" => {
+            ensure!(
+                binding == "json-ld:observation-receipt"
+                    && workspace_root
+                        .join("contracts/jsonld/v1/context.jsonld")
+                        .is_file(),
+                "observation receipt JSON-LD context is absent"
+            );
+        }
+        "okf" => {
+            ensure!(
+                binding == "okf:capability-catalog"
+                    && workspace_root
+                        .join("contracts/okf/v1/capabilities.md")
+                        .is_file(),
+                "OKF capability catalog is absent"
+            );
+        }
+        "sdk" => {
+            ensure!(
+                binding == "sdk:{capability_id}" || binding == "sdk:system.health",
+                "unknown SDK binding"
+            );
+            ensure!(
+                capability_id == "system.health"
+                    || capability_id == "receipt.stream"
+                    || CONFORMANCE_OPERATIONS
+                        .iter()
+                        .any(|operation| operation.capability_id == capability_id),
+                "generated SDK capability is absent"
+            );
+        }
+        "knowledge" => {
+            ensure!(
+                binding == "knowledge:problem-catalog",
+                "unknown knowledge binding"
+            );
+            ensure!(
+                array_at(problem_catalog, "/problems")?
+                    .iter()
+                    .any(|problem| {
+                        string_at(problem, "/capability_id").ok() == Some(capability_id)
+                    }),
+                "canonical problem catalog entry is absent"
+            );
+        }
+        "package_smoke" => match binding {
+            "package-smoke:production-health" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-oci.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/health"),
+                    "production health smoke is absent"
+                );
+            }
+            "package-smoke:b1-conformance-fixture" => {
+                let test = fs::read_to_string(workspace_root.join("tests/js/sdk-client.test.mjs"))?;
+                let sdk_method = b1_sdk_method(capability_id).with_context(|| {
+                    format!("no capability-specific B1 package smoke mapping for {capability_id}")
+                })?;
+                ensure!(
+                    test.contains("loopback Rust fixture")
+                        && test.contains("withRustFixture")
+                        && test.contains(&format!(".{sdk_method}(")),
+                    "B1 conformance package smoke does not exercise {capability_id} through {sdk_method}"
+                );
+            }
+            _ => anyhow::bail!("unknown package-smoke binding"),
+        },
+        other => anyhow::bail!("unsupported required surface {other}"),
+    }
+    Ok(())
+}
+
+fn b1_sdk_method(capability_id: &str) -> Option<&'static str> {
+    match capability_id {
+        "system.capabilities.discover" => Some("discoverCapabilities"),
+        "profile.select" => Some("selectProfile"),
+        "credential.rotate" => Some("rotateCredential"),
+        "credential.revoke" => Some("revokeCredential"),
+        "listener.configure" => Some("configureListener"),
+        "node.initialize" => Some("initializeNode"),
+        "client.enroll" => Some("enrollFirstClient"),
+        "observation.accept" => Some("acceptObservation"),
+        "receipt.replay" => Some("replayReceipt"),
+        "receipt.stream" => Some("receiptEvents"),
+        _ => None,
+    }
+}
+
+fn openapi_has_capability(openapi: &Value, capability_id: &str) -> anyhow::Result<bool> {
+    Ok(object_at(openapi, "/paths")?.values().any(|path| {
+        path.as_object().is_some_and(|methods| {
+            methods.values().any(|operation| {
+                string_at(operation, "/x-fasti-capability-id").ok() == Some(capability_id)
+            })
+        })
+    }))
+}
+
+fn validate_problem_responses(
+    operation: &Map<String, Value>,
+    expected: ConformanceOperation,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+    problems: &[Value],
+) -> anyhow::Result<()> {
+    let capability_key = *capability_keys
+        .get(expected.capability_id)
+        .with_context(|| {
+            format!(
+                "conformance capability {} has no application key",
+                expected.capability_id
+            )
+        })?;
+    let responses = operation
+        .get("responses")
+        .and_then(Value::as_object)
+        .context("conformance operation responses must be an object")?;
+    let mut represented_statuses = BTreeSet::new();
+    for problem in problems {
+        let raw_code = problem
+            .as_str()
+            .context("registry problem code must be a string")?;
+        let code = ProblemCode::from_code(raw_code).with_context(|| {
+            format!(
+                "conformance capability {} claims unknown problem {raw_code}",
+                expected.capability_id
+            )
+        })?;
+        if code.contract().param_policy() == ProblemParamPolicy::ReceiptIdentifierByCapability {
+            ensure!(
+                matches!(
+                    capability_key,
+                    CapabilityKey::ReplayReceipt | CapabilityKey::StreamReceipts
+                ),
+                "conformance capability {} cannot represent problem {raw_code}",
+                expected.capability_id
+            );
+        }
+        let status = code.contract().status().to_string();
+        let response = responses.get(&status).with_context(|| {
+            format!(
+                "{} {} cannot represent governed problem {raw_code}: response {status} is absent",
+                expected.method, expected.path
+            )
+        })?;
+        ensure!(
+            string_at(response, "/content/application~1problem+json/schema/$ref")?
+                == "#/components/schemas/ProblemDetails",
+            "{} {} cannot represent governed problem {raw_code} as ProblemDetails",
+            expected.method,
+            expected.path
+        );
+        represented_statuses.insert(status);
+    }
+
+    let documented_problem_statuses: BTreeSet<_> = responses
+        .iter()
+        .filter_map(|(status, response)| {
+            response
+                .pointer("/content/application~1problem+json")
+                .is_some()
+                .then_some(status.clone())
+        })
+        .collect();
+    ensure!(
+        documented_problem_statuses == represented_statuses,
+        "{} {} problem responses drift from registry claims: documented={documented_problem_statuses:?}, governed={represented_statuses:?}",
+        expected.method,
+        expected.path
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn bind_governed_examples(
+    workspace_root: &Path,
+    operation: &mut Map<String, Value>,
+    public_registry: &Value,
+    capability: &Value,
+    expected: ConformanceOperation,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+    examples: &[Value],
+    capability_discovery_example: &Value,
+) -> anyhow::Result<()> {
+    for example in examples {
+        let example_id = example
+            .as_str()
+            .context("registry example ID must be a string")?;
+        let governed =
+            load_governed_example(workspace_root, example_id, capability_discovery_example)?;
+        if governed.media_type == "application/ld+json" {
+            let profile = string_at(capability, "/surface_profile")?;
+            let profile_pointer = format!(
+                "/surface_profiles/{}/json_ld/state",
+                escape_pointer(profile)
+            );
+            ensure!(
+                string_at(public_registry, &profile_pointer)? == "required",
+                "linked-data example {example_id} is not owned by a required JSON-LD surface"
+            );
+            continue;
+        }
+
+        let (status, media_type) = if let Some(code) = governed.payload.get("code") {
+            let code = code
+                .as_str()
+                .context("problem example code must be a string")?;
+            ensure!(
+                array_at(capability, "/problems")?
+                    .iter()
+                    .any(|problem| problem.as_str() == Some(code)),
+                "example {example_id} uses ungoverned problem {code}"
+            );
+            ensure!(
+                string_at(&governed.payload, "/capability_id")? == expected.capability_id,
+                "example {example_id} claims another capability"
+            );
+            let status = u64_at(&governed.payload, "/status")?;
+            let canonical = ProblemCode::from_code(code)
+                .with_context(|| format!("example {example_id} uses unknown problem {code}"))?;
+            ensure!(
+                status == u64::from(canonical.contract().status()),
+                "example {example_id} status differs from canonical problem {code}"
+            );
+            validate_problem_example_semantics(
+                example_id,
+                &governed.payload,
+                expected.capability_id,
+                *capability_keys
+                    .get(expected.capability_id)
+                    .with_context(|| {
+                        format!("example {example_id} capability has no application key")
+                    })?,
+                canonical,
+            )?;
+            (status.to_string(), "application/problem+json")
+        } else {
+            ensure!(
+                example_id == "system.capabilities.success",
+                "finite HTTP example {example_id} has no deterministic response binding rule"
+            );
+            ("200".to_owned(), "application/json")
+        };
+        insert_openapi_example(
+            operation,
+            &status,
+            media_type,
+            example_id,
+            governed.payload,
+            expected,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_problem_example_semantics(
+    example_id: &str,
+    payload: &Value,
+    capability_id: &str,
+    capability_key: CapabilityKey,
+    code: ProblemCode,
+) -> anyhow::Result<()> {
+    let contract = code.contract();
+    let action = contract.default_next_action();
+    let expected = serde_json::json!({
+        "type": format!("{DOCUMENTATION_BASE}/{}", contract.documentation_path()),
+        "title": contract.title(),
+        "status": contract.status(),
+        "detail": contract.detail(capability_key),
+        "code": code.as_str(),
+        "capability_id": capability_id,
+        "safe_state": contract.safe_state().as_str(),
+        "retryability": contract.retryability().as_str(),
+        "next_actions": [{ "id": action.id(), "label": action.label() }],
+        "param": contract.param_policy().resolve(capability_key),
+        "actual": null,
+    });
+    for field in [
+        "type",
+        "title",
+        "status",
+        "detail",
+        "code",
+        "capability_id",
+        "safe_state",
+        "retryability",
+        "next_actions",
+        "param",
+        "actual",
+    ] {
+        ensure!(
+            payload.get(field) == expected.get(field),
+            "problem example {example_id} field {field} differs from its canonical application contract"
+        );
+    }
+    if let Some(violation) = code.representation_violation() {
+        ensure!(
+            payload.get("violations")
+                == Some(&serde_json::json!([{
+                    "code": violation.code(),
+                    "pointer": violation.pointer(),
+                    "reason": violation.reason(),
+                    "expected": violation.expected(),
+                    "actual": null,
+                }])),
+            "problem example {example_id} validation violations differ from the runtime representation-rejection contract"
+        );
+    }
+    Ok(())
+}
+
+struct GovernedExample {
+    media_type: &'static str,
+    payload: Value,
+}
+
+fn load_governed_example(
+    workspace_root: &Path,
+    example_id: &str,
+    capability_discovery_example: &Value,
+) -> anyhow::Result<GovernedExample> {
+    if example_id == "system.capabilities.success" {
+        return Ok(GovernedExample {
+            media_type: "application/json",
+            payload: capability_discovery_example.clone(),
+        });
+    }
+    let candidates = [
+        ("json", "application/json"),
+        ("jsonld", "application/ld+json"),
+    ];
+    let present: Vec<_> = candidates
+        .into_iter()
+        .filter_map(|(extension, media_type)| {
+            let path = workspace_root
+                .join(EXAMPLES_DIRECTORY)
+                .join(format!("{example_id}.{extension}"));
+            path.is_file().then_some((path, media_type))
+        })
+        .collect();
+    ensure!(
+        present.len() == 1,
+        "example {example_id} must resolve to exactly one governed JSON or JSON-LD file"
+    );
+    let (path, media_type) = &present[0];
+    let bytes = fs::read(path)
+        .with_context(|| format!("failed to read governed example {}", path.display()))?;
+    let payload = serde_json::from_slice(&bytes)
+        .with_context(|| format!("governed example {} is not JSON", path.display()))?;
+    Ok(GovernedExample {
+        media_type,
+        payload,
+    })
+}
+
+fn insert_openapi_example(
+    operation: &mut Map<String, Value>,
+    status: &str,
+    media_type: &str,
+    example_id: &str,
+    payload: Value,
+    expected: ConformanceOperation,
+) -> anyhow::Result<()> {
+    let response = operation
+        .get_mut("responses")
+        .and_then(Value::as_object_mut)
+        .and_then(|responses| responses.get_mut(status))
+        .with_context(|| {
+            format!(
+                "example {example_id} cannot bind: {} {} response {status} is absent",
+                expected.method, expected.path
+            )
+        })?;
+    let media = response
+        .get_mut("content")
+        .and_then(Value::as_object_mut)
+        .and_then(|content| content.get_mut(media_type))
+        .and_then(Value::as_object_mut)
+        .with_context(|| {
+            format!(
+                "example {example_id} cannot bind: {} {} response {status} omits {media_type}",
+                expected.method, expected.path
+            )
+        })?;
+    let examples = media
+        .entry("examples")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .context("OpenAPI response examples must be an object")?;
+    ensure!(
+        examples
+            .insert(
+                example_id.to_owned(),
+                serde_json::json!({ "value": payload })
+            )
+            .is_none(),
+        "OpenAPI response already contains example {example_id}"
+    );
     Ok(())
 }
 
@@ -358,6 +1341,31 @@ fn load_yaml(workspace_root: &Path, relative_path: &str) -> anyhow::Result<Value
     serde_saphyr::from_str(&source).with_context(|| format!("{} is not valid YAML", path.display()))
 }
 
+fn validate_receipt_stream_metadata(asyncapi: &Value) -> anyhow::Result<()> {
+    ensure!(
+        string_at(
+            asyncapi,
+            "/components/messages/receiptCommitted/x-fasti-sse-id-pointer"
+        )? == "$message.payload#/receipt_id",
+        "receipt SSE id must be governed by the payload receipt_id"
+    );
+    ensure!(
+        string_at(
+            asyncapi,
+            "/operations/sendReceiptCommitted/x-fasti-durability"
+        )? == "none",
+        "B1 receipt stream durability must remain explicitly none"
+    );
+    ensure!(
+        string_at(
+            asyncapi,
+            "/operations/sendReceiptCommitted/x-fasti-fixture-delivery"
+        )? == "finite_replay_then_close",
+        "B1 receipt fixture must declare finite replay then clean close"
+    );
+    Ok(())
+}
+
 fn rust_capability_ids(workspace_root: &Path) -> anyhow::Result<String> {
     let pairs = registry::internal_key_id_pairs(workspace_root)?;
     ensure!(!pairs.is_empty(), "capability ID match cannot be empty");
@@ -377,11 +1385,13 @@ fn rust_capability_ids(workspace_root: &Path) -> anyhow::Result<String> {
 
 fn typescript_sdk(
     public_registry: &Value,
+    problem_catalog: &Value,
     health_schema: &Value,
     problem_schema: &Value,
     asyncapi: &Value,
     conformance_openapi: &Value,
 ) -> anyhow::Result<String> {
+    validate_receipt_stream_metadata(asyncapi)?;
     let mut output = String::from(
         "/* This file is generated by `cargo xtask contract generate`. Do not edit. */\n\n",
     );
@@ -451,8 +1461,13 @@ fn typescript_sdk(
         output,
         "// prettier-ignore\nexport const PUBLIC_CAPABILITY_REGISTRY = {public_registry_json} as const;\n"
     )?;
+    let problem_catalog_json = serde_json::to_string_pretty(&sort_json(problem_catalog.clone()))?;
+    writeln!(
+        output,
+        "// prettier-ignore\nexport const PUBLIC_PROBLEM_CATALOG = {problem_catalog_json} as const;\n"
+    )?;
     output.push_str(
-        "export const CAPABILITY_REGISTRY = PUBLIC_CAPABILITY_REGISTRY.capabilities;\nexport const SURFACE_PROFILES = PUBLIC_CAPABILITY_REGISTRY.surface_profiles;\nexport type CapabilityMetadata = (typeof CAPABILITY_REGISTRY)[number];\nexport type SurfaceProfileMetadata = typeof SURFACE_PROFILES;\n\n",
+        "export const CAPABILITY_REGISTRY = PUBLIC_CAPABILITY_REGISTRY.capabilities;\nexport const SURFACE_PROFILES = PUBLIC_CAPABILITY_REGISTRY.surface_profiles;\nexport type CapabilityMetadata = (typeof CAPABILITY_REGISTRY)[number];\nexport type SurfaceProfileMetadata = typeof SURFACE_PROFILES;\nexport type CanonicalProblemMetadata = (typeof PUBLIC_PROBLEM_CATALOG.problems)[number];\n\n",
     );
 
     let stream_path = string_at(asyncapi, "/channels/receiptEvents/address")?;
@@ -461,6 +1476,10 @@ fn typescript_sdk(
         event_name == "receiptCommitted",
         "receipt event name changed; update the generated envelope contract deliberately"
     );
+    let sse_id_pointer = string_at(
+        asyncapi,
+        "/components/messages/receiptCommitted/x-fasti-sse-id-pointer",
+    )?;
     let capability_id = string_at(
         asyncapi,
         "/operations/sendReceiptCommitted/x-fasti-capability-id",
@@ -502,7 +1521,28 @@ fn typescript_sdk(
         async_scopes == registry_scopes,
         "AsyncAPI receipt scopes must exactly equal the registry-owned scope set"
     );
+    let registry_stream_problems: BTreeSet<_> = array_at(registry_capability, "/problems")?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .context("registry stream problem must be a string")
+                .map(ToOwned::to_owned)
+        })
+        .collect::<anyhow::Result<_>>()?;
+    let async_stream_problems: BTreeSet<_> = array_at(
+        asyncapi,
+        "/operations/sendReceiptCommitted/x-fasti-http-problems/responses",
+    )?
+    .iter()
+    .map(|response| string_at(response, "/code").map(ToOwned::to_owned))
+    .collect::<anyhow::Result<_>>()?;
+    ensure!(
+        async_stream_problems == registry_stream_problems,
+        "AsyncAPI receipt problems must exactly equal the registry-owned problem set"
+    );
     let scopes_json = serde_json::to_string(&async_scopes)?;
+    let stream_problems_json = serde_json::to_string(&registry_stream_problems)?;
     let maximum_replay = u64_at(
         asyncapi,
         "/operations/sendReceiptCommitted/x-fasti-replay/maximumBatch",
@@ -515,18 +1555,30 @@ fn typescript_sdk(
         asyncapi,
         "/operations/sendReceiptCommitted/x-fasti-runtime-availability",
     )?;
+    let durability = string_at(
+        asyncapi,
+        "/operations/sendReceiptCommitted/x-fasti-durability",
+    )?;
+    let fixture_delivery = string_at(
+        asyncapi,
+        "/operations/sendReceiptCommitted/x-fasti-fixture-delivery",
+    )?;
     ensure!(
         runtime_availabilities.contains(runtime_availability),
         "AsyncAPI runtime availability is absent from the registry vocabulary"
     );
     writeln!(
         output,
-        "export const RECEIPT_STREAM_CONTRACT = {{\n  path: {},\n  eventName: {},\n  capabilityId: {},\n  requiredScopes: {},\n  runtimeAvailability: {},\n  maximumReplayBatch: {},\n  retryPolicy: {},\n}} as const;\n",
+        "export const RECEIPT_STREAM_CONTRACT = {{\n  path: {},\n  eventName: {},\n  sseIdPointer: {},\n  capabilityId: {},\n  requiredScopes: {},\n  problemCodes: {},\n  runtimeAvailability: {},\n  durability: {},\n  fixtureDelivery: {},\n  maximumReplayBatch: {},\n  retryPolicy: {},\n}} as const;\n",
         json_string(stream_path)?,
         json_string(event_name)?,
+        json_string(sse_id_pointer)?,
         json_string(capability_id)?,
         scopes_json,
+        stream_problems_json,
         json_string(runtime_availability)?,
+        json_string(durability)?,
+        json_string(fixture_delivery)?,
         maximum_replay,
         json_string(retry_policy)?,
     )?;
@@ -585,6 +1637,12 @@ fn typescript_sdk(
     let receipt_capability = string_at(receipt_schema, "/properties/capability_id/const")?;
     let receipt_resolution = string_at(receipt_schema, "/properties/resolution/const")?;
     let correlation_pattern = string_at(receipt_schema, "/properties/correlation_id/pattern")?;
+    let problem_correlation_pattern =
+        string_at(problem_schema, "/properties/correlation_id/pattern")?;
+    ensure!(
+        problem_correlation_pattern == correlation_pattern,
+        "ProblemDetails and receipt events must use one canonical correlation ID pattern"
+    );
     let receipt_pattern = string_at(receipt_schema, "/properties/receipt_id/pattern")?;
     let operation_pattern = string_at(receipt_schema, "/properties/operation_id/pattern")?;
     let observation_pattern = string_at(receipt_schema, "/properties/observation_id/pattern")?;
@@ -650,12 +1708,59 @@ export function parseProblemDetails(value: unknown): ProblemDetails {{
   }}
   knownStringField(object, "capability_id", CAPABILITY_IDS, "ProblemDetails");
   knownStringField(object, "code", PROBLEM_CODES, "ProblemDetails");
+  patternString(object, "correlation_id", CORRELATION_ID, "ProblemDetails");
   integerField(object, "status", "ProblemDetails", 0, 65_535);
   nullableStringField(object, "param", "ProblemDetails");
-  nullableStringField(object, "actual", "ProblemDetails");
-  arrayField(object, "next_actions", "ProblemDetails").forEach(parseProblemAction);
-  arrayField(object, "violations", "ProblemDetails").forEach(parseViolation);
+  exactNullField(object, "actual", "ProblemDetails");
+  const actions = arrayField(object, "next_actions", "ProblemDetails");
+  if (actions.length !== 1) {{
+    throw new FastiContractParseError("ProblemDetails.next_actions must contain exactly one canonical action");
+  }}
+  actions.forEach(parseProblemAction);
+  const violations = arrayField(object, "violations", "ProblemDetails");
+  if (violations.length > 32) {{
+    throw new FastiContractParseError("ProblemDetails.violations exceeds the bounded violation count");
+  }}
+  violations.forEach(parseViolation);
   return object as unknown as ProblemDetails;
+}}
+
+// prettier-ignore
+export function parseProblemDetailsForOperation(
+  value: unknown,
+  capabilityId: CapabilityId,
+  allowedCodes: readonly ProblemCode[],
+): ProblemDetails {{
+  const problem = parseProblemDetails(value);
+  if (problem.capability_id !== capabilityId) {{
+    throw new FastiContractParseError("ProblemDetails capability does not match the requested operation");
+  }}
+  if (!allowedCodes.includes(problem.code)) {{
+    throw new FastiContractParseError("ProblemDetails code is not governed for the requested operation");
+  }}
+  const canonical = PUBLIC_PROBLEM_CATALOG.problems.find(
+    (entry) => entry.capability_id === capabilityId && entry.code === problem.code,
+  );
+  if (canonical === undefined) {{
+    throw new FastiContractParseError("ProblemDetails has no canonical capability problem contract");
+  }}
+  if (
+    problem.type !== canonical.type ||
+    problem.title !== canonical.title ||
+    problem.status !== canonical.status ||
+    problem.detail !== canonical.detail ||
+    problem.safe_state !== canonical.safe_state ||
+    problem.retryability !== canonical.retryability ||
+    (problem.param ?? null) !== canonical.param ||
+    problem.next_actions.length !== canonical.next_actions.length ||
+    problem.next_actions.some((action, index) =>
+      action.id !== canonical.next_actions[index]?.id ||
+      action.label !== canonical.next_actions[index]?.label
+    )
+  ) {{
+    throw new FastiContractParseError("ProblemDetails differs from its canonical application contract");
+  }}
+  return problem;
 }}
 
 // prettier-ignore
@@ -685,7 +1790,7 @@ function parseViolation(value: unknown): ViolationDto {{
   for (const field of ["code", "pointer", "reason", "expected"] as const) {{
     stringField(object, field, "ViolationDto");
   }}
-  nullableStringField(object, "actual", "ViolationDto");
+  exactNullField(object, "actual", "ViolationDto");
   return object as unknown as ViolationDto;
 }}
 
@@ -776,6 +1881,13 @@ function nullableStringField(object: JsonObject, field: string, label: string): 
   const value = object[field];
   if (value !== undefined && value !== null && typeof value !== "string") {{
     throw new FastiContractParseError(`${{label}}.${{field}} must be a string or null`);
+  }}
+}}
+
+// prettier-ignore
+function exactNullField(object: JsonObject, field: string, label: string): void {{
+  if (object[field] !== null) {{
+    throw new FastiContractParseError(`${{label}}.${{field}} must be null`);
   }}
 }}
 
@@ -897,7 +2009,12 @@ fn render_conformance_contract(openapi: &Value) -> anyhow::Result<String> {
         );
         let required_scopes = array_at(operation, "/x-fasti-required-scopes")?;
         let required_scopes_json = serde_json::to_string(required_scopes)?;
+        let problem_codes = array_at(operation, "/x-fasti-problem-codes")?;
+        let problem_codes_json = serde_json::to_string(problem_codes)?;
+        let example_ids = array_at(operation, "/x-fasti-example-ids")?;
+        let example_ids_json = serde_json::to_string(example_ids)?;
         let runtime_availability = string_at(operation, "/x-fasti-runtime-availability")?;
+        let authorization = string_at(operation, "/x-fasti-authorization")?;
         match request {
             Some(request_name) => ensure!(
                 string_at(
@@ -926,11 +2043,12 @@ fn render_conformance_contract(openapi: &Value) -> anyhow::Result<String> {
         }
         writeln!(
             output,
-            "  {alias}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, requiredScopes: {required_scopes_json}, authenticated: {authenticated}, runtimeAvailability: {}, durability: \"none\", retry: {}, requestSchema: {}, responseSchema: {} }},",
+            "  {alias}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes_json}, problemCodes: {problem_codes_json}, exampleIds: {example_ids_json}, authenticated: {authenticated}, runtimeAvailability: {}, durability: \"none\", retry: {}, requestSchema: {}, responseSchema: {} }},",
             json_string(operation_id)?,
             json_string(&method.to_ascii_uppercase())?,
             json_string(path)?,
             json_string(capability_id)?,
+            json_string(authorization)?,
             json_string(runtime_availability)?,
             json_string(retry)?,
             request.map(json_string).transpose()?.unwrap_or_else(|| "null".to_owned()),
@@ -980,7 +2098,16 @@ export function parseAcceptObservationResponse(value: unknown): AcceptObservatio
 
 // prettier-ignore
 export function parseCapabilityDiscoveryResponse(value: unknown): CapabilityDiscoveryResponse {
-  return parseConformanceDto("CapabilityDiscoveryResponse", value);
+  const response = parseConformanceDto<CapabilityDiscoveryResponse>("CapabilityDiscoveryResponse", value);
+  if (
+    response.contract_version !== PUBLIC_CAPABILITY_REGISTRY.contract_version ||
+    response.capability_base_uri !== PUBLIC_CAPABILITY_REGISTRY.capability_base_uri ||
+    !contractJsonEqual(response.surface_profiles, PUBLIC_CAPABILITY_REGISTRY.surface_profiles) ||
+    !contractJsonEqual(response.capabilities, PUBLIC_CAPABILITY_REGISTRY.capabilities)
+  ) {
+    throw new FastiContractParseError("CapabilityDiscoveryResponse differs from the complete generated registry handshake");
+  }
+  return response;
 }
 
 // prettier-ignore
@@ -1071,6 +2198,12 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (!Array.isArray(value)) {
       throw new FastiContractParseError(`${path} must be an array`);
     }
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) {
+      throw new FastiContractParseError(`${path} has fewer than its bounded items`);
+    }
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
+      throw new FastiContractParseError(`${path} exceeds its bounded items`);
+    }
     value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
     return;
   }
@@ -1079,13 +2212,26 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       throw new FastiContractParseError(`${path} must be a plain object`);
     }
     const object = value as Record<string, unknown>;
+    const keys = Object.keys(object);
+    if (typeof schema.minProperties === "number" && keys.length < schema.minProperties) {
+      throw new FastiContractParseError(`${path} has fewer than its bounded properties`);
+    }
+    if (typeof schema.maxProperties === "number" && keys.length > schema.maxProperties) {
+      throw new FastiContractParseError(`${path} exceeds its bounded properties`);
+    }
     const properties = isPlainObject(schema.properties)
       ? (schema.properties as Record<string, unknown>)
       : {};
-    if (schema.additionalProperties === false) {
-      for (const key of Object.keys(object)) {
-        if (!Object.hasOwn(properties, key)) {
+    for (const key of keys) {
+      if (isPlainObject(schema.propertyNames)) {
+        validateOpenApiValue(key, schema.propertyNames, `${path} property name`);
+      }
+      if (!Object.hasOwn(properties, key)) {
+        if (schema.additionalProperties === false) {
           throw new FastiContractParseError(`${path} contains unknown field ${key}`);
+        }
+        if (isPlainObject(schema.additionalProperties)) {
+          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`);
         }
       }
     }
@@ -1103,6 +2249,20 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     return;
   }
   throw new FastiContractParseError(`${path} uses an unsupported schema shape`);
+}
+
+// prettier-ignore
+function contractJsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length && left.every((value, index) => contractJsonEqual(value, right[index]));
+  }
+  if (!isPlainObject(left) || !isPlainObject(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) => key === rightKeys[index] && contractJsonEqual(left[key], right[key]));
 }
 
 // prettier-ignore
@@ -1250,6 +2410,17 @@ fn typescript_type(schema: &Value) -> anyhow::Result<String> {
                 "ReadonlyArray<{}>",
                 typescript_type(value_at(schema, "/items")?)?
             )),
+            "object" => {
+                let additional = value_at(schema, "/additionalProperties")?;
+                ensure!(
+                    !additional.is_boolean(),
+                    "generated object map must define a value schema"
+                );
+                Ok(format!(
+                    "Readonly<Record<string, {}>>",
+                    typescript_type(additional)?
+                ))
+            }
             other => anyhow::bail!("unsupported JSON Schema type {other}"),
         },
         Some(Value::Array(kinds)) => {
@@ -1424,6 +2595,8 @@ mod tests {
             Path::new(OPENAPI_PATH),
             Path::new(CONFORMANCE_OPENAPI_PATH),
             Path::new(CAPABILITY_REGISTRY_PATH),
+            Path::new(PROBLEM_CATALOG_PATH),
+            Path::new(CAPABILITY_DISCOVERY_EXAMPLE_PATH),
             Path::new(HEALTH_SCHEMA_PATH),
             Path::new(PROBLEM_SCHEMA_PATH),
             Path::new(SDK_GENERATED_PATH),
@@ -1498,15 +2671,224 @@ mod tests {
                     .expect("capability annotation is present"),
                 expected.capability_id
             );
-            assert!(!array_at(operation, "/x-fasti-required-scopes")
-                .expect("scope annotation is present")
-                .is_empty());
+            let authorization = string_at(operation, "/x-fasti-authorization")
+                .expect("authorization annotation is present");
+            let scopes = array_at(operation, "/x-fasti-required-scopes")
+                .expect("scope annotation is present");
+            if expected.capability_id == "node.initialize" {
+                assert_eq!(authorization, "bootstrap_only");
+                assert!(scopes.is_empty());
+            } else {
+                assert_eq!(authorization, "scoped");
+                assert!(!scopes.is_empty());
+            }
             assert_eq!(
                 string_at(operation, "/x-fasti-runtime-availability")
                     .expect("runtime annotation is present"),
                 "fixture_only"
             );
+            assert!(!array_at(operation, "/x-fasti-problem-codes")
+                .expect("problem annotation is present")
+                .is_empty());
+            assert!(operation.get("x-fasti-example-ids").is_some());
+            for example in
+                array_at(operation, "/x-fasti-example-ids").expect("example annotation is present")
+            {
+                let example = example.as_str().expect("example ID is a string");
+                if example == "observation.accept.receipt" {
+                    continue;
+                }
+                assert!(operation
+                    .pointer("/responses")
+                    .expect("responses")
+                    .to_string()
+                    .contains(&format!("\"{example}\"")));
+            }
         }
+    }
+
+    #[test]
+    fn production_health_has_exact_registry_annotations_and_example() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(OPENAPI_PATH))
+                .expect("production OpenAPI generated"),
+        )
+        .expect("production OpenAPI JSON");
+        let operation =
+            value_at(&openapi, "/paths/~1api~1v1~1health/get").expect("health operation");
+        assert_eq!(
+            string_at(operation, "/x-fasti-capability-id").expect("capability ID"),
+            "system.health"
+        );
+        assert_eq!(
+            string_at(operation, "/x-fasti-runtime-availability").expect("availability"),
+            "implemented"
+        );
+        assert_eq!(
+            string_at(operation, "/x-fasti-authorization").expect("authorization"),
+            "unauthenticated"
+        );
+        assert!(array_at(operation, "/x-fasti-required-scopes")
+            .expect("scopes")
+            .is_empty());
+        assert_eq!(
+            string_at(
+                operation,
+                "/responses/200/content/application~1json/examples/system.health.success/value/status"
+            )
+            .expect("embedded health example"),
+            "healthy"
+        );
+    }
+
+    #[test]
+    fn discovery_openapi_exposes_finite_registry_vocabularies() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CONFORMANCE_OPENAPI_PATH))
+                .expect("conformance OpenAPI generated"),
+        )
+        .expect("conformance OpenAPI JSON");
+        for pointer in [
+            "/components/schemas/CapabilityDescriptorDto/properties/id/enum",
+            "/components/schemas/CapabilityDescriptorDto/properties/authorization/enum",
+            "/components/schemas/CapabilityDescriptorDto/properties/contract_body/enum",
+            "/components/schemas/CapabilityDescriptorDto/properties/runtime_body/enum",
+            "/components/schemas/CapabilityDescriptorDto/properties/surface_profile/enum",
+            "/components/schemas/CapabilityLifecycleDto/properties/contract_state/enum",
+            "/components/schemas/CapabilityLifecycleDto/properties/runtime_availability/enum",
+            "/components/schemas/CapabilitySurfaceDispositionDto/properties/state/enum",
+            "/components/schemas/CapabilitySurfaceDispositionDto/properties/binding_visibility/enum",
+            "/components/schemas/CapabilityUatDto/properties/relationship/enum",
+        ] {
+            assert!(
+                !array_at(&openapi, pointer)
+                    .unwrap_or_else(|_| panic!("missing finite vocabulary {pointer}"))
+                    .is_empty(),
+                "finite vocabulary {pointer} cannot be empty"
+            );
+        }
+        assert_eq!(
+            value_at(
+                &openapi,
+                "/components/schemas/CapabilityDescriptorDto/properties/scopes/uniqueItems"
+            )
+            .expect("scope uniqueness"),
+            &Value::Bool(true)
+        );
+    }
+
+    #[test]
+    fn validation_example_violation_mutations_are_rejected() {
+        let path = workspace_root()
+            .join(EXAMPLES_DIRECTORY)
+            .join("observation.accept.validation_failed.json");
+        let baseline: Value = serde_json::from_slice(&fs::read(path).expect("validation example"))
+            .expect("validation example JSON");
+        for (field, replacement) in [
+            ("code", "another_code"),
+            ("pointer", "/another"),
+            ("reason", "another reason"),
+            ("expected", "another expectation"),
+        ] {
+            let mut mutated = baseline.clone();
+            mutated["violations"][0][field] = Value::String(replacement.to_owned());
+            assert!(validate_problem_example_semantics(
+                "observation.accept.validation_failed",
+                &mutated,
+                "observation.accept",
+                CapabilityKey::AcceptObservation,
+                ProblemCode::ValidationFailed,
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn receipt_stream_metadata_mutations_are_rejected() {
+        let baseline = load_yaml(workspace_root(), ASYNCAPI_PATH).expect("authored AsyncAPI");
+        assert!(validate_receipt_stream_metadata(&baseline).is_ok());
+        for (pointer, replacement) in [
+            (
+                "/components/messages/receiptCommitted/x-fasti-sse-id-pointer",
+                "another-pointer",
+            ),
+            (
+                "/operations/sendReceiptCommitted/x-fasti-durability",
+                "durable",
+            ),
+            (
+                "/operations/sendReceiptCommitted/x-fasti-fixture-delivery",
+                "wait_forever",
+            ),
+        ] {
+            let mut mutated = baseline.clone();
+            *mutated.pointer_mut(pointer).expect("mutation pointer") =
+                Value::String(replacement.to_owned());
+            assert!(validate_receipt_stream_metadata(&mutated).is_err());
+        }
+    }
+
+    #[test]
+    fn problem_catalog_and_discovery_example_are_complete_and_sorted() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let registry: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CAPABILITY_REGISTRY_PATH))
+                .expect("public registry generated"),
+        )
+        .expect("registry JSON");
+        let example: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CAPABILITY_DISCOVERY_EXAMPLE_PATH))
+                .expect("discovery example generated"),
+        )
+        .expect("example JSON");
+        assert_eq!(
+            array_at(&example, "/capabilities").expect("example capabilities"),
+            array_at(&registry, "/capabilities").expect("registry capabilities")
+        );
+        assert_eq!(
+            string_at(&example, "/contract_version").expect("example version"),
+            string_at(&registry, "/contract_version").expect("registry version")
+        );
+        assert_eq!(
+            value_at(&example, "/surface_profiles").expect("example profiles"),
+            value_at(&registry, "/surface_profiles").expect("registry profiles")
+        );
+        assert_eq!(
+            array_at(&example, "/capabilities")
+                .expect("example capabilities")
+                .len(),
+            CapabilityKey::ALL.len()
+        );
+
+        let catalog: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(PROBLEM_CATALOG_PATH))
+                .expect("problem catalog generated"),
+        )
+        .expect("problem catalog JSON");
+        let governed_pairs: usize = array_at(&registry, "/capabilities")
+            .expect("registry capabilities")
+            .iter()
+            .map(|capability| {
+                array_at(capability, "/problems")
+                    .expect("capability problems")
+                    .len()
+            })
+            .sum();
+        assert_eq!(
+            array_at(&catalog, "/problems")
+                .expect("catalog problems")
+                .len(),
+            governed_pairs
+        );
+        assert!(catalog.to_string().contains("\"param_policy\""));
+        assert!(!catalog.to_string().contains("application_key"));
     }
 
     fn workspace_root() -> &'static Path {

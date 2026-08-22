@@ -14,7 +14,7 @@ use axum::{
 use fasti_application::{
     conformance::B1ConformanceFixture, conformance::FixtureEnrollment,
     conformance::FixtureInitialization, AcceptObservationCommand, AcceptObservationReceipt,
-    CapabilityKey, FastiProblem, ReplayReceiptQuery, StreamReceiptsQuery, Violation,
+    CapabilityKey, FastiProblem, ProblemCode, ReplayReceiptQuery, StreamReceiptsQuery, Violation,
 };
 use fasti_contracts::{
     public_capability_id, AcceptObservationRequest, AcceptObservationResponse,
@@ -139,6 +139,9 @@ async fn discover_capabilities(
     });
     Ok(Json(CapabilityDiscoveryResponse {
         conformance: ConformanceMarkerDto::FIXTURE_ONLY,
+        contract_version: capabilities.contract_version.clone(),
+        capability_base_uri: capabilities.capability_base_uri.clone(),
+        surface_profiles: capabilities.surface_profiles.clone(),
         capabilities: capabilities.capabilities.clone(),
     }))
 }
@@ -663,35 +666,39 @@ fn json_rejection(
     rejection: JsonRejection,
 ) -> HttpProblem {
     let status = rejection.status();
-    let (reason, expected) = match status {
-        StatusCode::BAD_REQUEST => ("request JSON is malformed", "well-formed JSON"),
-        StatusCode::PAYLOAD_TOO_LARGE => (
-            "request body exceeds the bounded fixture limit",
-            "a JSON body no larger than 4096 bytes",
-        ),
-        StatusCode::UNSUPPORTED_MEDIA_TYPE => (
-            "request media type is unsupported",
-            "Content-Type application/json",
-        ),
-        _ => (
-            "request JSON does not match the governed schema",
-            "the documented request schema",
-        ),
+    let code = match status {
+        StatusCode::BAD_REQUEST => ProblemCode::MalformedJson,
+        StatusCode::PAYLOAD_TOO_LARGE => ProblemCode::PayloadTooLarge,
+        StatusCode::UNSUPPORTED_MEDIA_TYPE => ProblemCode::UnsupportedMediaType,
+        _ => ProblemCode::ValidationFailed,
     };
-    let violation = Violation::try_new("invalid_representation", "/", reason, expected)
-        .expect("static rejection metadata is valid");
-    let problem = FastiProblem::validation_failed(capability, correlation_id, vec![violation])
-        .expect("one static violation is within bounds");
-    let mut dto = ProblemDetails::from_application(
-        &problem,
-        public_capability_id(capability),
-        DOCUMENTATION_BASE,
-    );
-    dto.status = status.as_u16();
-    HttpProblem {
-        status,
-        body: Box::new(dto),
+    let violation_contract = code
+        .representation_violation()
+        .expect("representation problem owns violation metadata");
+    let violation = Violation::try_new(
+        violation_contract.code(),
+        violation_contract.pointer(),
+        violation_contract.reason(),
+        violation_contract.expected(),
+    )
+    .expect("application-owned rejection metadata is valid");
+    let problem = match code {
+        ProblemCode::MalformedJson => {
+            FastiProblem::malformed_json(capability, correlation_id, vec![violation])
+        }
+        ProblemCode::PayloadTooLarge => {
+            FastiProblem::payload_too_large(capability, correlation_id, vec![violation])
+        }
+        ProblemCode::UnsupportedMediaType => {
+            FastiProblem::unsupported_media_type(capability, correlation_id, vec![violation])
+        }
+        ProblemCode::ValidationFailed => {
+            FastiProblem::validation_failed(capability, correlation_id, vec![violation])
+        }
+        _ => unreachable!("only representation problem codes are selected"),
     }
+    .expect("one static violation is within bounds");
+    application_problem(Box::new(problem))
 }
 
 fn forbidden(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> HttpProblem {
@@ -1065,12 +1072,14 @@ mod tests {
                     .body(Body::from("{"))
                     .expect("malformed request"),
                 StatusCode::BAD_REQUEST,
+                "malformed_json",
             ),
             (
                 Request::post("/api/v1/node/initialization")
                     .body(Body::from("{}"))
                     .expect("missing content type request"),
                 StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media_type",
             ),
             (
                 Request::post("/api/v1/node/initialization")
@@ -1078,6 +1087,7 @@ mod tests {
                     .body(Body::from(r#"{"extra":true}"#))
                     .expect("schema mismatch request"),
                 StatusCode::UNPROCESSABLE_ENTITY,
+                "validation_failed",
             ),
             (
                 Request::post("/api/v1/node/initialization")
@@ -1085,19 +1095,69 @@ mod tests {
                     .body(Body::from(" ".repeat(MAX_JSON_BODY_BYTES + 1)))
                     .expect("oversized request"),
                 StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
             ),
         ];
 
-        for (request, expected) in cases {
+        for (request, expected, expected_code) in cases {
             let response = b1_conformance_router()
                 .oneshot(request)
                 .await
                 .expect("governed rejection response");
             let problem = assert_problem_response(response, expected).await;
-            assert_eq!(problem.code, "validation_failed");
+            assert_eq!(problem.code, expected_code);
             assert_eq!(problem.safe_state, "no_mutation");
-            assert!(problem.actual.is_none());
+            assert_eq!(problem.actual, ());
+            if expected_code == "validation_failed" {
+                let mut governed: serde_json::Value = serde_json::from_str(include_str!(
+                    "../../../contracts/examples/v1/node.initialize.validation_failed.json"
+                ))
+                .expect("governed validation example");
+                governed["correlation_id"] =
+                    serde_json::Value::String(problem.correlation_id.clone());
+                assert_eq!(
+                    serde_json::to_value(&problem).expect("runtime problem JSON"),
+                    governed,
+                    "runtime validation semantics must equal the governed example after correlation normalization"
+                );
+                assert_eq!(problem.violations.len(), 1);
+                let violation = &problem.violations[0];
+                assert_eq!(violation.code, "invalid_representation");
+                assert_eq!(violation.pointer, "/");
+                assert_eq!(
+                    violation.reason,
+                    "request JSON does not match the governed schema"
+                );
+                assert_eq!(violation.expected, "the documented request schema");
+            }
         }
+    }
+
+    #[tokio::test]
+    async fn observation_validation_runtime_matches_its_governed_example() {
+        let router = b1_conformance_router();
+        let credential = initialize_and_enroll(&router).await;
+        let response = router
+            .oneshot(authorized_json_request(
+                "POST",
+                "/api/v1/observations",
+                &credential,
+                &serde_json::json!({ "unexpected": true }),
+            ))
+            .await
+            .expect("observation validation response");
+        let problem = assert_problem_response(response, StatusCode::UNPROCESSABLE_ENTITY).await;
+        assert_eq!(problem.code, "validation_failed");
+        let mut governed: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/examples/v1/observation.accept.validation_failed.json"
+        ))
+        .expect("governed observation validation example");
+        governed["correlation_id"] = serde_json::Value::String(problem.correlation_id.clone());
+        assert_eq!(
+            serde_json::to_value(problem).expect("runtime observation problem JSON"),
+            governed,
+            "observation validation runtime must equal its governed example after correlation normalization"
+        );
     }
 
     #[tokio::test]

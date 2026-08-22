@@ -300,6 +300,7 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
             [
                 "--test",
                 "tests/js/authored-contracts.test.mjs",
+                "tests/js/examples.test.mjs",
                 "tests/js/generated-contracts.test.mjs",
                 "tests/js/sdk-client.test.mjs",
             ],

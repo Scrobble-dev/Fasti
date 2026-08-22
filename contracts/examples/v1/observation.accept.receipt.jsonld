@@ -3,7 +3,6 @@
   "id": "https://fasti.scrobble.dev/id/rcp_018f0e0e7f7b70008000000000000001",
   "type": "AcceptObservationReceipt",
   "capabilityId": "observation.accept",
-  "correlationId": "req_018f0e0e7f7b70008000000000000002",
   "receiptId": "rcp_018f0e0e7f7b70008000000000000001",
   "operationId": "op_018f0e0e7f7b70008000000000000003",
   "workspaceId": "wsp_018f0e0e7f7b70008000000000000004",

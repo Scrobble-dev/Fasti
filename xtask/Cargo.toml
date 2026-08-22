@@ -12,7 +12,7 @@ description = "Repository-local deterministic verification task runner"
 anyhow = { workspace = true }
 clap = { workspace = true }
 fasti-application = { workspace = true }
-fasti-api = { workspace = true }
+fasti-api = { workspace = true, features = ["conformance-fixture"] }
 fasti-contracts = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

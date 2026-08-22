@@ -1,6 +1,7 @@
 use anyhow::{ensure, Context};
 use fasti_application::{
-    CapabilityBody, CapabilityKey, ContractState, ProblemCode, RuntimeAvailability, ScopeKey,
+    AuthorizationKind, AuthorizationRequirement, CapabilityBody, CapabilityKey, ContractState,
+    ProblemCode, RuntimeAvailability, ScopeKey,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -8,10 +9,11 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 6] = [
+const EXPECTED_PROFILES: [&str; 7] = [
     "b1_http_fixture",
-    "b1_listener",
+    "b1_observation_accept",
     "b1_receipt_replay",
+    "b1_receipt_stream",
     "health",
     "later_b2",
     "later_b3",
@@ -41,7 +43,8 @@ struct SurfaceProfile {
     sse_asyncapi: SurfaceDisposition,
     cli: SurfaceDisposition,
     json_schema: SurfaceDisposition,
-    json_ld_okf: SurfaceDisposition,
+    json_ld: SurfaceDisposition,
+    okf: SurfaceDisposition,
     sdk: SurfaceDisposition,
     knowledge: SurfaceDisposition,
     package_smoke: SurfaceDisposition,
@@ -49,14 +52,15 @@ struct SurfaceProfile {
 }
 
 impl SurfaceProfile {
-    fn surfaces(&self) -> [(&'static str, &SurfaceDisposition); 10] {
+    fn surfaces(&self) -> [(&'static str, &SurfaceDisposition); 11] {
         [
             ("domain_application", &self.domain_application),
             ("http_openapi", &self.http_openapi),
             ("sse_asyncapi", &self.sse_asyncapi),
             ("cli", &self.cli),
             ("json_schema", &self.json_schema),
-            ("json_ld_okf", &self.json_ld_okf),
+            ("json_ld", &self.json_ld),
+            ("okf", &self.okf),
             ("sdk", &self.sdk),
             ("knowledge", &self.knowledge),
             ("package_smoke", &self.package_smoke),
@@ -94,6 +98,7 @@ struct Capability {
     bounded_context: String,
     contract_body: CapabilityBody,
     runtime_body: CapabilityBody,
+    authorization: AuthorizationKind,
     lifecycle: RegistryLifecycle,
     surface_profile: String,
     scopes: Vec<ScopeKey>,
@@ -151,7 +156,81 @@ pub(crate) fn normalized_public_json(workspace_root: &Path) -> anyhow::Result<se
         capability.uat.sort_by(|left, right| left.id.cmp(&right.id));
     }
 
-    serde_json::to_value(registry).context("public capability registry is not serializable")
+    let mut public =
+        serde_json::to_value(registry).context("public capability registry is not serializable")?;
+    let profiles = public
+        .get_mut("surface_profiles")
+        .and_then(serde_json::Value::as_object_mut)
+        .context("public surface_profiles must be an object")?;
+    for profile in profiles.values_mut() {
+        let surfaces = profile
+            .as_object_mut()
+            .context("public surface profile must be an object")?;
+        for disposition in surfaces.values_mut() {
+            let disposition = disposition
+                .as_object_mut()
+                .context("public surface disposition must be an object")?;
+            let visibility = match disposition
+                .get("binding")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("application:{application_key}") => {
+                    disposition.remove("binding");
+                    Some("internal")
+                }
+                Some(_) => Some("public"),
+                None => None,
+            };
+            if let Some(visibility) = visibility {
+                disposition.insert(
+                    "binding_visibility".to_owned(),
+                    serde_json::Value::String(visibility.to_owned()),
+                );
+            }
+        }
+    }
+    Ok(public)
+}
+
+#[derive(Debug)]
+pub(crate) struct RequiredBinding {
+    pub capability_id: String,
+    pub surface: &'static str,
+    pub binding: String,
+}
+
+pub(crate) fn finalized_b1_required_bindings(
+    workspace_root: &Path,
+) -> anyhow::Result<Vec<RequiredBinding>> {
+    let registry = load_validated(workspace_root)?;
+    let mut bindings = Vec::new();
+    for capability in registry.capabilities {
+        if capability.contract_body != CapabilityBody::B1
+            || capability.lifecycle.contract_state != ContractState::Finalized
+        {
+            continue;
+        }
+        let profile = registry
+            .surface_profiles
+            .get(&capability.surface_profile)
+            .context("validated capability profile disappeared")?;
+        for (surface, disposition) in profile.surfaces() {
+            if matches!(disposition.state, SurfaceState::Required) {
+                bindings.push(RequiredBinding {
+                    capability_id: capability.id.clone(),
+                    surface,
+                    binding: disposition
+                        .binding
+                        .clone()
+                        .context("validated required binding disappeared")?,
+                });
+            }
+        }
+    }
+    bindings.sort_by(|left, right| {
+        (&left.capability_id, left.surface).cmp(&(&right.capability_id, right.surface))
+    });
+    Ok(bindings)
 }
 
 pub(crate) fn internal_key_id_pairs(
@@ -288,6 +367,21 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
             "{label}: runtime_body disagrees with fasti-application"
         );
         ensure!(
+            capability.authorization == capability.application_key.authorization_kind(),
+            "{label}: authorization disagrees with fasti-application"
+        );
+        let requirement = AuthorizationRequirement::for_capability(capability.application_key);
+        ensure!(
+            match capability.authorization {
+                AuthorizationKind::Unauthenticated => requirement.is_unauthenticated(),
+                AuthorizationKind::BootstrapOnly => requirement.is_bootstrap_only(),
+                AuthorizationKind::Scoped => {
+                    !requirement.is_unauthenticated() && !requirement.is_bootstrap_only()
+                }
+            },
+            "{label}: authorization disagrees with effective AuthorizationRequirement"
+        );
+        ensure!(
             body_rank(capability.lifecycle.introduced_in) <= body_rank(capability.contract_body),
             "{label}: introduced_in cannot follow contract_body"
         );
@@ -298,6 +392,12 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 .surface_profiles
                 .contains_key(&capability.surface_profile),
             "{label}: unknown surface_profile {}",
+            capability.surface_profile
+        );
+        let expected_profile = expected_surface_profile(capability.application_key);
+        ensure!(
+            capability.surface_profile == expected_profile,
+            "{label}: surface_profile violates contract policy; expected {expected_profile}, found {}",
             capability.surface_profile
         );
         used_profiles.insert(capability.surface_profile.as_str());
@@ -315,9 +415,9 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
             used_scopes.insert(*scope);
         }
         ensure!(
-            capability.scopes.as_slice() == capability.application_key.required_scopes(),
-            "{label}: scopes disagree with fasti-application; expected {:?}, found {:?}",
-            capability.application_key.required_scopes(),
+            capability.scopes.as_slice() == requirement.required_scopes(),
+            "{label}: scopes disagree with effective AuthorizationRequirement; expected {:?}, found {:?}",
+            requirement.required_scopes(),
             capability.scopes
         );
 
@@ -333,6 +433,16 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
             );
             used_problems.insert(problem.as_str());
         }
+        let expected_problems: BTreeSet<_> = capability
+            .application_key
+            .allowed_problem_codes()
+            .iter()
+            .map(|problem| problem.as_str())
+            .collect();
+        ensure!(
+            capability_problems == expected_problems,
+            "{label}: problems disagree with fasti-application; expected {expected_problems:?}, found {capability_problems:?}"
+        );
 
         let mut examples = BTreeSet::new();
         for example in &capability.examples {
@@ -343,6 +453,14 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
             ensure!(
                 examples.insert(example.as_str()),
                 "{label}: duplicate example key {example:?}"
+            );
+        }
+        if capability.contract_body == CapabilityBody::B1
+            && capability.lifecycle.contract_state == ContractState::Finalized
+        {
+            ensure!(
+                !examples.is_empty(),
+                "{label}: every finalized B1 capability must own at least one example"
             );
         }
         validate_uat(&label, &capability.uat)?;
@@ -456,6 +574,21 @@ fn nonempty(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.trim().is_empty())
 }
 
+const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
+    match key {
+        CapabilityKey::SystemHealth => "health",
+        CapabilityKey::AcceptObservation => "b1_observation_accept",
+        CapabilityKey::ReplayReceipt => "b1_receipt_replay",
+        CapabilityKey::StreamReceipts => "b1_receipt_stream",
+        _ => match key.contract_body() {
+            CapabilityBody::B1 => "b1_http_fixture",
+            CapabilityBody::B2 => "later_b2",
+            CapabilityBody::B3 => "later_b3",
+            CapabilityBody::B0 => "health",
+        },
+    }
+}
+
 const fn body_rank(body: CapabilityBody) -> u8 {
     match body {
         CapabilityBody::B0 => 0,
@@ -481,5 +614,92 @@ mod tests {
     fn uat_ids_are_fixed_width() {
         assert!(uat_id_is_well_formed("ID-065"));
         assert!(!uat_id_is_well_formed("ID-65"));
+    }
+
+    #[test]
+    fn surface_profile_policy_separates_finalized_and_later_contracts() {
+        assert_eq!(
+            expected_surface_profile(CapabilityKey::InitializeNode),
+            "b1_http_fixture"
+        );
+        assert_eq!(
+            expected_surface_profile(CapabilityKey::AcceptObservation),
+            "b1_observation_accept"
+        );
+        assert_eq!(
+            expected_surface_profile(CapabilityKey::CreateRecord),
+            "later_b2"
+        );
+        assert_eq!(
+            expected_surface_profile(CapabilityKey::ExportWorkspace),
+            "later_b3"
+        );
+    }
+
+    #[test]
+    fn cross_body_surface_profile_mutations_are_rejected() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let mut finalized = load_validated(root).expect("authored registry is valid");
+        finalized
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::InitializeNode)
+            .expect("initialize capability")
+            .surface_profile = "later_b2".to_owned();
+        assert!(validate_capabilities(&finalized).is_err());
+
+        let mut reserved = load_validated(root).expect("authored registry is valid");
+        reserved
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::CreateRecord)
+            .expect("create-record capability")
+            .surface_profile = "b1_http_fixture".to_owned();
+        assert!(validate_capabilities(&reserved).is_err());
+    }
+
+    #[test]
+    fn finalized_b1_capabilities_without_examples_are_rejected() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let mut registry = load_validated(root).expect("authored registry is valid");
+        registry
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::DiscoverCapabilities)
+            .expect("capability discovery")
+            .examples
+            .clear();
+        assert!(validate_capabilities(&registry).is_err());
+    }
+
+    #[test]
+    fn authorization_mutations_are_rejected() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let mut registry = load_validated(root).expect("authored registry is valid");
+        registry
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::InitializeNode)
+            .expect("initialize capability")
+            .authorization = AuthorizationKind::Scoped;
+        assert!(validate_capabilities(&registry).is_err());
+    }
+
+    #[test]
+    fn public_registry_redacts_private_application_bindings() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let public = normalized_public_json(root).expect("public registry");
+        let rendered = serde_json::to_string(&public).expect("serialize public registry");
+        assert!(!rendered.contains("application_key"));
+        assert!(!rendered.contains("application:{application_key}"));
+        assert!(rendered.contains("\"binding_visibility\":\"internal\""));
     }
 }

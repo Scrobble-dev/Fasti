@@ -1,8 +1,10 @@
 use clap::ValueEnum;
+use fasti_application::CapabilityKey;
+use fasti_contracts::public_capability_id;
 use serde_json::{json, Map, Value};
 use std::fmt::{self, Write as _};
 
-const DISCOVERY_CAPABILITY_ID: &str = "system.capabilities.discover";
+const DISCOVERY_CAPABILITY_ID: &str = public_capability_id(CapabilityKey::DiscoverCapabilities);
 const PUBLIC_REGISTRY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../contracts/generated/v1/capabilities.json"
@@ -17,11 +19,18 @@ pub(crate) enum OutputFormat {
 }
 
 #[derive(Debug)]
-pub(crate) struct CliFailure {
-    code: &'static str,
-    capability_id: &'static str,
-    detail: String,
-    next_action: String,
+pub(crate) enum CliFailure {
+    Capability {
+        code: &'static str,
+        capability_id: &'static str,
+        detail: String,
+        next_action: String,
+    },
+    Local {
+        diagnostic: &'static str,
+        detail: String,
+        next_action: String,
+    },
 }
 
 impl CliFailure {
@@ -31,7 +40,7 @@ impl CliFailure {
         detail: impl Into<String>,
         next_action: impl Into<String>,
     ) -> Self {
-        Self {
+        Self::Capability {
             code,
             capability_id,
             detail: detail.into(),
@@ -40,22 +49,47 @@ impl CliFailure {
     }
 
     fn registry(detail: impl Into<String>) -> Self {
-        Self::new(
-            "contract_registry_invalid",
-            DISCOVERY_CAPABILITY_ID,
+        Self::local(
+            "registry_invalid",
             detail,
             "Regenerate and validate the checked-in public contract registry, then rebuild Fasti.",
         )
+    }
+
+    pub(crate) fn local(
+        diagnostic: &'static str,
+        detail: impl Into<String>,
+        next_action: impl Into<String>,
+    ) -> Self {
+        Self::Local {
+            diagnostic,
+            detail: detail.into(),
+            next_action: next_action.into(),
+        }
     }
 }
 
 impl fmt::Display for CliFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "code={} capability_id={} safe_state=no_mutation detail={:?} next_action={:?}",
-            self.code, self.capability_id, self.detail, self.next_action
-        )
+        match self {
+            Self::Capability {
+                code,
+                capability_id,
+                detail,
+                next_action,
+            } => write!(
+                formatter,
+                "code={code} capability_id={capability_id} safe_state=no_mutation detail={detail:?} next_action={next_action:?}"
+            ),
+            Self::Local {
+                diagnostic,
+                detail,
+                next_action,
+            } => write!(
+                formatter,
+                "diagnostic={diagnostic} scope=cli_local detail={detail:?} next_action={next_action:?}"
+            ),
+        }
     }
 }
 
@@ -153,9 +187,8 @@ impl CapabilityCatalog {
             .ok()
             .and_then(|index| self.resources.get(index))
             .ok_or_else(|| {
-                CliFailure::new(
-                    "capability_not_found",
-                    DISCOVERY_CAPABILITY_ID,
+                CliFailure::local(
+                    "resource_not_found",
                     format!("No public capability resource has id {id:?}."),
                     "Run `fasti capability list` to inspect the stable public identifiers.",
                 )
@@ -268,28 +301,17 @@ fn public_surface_dispositions(
         let mut public = disposition.as_object().cloned().ok_or_else(|| {
             CliFailure::registry(format!("Surface disposition {surface} must be an object."))
         })?;
-
-        if let Some(binding) = public.get("binding").and_then(Value::as_str) {
-            if binding.contains("{application_key}") {
-                public.remove("binding");
-                public.insert(
-                    "binding_visibility".to_owned(),
-                    Value::String("internal".to_owned()),
-                );
-                public.entry("reason").or_insert_with(|| {
-                    Value::String(
-                        "The implementation binding is internal; use the stable public capability id."
-                            .to_owned(),
-                    )
-                });
-            } else {
+        if serde_json::to_string(&public).is_ok_and(|rendered| rendered.contains("application_key"))
+        {
+            return Err(CliFailure::registry(
+                "A public surface disposition contains an internal application binding.",
+            ));
+        }
+        if public.get("binding_visibility").and_then(Value::as_str) == Some("public") {
+            if let Some(binding) = public.get("binding").and_then(Value::as_str) {
                 public.insert(
                     "binding".to_owned(),
                     Value::String(binding.replace("{capability_id}", capability_id)),
-                );
-                public.insert(
-                    "binding_visibility".to_owned(),
-                    Value::String("public".to_owned()),
                 );
             }
         }
@@ -430,9 +452,8 @@ fn string_array(object: &Map<String, Value>, field: &str) -> Result<String, CliF
 
 fn render_json(value: &Value) -> Result<String, CliFailure> {
     serde_json::to_string_pretty(value).map_err(|error| {
-        CliFailure::new(
+        CliFailure::local(
             "output_failed",
-            DISCOVERY_CAPABILITY_ID,
             format!("The capability result could not be encoded as JSON: {error}"),
             "Validate the checked-in registry and retry the command.",
         )
@@ -440,9 +461,8 @@ fn render_json(value: &Value) -> Result<String, CliFailure> {
 }
 
 fn format_failure(_: fmt::Error) -> CliFailure {
-    CliFailure::new(
+    CliFailure::local(
         "output_failed",
-        DISCOVERY_CAPABILITY_ID,
         "The capability result could not be formatted.",
         "Validate the checked-in registry and retry the command.",
     )

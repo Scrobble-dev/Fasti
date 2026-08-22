@@ -6,14 +6,15 @@ resource: https://fasti.scrobble.dev/ns/knowledge/v1/problems
 tags: [fasti, b1, contracts, problems]
 status: draft
 identifiers:
+  - capacity_exceeded
   - capability_unavailable
-  - contract_drift
   - forbidden
   - idempotency_conflict
-  - invalid_identifier
   - invalid_observation
-  - invalid_time
+  - malformed_json
+  - payload_too_large
   - receipt_not_found
+  - unsupported_media_type
   - validation_failed
 sources:
   - id: fasti-capability-registry
@@ -31,14 +32,15 @@ not claim a later-body failure path is executable.
 
 | Code                     | Contract meaning                                                 |
 | ------------------------ | ---------------------------------------------------------------- |
+| `capacity_exceeded`      | A bounded application resource rejected work without mutation.   |
 | `capability_unavailable` | The requested capability is owned by another runtime body.       |
-| `contract_drift`         | A public surface disagrees with the governed contract source.    |
 | `forbidden`              | The request context is not authorized for the capability.        |
 | `idempotency_conflict`   | An operation identifier was reused with different semantics.     |
-| `invalid_identifier`     | A typed identifier is malformed or used in the wrong role.       |
 | `invalid_observation`    | An observation violates the governed input contract.             |
-| `invalid_time`           | A claimed time is malformed or violates its role-specific rules. |
+| `malformed_json`         | The request body is not well-formed JSON; no mutation occurred.  |
+| `payload_too_large`      | The request exceeded its documented bounded body limit.          |
 | `receipt_not_found`      | No visible receipt matches the requested identifier and context. |
+| `unsupported_media_type` | The request did not use the required JSON media type.            |
 | `validation_failed`      | One or more public fields fail contract validation.              |
 
 See [capabilities](capabilities.md) for which codes each capability declares and

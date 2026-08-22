@@ -4,10 +4,16 @@
 //! body finalizes a public shape. Domain entities and application problems stay
 //! inward; adapters map them through these DTOs.
 
-use fasti_application::{FastiProblem, ProblemCode};
+use fasti_application::FastiProblem;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+
+fn explicit_null_openapi() -> utoipa::openapi::schema::Object {
+    utoipa::openapi::schema::ObjectBuilder::new()
+        .schema_type(utoipa::openapi::schema::Type::Null)
+        .build()
+}
 
 mod conformance;
 mod generated_capability_ids;
@@ -36,7 +42,8 @@ pub struct ViolationDto {
     pub pointer: String,
     pub reason: String,
     pub expected: String,
-    pub actual: Option<String>,
+    #[schema(schema_with = explicit_null_openapi)]
+    pub actual: (),
 }
 
 /// RFC 9457 representation of the one application problem model.
@@ -46,16 +53,24 @@ pub struct ProblemDetails {
     #[serde(rename = "type")]
     pub type_uri: String,
     pub title: String,
+    #[schema(minimum = 0, maximum = 65535, format = "uint16")]
     pub status: u16,
     pub detail: String,
     pub code: String,
     pub capability_id: String,
     pub safe_state: String,
     pub retryability: String,
+    #[schemars(length(equal = 1))]
+    #[schema(min_items = 1, max_items = 1)]
     pub next_actions: Vec<ProblemActionDto>,
+    #[schemars(regex(pattern = r"^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"))]
+    #[schema(pattern = r"^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")]
     pub correlation_id: String,
     pub param: Option<String>,
-    pub actual: Option<String>,
+    #[schema(schema_with = explicit_null_openapi)]
+    pub actual: (),
+    #[schemars(length(max = 32))]
+    #[schema(max_items = 32)]
     pub violations: Vec<ViolationDto>,
 }
 
@@ -65,18 +80,15 @@ impl ProblemDetails {
         capability_id: &str,
         documentation_base: &str,
     ) -> Self {
-        let documentation_path = problem
-            .documentation_path()
-            .unwrap_or("v1/problems/unknown");
         Self {
             type_uri: format!(
                 "{}/{}",
                 documentation_base.trim_end_matches('/'),
-                documentation_path
+                problem.documentation_path()
             ),
-            title: title_for(problem.code()).to_owned(),
-            status: status_for(problem.code()),
-            detail: problem.message().to_owned(),
+            title: problem.title().to_owned(),
+            status: problem.status(),
+            detail: problem.message().into_owned(),
             code: problem.code().as_str().to_owned(),
             capability_id: capability_id.to_owned(),
             safe_state: problem.safe_state().as_str().to_owned(),
@@ -91,7 +103,7 @@ impl ProblemDetails {
                 .collect(),
             correlation_id: problem.correlation_id().to_string(),
             param: problem.param().map(str::to_owned),
-            actual: problem.actual().map(str::to_owned),
+            actual: (),
             violations: problem
                 .violations()
                 .iter()
@@ -100,40 +112,10 @@ impl ProblemDetails {
                     pointer: violation.pointer().to_owned(),
                     reason: violation.reason().to_owned(),
                     expected: violation.expected().to_owned(),
-                    actual: violation.actual().map(str::to_owned),
+                    actual: (),
                 })
                 .collect(),
         }
-    }
-}
-
-const fn status_for(code: ProblemCode) -> u16 {
-    match code {
-        ProblemCode::CapacityExceeded => 507,
-        ProblemCode::Forbidden => 403,
-        ProblemCode::ReceiptNotFound => 404,
-        ProblemCode::IdempotencyConflict => 409,
-        ProblemCode::InvalidIdentifier
-        | ProblemCode::InvalidObservation
-        | ProblemCode::InvalidTime
-        | ProblemCode::ValidationFailed => 422,
-        ProblemCode::CapabilityUnavailable => 501,
-        ProblemCode::ContractDrift => 500,
-    }
-}
-
-const fn title_for(code: ProblemCode) -> &'static str {
-    match code {
-        ProblemCode::CapacityExceeded => "Capacity exceeded",
-        ProblemCode::CapabilityUnavailable => "Capability unavailable",
-        ProblemCode::ContractDrift => "Contract drift",
-        ProblemCode::Forbidden => "Forbidden",
-        ProblemCode::IdempotencyConflict => "Idempotency conflict",
-        ProblemCode::InvalidIdentifier => "Invalid identifier",
-        ProblemCode::InvalidObservation => "Invalid observation",
-        ProblemCode::InvalidTime => "Invalid time",
-        ProblemCode::ReceiptNotFound => "Receipt not found",
-        ProblemCode::ValidationFailed => "Validation failed",
     }
 }
 
@@ -184,6 +166,40 @@ mod tests {
         assert_eq!(
             value.get("$schema").and_then(serde_json::Value::as_str),
             Some("https://json-schema.org/draft/2020-12/schema")
+        );
+    }
+
+    #[test]
+    fn problem_schema_freezes_canonical_action_and_violation_bounds() {
+        let schema = SchemaSettings::draft2020_12()
+            .into_generator()
+            .into_root_schema_for::<ProblemDetails>();
+        let value = serde_json::to_value(schema).expect("serializable JSON Schema");
+        assert_eq!(
+            value.pointer("/properties/next_actions/minItems"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            value.pointer("/properties/next_actions/maxItems"),
+            Some(&serde_json::json!(1))
+        );
+        assert_eq!(
+            value.pointer("/properties/violations/maxItems"),
+            Some(&serde_json::json!(32))
+        );
+        assert_eq!(
+            value.pointer("/properties/actual/type"),
+            Some(&serde_json::json!("null"))
+        );
+        assert_eq!(
+            value.pointer("/$defs/ViolationDto/properties/actual/type"),
+            Some(&serde_json::json!("null"))
+        );
+        assert_eq!(
+            value.pointer("/properties/correlation_id/pattern"),
+            Some(&serde_json::json!(
+                "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+            ))
         );
     }
 }
