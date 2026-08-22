@@ -1,8 +1,10 @@
+mod evidence;
 mod generate;
+mod orchestration;
 mod registry;
 mod verify;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -20,6 +22,48 @@ enum Command {
         #[command(subcommand)]
         command: ContractCommand,
     },
+    /// Canonical contributor and milestone test orchestration
+    Test {
+        #[command(subcommand)]
+        command: TestCommand,
+    },
+    /// Canonical digest-bound evidence operations
+    Evidence {
+        #[command(subcommand)]
+        command: EvidenceCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TestCommand {
+    /// Run the complete, bounded pull-request gate
+    Pr,
+    /// Run the pull-request gate plus applicable deep checks
+    Deep,
+    /// Run a fail-closed milestone gate for one implementation body
+    Milestone {
+        #[arg(long, value_enum, ignore_case = true)]
+        body: BodyArg,
+        /// Override the canonical digest-bound evidence manifest path
+        #[arg(long)]
+        manifest: Option<PathBuf>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum BodyArg {
+    B0,
+    B1,
+    B2,
+    B3,
+}
+
+#[derive(Subcommand)]
+enum EvidenceCommand {
+    /// Print the strict evidence-manifest schema and its canonical digest
+    Schema,
+    /// Verify schema, RFC 8785 manifest digest, file digests, source, and claims
+    Verify { manifest: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -60,6 +104,61 @@ fn main() -> anyhow::Result<()> {
         Command::Contract {
             command: ContractCommand::Verify { locked },
         } => verify_contracts(&root, locked),
+        Command::Test {
+            command: TestCommand::Pr,
+        } => run_pr(&root),
+        Command::Test {
+            command: TestCommand::Deep,
+        } => run_deep(&root),
+        Command::Test {
+            command: TestCommand::Milestone { body, manifest },
+        } => run_milestone(&root, body, manifest),
+        Command::Evidence {
+            command: EvidenceCommand::Schema,
+        } => evidence::print_schema(),
+        Command::Evidence {
+            command: EvidenceCommand::Verify { manifest },
+        } => evidence::verify(&root, &manifest).map(|_| ()),
+    }
+}
+
+fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
+    verify_contracts(root, true)?;
+    orchestration::run_portable_b1(root)?;
+    println!("PASS: canonical B1 pull-request gate");
+    Ok(())
+}
+
+fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
+    run_pr(root)?;
+    orchestration::run_deep_b1(root)?;
+    println!("PASS: every deep check applicable to the current B1 body");
+    Ok(())
+}
+
+fn run_milestone(
+    root: &std::path::Path,
+    body: BodyArg,
+    manifest: Option<PathBuf>,
+) -> anyhow::Result<()> {
+    match body {
+        BodyArg::B1 => {
+            run_deep(root)?;
+            let manifest = manifest
+                .unwrap_or_else(|| root.join("target/fasti-evidence/b1-manifest.json"));
+            evidence::create_b1_milestone_manifest(root, &manifest).map(|_| ())
+        }
+        BodyArg::B0 => anyhow::bail!(
+            "B0 predates the canonical milestone evidence manifest; create and verify a B0 manifest before claiming this gate"
+        ),
+        BodyArg::B2 | BodyArg::B3 => anyhow::bail!(
+            "{} is not authorized while the fail-closed B1 milestone remains open",
+            match body {
+                BodyArg::B2 => "B2",
+                BodyArg::B3 => "B3",
+                _ => unreachable!(),
+            }
+        ),
     }
 }
 

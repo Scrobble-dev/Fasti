@@ -1,4 +1,4 @@
-name: Governed Draft Validation
+name: Governed Contract Conformance
 
 on:
   push:
@@ -10,49 +10,22 @@ permissions:
   contents: read
 
 jobs:
-  validate-drafts:
-    name: Validate draft schema, fixtures, identity seed, and manifests
+  contract-conformance:
+    name: OpenAPI, AsyncAPI, JSON Schema, JSON-LD, OKF, and SDK parity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
-          python-version: "3.12"
-      - name: Install draft validators
-        run: python -m pip install --disable-pip-version-check jsonschema pyyaml
-      - name: Validate activity fixtures against the governed draft schema
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          from jsonschema import Draft202012Validator, FormatChecker
-
-          schema = json.loads(Path("packages/schemas/schemas/activity-envelope.json").read_text())
-          validator = Draft202012Validator(schema, format_checker=FormatChecker())
-          fixtures = sorted(Path("fixtures/activity").glob("*.json"))
-          if not fixtures:
-              raise SystemExit("No activity fixtures found")
-          for fixture in fixtures:
-              payload = json.loads(fixture.read_text())
-              validator.validate(payload)
-              print(f"PASS: {fixture}")
-          PY
-      - name: Validate identity seed and provider manifests as YAML
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import yaml
-
-          paths = [Path("contracts/identity/identity-contract-seed.yaml")]
-          manifests = sorted(Path("contracts/addons/manifests").glob("*.yaml"))
-          if not manifests:
-              raise SystemExit("No provider manifests found")
-          paths.extend(manifests)
-          for path in paths:
-              yaml.safe_load(path.read_text())
-              print(f"PASS: {path}")
-          PY
-      - name: State the contract boundary honestly
-        run: |
-          echo "B0 validates governed draft syntax and fixture shape only."
-          echo "OpenAPI 3.1, AsyncAPI 3.x, JSON-LD 1.1, OKF, generated SDK parity, and semantic mutation gates become executable in B1."
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: cargo fetch --locked
+      - name: Verify the governed B1 contract spine
+        run: cargo xtask contract verify --locked

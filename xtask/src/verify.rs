@@ -29,7 +29,7 @@ pub(crate) struct VerificationFacts {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct CommandGate {
+pub(crate) struct CommandGate {
     id: &'static str,
     program: &'static str,
     args: Vec<OsString>,
@@ -37,7 +37,7 @@ struct CommandGate {
 }
 
 impl CommandGate {
-    fn new(
+    pub(crate) fn new(
         id: &'static str,
         program: &'static str,
         args: impl IntoIterator<Item = impl Into<OsString>>,
@@ -221,6 +221,15 @@ fn run_command_gates(
 ) -> anyhow::Result<Vec<String>> {
     let mut passed = Vec::with_capacity(PREFLIGHT_GATES.len() + gates.len());
     passed.extend(PREFLIGHT_GATES.iter().map(|gate| (*gate).to_owned()));
+    run_command_gates_from(root, gates, executor, passed)
+}
+
+fn run_command_gates_from(
+    root: &Path,
+    gates: &[CommandGate],
+    executor: &mut impl GateExecutor,
+    mut passed: Vec<String>,
+) -> anyhow::Result<Vec<String>> {
     for gate in gates {
         println!("RUN [{}]: {}", gate.id, gate.display());
         std::io::stdout()
@@ -239,6 +248,14 @@ fn run_command_gates(
         passed.push(gate.id.to_owned());
     }
     Ok(passed)
+}
+
+pub(crate) fn run_additional_gates(
+    root: &Path,
+    gates: &[CommandGate],
+) -> anyhow::Result<Vec<String>> {
+    let mut executor = ProcessGateExecutor;
+    run_command_gates_from(root, gates, &mut executor, Vec::new())
 }
 
 fn command_gates(locked: bool) -> Vec<CommandGate> {
