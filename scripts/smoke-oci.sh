@@ -11,7 +11,15 @@ fi
 
 container_id="$(docker run --detach --rm --publish 127.0.0.1::8420 "$image")"
 isolated_id=""
+cli_stdout=""
+cli_stderr=""
 cleanup() {
+  if [[ -n "$cli_stdout" ]]; then
+    rm -f "$cli_stdout"
+  fi
+  if [[ -n "$cli_stderr" ]]; then
+    rm -f "$cli_stderr"
+  fi
   docker rm --force "$container_id" >/dev/null 2>&1 || true
   if [[ -n "$isolated_id" ]]; then
     docker rm --force "$isolated_id" >/dev/null 2>&1 || true
@@ -58,7 +66,6 @@ fi
 
 cli_stdout="$(mktemp)"
 cli_stderr="$(mktemp)"
-trap 'rm -f "$cli_stdout" "$cli_stderr"; docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
 
 if docker run --rm --network none "$image" /usr/local/bin/fasti verify >"$cli_stdout" 2>"$cli_stderr"; then
   echo "Unavailable verify command reported success" >&2
