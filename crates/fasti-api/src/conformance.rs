@@ -846,7 +846,7 @@ pub fn b1_conformance_router() -> Router {
         .route("/api/v1/client-enrollments", post(enroll_first_client))
         .route("/api/v1/observations", post(accept_observation))
         .route("/api/v1/receipts/stream", get(stream_receipts))
-        .route("/api/v1/receipts/:receipt_id", get(replay_receipt))
+        .route("/api/v1/receipts/{receipt_id}", get(replay_receipt))
         .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
         .with_state(Arc::new(B1HttpState::default()))
 }

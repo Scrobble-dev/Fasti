@@ -40,7 +40,7 @@ uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Web & API
-axum = { version = "0.7", features = ["macros", "ws"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
 
 # SQLite & Persistence
@@ -50,7 +50,7 @@ rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 serde-saphyr = "1.0.1"
 proptest = "1.6"
