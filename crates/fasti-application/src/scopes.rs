@@ -12,6 +12,12 @@ macro_rules! define_scope_keys {
 
         impl ScopeKey {
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => stringify!($variant)),+
+                }
+            }
         }
     };
 }

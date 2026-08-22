@@ -16,11 +16,7 @@ pub type ApplicationResult<T> = Result<T, Box<FastiProblem>>;
 /// application authorization evaluator inside the same transaction as the
 /// idempotency lookup and receipt commit. A pre-authorized token is not enough:
 /// revocation or epoch advancement may race the request.
-///
-/// For one operation ID, same capability plus digest returns the exact original
-/// receipt; changed capability or digest returns an idempotency conflict without
-/// changing that receipt. B1 supplies only a non-production conformance adapter.
-pub trait ObservationAcceptancePort {
+pub trait ObservationAcceptancePort: Send + Sync {
     fn authorize_and_accept(
         &self,
         command: AcceptObservationCommand,
@@ -113,7 +109,7 @@ impl ReceiptStreamBatch {
 /// Short-lived authorization and bounded replay boundary for receipt streams.
 /// Implementations return available events and release storage locks before a
 /// delivery adapter starts SSE serialization or waits for a reconnect.
-pub trait ReceiptStreamPort {
+pub trait ReceiptStreamPort: Send + Sync {
     fn authorize_and_stream(
         &self,
         query: StreamReceiptsQuery,
@@ -128,7 +124,7 @@ mod tests {
     fn assert_stream_object_safe(_: &dyn ReceiptStreamPort) {}
 
     #[test]
-    fn port_can_be_supplied_as_one_atomic_adapter_boundary() {
+    fn ports_are_object_safe() {
         struct CompileOnly;
 
         impl ObservationAcceptancePort for CompileOnly {
@@ -146,7 +142,6 @@ mod tests {
                 unreachable!("compile-only port proof")
             }
         }
-
         assert_object_safe(&CompileOnly);
 
         struct StreamCompileOnly;

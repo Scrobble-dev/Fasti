@@ -7,6 +7,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
     match key {
         CapabilityKey::AcceptObservation => "observation.accept",
         CapabilityKey::AppendCorrection => "correction.chain.append",
+        CapabilityKey::ApplyIdentitySeed => "identity.seed.apply",
         CapabilityKey::AttachIdentifier => "identity.identifier.attach",
         CapabilityKey::ConfigureListener => "listener.configure",
         CapabilityKey::CreateRecord => "identity.record.create",
@@ -26,6 +27,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::SelectProfile => "profile.select",
         CapabilityKey::StreamReceipts => "receipt.stream",
         CapabilityKey::SystemHealth => "system.health",
+        CapabilityKey::UploadEvidence => "evidence.upload",
         CapabilityKey::VerifyWorkspace => "portability.workspace.verify",
     }
 }

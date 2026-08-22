@@ -7,6 +7,7 @@ pub mod authorization;
 pub mod capabilities;
 #[cfg(feature = "conformance-fixture")]
 pub mod conformance;
+pub mod kernel;
 pub mod ports;
 pub mod problems;
 pub mod receipts;
@@ -15,6 +16,7 @@ pub mod scopes;
 
 pub use authorization::*;
 pub use capabilities::*;
+pub use kernel::*;
 pub use ports::*;
 pub use problems::*;
 pub use receipts::*;
