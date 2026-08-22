@@ -37,9 +37,18 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
 }
 
-/// Constructs the primary API router for fastid.
-pub fn api_router() -> Router {
+/// Constructs the health-only router used by every non-loopback listener.
+///
+/// This router is intentionally separate from the local application router so a
+/// future local capability cannot become remotely reachable through container or
+/// operator listener configuration by accident.
+pub fn health_router() -> Router {
     Router::new().route("/api/v1/health", get(health_check))
+}
+
+/// Constructs the primary local API router for fastid.
+pub fn api_router() -> Router {
+    health_router()
 }
 
 #[cfg(test)]
@@ -89,6 +98,20 @@ mod tests {
             .expect("router response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn remote_health_router_exposes_no_local_capability_route() {
+        let response = health_router()
+            .oneshot(
+                Request::get("/api/v1/capabilities")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
