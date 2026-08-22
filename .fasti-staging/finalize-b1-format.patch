@@ -1,6 +1,6 @@
 --- a/crates/fasti-store/src/observation.rs
 +++ b/crates/fasti-store/src/observation.rs
-@@ -6,9 +6,8 @@
+@@ -6,9 +6,9 @@
  };
  use fasti_application::{
      AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
@@ -11,3 +11,5 @@
 +    ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery, StreamReceiptsQuery,
 +    MAX_RECEIPT_STREAM_REPLAY,
  };
+ use fasti_domain::{
+     ClientId, CommittedAt, EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain,
