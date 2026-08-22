@@ -15,6 +15,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use thiserror::Error;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_EVIDENCE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_TEMP_EVIDENCE_BYTES: u64 = 32 * 1024 * 1024;
@@ -24,6 +27,11 @@ pub const MAX_CONCURRENT_UPLOADS: usize = 4;
 pub enum StoreOpenError {
     #[error("failed to prepare the Fasti data root: {0}")]
     Io(#[from] std::io::Error),
+    #[error("refusing unsafe data path {path:?}: {reason}")]
+    UnsafePath {
+        path: PathBuf,
+        reason: &'static str,
+    },
     #[error("failed to open or migrate SQLite: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("SQLite returned unsupported journal mode {0:?}; WAL is required")]
@@ -61,11 +69,16 @@ impl SqliteKernel {
         let current_root = data_root.join("current");
         let payload_root = current_root.join("payloads").join("sha256");
         let scratch_root = current_root.join("scratch").join("uploads");
-        fs::create_dir_all(&payload_root)?;
-        fs::create_dir_all(&scratch_root)?;
+
+        prepare_private_directory(&data_root)?;
+        prepare_private_directory(&current_root)?;
+        prepare_private_directory(&payload_root)?;
+        prepare_private_directory(&scratch_root)?;
 
         let database_path = current_root.join("fasti.sqlite3");
-        let connection = Connection::open(database_path)?;
+        reject_unsafe_existing_file(&database_path)?;
+        let connection = Connection::open(&database_path)?;
+        harden_private_regular_file(&database_path)?;
         connection.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
         let journal_mode: String =
@@ -132,6 +145,69 @@ impl SqliteKernel {
             ))
         })
     }
+}
+
+fn unsafe_path(path: &Path, reason: &'static str) -> StoreOpenError {
+    StoreOpenError::UnsafePath {
+        path: path.to_path_buf(),
+        reason,
+    }
+}
+
+fn prepare_private_directory(path: &Path) -> Result<(), StoreOpenError> {
+    fs::create_dir_all(path)?;
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Err(unsafe_path(path, "symbolic links are not accepted"));
+    }
+    if !metadata.is_dir() {
+        return Err(unsafe_path(path, "expected a directory"));
+    }
+    set_owner_only_directory_permissions(path)?;
+    Ok(())
+}
+
+fn reject_unsafe_existing_file(path: &Path) -> Result<(), StoreOpenError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(unsafe_path(path, "symbolic links are not accepted"));
+    }
+    if !metadata.is_file() {
+        return Err(unsafe_path(path, "expected a regular file"));
+    }
+    Ok(())
+}
+
+fn harden_private_regular_file(path: &Path) -> Result<(), StoreOpenError> {
+    reject_unsafe_existing_file(path)?;
+    set_owner_only_file_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_directory_permissions(_path: &Path) -> Result<(), StoreOpenError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_owner_only_file_permissions(path: &Path) -> Result<(), StoreOpenError> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_file_permissions(_path: &Path) -> Result<(), StoreOpenError> {
+    Ok(())
 }
 
 pub(crate) fn now() -> DateTime<Utc> {
@@ -321,6 +397,8 @@ pub(crate) fn load_access_snapshot(
     let grant_id = grant
         .parse::<ProfileGrantId>()
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let epoch = u64::try_from(epoch)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
 
     Ok(AccessSnapshot::established(
         workspace_id,
@@ -338,7 +416,7 @@ pub(crate) fn load_access_snapshot(
         } else {
             GrantStatus::Revoked
         },
-        u64::try_from(epoch).unwrap_or(u64::MAX),
+        epoch,
         scopes,
     ))
 }
@@ -374,4 +452,60 @@ pub(crate) fn problem(
     correlation_id: RequestCorrelationId,
 ) -> Box<FastiProblem> {
     Box::new(FastiProblem::from_code(code, capability, correlation_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_root_rejects_a_symbolic_link() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let target = temporary.path().join("target");
+        fs::create_dir(&target).expect("target directory");
+        let link = temporary.path().join("fasti-data");
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target, &link).expect("symbolic link");
+            assert!(matches!(
+                SqliteKernel::open(&link),
+                Err(StoreOpenError::UnsafePath { .. })
+            ));
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = link;
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn data_root_and_database_are_owner_only() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let kernel = SqliteKernel::open(&root).expect("secure local kernel");
+
+        for directory in [
+            root.clone(),
+            root.join("current"),
+            root.join("current/payloads/sha256"),
+            root.join("current/scratch/uploads"),
+        ] {
+            let mode = fs::metadata(directory)
+                .expect("directory metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+
+        let mode = fs::metadata(kernel.database_path())
+            .expect("database metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }
