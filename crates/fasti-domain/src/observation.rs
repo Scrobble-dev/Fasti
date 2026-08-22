@@ -5,25 +5,21 @@ use crate::{
     WorkspaceId,
 };
 
-/// Resolution state produced when an observation enters the domain without an
-/// identity decision.
-///
-/// Later bodies may add outcomes without adding Record or Occurrence mutation
-/// to observation construction.
+/// Resolution state produced when an observation enters the domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationResolution {
     Unresolved,
+    Resolved,
+    Conflicted,
 }
 
 /// Immutable source observation accepted for later interpretation.
 ///
 /// `Observation` intentionally contains neither a Record nor an Occurrence ID:
-/// acceptance preserves source evidence without inventing an identity or
-/// smuggling a resolution mutation into construction. It is serialize-only so
-/// transport callers cannot deserialize and inject the server-owned
-/// `ReceivedAt`; the application acceptance boundary is the sole intended
-/// caller of `new_unresolved`.
+/// acceptance preserves source evidence without making identity construction a
+/// hidden side effect. It is serialize-only so transport callers cannot inject
+/// the server-owned `ReceivedAt`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Observation {
     observation_id: ObservationId,

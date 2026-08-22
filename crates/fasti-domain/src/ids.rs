@@ -196,14 +196,14 @@ define_fasti_ids!(
     (Client, ClientId, "cli_", Executable),
     (Credential, CredentialId, "crd_", Executable),
     (ProfileGrant, ProfileGrantId, "grt_", Executable),
-    (Record, RecordId, "rec_", Reserved),
-    (ExternalIdentifier, ExternalIdentifierId, "xid_", Reserved),
+    (Record, RecordId, "rec_", Executable),
+    (ExternalIdentifier, ExternalIdentifierId, "xid_", Executable),
     (IdentityAssertion, IdentityAssertionId, "asr_", Reserved),
     (Evidence, EvidenceId, "evd_", Executable),
     (Observation, ObservationId, "obs_", Executable),
-    (Occurrence, OccurrenceId, "occ_", Reserved),
-    (Interpretation, InterpretationId, "int_", Reserved),
-    (ReviewItem, ReviewItemId, "rev_", Reserved),
+    (Occurrence, OccurrenceId, "occ_", Executable),
+    (Interpretation, InterpretationId, "int_", Executable),
+    (ReviewItem, ReviewItemId, "rev_", Executable),
     (Operation, OperationId, "op_", Executable),
     (Receipt, ReceiptId, "rcp_", Executable),
     (Correction, CorrectionId, "cor_", Reserved),
@@ -251,15 +251,11 @@ mod tests {
         assert_eq!(
             executable,
             HashSet::from([
-                "wsp_", "prf_", "cli_", "crd_", "grt_", "evd_", "obs_", "op_", "rcp_", "req_",
+                "wsp_", "prf_", "cli_", "crd_", "grt_", "rec_", "xid_", "evd_", "obs_",
+                "occ_", "int_", "rev_", "op_", "rcp_", "req_",
             ])
         );
-        assert_eq!(
-            reserved,
-            HashSet::from([
-                "rec_", "xid_", "asr_", "occ_", "int_", "rev_", "cor_", "rst_", "fld_",
-            ])
-        );
+        assert_eq!(reserved, HashSet::from(["asr_", "cor_", "rst_", "fld_"]));
     }
 
     #[test]

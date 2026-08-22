@@ -6,7 +6,7 @@ A Fasti body is complete only when all applicable evidence below is current and 
 
 - The body begins from its accepted predecessor and lands independently green.
 - Domain meaning follows [the constitution](constitution.md); adapters do not own policy.
-- DDD boundaries and semantic DRY ownership are explicit.
+- Meaning ownership and dependency direction are explicit.
 - Implemented behavior, README, roadmap, issues, examples, packages, and workflows agree.
 - Rust formatting, lint, build, and test gates plus retained JavaScript formatting, strict type, build, and test gates pass from a clean checkout with lockfiles enforced.
 - Native and OCI smoke paths fail loudly; no fallback turns a failed build into an empty artifact.

@@ -5,7 +5,8 @@
 
 use crate::RequestAccessContext;
 use fasti_domain::{
-    EvidenceReference, ObservedAt, OccurredAt, OperationId, ReceiptId, RequestCorrelationId,
+    EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt, OccurredAt, OperationId,
+    ReceiptId, RequestCorrelationId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +17,8 @@ pub struct AcceptObservationCommand {
     occurred_at: Option<OccurredAt>,
     observed_at: ObservedAt,
     prepared_evidence: EvidenceReference,
+    identity_clues: Vec<ExternalIdentifierClaim>,
+    target_grain: Option<Grain>,
 }
 
 impl AcceptObservationCommand {
@@ -34,7 +37,19 @@ impl AcceptObservationCommand {
             occurred_at,
             observed_at,
             prepared_evidence,
+            identity_clues: Vec::new(),
+            target_grain: None,
         }
+    }
+
+    pub fn with_identity_clues(
+        mut self,
+        identity_clues: Vec<ExternalIdentifierClaim>,
+        target_grain: Option<Grain>,
+    ) -> Self {
+        self.identity_clues = identity_clues;
+        self.target_grain = target_grain;
+        self
     }
 
     pub const fn correlation_id(&self) -> RequestCorrelationId {
@@ -59,6 +74,14 @@ impl AcceptObservationCommand {
 
     pub const fn prepared_evidence(&self) -> &EvidenceReference {
         &self.prepared_evidence
+    }
+
+    pub fn identity_clues(&self) -> &[ExternalIdentifierClaim] {
+        &self.identity_clues
+    }
+
+    pub const fn target_grain(&self) -> Option<Grain> {
+        self.target_grain
     }
 }
 
@@ -135,5 +158,6 @@ mod tests {
 
         assert_eq!(command.access().client_id(), access.client_id());
         assert_eq!(command.prepared_evidence(), &evidence);
+        assert!(command.identity_clues().is_empty());
     }
 }

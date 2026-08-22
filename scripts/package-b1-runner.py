@@ -65,12 +65,33 @@ def snapshot_regular_file(source_path: Path, destination_path: Path, label: str)
     except OSError as error:
         raise BundleError(f"{label} snapshot refused an unsafe input path") from error
     try:
-        if not stat.S_ISREG(os.fstat(source_descriptor).st_mode):
+        metadata_before = os.fstat(source_descriptor)
+        if not stat.S_ISREG(metadata_before.st_mode):
             raise BundleError(f"{label} input must be a regular file")
         with os.fdopen(source_descriptor, "rb", closefd=False) as source, destination_path.open(
             "xb"
         ) as destination:
             shutil.copyfileobj(source, destination, length=1024 * 1024)
+            copied_bytes = destination.tell()
+
+        metadata_after = os.fstat(source_descriptor)
+        identity_before = (
+            metadata_before.st_dev,
+            metadata_before.st_ino,
+            metadata_before.st_size,
+            metadata_before.st_mtime_ns,
+            metadata_before.st_ctime_ns,
+        )
+        identity_after = (
+            metadata_after.st_dev,
+            metadata_after.st_ino,
+            metadata_after.st_size,
+            metadata_after.st_mtime_ns,
+            metadata_after.st_ctime_ns,
+        )
+        if copied_bytes != metadata_before.st_size or identity_after != identity_before:
+            destination_path.unlink(missing_ok=True)
+            raise BundleError(f"{label} input changed while it was copied")
     finally:
         os.close(source_descriptor)
 

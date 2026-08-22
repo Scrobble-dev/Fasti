@@ -21,6 +21,15 @@ assert_rejected "packages: write"
 printf '%s\n' 'permissions: write-all' > "$fixture_dir/mutated.yml"
 assert_rejected "permissions: write-all"
 
+printf '%s\n' 'permissions:' '  contents: write' > "$fixture_dir/mutated.yml"
+assert_rejected "contents: write"
+
+printf '%s\n' 'jobs:' '  mutate:' '    steps:' '      - run: git push origin HEAD:review-branch' > "$fixture_dir/mutated.yml"
+assert_rejected "git push"
+
+printf '%s\n' 'jobs:' '  mutate:' '    steps:' '      - run: gh pr merge 14 --squash' > "$fixture_dir/mutated.yml"
+assert_rejected "pull-request mutation"
+
 printf '%s\n' 'jobs:' '  build:' '    steps:' '      - uses: docker/build-push-action@v6' '        with:' '          push: true' > "$fixture_dir/mutated.yml"
 
 assert_rejected "push: true"

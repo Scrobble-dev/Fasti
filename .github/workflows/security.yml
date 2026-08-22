@@ -16,9 +16,9 @@ jobs:
     name: Rust Security Advisories
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
+        uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-audit
       - name: Audit workspace lockfile
         run: cargo audit --file Cargo.lock
       - name: Audit isolated Tauri benchmark lockfile

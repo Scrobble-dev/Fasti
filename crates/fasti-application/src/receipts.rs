@@ -1,13 +1,14 @@
 //! Capability-bound receipt semantics.
 //!
-//! A receipt represents a completed durability boundary. B1 exercises this
-//! model only through a fixture-only adapter; production persistence arrives
-//! in B2 and must not issue one before its commit and flush obligations hold.
+//! A receipt represents a completed durability boundary. Production
+//! persistence must not issue one before its database and evidence obligations
+//! hold.
 
 use crate::CapabilityKey;
 use fasti_domain::{
-    ClientId, CommittedAt, EvidenceId, Observation, ObservationId, ObservationResolution,
-    OperationId, ProfileId, ReceiptId, ReceivedAt, Sha256Digest, WorkspaceId,
+    ClientId, CommittedAt, EvidenceId, InterpretationId, Observation, ObservationId,
+    ObservationResolution, OccurrenceId, OperationId, ProfileId, ReceiptId, ReceivedAt, RecordId,
+    ReviewItemId, Sha256Digest, WorkspaceId,
 };
 use serde::Serialize;
 use std::{error::Error, fmt};
@@ -20,6 +21,10 @@ pub struct AcceptObservationReceipt {
     profile_id: ProfileId,
     source_client_id: ClientId,
     observation_id: ObservationId,
+    occurrence_id: Option<OccurrenceId>,
+    interpretation_id: Option<InterpretationId>,
+    record_id: Option<RecordId>,
+    review_item_id: Option<ReviewItemId>,
     evidence_id: EvidenceId,
     payload_digest: Sha256Digest,
     resolution: ObservationResolution,
@@ -34,9 +39,43 @@ impl AcceptObservationReceipt {
         observation: &Observation,
         committed_at: CommittedAt,
     ) -> Result<Self, ReceiptBuildError> {
+        Self::from_committed(
+            receipt_id,
+            operation_id,
+            observation,
+            None,
+            None,
+            None,
+            None,
+            ObservationResolution::Unresolved,
+            committed_at,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_committed(
+        receipt_id: ReceiptId,
+        operation_id: OperationId,
+        observation: &Observation,
+        occurrence_id: Option<OccurrenceId>,
+        interpretation_id: Option<InterpretationId>,
+        record_id: Option<RecordId>,
+        review_item_id: Option<ReviewItemId>,
+        resolution: ObservationResolution,
+        committed_at: CommittedAt,
+    ) -> Result<Self, ReceiptBuildError> {
         let received_at = observation.received_at();
         if committed_at.value() < received_at.value() {
             return Err(ReceiptBuildError::CommitBeforeReceive);
+        }
+        match resolution {
+            ObservationResolution::Resolved if record_id.is_none() => {
+                return Err(ReceiptBuildError::ResolvedWithoutRecord)
+            }
+            ObservationResolution::Conflicted if review_item_id.is_none() => {
+                return Err(ReceiptBuildError::ConflictWithoutReview)
+            }
+            _ => {}
         }
         Ok(Self {
             receipt_id,
@@ -45,9 +84,13 @@ impl AcceptObservationReceipt {
             profile_id: observation.profile_id(),
             source_client_id: observation.source_client_id(),
             observation_id: observation.observation_id(),
+            occurrence_id,
+            interpretation_id,
+            record_id,
+            review_item_id,
             evidence_id: observation.evidence().evidence_id(),
             payload_digest: observation.evidence().digest().clone(),
-            resolution: ObservationResolution::Unresolved,
+            resolution,
             received_at,
             committed_at,
         })
@@ -79,6 +122,22 @@ impl AcceptObservationReceipt {
 
     pub const fn observation_id(&self) -> ObservationId {
         self.observation_id
+    }
+
+    pub const fn occurrence_id(&self) -> Option<OccurrenceId> {
+        self.occurrence_id
+    }
+
+    pub const fn interpretation_id(&self) -> Option<InterpretationId> {
+        self.interpretation_id
+    }
+
+    pub const fn record_id(&self) -> Option<RecordId> {
+        self.record_id
+    }
+
+    pub const fn review_item_id(&self) -> Option<ReviewItemId> {
+        self.review_item_id
     }
 
     pub const fn evidence_id(&self) -> EvidenceId {
@@ -124,11 +183,17 @@ impl AcceptObservationOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReceiptBuildError {
     CommitBeforeReceive,
+    ResolvedWithoutRecord,
+    ConflictWithoutReview,
 }
 
 impl fmt::Display for ReceiptBuildError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("committed_at cannot precede received_at")
+        formatter.write_str(match self {
+            Self::CommitBeforeReceive => "committed_at cannot precede received_at",
+            Self::ResolvedWithoutRecord => "resolved receipt requires a record",
+            Self::ConflictWithoutReview => "conflicted receipt requires review work",
+        })
     }
 }
 
@@ -138,7 +203,7 @@ impl Error for ReceiptBuildError {}
 mod tests {
     use super::*;
     use chrono::{Duration, TimeZone, Utc};
-    use fasti_domain::{ClaimedTrust, EvidenceReference, ObservedAt, Sha256Digest};
+    use fasti_domain::{ClaimedTrust, EvidenceReference, ObservedAt};
 
     fn observation(received_at: ReceivedAt) -> Observation {
         let (observation, _) = Observation::new_unresolved(
@@ -179,32 +244,37 @@ mod tests {
     }
 
     #[test]
-    fn replay_reuses_the_exact_receipt_without_inventing_identity() {
-        let received = Utc
-            .with_ymd_and_hms(2026, 8, 21, 17, 44, 16)
-            .single()
-            .expect("valid instant");
-        let observation = observation(ReceivedAt::from_application_clock(received));
-        let receipt = AcceptObservationReceipt::try_from_observation(
-            ReceiptId::new_v7(),
-            OperationId::new_v7(),
-            &observation,
-            CommittedAt::from_durability_boundary(received + Duration::milliseconds(1)),
-        )
-        .expect("valid receipt");
-
-        let committed = AcceptObservationOutcome::Committed(receipt.clone());
-        let replayed = AcceptObservationOutcome::Replayed(receipt);
-        assert_eq!(committed.receipt(), replayed.receipt());
-        assert!(!committed.is_replay());
-        assert!(replayed.is_replay());
+    fn resolved_and_conflicted_receipts_require_their_governed_targets() {
+        let received = ReceivedAt::from_application_clock(Utc::now());
+        let observation = observation(received);
+        let committed_at = CommittedAt::from_durability_boundary(Utc::now());
         assert_eq!(
-            replayed.receipt().resolution(),
-            ObservationResolution::Unresolved
+            AcceptObservationReceipt::from_committed(
+                ReceiptId::new_v7(),
+                OperationId::new_v7(),
+                &observation,
+                Some(OccurrenceId::new_v7()),
+                Some(InterpretationId::new_v7()),
+                None,
+                None,
+                ObservationResolution::Resolved,
+                committed_at,
+            ),
+            Err(ReceiptBuildError::ResolvedWithoutRecord)
         );
-
-        let value = serde_json::to_value(replayed.receipt()).expect("serialize receipt");
-        assert!(value.get("record_id").is_none());
-        assert!(value.get("occurrence_id").is_none());
+        assert_eq!(
+            AcceptObservationReceipt::from_committed(
+                ReceiptId::new_v7(),
+                OperationId::new_v7(),
+                &observation,
+                Some(OccurrenceId::new_v7()),
+                Some(InterpretationId::new_v7()),
+                None,
+                None,
+                ObservationResolution::Conflicted,
+                committed_at,
+            ),
+            Err(ReceiptBuildError::ConflictWithoutReview)
+        );
     }
 }

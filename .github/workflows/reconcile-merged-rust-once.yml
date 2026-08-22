@@ -1,0 +1,66 @@
+name: Reconcile merged Rust source once
+
+on:
+  push:
+    branches:
+      - "security/b1-evidence-hardening-20260822"
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    if: github.actor == 'ryan-winkler' && startsWith(github.event.head_commit.message, 'merge(program): preserve dependency upgrades and B2 implementation')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: security/b1-evidence-hardening-20260822
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt
+      - name: Reconcile the merged manifest graph and standard formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+          cargo fetch
+          cargo fmt --all
+          rm .github/workflows/reconcile-merged-rust-once.yml
+
+          changed="$(git status --short | sed -E 's/^.. //')"
+          test -n "$changed"
+          while IFS= read -r path; do
+            case "$path" in
+              Cargo.lock | .github/workflows/reconcile-merged-rust-once.yml | apps/*.rs | apps/*/*.rs | apps/*/*/*.rs | crates/*.rs | crates/*/*.rs | crates/*/*/*.rs | crates/*/*/*/*.rs | xtask/*.rs | xtask/*/*.rs | xtask/*/*/*.rs)
+                ;;
+              *)
+                echo "Unexpected reconciliation change: $path" >&2
+                exit 1
+                ;;
+            esac
+          done <<< "$changed"
+
+          grep -q '^name = "rusqlite"$' Cargo.lock
+          git diff --check
+          cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          cargo fmt --all -- --check
+          bash scripts/check-repository-truth.sh
+          bash scripts/check-no-publish.sh
+          bash scripts/test-no-publish-policy.sh
+          node scripts/check-doc-links.mjs
+
+      - name: Commit the bounded generated changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ryan Winkler"
+          git config user.email "28455297+ryan-winkler@users.noreply.github.com"
+          git add -A
+          git commit -s \
+            -m "chore(merge): reconcile lockfile and formatter output" \
+            -m "Resolve the merged B2 manifest graph after the accepted dependency updates, apply the pinned formatter, and remove this one-time maintenance workflow." \
+            -m "Normal pull-request validation remains read-only. No product artifact is published."
+          git push origin HEAD:security/b1-evidence-hardening-20260822

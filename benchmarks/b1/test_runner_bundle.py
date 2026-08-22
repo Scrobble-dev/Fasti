@@ -223,6 +223,27 @@ class HandoffIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(bundle.BundleError, "outside"):
             bundle.create_bundle(ignored_output, repository=self.repository)
 
+    def test_snapshot_refuses_source_changed_during_copy(self) -> None:
+        source = self.root / "changing.bundle"
+        destination = self.root / "snapshot.bundle"
+        source.write_bytes(b"stable source")
+        original_copy = bundle.shutil.copyfileobj
+
+        def copy_then_mutate(
+            source_handle: object, destination_handle: object, length: int
+        ) -> None:
+            original_copy(source_handle, destination_handle, length=length)
+            source.write_bytes(b"changed after copy and before the final file check")
+
+        with mock.patch.object(
+            bundle.shutil, "copyfileobj", side_effect=copy_then_mutate
+        ):
+            with self.assertRaisesRegex(
+                bundle.BundleError, "changed while it was copied"
+            ):
+                bundle.snapshot_regular_file(source, destination, "bundle")
+        self.assertFalse(destination.exists())
+
     def test_snapshot_fails_closed_without_no_follow_support(self) -> None:
         source = self.root / "regular.bundle"
         destination = self.root / "snapshot.bundle"

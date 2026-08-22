@@ -14,6 +14,16 @@ retired_paths=(
   "crates/fasti-auth"
 )
 
+if git ls-files --error-unmatch .fasti-staging >/dev/null 2>&1 || [[ -d .fasti-staging ]]; then
+  echo "Temporary source-transfer staging must not be tracked or present" >&2
+  exit 1
+fi
+
+if find .github/workflows -maxdepth 1 -type f \( -name '*apply*source*.yml' -o -name '*diagnose*source*.yml' \) -print | grep -q .; then
+  echo "Review workflows must not apply or diagnose staged source archives" >&2
+  exit 1
+fi
+
 for path in "${retired_paths[@]}"; do
   while IFS= read -r tracked_file; do
     if [[ -e "$tracked_file" ]]; then
@@ -182,5 +192,25 @@ fi
 grep -Fiq "discussion" CONTRIBUTING.md
 grep -Fq "Developer Certificate of Origin" CONTRIBUTING.md
 grep -Fq "AGPL-3.0-or-later" README.md
+
+while IFS=: read -r workflow line_number instruction; do
+  action_ref="${instruction#*uses:}"
+  action_ref="${action_ref%%#*}"
+  action_ref="${action_ref#"${action_ref%%[![:space:]]*}"}"
+  action_ref="${action_ref%"${action_ref##*[![:space:]]}"}"
+  action_ref="${action_ref#\"}"
+  action_ref="${action_ref%\"}"
+  action_ref="${action_ref#\'}"
+  action_ref="${action_ref%\'}"
+
+  [[ "$action_ref" == ./* ]] && continue
+
+  if [[ ! "$action_ref" =~ ^[^@[:space:]]+@[0-9a-f]{40}$ ]]; then
+    echo "External workflow action must use an immutable commit: $workflow:$line_number: $action_ref" >&2
+    exit 1
+  fi
+done < <(
+  grep -RHnE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*' .github/workflows
+)
 
 echo "PASS: active repository surfaces match the B0/B1 capability boundaries"
