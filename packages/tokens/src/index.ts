@@ -22,8 +22,8 @@ export const colors = {
 
 export const typography = {
   display: "Newsreader, Georgia, serif",
-  body: "\"Atkinson Hyperlegible Next\", -apple-system, BlinkMacSystemFont, sans-serif",
-  mono: "\"Atkinson Hyperlegible Mono\", \"IBM Plex Mono\", monospace",
+  body: '"Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, sans-serif',
+  mono: '"Atkinson Hyperlegible Mono", "IBM Plex Mono", monospace',
 } as const;
 
 export const touchTargets = {

@@ -2,7 +2,9 @@
 
 Thank you for your interest in contributing to Fasti!
 
-Fasti is an open-source, self-hosted-first media chronicle and player. We believe personal media history should remain durable, correctable, and owned by the individual. We welcome contributions from developers, designers, archivists, and writers of all experience levels.
+Fasti is an open-source, identity-first local system of record for media activity. Fasti records; players play. We welcome collaboration from developers, designers, archivists, integrators, accessibility practitioners, security researchers, and writers of all experience levels.
+
+> **Discuss before you implement or open a pull request.** Begin or join a GitHub Discussion and align the problem, bounded context, scope, and required review gates first. This is technical and product scope alignment, not legal approval. Fasti does not require a CLA or legal review before community collaboration.
 
 ---
 
@@ -26,7 +28,7 @@ If you forgot to sign off a commit on a branch:
 ```bash
 git commit --amend --no-edit -s
 # Or for multiple commits:
-git rebase --signoff origin/dev
+git rebase --signoff origin/release
 ```
 
 ### Full DCO 1.1 Text
@@ -80,12 +82,14 @@ We organize contributions into explicit lanes to set expectations on review requ
 
 | Lane | Scope | Review Requirement |
 |---|---|---|
-| **Documentation & Guides** | Typos, architectural explanations, deployment tutorials, API documentation | 1 Maintainer review |
-| **Test Fixtures** | Sample media activity, import test cases, sync chaos fixtures | 1 Domain review |
-| **Importers & Connectors** | Adding or improving integrations (Plex, Trakt, Jellyfin, Floppy, etc.) | 1 Integration maintainer |
-| **UI & Accessibility** | Web client components, keyboard navigation, screen reader support, design tokens | 1 UI / Accessibility maintainer |
-| **Core & Sync Engine** | Event ledger, SQLite persistence, replica sync protocol, idempotency | 2 Core maintainers + RFC if modifying invariants |
-| **Security & Auth** | Authentication, token scoping, container permissions, cryptography | 1 Security maintainer |
+| **Documentation & Guides** | Truth corrections, architecture, recovery, examples, and task-first guides | Documentation checks and QA |
+| **Governed Fixtures** | Provenance-labelled media observations, identity cases, and hostile inputs | Domain review and executable schema checks |
+| **Domain & Application** | Invariants, typed values, capabilities, ports, and problems | DDD/DRY review, contract mutation gates, and QA |
+| **Contracts & SDK** | OpenAPI, AsyncAPI, Schema, JSON-LD, OKF, examples, and generated clients | Deterministic generation, parity checks, and QA |
+| **Delivery & Persistence** | HTTP/SSE, CLI, SQLite/files, OCI, recovery, and performance | Native/OCI tests, fault evidence, and QA |
+| **Design & Accessibility** | Tokens and later media UI, keyboard, screen reader, touch, TV remote, ADHD/AuDHD | Approved design contract, design review, accessibility evidence, and QA |
+| **Provider Patterns** | Neutral manifests, recipes, and conformance fixtures | B5/B6 gate; no compatibility claim or provider-specific code early |
+| **Security** | Access, secrets, limits, container permissions, and cryptography | Threat evidence, private disclosure where needed, and security review |
 
 ---
 
@@ -104,13 +108,20 @@ We organize contributions into explicit lanes to set expectations on review requ
 3. **Verify the environment**:
    ```bash
    # Rust workspace check
-   cargo check --workspace
-   cargo test --workspace
+   cargo fmt --all -- --check
+   cargo clippy --workspace --all-targets --locked -- -D warnings
+   cargo test --workspace --locked
 
    # TypeScript / Node check
-   pnpm install
+   pnpm install --frozen-lockfile
+   pnpm format:check
+   pnpm typecheck
    pnpm test
-   pnpm lint
+
+   # Repository truth and portability checks
+   bash scripts/check-repository-truth.sh
+   bash scripts/check-no-publish.sh
+   node scripts/check-doc-links.mjs
    ```
 
 ### Branch Naming Conventions
@@ -130,7 +141,7 @@ We follow the Conventional Commits format:
 Signed-off-by: Jane Developer <jane@example.com>
 ```
 *Types:* `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`.  
-*Scopes:* `core`, `activity`, `store`, `sync`, `api`, `player`, `web`, `desktop`, `tokens`, `sdk`, `cli`.
+*Scopes:* `domain`, `application`, `contracts`, `store`, `api`, `cli`, `sdk`, `tokens`, `design`, `docs`, `infra`.
 
 ---
 
@@ -138,30 +149,38 @@ Signed-off-by: Jane Developer <jane@example.com>
 
 ### Rust Code (`crates/*`, `apps/fastid`)
 * Format code with `cargo fmt --all`.
-* Ensure `cargo clippy --workspace --all-targets -- -D warnings` passes cleanly.
+* Ensure `cargo clippy --workspace --all-targets --locked -- -D warnings` passes cleanly.
 * Document public types and traits with clear docstrings and usage examples.
-* Maintain error transparency: use `thiserror` for library crates and avoid bare `.unwrap()` in production codepaths.
+* Keep domain policy out of adapters and preserve one semantic owner for invariants, capabilities, public types, permissions, and problems.
+* Maintain error transparency: use typed errors for libraries and avoid bare `.unwrap()` in production codepaths.
 
-### TypeScript / Frontend (`packages/*`, `apps/web`, `apps/desktop`)
-* Strictly typed: Avoid `any`. Use runtime schema validation (`zod` or generated schema types) at API boundaries.
-* Accessibility first: Ensure interactive controls satisfy WCAG 2.2 AA and our 44px touch target baseline.
-* Format code with Prettier and verify with ESLint (`pnpm lint`).
+### TypeScript (`packages/*`)
+* Keep strict typing enabled and consume generated contract types once B1 establishes them.
+* Do not redefine domain, permission, error, retry, idempotency, or offline behavior in a client package.
+* Format code with Prettier and verify with `pnpm format:check`, `pnpm typecheck`, and `pnpm test`.
+
+### Rendered UI and UX
+* Do not add a placeholder web application before B4.
+* Follow [`brand/DESIGN.md`](brand/DESIGN.md) and the approved media-first interaction contract.
+* Every rendered change requires design review and QA, including keyboard, screen reader, responsive, 44 px target, reduced-motion, focus-return, and ADHD/AuDHD state-continuity evidence.
 
 ---
 
 ## 6. Submitting a Pull Request
 
-1. Push your branch to your fork:
+1. Link the GitHub Discussion where the problem, bounded context, scope, and gates were aligned.
+2. Push your branch to your fork:
    ```bash
    git push origin feat/my-new-feature
    ```
-2. Open a Pull Request against `dev` (or `release` for release promotions) on `Scrobble-dev/Fasti`.
-3. Complete the provided [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md), documenting:
+3. Open a Pull Request against `release` unless the linked Discussion names a different integration branch. Repository automation does not publish a release from the pull request.
+4. Complete the provided [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md), documenting:
    * The problem being solved.
    * Behavioral & data-model impact.
    * Test evidence (unit, integration, or manual verification).
    * Accessibility and security considerations.
-4. Ensure all CI checks are green.
-5. Address reviewer feedback constructively.
+5. Run every gate named by the linked Discussion. QA is mandatory; rendered UI/UX also requires design review.
+6. Ensure all CI checks are green.
+7. Address reviewer feedback constructively.
 
-Thank you for helping make Fasti the best home for personal media chronicles!
+Thank you for helping Fasti keep media records trustworthy, portable, and provider-neutral.

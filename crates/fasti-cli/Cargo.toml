@@ -5,18 +5,12 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Command-line administrative utility for Fasti (export, import, backup, restore, diagnostics)"
+description = "Command-line administrative shell for explicitly gated Fasti operations"
 
 [[bin]]
 name = "fasti"
 path = "src/main.rs"
 
 [dependencies]
-fasti-core = { workspace = true }
-fasti-activity = { workspace = true }
-fasti-store = { workspace = true }
 clap = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }

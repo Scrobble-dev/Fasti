@@ -1,38 +1,28 @@
 # syntax=docker/dockerfile:1
 
-# Stage 1: Build Frontend
-FROM node:20-alpine AS web-builder
+FROM rust:1.97-alpine AS rust-builder
+RUN apk add --no-cache musl-dev
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9 --activate
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
-COPY packages/ ./packages/
-COPY apps/web/ ./apps/web/
-RUN pnpm install --frozen-lockfile || pnpm install
-RUN pnpm --filter @fasti/web build || mkdir -p /app/apps/web/dist
 
-# Stage 2: Build Rust Backend
-FROM rust:1.80-alpine AS rust-builder
-RUN apk add --no-cache musl-dev sqlite-dev
-WORKDIR /app
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 COPY apps/fastid/ ./apps/fastid/
-RUN cargo build --release --bin fastid
 
-# Stage 3: Runtime
-FROM alpine:3.20 AS runtime
-RUN apk add --no-cache ca-certificates tzdata sqlite-libs
-WORKDIR /app
+RUN cargo build --locked --release --bin fastid --bin fasti
 
-# Create non-root user
-RUN addgroup -S fasti && adduser -S fasti -G fasti
-USER fasti:fasti
+FROM alpine:3.22 AS runtime
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S fasti \
+    && adduser -S fasti -G fasti
 
 COPY --from=rust-builder /app/target/release/fastid /usr/local/bin/fastid
-COPY --from=web-builder /app/apps/web/dist /app/static
+COPY --from=rust-builder /app/target/release/fasti /usr/local/bin/fasti
 
-ENV FASTI_PORT=8420
-ENV FASTI_STATIC_DIR=/app/static
+ENV FASTI_LISTEN=0.0.0.0:8420
 EXPOSE 8420
+USER fasti:fasti
 
-ENTRYPOINT ["fastid"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=3s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8420/api/v1/health || exit 1
+
+CMD ["/usr/local/bin/fastid"]

@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "fasti")]
-#[command(about = "Fasti — A self-hosted-first media chronicle and player", long_about = None)]
+#[command(about = "Fasti records media activity; it does not play media", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -10,36 +10,32 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Export the complete media chronicle to a portable JSON bundle
+    /// Reserved for the B3 verified workspace export capability
     Export {
         #[arg(short, long)]
         output: String,
     },
-    /// Restore a media chronicle from an export bundle onto a fresh node
+    /// Reserved for the B3 clean-restore capability
     Restore {
         #[arg(short, long)]
         input: String,
     },
-    /// Verify database integrity and sequence consistency
+    /// Reserved for the B3 workspace verification capability
     Verify,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+fn unavailable(command: &str, body: &str) -> anyhow::Result<()> {
+    anyhow::bail!(
+        "{command} is not available in B0; it is owned by {body}. No data was changed and no success receipt was emitted."
+    )
+}
+
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Export { output } => {
-            println!("Exporting chronicle to {}", output);
-        }
-        Commands::Restore { input } => {
-            println!("Restoring chronicle from {}", input);
-        }
-        Commands::Verify => {
-            println!("Database ledger integrity verified. All sequence checks passed.");
-        }
+        Commands::Export { output: _ } => unavailable("export", "B3"),
+        Commands::Restore { input: _ } => unavailable("restore", "B3"),
+        Commands::Verify => unavailable("verify", "B3"),
     }
-
-    Ok(())
 }

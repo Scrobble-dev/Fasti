@@ -9,7 +9,5 @@ description = "Core domain invariants, identifiers, timestamps, and media refere
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-thiserror = { workspace = true }

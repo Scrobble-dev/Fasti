@@ -5,12 +5,8 @@ members = [
   "crates/fasti-core",
   "crates/fasti-activity",
   "crates/fasti-store",
-  "crates/fasti-projections",
-  "crates/fasti-sync",
   "crates/fasti-api",
   "crates/fasti-auth",
-  "crates/fasti-player",
-  "crates/fasti-connectors",
   "crates/fasti-cli",
 ]
 
@@ -27,17 +23,11 @@ homepage = "https://scrobble.dev"
 fasti-core = { path = "crates/fasti-core", version = "0.1.0" }
 fasti-activity = { path = "crates/fasti-activity", version = "0.1.0" }
 fasti-store = { path = "crates/fasti-store", version = "0.1.0" }
-fasti-projections = { path = "crates/fasti-projections", version = "0.1.0" }
-fasti-sync = { path = "crates/fasti-sync", version = "0.1.0" }
 fasti-api = { path = "crates/fasti-api", version = "0.1.0" }
 fasti-auth = { path = "crates/fasti-auth", version = "0.1.0" }
-fasti-player = { path = "crates/fasti-player", version = "0.1.0" }
-fasti-connectors = { path = "crates/fasti-connectors", version = "0.1.0" }
 
 # Async & Runtime
 tokio = { version = "1.40", features = ["full"] }
-futures = "0.3"
-async-trait = "0.1"
 
 # Serialization & Models
 serde = { version = "1.0", features = ["derive"] }
@@ -48,7 +38,6 @@ chrono = { version = "0.4", features = ["serde"] }
 # Web & API
 axum = { version = "0.7", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
-tower-http = { version = "0.6", features = ["cors", "trace", "compression-full"] }
 
 # SQLite & Persistence
 rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
@@ -59,7 +48,3 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1.0"
 anyhow = "1.0"
-
-# Testing & Property Checks
-proptest = "1.5"
-tempfile = "3.12"

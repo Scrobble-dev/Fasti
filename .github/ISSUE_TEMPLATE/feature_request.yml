@@ -1,8 +1,19 @@
-name: Feature Proposal
-description: Propose a new capability, connector, or interface enhancement
+name: Scoped Capability Proposal
+description: Capture an already-discussed capability, integration pattern, or interface outcome
 title: "feat: [Concise feature title]"
 labels: ["enhancement", "proposal"]
 body:
+  - type: markdown
+    attributes:
+      value: "Begin in GitHub Discussions before opening this proposal. The Discussion aligns the problem, bounded context, scope, and gates; it is not legal approval. Planned capabilities must not be presented as implemented."
+  - type: input
+    id: discussion
+    attributes:
+      label: Prior Discussion URL
+      description: Link the Discussion where scope was aligned.
+      placeholder: "https://github.com/Scrobble-dev/Fasti/discussions/..."
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:
@@ -14,10 +25,17 @@ body:
     id: solution
     attributes:
       label: Proposed Approach
-      description: How should Fasti address this while preserving local-first durability?
+      description: Which domain/application capability owns this, and how does it preserve provider-neutral identity and local durability?
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
       label: Alternatives Considered
+  - type: textarea
+    id: gates
+    attributes:
+      label: Required Evidence
+      description: Name applicable contract, QA, design, accessibility, offline, package, security, and performance gates.
+    validations:
+      required: true

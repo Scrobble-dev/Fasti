@@ -54,7 +54,17 @@
         "id": { "type": "string" },
         "grain": {
           "type": "string",
-          "enum": ["track", "album", "episode", "season", "movie", "book", "chapter", "game", "session"]
+          "enum": [
+            "track",
+            "album",
+            "episode",
+            "season",
+            "movie",
+            "book",
+            "chapter",
+            "game",
+            "session"
+          ]
         },
         "title": { "type": "string" }
       }

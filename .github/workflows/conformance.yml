@@ -1,4 +1,4 @@
-name: Scrobble.dev & Identity Conformance
+name: Governed Draft Validation
 
 on:
   push:
@@ -10,34 +10,49 @@ permissions:
   contents: read
 
 jobs:
-  validate-conformance:
-    name: Validate Scrobble Activity Profile & Identity Contracts
+  validate-drafts:
+    name: Validate draft schema, fixtures, identity seed, and manifests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install PyYAML
-        run: pip install pyyaml
-
-      - name: Validate Activity Fixtures
+      - name: Install draft validators
+        run: python -m pip install --disable-pip-version-check jsonschema pyyaml
+      - name: Validate activity fixtures against the governed draft schema
         run: |
-          echo "Validating activity event fixtures..."
-          for f in fixtures/activity/*.json; do
-            python3 -m json.tool "$f" > /dev/null || exit 1
-            echo "PASS: $f"
-          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator, FormatChecker
 
-      - name: Validate Identity Contract Seed & Addon Manifests
+          schema = json.loads(Path("packages/schemas/schemas/activity-envelope.json").read_text())
+          validator = Draft202012Validator(schema, format_checker=FormatChecker())
+          fixtures = sorted(Path("fixtures/activity").glob("*.json"))
+          if not fixtures:
+              raise SystemExit("No activity fixtures found")
+          for fixture in fixtures:
+              payload = json.loads(fixture.read_text())
+              validator.validate(payload)
+              print(f"PASS: {fixture}")
+          PY
+      - name: Validate identity seed and provider manifests as YAML
         run: |
-          echo "Validating identity contract and provider manifests..."
-          python3 -c "import yaml; yaml.safe_load(open('contracts/identity/identity-contract-seed.yaml'))"
-          for m in contracts/addons/manifests/*.yaml; do
-            python3 -c "import yaml; yaml.safe_load(open('$m'))"
-            echo "PASS: $m"
-          done
-          echo "All identity contracts and provider manifests validated successfully."
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          paths = [Path("contracts/identity/identity-contract-seed.yaml")]
+          manifests = sorted(Path("contracts/addons/manifests").glob("*.yaml"))
+          if not manifests:
+              raise SystemExit("No provider manifests found")
+          paths.extend(manifests)
+          for path in paths:
+              yaml.safe_load(path.read_text())
+              print(f"PASS: {path}")
+          PY
+      - name: State the contract boundary honestly
+        run: |
+          echo "B0 validates governed draft syntax and fixture shape only."
+          echo "OpenAPI 3.1, AsyncAPI 3.x, JSON-LD 1.1, OKF, generated SDK parity, and semantic mutation gates become executable in B1."

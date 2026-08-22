@@ -42,7 +42,7 @@ pub struct ActivityEvent {
 pub struct Provenance {
     /// Ingestion channel (e.g. "player", "webhook", "import", "manual", "sync").
     pub channel: String,
-    /// Specific client or plugin identifier (e.g. "fasti-desktop/0.1.0", "floppy-import/1.0").
+    /// Specific external client or adapter identifier (for example, "floppy-import/1.0").
     pub client: String,
     /// Optional external source event ID for deduplication.
     pub external_event_id: Option<String>,

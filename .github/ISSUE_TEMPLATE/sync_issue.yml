@@ -1,28 +1,29 @@
-name: Synchronisation / Reconnection Issue
-description: Report event duplicates, sequence gaps, or sync stall across offline periods
-title: "sync: [Brief summary of sync discrepancy]"
-labels: ["sync", "distributed-state"]
+name: Replication Design / Conformance Issue
+description: Capture an accepted replication invariant or fixture issue before a replication product exists
+title: "replication: [Brief invariant or fixture issue]"
+labels: ["replication-design", "conformance"]
 body:
   - type: markdown
     attributes:
-      value: "Report replication or offline reconnection anomalies."
+      value: "Fasti has no replication service or hidden offline mutation queue. Begin proposals in Discussions. Use this form only after scope alignment for a neutral invariant or governed conformance fixture."
   - type: input
-    id: topology
+    id: discussion
     attributes:
-      label: Node Topology
-      description: Describe the nodes involved.
-      placeholder: "e.g. Fasti Desktop (macOS) syncing with Home Server fastid node"
+      label: Prior Discussion URL
+      description: Link the Discussion where the boundary and evidence were aligned.
+      placeholder: "https://github.com/Scrobble-dev/Fasti/discussions/..."
     validations:
       required: true
   - type: textarea
     id: sequence_behavior
     attributes:
-      label: Observable Sync Anomaly
-      placeholder: "Did events duplicate, fail to acknowledge receipts, or miss sequence numbers?"
+      label: Required Invariant or Fixture Defect
+      placeholder: "Describe duplicate delivery, cursor, ordering, conflict, or reconnect behavior without claiming a current implementation."
     validations:
       required: true
   - type: textarea
     id: diagnostics
     attributes:
       label: Sync Cursor / Log Output
+      description: Use synthetic data and redact credentials, device identifiers, addresses, and personal media history.
       render: shell

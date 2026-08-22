@@ -5,16 +5,13 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Fasti Node daemon providing HTTP REST endpoints and background synchronization"
+description = "Fasti Node daemon exposing the currently implemented local HTTP surface"
 
 [[bin]]
 name = "fastid"
 path = "src/main.rs"
 
 [dependencies]
-fasti-core = { workspace = true }
-fasti-activity = { workspace = true }
-fasti-store = { workspace = true }
 fasti-api = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }

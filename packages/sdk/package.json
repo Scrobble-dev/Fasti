@@ -1,14 +1,15 @@
 {
   "name": "@fasti/sdk",
   "version": "0.1.0",
-  "description": "Typed TypeScript API client for Fasti nodes and daemons",
+  "private": true,
+  "type": "module",
+  "description": "Minimal typed client for the implemented B0 health surface",
   "main": "dist/index.js",
-  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "license": "AGPL-3.0-or-later",
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

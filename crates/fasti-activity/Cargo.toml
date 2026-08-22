@@ -5,12 +5,9 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Activity event envelope, validation, idempotency calculations, and receipts for Fasti"
+description = "Draft activity event envelope and receipt types retained for B1 reconciliation"
 
 [dependencies]
 fasti-core = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-uuid = { workspace = true }
 chrono = { workspace = true }
-thiserror = { workspace = true }

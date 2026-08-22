@@ -23,7 +23,7 @@
   },
   "provenance": {
     "channel": "player",
-    "client": "fasti-desktop/0.1.0"
+    "client": "external-player-adapter/example"
   },
   "correction_of": null,
   "tombstone_of": null

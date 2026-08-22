@@ -10,65 +10,56 @@ permissions:
   contents: read
 
 jobs:
-  rust-check:
-    name: Rust Checks & Tests
+  rust:
+    name: Rust workspace
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo metadata --locked --format-version 1 --no-deps
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --all-targets --locked
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Formatting check
-        run: cargo fmt --all -- --check
-
-      - name: Clippy linting
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Run workspace unit tests
-        run: cargo test --workspace
-
-  ts-check:
-    name: TypeScript Checks & Tests
+  javascript:
+    name: Retained JavaScript packages
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+          node-version: 22
+      - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Prettier check
-        run: pnpm format:check
-
-      - name: TypeScript typecheck
-        run: pnpm typecheck
-
-      - name: Run workspace tests
-        run: pnpm test
-
-  schema-validation:
-    name: Schema & Fixture Invariants
+  repository-truth:
+    name: B0 repository truth
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify JSON syntax in fixtures
-        run: |
-          for f in fixtures/activity/*.json; do
-            python3 -m json.tool "$f" > /dev/null || exit 1
-          done
-          echo "All activity fixtures validated successfully."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bash scripts/check-repository-truth.sh
+      - run: bash scripts/check-no-publish.sh
+      - run: bash scripts/test-no-publish-policy.sh
+      - run: node scripts/check-doc-links.mjs
+
+  oci:
+    name: Daemon and CLI OCI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build strict OCI image
+        run: docker build --tag fasti:b0 .
+      - name: Verify non-root, health, false-success, and idle-memory gates
+        run: bash scripts/smoke-oci.sh fasti:b0

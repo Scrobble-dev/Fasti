@@ -5,10 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "WebAuthn/Passkeys, local credentials, and scoped API token authorization for Fasti"
+description = "Draft authorization scope types retained for B1 reconciliation"
 
 [dependencies]
-fasti-core = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }

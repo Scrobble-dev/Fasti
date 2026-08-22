@@ -12,10 +12,6 @@ dist/
 build/
 *.tsbuildinfo
 
-# Tauri build outputs
-/apps/desktop/src-tauri/target/
-/apps/desktop/src-tauri/gen/
-
 # SQLite & local runtime data
 *.db
 *.db-journal
