@@ -183,4 +183,24 @@ grep -Fiq "discussion" CONTRIBUTING.md
 grep -Fq "Developer Certificate of Origin" CONTRIBUTING.md
 grep -Fq "AGPL-3.0-or-later" README.md
 
+while IFS=: read -r workflow line_number instruction; do
+  action_ref="${instruction#*uses:}"
+  action_ref="${action_ref%%#*}"
+  action_ref="${action_ref#"${action_ref%%[![:space:]]*}"}"
+  action_ref="${action_ref%"${action_ref##*[![:space:]]}"}"
+  action_ref="${action_ref#\"}"
+  action_ref="${action_ref%\"}"
+  action_ref="${action_ref#\'}"
+  action_ref="${action_ref%\'}"
+
+  [[ "$action_ref" == ./* ]] && continue
+
+  if [[ ! "$action_ref" =~ ^[^@[:space:]]+@[0-9a-f]{40}$ ]]; then
+    echo "External workflow action must use an immutable commit: $workflow:$line_number: $action_ref" >&2
+    exit 1
+  fi
+done < <(
+  grep -RHnE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*' .github/workflows
+)
+
 echo "PASS: active repository surfaces match the B0/B1 capability boundaries"

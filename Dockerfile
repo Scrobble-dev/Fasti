@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1
-
-FROM rust:1.97-alpine AS rust-builder
+# Multi-architecture Docker Official Image index digests resolved on 2026-08-22.
+# The tags remain readable; the digests make the build inputs immutable.
+FROM rust:1.97-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS rust-builder
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY contracts/ ./contracts/
 
 RUN cargo build --locked --release --bin fastid --bin fasti
 
-FROM alpine:3.22 AS runtime
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
 ARG FASTI_SOURCE_COMMIT=""
 ARG FASTI_SOURCE_TREE=""
 ARG FASTI_CONTRACT_REF=""
