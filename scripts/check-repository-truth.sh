@@ -14,6 +14,16 @@ retired_paths=(
   "crates/fasti-auth"
 )
 
+if git ls-files --error-unmatch .fasti-staging >/dev/null 2>&1 || [[ -d .fasti-staging ]]; then
+  echo "Temporary source-transfer staging must not be tracked or present" >&2
+  exit 1
+fi
+
+if find .github/workflows -maxdepth 1 -type f \( -name '*apply*source*.yml' -o -name '*diagnose*source*.yml' \) -print | grep -q .; then
+  echo "Review workflows must not apply or diagnose staged source archives" >&2
+  exit 1
+fi
+
 for path in "${retired_paths[@]}"; do
   while IFS= read -r tracked_file; do
     if [[ -e "$tracked_file" ]]; then

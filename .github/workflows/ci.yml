@@ -7,78 +7,9 @@ on:
     branches: ["dev", "release"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-reviewed-b2-source:
-    name: Apply checksum-bound B2 source
-    if: github.event_name == 'pull_request' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: security/b1-evidence-hardening-20260822
-          fetch-depth: 1
-      - name: Verify the staged source archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -c 'from base64 import b64decode; from pathlib import Path; source = Path(".fasti-staging/b2-source.tar.gz.b64"); encoded = "".join(source.read_text(encoding="utf-8").split()); encoded += "=" * (-len(encoded) % 4); Path("/tmp/b2-source.tar.gz").write_bytes(b64decode(encoded, validate=True))'
-          echo "44848c330440cb0e5674e368c475d0a98848b8363ac03f22356ec89983fac196  /tmp/b2-source.tar.gz" | sha256sum --check --strict
-          tar -tzf /tmp/b2-source.tar.gz | LC_ALL=C sort > /tmp/actual-paths.txt
-          cat > /tmp/expected-paths.txt <<'PATHS'
-          .github/workflows/ci.yml
-          Cargo.lock
-          Dockerfile
-          apps/fastid/Cargo.toml
-          apps/fastid/src/main.rs
-          benchmarks/b1/Dockerfile
-          crates/fasti-api/Cargo.toml
-          crates/fasti-api/src/lib.rs
-          crates/fasti-api/src/production.rs
-          crates/fasti-application/src/capabilities.rs
-          crates/fasti-application/src/kernel.rs
-          crates/fasti-cli/Cargo.toml
-          crates/fasti-cli/src/local.rs
-          crates/fasti-cli/src/main.rs
-          crates/fasti-contracts/Cargo.toml
-          crates/fasti-contracts/src/generated_capability_ids.rs
-          crates/fasti-contracts/src/lib.rs
-          crates/fasti-contracts/src/production.rs
-          crates/fasti-store/src/access.rs
-          crates/fasti-store/src/lib.rs
-          crates/fasti-store/src/status.rs
-          PATHS
-          LC_ALL=C sort -o /tmp/expected-paths.txt /tmp/expected-paths.txt
-          diff --unified /tmp/expected-paths.txt /tmp/actual-paths.txt
-          if grep -Eq '(^/|(^|/)\.\.(/|$))' /tmp/actual-paths.txt; then
-            echo "Unsafe path found in staged source archive" >&2
-            exit 1
-          fi
-      - name: Apply the reviewed source and remove staging surfaces
-        shell: bash
-        run: |
-          set -euo pipefail
-          tar -xzf /tmp/b2-source.tar.gz -C .
-          rm -f .fasti-staging/b2-source.tar.gz.b64
-          rmdir .fasti-staging
-          rm -f .github/workflows/b2-apply-reviewed-source.yml
-          rm -f .github/workflows/b2-format-evidence.yml
-          git diff --check
-      - name: Commit and push the reviewed source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "Ryan Winkler"
-          git config user.email "28455297+ryan-winkler@users.noreply.github.com"
-          git add -A
-          git commit -s \
-            -m "feat(b2): expose the durable local kernel through API and CLI" \
-            -m "Add the loopback-first production API, stable public B2 transport shapes, local node composition, authenticated status, content-addressed evidence upload, observation and receipt delivery, identity and review operations, credential lifecycle, listener configuration, provider-neutral seed handling, and a credential-free headless sandbox." \
-            -m "Keep credential material in permission-restricted files, keep query strings free of credentials, preserve bounded request and replay behavior, keep Docker as one wrapper over the native runtime, and retain explicit later-body guards for export, restore, and verification." \
-            -m "Reconcile the local package graph and retain a temporary read-only formatting export job for exact follow-up validation."
-          git push origin HEAD:security/b1-evidence-hardening-20260822
-
   b1-portable-gate:
     name: Canonical B1 PR gate
     runs-on: ubuntu-latest
@@ -172,34 +103,19 @@ jobs:
       - name: Verify non-root, health, false-success, and idle-memory gates
         run: bash scripts/smoke-oci.sh fasti:b0
 
-  b2-workspace-export:
-    name: B2 formatted workspace export
+  lockfile-reconciliation:
+    name: B2 lockfile reconciliation evidence
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
-        with:
-          components: rustfmt
-      - name: Reconcile the local lock graph and format Rust
+      - name: Resolve only the current manifest graph
         run: |
-          cargo metadata --format-version 1 --no-deps >/dev/null
-          cargo fmt --all
-      - name: Capture the exact source and change
-        run: |
-          git diff --binary > /tmp/fasti-b2-workspace.patch
-          tar \
-            --exclude=.git \
-            --exclude=target \
-            --exclude=node_modules \
-            --exclude='benchmarks/b1/tauri-shell/src-tauri/target' \
-            -czf /tmp/fasti-b2-workspace.tar.gz .
-          test -s /tmp/fasti-b2-workspace.patch
-          test -s /tmp/fasti-b2-workspace.tar.gz
+          cargo fetch
+          test -s Cargo.lock
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: fasti-b2-workspace
-          path: |
-            /tmp/fasti-b2-workspace.patch
-            /tmp/fasti-b2-workspace.tar.gz
+          name: fasti-b2-lockfile
+          path: Cargo.lock
           if-no-files-found: error
           retention-days: 1
