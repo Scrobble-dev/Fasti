@@ -3,9 +3,7 @@ use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
     CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort,
 };
-use fasti_domain::{
-    ExternalIdentifierClaim, ExternalIdentifierId, Grain, RecordId, WorkspaceId,
-};
+use fasti_domain::{ExternalIdentifierClaim, ExternalIdentifierId, Grain, RecordId, WorkspaceId};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::collections::BTreeSet;
 
@@ -118,12 +116,9 @@ pub(crate) fn load_record_grain(
             correlation_id,
         )));
     };
-    value.parse::<Grain>().map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        ))
-    })
+    value
+        .parse::<Grain>()
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
 
 pub(crate) fn attach_identifier_tx(
@@ -172,18 +167,12 @@ pub(crate) fn attach_identifier_tx(
         correlation_id,
     )?;
     if let Some((identifier, existing_record)) = existing {
-        let identifier = identifier.parse::<ExternalIdentifierId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?;
-        let existing_record = existing_record.parse::<RecordId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?;
+        let identifier = identifier
+            .parse::<ExternalIdentifierId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let existing_record = existing_record
+            .parse::<RecordId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         if existing_record == record_id {
             return Ok(AttachIdentifierOutcome::new(
                 identifier,
@@ -219,11 +208,7 @@ pub(crate) fn attach_identifier_tx(
         capability,
         correlation_id,
     )?;
-    Ok(AttachIdentifierOutcome::new(
-        identifier_id,
-        record_id,
-        true,
-    ))
+    Ok(AttachIdentifierOutcome::new(identifier_id, record_id, true))
 }
 
 pub(crate) fn matching_record_ids(
@@ -270,12 +255,9 @@ pub(crate) fn matching_record_ids(
     records
         .into_iter()
         .map(|value| {
-            value.parse::<RecordId>().map_err(|_| {
-                Box::new(FastiProblem::integrity_failed(
-                    capability,
-                    correlation_id,
-                ))
-            })
+            value
+                .parse::<RecordId>()
+                .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
         })
         .collect()
 }

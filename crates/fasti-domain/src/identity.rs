@@ -198,19 +198,18 @@ mod tests {
 
     #[test]
     fn record_identity_is_not_a_provider_coordinate() {
-        let record = Record::new(
-            RecordId::new_v7(),
-            WorkspaceId::new_v7(),
-            Grain::Release,
-        );
-        let claim = ExternalIdentifierClaim::try_new("kitsu", Grain::Release, "42")
-            .expect("valid claim");
+        let record = Record::new(RecordId::new_v7(), WorkspaceId::new_v7(), Grain::Release);
+        let claim =
+            ExternalIdentifierClaim::try_new("kitsu", Grain::Release, "42").expect("valid claim");
         let identifier = ExternalIdentifier::new(
             ExternalIdentifierId::new_v7(),
             record.workspace_id(),
             record.record_id(),
             claim,
         );
-        assert_ne!(identifier.record_id().to_string(), identifier.claim().value());
+        assert_ne!(
+            identifier.record_id().to_string(),
+            identifier.claim().value()
+        );
     }
 }

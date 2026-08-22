@@ -71,8 +71,12 @@ pub struct NextActionContract {
 }
 
 impl NextActionContract {
-    pub const fn id(self) -> &'static str { self.id }
-    pub const fn label(self) -> &'static str { self.label }
+    pub const fn id(self) -> &'static str {
+        self.id
+    }
+    pub const fn label(self) -> &'static str {
+        self.label
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,15 +100,27 @@ pub struct RepresentationViolationContract {
 }
 
 impl RepresentationViolationContract {
-    pub const fn code(self) -> &'static str { self.code }
-    pub const fn pointer(self) -> &'static str { self.pointer }
-    pub const fn reason(self) -> &'static str { self.reason }
-    pub const fn expected(self) -> &'static str { self.expected }
+    pub const fn code(self) -> &'static str {
+        self.code
+    }
+    pub const fn pointer(self) -> &'static str {
+        self.pointer
+    }
+    pub const fn reason(self) -> &'static str {
+        self.reason
+    }
+    pub const fn expected(self) -> &'static str {
+        self.expected
+    }
 }
 
 impl ProblemContract {
-    pub const fn title(self) -> &'static str { self.title }
-    pub const fn status(self) -> u16 { self.status }
+    pub const fn title(self) -> &'static str {
+        self.title
+    }
+    pub const fn status(self) -> u16 {
+        self.status
+    }
     pub fn detail(self, capability: CapabilityKey) -> Cow<'static, str> {
         match self.detail {
             ProblemDetail::Static(detail) => Cow::Borrowed(detail),
@@ -114,11 +130,21 @@ impl ProblemContract {
             )),
         }
     }
-    pub const fn documentation_path(self) -> &'static str { self.documentation_path }
-    pub const fn safe_state(self) -> SafeState { self.safe_state }
-    pub const fn retryability(self) -> Retryability { self.retryability }
-    pub const fn default_next_action(self) -> NextActionContract { self.default_next_action }
-    pub const fn param_policy(self) -> ProblemParamPolicy { self.param_policy }
+    pub const fn documentation_path(self) -> &'static str {
+        self.documentation_path
+    }
+    pub const fn safe_state(self) -> SafeState {
+        self.safe_state
+    }
+    pub const fn retryability(self) -> Retryability {
+        self.retryability
+    }
+    pub const fn default_next_action(self) -> NextActionContract {
+        self.default_next_action
+    }
+    pub const fn param_policy(self) -> ProblemParamPolicy {
+        self.param_policy
+    }
 }
 
 macro_rules! define_problem_catalog {
@@ -358,17 +384,32 @@ define_problem_catalog!(
 );
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NextAction { id: String, label: String }
+pub struct NextAction {
+    id: String,
+    label: String,
+}
 impl NextAction {
     fn from_contract(contract: NextActionContract) -> Self {
-        Self { id: contract.id().to_owned(), label: contract.label().to_owned() }
+        Self {
+            id: contract.id().to_owned(),
+            label: contract.label().to_owned(),
+        }
     }
-    pub fn id(&self) -> &str { &self.id }
-    pub fn label(&self) -> &str { &self.label }
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+    pub fn label(&self) -> &str {
+        &self.label
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Violation { code: String, pointer: String, reason: String, expected: String }
+pub struct Violation {
+    code: String,
+    pointer: String,
+    reason: String,
+    expected: String,
+}
 impl Violation {
     pub fn try_new(
         code: impl Into<String>,
@@ -380,34 +421,62 @@ impl Violation {
         let pointer = pointer.into();
         let reason = reason.into();
         let expected = expected.into();
-        if code.trim().is_empty() || !is_valid_json_pointer(&pointer) || reason.trim().is_empty() || expected.trim().is_empty() {
+        if code.trim().is_empty()
+            || !is_valid_json_pointer(&pointer)
+            || reason.trim().is_empty()
+            || expected.trim().is_empty()
+        {
             return Err(ProblemBuildError::InvalidViolation);
         }
-        Ok(Self { code, pointer, reason, expected })
+        Ok(Self {
+            code,
+            pointer,
+            reason,
+            expected,
+        })
     }
-    pub fn code(&self) -> &str { &self.code }
-    pub fn pointer(&self) -> &str { &self.pointer }
-    pub fn reason(&self) -> &str { &self.reason }
-    pub fn expected(&self) -> &str { &self.expected }
-    pub fn actual(&self) -> Option<&str> { None }
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+    pub fn pointer(&self) -> &str {
+        &self.pointer
+    }
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+    pub fn expected(&self) -> &str {
+        &self.expected
+    }
+    pub fn actual(&self) -> Option<&str> {
+        None
+    }
 }
 
 fn is_valid_json_pointer(pointer: &str) -> bool {
-    if !pointer.starts_with('/') { return false; }
+    if !pointer.starts_with('/') {
+        return false;
+    }
     let mut characters = pointer.chars();
     while let Some(character) = characters.next() {
-        if character == '~' && !matches!(characters.next(), Some('0' | '1')) { return false; }
+        if character == '~' && !matches!(characters.next(), Some('0' | '1')) {
+            return false;
+        }
     }
     true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProblemBuildError { TooManyViolations, InvalidViolation }
+pub enum ProblemBuildError {
+    TooManyViolations,
+    InvalidViolation,
+}
 impl fmt::Display for ProblemBuildError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::TooManyViolations => "a problem may expose no more than 32 validation violations",
-            Self::InvalidViolation => "violation fields must be non-empty and pointer must be a JSON Pointer",
+            Self::InvalidViolation => {
+                "violation fields must be non-empty and pointer must be a JSON Pointer"
+            }
         })
     }
 }
@@ -423,8 +492,16 @@ pub struct FastiProblem {
 }
 
 impl FastiProblem {
-    fn new(code: ProblemCode, capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self {
-        assert!(capability.allowed_problem_codes().contains(&code), "problem {} is not allowed for capability {capability:?}", code.as_str());
+    fn new(
+        code: ProblemCode,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        assert!(
+            capability.allowed_problem_codes().contains(&code),
+            "problem {} is not allowed for capability {capability:?}",
+            code.as_str()
+        );
         let action = code.contract().default_next_action();
         Self {
             code,
@@ -435,72 +512,254 @@ impl FastiProblem {
         }
     }
 
-    fn with_violations(code: ProblemCode, capability: CapabilityKey, correlation_id: RequestCorrelationId, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
+    fn with_violations(
+        code: ProblemCode,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
         Self::new(code, capability, correlation_id).try_with_violations(violations)
     }
 
-    pub fn from_code(code: ProblemCode, capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self {
+    pub fn from_code(
+        code: ProblemCode,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
         Self::new(code, capability, correlation_id)
     }
 
-    pub fn capacity_exceeded(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::CapacityExceeded, capability, correlation_id) }
-    pub fn capability_unavailable(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::CapabilityUnavailable, capability, correlation_id) }
-    pub fn forbidden(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::Forbidden, capability, correlation_id) }
-    pub fn authentication_failed(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::AuthenticationFailed, capability, correlation_id) }
-    pub fn already_initialized(correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::AlreadyInitialized, CapabilityKey::InitializeNode, correlation_id) }
-    pub fn bootstrap_closed(correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::BootstrapClosed, CapabilityKey::EnrollFirstClient, correlation_id) }
-    pub fn idempotency_conflict(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::IdempotencyConflict, capability, correlation_id) }
-    pub fn evidence_not_found(correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::EvidenceNotFound, CapabilityKey::AcceptObservation, correlation_id) }
-    pub fn identity_conflict(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::IdentityConflict, capability, correlation_id) }
-    pub fn integrity_failed(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::IntegrityFailed, capability, correlation_id) }
-    pub fn invalid_identifier(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::InvalidIdentifier, capability, correlation_id) }
-    pub fn record_not_found(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::RecordNotFound, capability, correlation_id) }
-    pub fn review_not_found(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::ReviewNotFound, capability, correlation_id) }
-    pub fn storage_unavailable(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::StorageUnavailable, capability, correlation_id) }
-    pub fn cursor_expired(correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::CursorExpired, CapabilityKey::StreamReceipts, correlation_id) }
-    pub fn unsupported_listener(correlation_id: RequestCorrelationId) -> Self { Self::new(ProblemCode::UnsupportedListener, CapabilityKey::ConfigureListener, correlation_id) }
+    pub fn capacity_exceeded(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::CapacityExceeded, capability, correlation_id)
+    }
+    pub fn capability_unavailable(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(
+            ProblemCode::CapabilityUnavailable,
+            capability,
+            correlation_id,
+        )
+    }
+    pub fn forbidden(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self {
+        Self::new(ProblemCode::Forbidden, capability, correlation_id)
+    }
+    pub fn authentication_failed(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(
+            ProblemCode::AuthenticationFailed,
+            capability,
+            correlation_id,
+        )
+    }
+    pub fn already_initialized(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::AlreadyInitialized,
+            CapabilityKey::InitializeNode,
+            correlation_id,
+        )
+    }
+    pub fn bootstrap_closed(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::BootstrapClosed,
+            CapabilityKey::EnrollFirstClient,
+            correlation_id,
+        )
+    }
+    pub fn idempotency_conflict(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::IdempotencyConflict, capability, correlation_id)
+    }
+    pub fn evidence_not_found(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::EvidenceNotFound,
+            CapabilityKey::AcceptObservation,
+            correlation_id,
+        )
+    }
+    pub fn identity_conflict(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::IdentityConflict, capability, correlation_id)
+    }
+    pub fn integrity_failed(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::IntegrityFailed, capability, correlation_id)
+    }
+    pub fn invalid_identifier(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::InvalidIdentifier, capability, correlation_id)
+    }
+    pub fn record_not_found(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::RecordNotFound, capability, correlation_id)
+    }
+    pub fn review_not_found(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::ReviewNotFound, capability, correlation_id)
+    }
+    pub fn storage_unavailable(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::StorageUnavailable, capability, correlation_id)
+    }
+    pub fn cursor_expired(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::CursorExpired,
+            CapabilityKey::StreamReceipts,
+            correlation_id,
+        )
+    }
+    pub fn unsupported_listener(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::UnsupportedListener,
+            CapabilityKey::ConfigureListener,
+            correlation_id,
+        )
+    }
 
-    pub fn receipt_not_found(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self {
-        debug_assert!(matches!(capability, CapabilityKey::ReplayReceipt | CapabilityKey::StreamReceipts));
+    pub fn receipt_not_found(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        debug_assert!(matches!(
+            capability,
+            CapabilityKey::ReplayReceipt | CapabilityKey::StreamReceipts
+        ));
         Self::new(ProblemCode::ReceiptNotFound, capability, correlation_id)
     }
 
-    pub fn invalid_observation(correlation_id: RequestCorrelationId, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
-        Self::with_violations(ProblemCode::InvalidObservation, CapabilityKey::AcceptObservation, correlation_id, violations)
+    pub fn invalid_observation(
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::InvalidObservation,
+            CapabilityKey::AcceptObservation,
+            correlation_id,
+            violations,
+        )
     }
-    pub fn malformed_json(capability: CapabilityKey, correlation_id: RequestCorrelationId, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
-        Self::with_violations(ProblemCode::MalformedJson, capability, correlation_id, violations)
+    pub fn malformed_json(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::MalformedJson,
+            capability,
+            correlation_id,
+            violations,
+        )
     }
-    pub fn payload_too_large(capability: CapabilityKey, correlation_id: RequestCorrelationId, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
-        Self::with_violations(ProblemCode::PayloadTooLarge, capability, correlation_id, violations)
+    pub fn payload_too_large(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::PayloadTooLarge,
+            capability,
+            correlation_id,
+            violations,
+        )
     }
-    pub fn unsupported_media_type(capability: CapabilityKey, correlation_id: RequestCorrelationId, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
-        Self::with_violations(ProblemCode::UnsupportedMediaType, capability, correlation_id, violations)
+    pub fn unsupported_media_type(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::UnsupportedMediaType,
+            capability,
+            correlation_id,
+            violations,
+        )
     }
-    pub fn validation_failed(capability: CapabilityKey, correlation_id: RequestCorrelationId, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
-        Self::with_violations(ProblemCode::ValidationFailed, capability, correlation_id, violations)
+    pub fn validation_failed(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self::with_violations(
+            ProblemCode::ValidationFailed,
+            capability,
+            correlation_id,
+            violations,
+        )
     }
 
-    pub fn try_with_violations(mut self, violations: Vec<Violation>) -> Result<Self, ProblemBuildError> {
-        if violations.len() > 32 { return Err(ProblemBuildError::TooManyViolations); }
+    pub fn try_with_violations(
+        mut self,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        if violations.len() > 32 {
+            return Err(ProblemBuildError::TooManyViolations);
+        }
         self.violations = violations;
         Ok(self)
     }
 
-    pub fn code(&self) -> ProblemCode { self.code }
-    pub const fn contract(&self) -> ProblemContract { self.code.contract() }
-    pub fn capability(&self) -> CapabilityKey { self.capability }
-    pub fn title(&self) -> &'static str { self.contract().title() }
-    pub fn status(&self) -> u16 { self.contract().status() }
-    pub fn message(&self) -> Cow<'static, str> { self.contract().detail(self.capability) }
-    pub fn safe_state(&self) -> SafeState { self.contract().safe_state() }
-    pub fn retryability(&self) -> Retryability { self.contract().retryability() }
-    pub fn next_actions(&self) -> &[NextAction] { &self.next_actions }
-    pub fn correlation_id(&self) -> RequestCorrelationId { self.correlation_id }
-    pub fn param(&self) -> Option<&str> { self.contract().param_policy().resolve(self.capability) }
-    pub fn actual(&self) -> Option<&str> { None }
-    pub fn documentation_path(&self) -> &'static str { self.contract().documentation_path() }
-    pub fn violations(&self) -> &[Violation] { &self.violations }
+    pub fn code(&self) -> ProblemCode {
+        self.code
+    }
+    pub const fn contract(&self) -> ProblemContract {
+        self.code.contract()
+    }
+    pub fn capability(&self) -> CapabilityKey {
+        self.capability
+    }
+    pub fn title(&self) -> &'static str {
+        self.contract().title()
+    }
+    pub fn status(&self) -> u16 {
+        self.contract().status()
+    }
+    pub fn message(&self) -> Cow<'static, str> {
+        self.contract().detail(self.capability)
+    }
+    pub fn safe_state(&self) -> SafeState {
+        self.contract().safe_state()
+    }
+    pub fn retryability(&self) -> Retryability {
+        self.contract().retryability()
+    }
+    pub fn next_actions(&self) -> &[NextAction] {
+        &self.next_actions
+    }
+    pub fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub fn param(&self) -> Option<&str> {
+        self.contract().param_policy().resolve(self.capability)
+    }
+    pub fn actual(&self) -> Option<&str> {
+        None
+    }
+    pub fn documentation_path(&self) -> &'static str {
+        self.contract().documentation_path()
+    }
+    pub fn violations(&self) -> &[Violation] {
+        &self.violations
+    }
 }
 
 #[cfg(test)]

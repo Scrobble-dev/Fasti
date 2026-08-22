@@ -25,7 +25,10 @@ impl EvidenceUploadPort for SqliteKernel {
             .declared_size()
             .unwrap_or(MAX_EVIDENCE_BYTES)
             .min(MAX_EVIDENCE_BYTES);
-        if request.declared_size().is_some_and(|size| size > MAX_EVIDENCE_BYTES) {
+        if request
+            .declared_size()
+            .is_some_and(|size| size > MAX_EVIDENCE_BYTES)
+        {
             return Err(problem(
                 ProblemCode::PayloadTooLarge,
                 capability,
@@ -36,26 +39,15 @@ impl EvidenceUploadPort for SqliteKernel {
         // Authorization is complete before any temp path or file is created.
         {
             let connection = self.lock_connection(capability, correlation_id)?;
-            authorize_connection(
-                &connection,
-                capability,
-                request.access(),
-                correlation_id,
-            )?;
+            authorize_connection(&connection, capability, request.access(), correlation_id)?;
         }
 
         let reserved = request.declared_size().unwrap_or(MAX_EVIDENCE_BYTES);
         {
             let mut budget = self.lock_upload_budget(capability, correlation_id)?;
-            let next_bytes = budget
-                .reserved_bytes
-                .checked_add(reserved)
-                .ok_or_else(|| {
-                    Box::new(FastiProblem::capacity_exceeded(
-                        capability,
-                        correlation_id,
-                    ))
-                })?;
+            let next_bytes = budget.reserved_bytes.checked_add(reserved).ok_or_else(|| {
+                Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
+            })?;
             if budget.active >= MAX_CONCURRENT_UPLOADS || next_bytes > MAX_TEMP_EVIDENCE_BYTES {
                 return Err(Box::new(FastiProblem::capacity_exceeded(
                     capability,
@@ -179,12 +171,8 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
 
         let digest_bytes: [u8; 32] = self.hasher.clone().finalize().into();
         let digest_hex = encode_hex(&digest_bytes);
-        let digest = Sha256Digest::parse(format!("sha256:{digest_hex}")).map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?;
+        let digest = Sha256Digest::parse(format!("sha256:{digest_hex}"))
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
 
         // Recheck the current credential and grant before durable promotion.
         {
@@ -217,16 +205,10 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
             }
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {
                 let existing = File::open(&destination).map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(
-                        capability,
-                        correlation_id,
-                    ))
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?;
                 let (existing_digest, existing_size) = sha256_reader(existing).map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(
-                        capability,
-                        correlation_id,
-                    ))
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?;
                 if existing_digest != digest_bytes || existing_size != self.bytes_written {
                     return Err(Box::new(FastiProblem::integrity_failed(
@@ -257,12 +239,7 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
 
         let relative_path = destination
             .strip_prefix(&self.kernel.inner.current_root)
-            .map_err(|_| {
-                Box::new(FastiProblem::integrity_failed(
-                    capability,
-                    correlation_id,
-                ))
-            })?
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?
             .to_string_lossy()
             .replace('\\', "/");
         let created_at = timestamp(now());
@@ -301,10 +278,7 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
             }
             EvidenceReference::new(
                 existing_id.parse::<EvidenceId>().map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(
-                        capability,
-                        correlation_id,
-                    ))
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?,
                 digest,
                 self.bytes_written,

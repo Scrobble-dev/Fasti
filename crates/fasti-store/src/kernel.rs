@@ -68,17 +68,13 @@ impl SqliteKernel {
         let connection = Connection::open(database_path)?;
         connection.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
-        let journal_mode: String = connection.query_row(
-            "PRAGMA journal_mode = WAL",
-            [],
-            |row| row.get(0),
-        )?;
+        let journal_mode: String =
+            connection.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
         if !journal_mode.eq_ignore_ascii_case("wal") {
             return Err(StoreOpenError::JournalMode(journal_mode));
         }
         connection.pragma_update(None, "synchronous", "FULL")?;
-        let synchronous: i64 =
-            connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;
+        let synchronous: i64 = connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;
         if synchronous != 2 {
             return Err(StoreOpenError::SynchronousLevel(synchronous));
         }
@@ -153,12 +149,7 @@ pub(crate) fn parse_timestamp(
 ) -> ApplicationResult<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value)
         .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
 
 pub(crate) fn map_sql<T>(
@@ -179,12 +170,7 @@ pub(crate) fn map_json<T>(
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<T> {
-    result.map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        ))
-    })
+    result.map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
 
 pub(crate) fn random_secret(
@@ -288,7 +274,17 @@ pub(crate) fn load_access_snapshot(
         correlation_id,
     )?;
 
-    let Some((workspace, profile, client, credential, grant, credential_status, grant_status, epoch)) = row else {
+    let Some((
+        workspace,
+        profile,
+        client,
+        credential,
+        grant,
+        credential_status,
+        grant_status,
+        epoch,
+    )) = row
+    else {
         return Ok(AccessSnapshot::bootstrap_closed());
     };
 
@@ -305,27 +301,26 @@ pub(crate) fn load_access_snapshot(
     let mut scopes = Vec::new();
     for value in rows {
         let value = map_sql(value, capability, correlation_id)?;
-        let scope = parse_scope(&value).ok_or_else(|| {
-            Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-        })?;
+        let scope = parse_scope(&value)
+            .ok_or_else(|| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         scopes.push(scope);
     }
 
-    let workspace_id = workspace.parse::<WorkspaceId>().map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-    })?;
-    let profile_id = profile.parse::<ProfileId>().map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-    })?;
-    let client_id = client.parse::<ClientId>().map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-    })?;
-    let credential_id = credential.parse::<CredentialId>().map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-    })?;
-    let grant_id = grant.parse::<ProfileGrantId>().map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-    })?;
+    let workspace_id = workspace
+        .parse::<WorkspaceId>()
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let profile_id = profile
+        .parse::<ProfileId>()
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let client_id = client
+        .parse::<ClientId>()
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let credential_id = credential
+        .parse::<CredentialId>()
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let grant_id = grant
+        .parse::<ProfileGrantId>()
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
 
     Ok(AccessSnapshot::established(
         workspace_id,

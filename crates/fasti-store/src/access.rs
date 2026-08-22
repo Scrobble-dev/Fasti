@@ -7,13 +7,11 @@ use fasti_application::{
     authorize, AccessAdministrationPort, AccessSnapshot, ApplicationResult,
     AuthenticateCredentialQuery, AuthorizationRequirement, CapabilityKey, ConfigureListenerCommand,
     EnrollFirstClientCommand, EnrollFirstClientOutcome, FastiProblem, InitializeNodeCommand,
-    InitializeNodeOutcome, ListenerConfiguration, ProfileSelectionOutcome, ProblemCode,
-    RequestAccessContext, RevokeCredentialCommand, RotateCredentialCommand, RotateCredentialOutcome,
-    ScopeKey,
+    InitializeNodeOutcome, ListenerConfiguration, ProblemCode, ProfileSelectionOutcome,
+    RequestAccessContext, RevokeCredentialCommand, RotateCredentialCommand,
+    RotateCredentialOutcome, ScopeKey,
 };
-use fasti_domain::{
-    ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId,
-};
+use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 const INITIALIZATION_LIFETIME_MINUTES: i64 = 10;
@@ -172,7 +170,9 @@ impl AccessAdministrationPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        let Some((workspace, profile, client, stored_proof_digest, expires_at, consumed_at)) = state else {
+        let Some((workspace, profile, client, stored_proof_digest, expires_at, consumed_at)) =
+            state
+        else {
             return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
         };
         let expires_at = DateTime::parse_from_rfc3339(&expires_at)
@@ -191,15 +191,15 @@ impl AccessAdministrationPort for SqliteKernel {
         )
         .map_err(|_| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
 
-        let workspace_id = workspace.parse::<WorkspaceId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-        })?;
-        let profile_id = profile.parse::<ProfileId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-        })?;
-        let client_id = client.parse::<ClientId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-        })?;
+        let workspace_id = workspace
+            .parse::<WorkspaceId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let profile_id = profile
+            .parse::<ProfileId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let client_id = client
+            .parse::<ClientId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         let created_at_text = timestamp(created_at);
 
         map_sql(
@@ -235,7 +235,13 @@ impl AccessAdministrationPort for SqliteKernel {
                     grant_id, workspace_id, profile_id, client_id, status, created_at
                 ) VALUES (?1, ?2, ?3, ?4, 'active', ?5)
                 "#,
-                params![grant_id.to_string(), workspace, profile, client, created_at_text],
+                params![
+                    grant_id.to_string(),
+                    workspace,
+                    profile,
+                    client,
+                    created_at_text
+                ],
             ),
             capability,
             correlation_id,

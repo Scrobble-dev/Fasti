@@ -67,10 +67,7 @@ impl ObservationAcceptancePort for SqliteKernel {
                 )));
             }
             let receipt_id = receipt_id.parse::<ReceiptId>().map_err(|_| {
-                Box::new(FastiProblem::integrity_failed(
-                    capability,
-                    correlation_id,
-                ))
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
             })?;
             let receipt = load_receipt(
                 &transaction,
@@ -102,10 +99,7 @@ impl ObservationAcceptancePort for SqliteKernel {
         let observation_id = ObservationId::new_v7();
         let occurrence_id = OccurrenceId::new_v7();
         let interpretation_id = InterpretationId::new_v7();
-        let review_item_id = matches
-            .len()
-            .gt(&1)
-            .then(ReviewItemId::new_v7);
+        let review_item_id = matches.len().gt(&1).then(ReviewItemId::new_v7);
         let (observation, _) = Observation::new_unresolved(
             observation_id,
             command.access().workspace_id(),
@@ -257,12 +251,7 @@ impl ObservationAcceptancePort for SqliteKernel {
             resolution,
             committed_at,
         )
-        .map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?;
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
         map_sql(
             transaction.execute(
                 r#"
@@ -349,9 +338,9 @@ impl ReceiptStreamPort for SqliteKernel {
         let connection = self.lock_connection(capability, correlation_id)?;
         authorize_connection(&connection, capability, query.access(), correlation_id)?;
         let after_sequence = if let Some(cursor) = query.last_event_id() {
-            let receipt_id = cursor.parse::<ReceiptId>().map_err(|_| {
-                Box::new(FastiProblem::cursor_expired(correlation_id))
-            })?;
+            let receipt_id = cursor
+                .parse::<ReceiptId>()
+                .map_err(|_| Box::new(FastiProblem::cursor_expired(correlation_id)))?;
             map_sql(
                 connection
                     .query_row(
@@ -408,10 +397,7 @@ impl ReceiptStreamPort for SqliteKernel {
             let receipt_id = map_sql(row, capability, correlation_id)?
                 .parse::<ReceiptId>()
                 .map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(
-                        capability,
-                        correlation_id,
-                    ))
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?;
             let receipt = load_receipt(
                 &connection,
@@ -462,12 +448,8 @@ fn validate_prepared_evidence(
         )?
         .ok_or_else(|| Box::new(FastiProblem::evidence_not_found(correlation_id)))?
     };
-    let size = u64::try_from(size).map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        ))
-    })?;
+    let size = u64::try_from(size)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     if digest != command.prepared_evidence().digest().as_str()
         || size != command.prepared_evidence().byte_length()
     {
@@ -477,18 +459,10 @@ fn validate_prepared_evidence(
         )));
     }
     let full_path = kernel.inner.current_root.join(path);
-    let file = File::open(full_path).map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        ))
-    })?;
-    let (observed_digest, observed_size) = sha256_reader(file).map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        ))
-    })?;
+    let file = File::open(full_path)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let (observed_digest, observed_size) = sha256_reader(file)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let observed = format!("sha256:{}", crate::crypto::encode_hex(&observed_digest));
     if observed != digest || observed_size != size {
         return Err(Box::new(FastiProblem::integrity_failed(
@@ -635,19 +609,38 @@ pub(crate) fn load_receipt(
         capability,
         correlation_id,
     )?;
-    let Some((operation, observation, occurrence, interpretation, record, review, evidence, digest, resolution, received, committed, occurred_json, observed_json, size)) = row else {
+    let Some((
+        operation,
+        observation,
+        occurrence,
+        interpretation,
+        record,
+        review,
+        evidence,
+        digest,
+        resolution,
+        received,
+        committed,
+        occurred_json,
+        observed_json,
+        size,
+    )) = row
+    else {
         return Err(Box::new(FastiProblem::receipt_not_found(
             capability,
             correlation_id,
         )));
     };
-    let received_at = ReceivedAt::from_application_clock(parse_timestamp(
-        &received,
-        capability,
-        correlation_id,
-    )?);
+    let received_at =
+        ReceivedAt::from_application_clock(parse_timestamp(&received, capability, correlation_id)?);
     let occurred_at = occurred_json
-        .map(|value| map_json(serde_json::from_str::<OccurredAt>(&value), capability, correlation_id))
+        .map(|value| {
+            map_json(
+                serde_json::from_str::<OccurredAt>(&value),
+                capability,
+                correlation_id,
+            )
+        })
         .transpose()?;
     let observed_at = map_json(
         serde_json::from_str::<ObservedAt>(&observed_json),
@@ -655,32 +648,19 @@ pub(crate) fn load_receipt(
         correlation_id,
     )?;
     let evidence_reference = EvidenceReference::new(
-        evidence.parse::<EvidenceId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
-        digest.parse::<Sha256Digest>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
-        u64::try_from(size).map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
+        evidence
+            .parse::<EvidenceId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
+        digest
+            .parse::<Sha256Digest>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
+        u64::try_from(size)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
     );
     let (observation_value, _) = Observation::new_unresolved(
-        observation.parse::<ObservationId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
+        observation
+            .parse::<ObservationId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
         workspace_id,
         profile_id,
         client_id,
@@ -691,12 +671,9 @@ pub(crate) fn load_receipt(
     );
     AcceptObservationReceipt::from_committed(
         receipt_id,
-        operation.parse::<OperationId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
+        operation
+            .parse::<OperationId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
         &observation_value,
         parse_optional_id::<OccurrenceId>(occurrence, capability, correlation_id)?,
         parse_optional_id::<InterpretationId>(interpretation, capability, correlation_id)?,
@@ -709,12 +686,7 @@ pub(crate) fn load_receipt(
             correlation_id,
         )?),
     )
-    .map_err(|_| {
-        Box::new(FastiProblem::integrity_failed(
-            capability,
-            correlation_id,
-        ))
-    })
+    .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
 
 fn parse_optional_id<T: std::str::FromStr>(
@@ -724,12 +696,9 @@ fn parse_optional_id<T: std::str::FromStr>(
 ) -> ApplicationResult<Option<T>> {
     value
         .map(|value| {
-            value.parse::<T>().map_err(|_| {
-                Box::new(FastiProblem::integrity_failed(
-                    capability,
-                    correlation_id,
-                ))
-            })
+            value
+                .parse::<T>()
+                .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
         })
         .transpose()
 }

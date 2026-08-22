@@ -575,10 +575,8 @@ impl AttachIdentifierOutcome {
 }
 
 pub trait IdentityPort: Send + Sync {
-    fn create_record(
-        &self,
-        command: CreateRecordCommand,
-    ) -> ApplicationResult<CreateRecordOutcome>;
+    fn create_record(&self, command: CreateRecordCommand)
+        -> ApplicationResult<CreateRecordOutcome>;
 
     fn attach_identifier(
         &self,

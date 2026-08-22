@@ -5,9 +5,7 @@ use fasti_application::{
     ReviewAction, ReviewActionCommand, ReviewItemView, ReviewPort, ReviewQuery,
     ReviewResolutionTarget,
 };
-use fasti_domain::{
-    InterpretationId, ObservationId, RecordId, ReviewItemId, ReviewStatus,
-};
+use fasti_domain::{InterpretationId, ObservationId, RecordId, ReviewItemId, ReviewStatus};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
 
 const MAX_REVIEW_PAGE: i64 = 100;
@@ -72,10 +70,7 @@ impl ReviewPort for SqliteKernel {
                 let id = map_sql(row, capability, correlation_id)?
                     .parse::<ReviewItemId>()
                     .map_err(|_| {
-                        Box::new(FastiProblem::integrity_failed(
-                            capability,
-                            correlation_id,
-                        ))
+                        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                     })?;
                 if let Some(value) = load_review_view(
                     &connection,
@@ -389,27 +384,18 @@ fn load_review_view(
             map_sql(row, capability, correlation_id)?
                 .parse::<RecordId>()
                 .map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(
-                        capability,
-                        correlation_id,
-                    ))
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?,
         );
     }
     Ok(Some(ReviewItemView::new(
         review_item_id,
-        observation.parse::<ObservationId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
-        interpretation.parse::<InterpretationId>().map_err(|_| {
-            Box::new(FastiProblem::integrity_failed(
-                capability,
-                correlation_id,
-            ))
-        })?,
+        observation
+            .parse::<ObservationId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
+        interpretation
+            .parse::<InterpretationId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?,
         parse_review_status(&status, capability, correlation_id)?,
         candidates,
     )))

@@ -1,10 +1,10 @@
 use crate::identity::{attach_identifier_tx, insert_record, matching_record_ids};
 use crate::kernel::{authorize_transaction, map_sql, SqliteKernel};
 use fasti_application::{
-    ApplyIdentitySeedCommand, ApplyIdentitySeedOutcome, ApplicationResult, CapabilityKey,
+    ApplicationResult, ApplyIdentitySeedCommand, ApplyIdentitySeedOutcome, CapabilityKey,
     FastiProblem, IdentitySeedDisposition, IdentitySeedEntryOutcome, IdentitySeedPort, ProblemCode,
 };
-use rusqlite::{TransactionBehavior};
+use rusqlite::TransactionBehavior;
 use std::collections::BTreeSet;
 
 const MAX_SEED_ENTRIES: usize = 1_000;
