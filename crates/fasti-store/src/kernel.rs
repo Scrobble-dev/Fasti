@@ -28,10 +28,7 @@ pub enum StoreOpenError {
     #[error("failed to prepare the Fasti data root: {0}")]
     Io(#[from] std::io::Error),
     #[error("refusing unsafe data path {path:?}: {reason}")]
-    UnsafePath {
-        path: PathBuf,
-        reason: &'static str,
-    },
+    UnsafePath { path: PathBuf, reason: &'static str },
     #[error("failed to open or migrate SQLite: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("SQLite returned unsupported journal mode {0:?}; WAL is required")]
