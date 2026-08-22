@@ -1,7 +1,8 @@
 {
   "$schema": "./device-hypotheses.schema.json",
-  "schema_version": "fasti.b1.device-hypotheses.v2",
+  "schema_version": "fasti.b1.device-hypotheses.v3",
   "policy": "A device is not qualified until its observed runner fingerprint, exact source artifacts and contracts, and validated evidence receipt are correlated; calibrated secondary status additionally requires validated champion evidence.",
+  "performance_gate_owner": "Ryan Winkler",
   "devices": [
     {
       "profile": "raspberry_pi_5_champion",
@@ -16,7 +17,8 @@
       "evidence_ref": null,
       "results": null,
       "blocking_reason": "No device custodian or measured evidence receipt is assigned.",
-      "calibration": null
+      "calibration": null,
+      "spike": null
     },
     {
       "profile": "j4125_calibrated",
@@ -37,13 +39,14 @@
         "method": null,
         "reference_evidence_ref": null,
         "measured_relation": null
-      }
+      },
+      "spike": null
     },
     {
       "profile": "ugoos_am6b_plus",
-      "display_name": "Ugoos AM6B+",
+      "display_name": "UGOOS AM6B Plus",
       "role": "packaging_hypothesis",
-      "hypothesis": "A future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
+      "hypothesis": "Test whether a future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
       "qualification_state": "blocking_unassigned",
       "custodian": null,
       "runner_fingerprint": null,
@@ -51,14 +54,47 @@
       "contract_ref": null,
       "evidence_ref": null,
       "results": null,
-      "blocking_reason": "The runtime, packaging path, device custodian, and measured evidence are unassigned.",
-      "calibration": null
+      "blocking_reason": "The documented packaging spike is unverified; no device custodian or measured qualification evidence is assigned.",
+      "calibration": null,
+      "spike": {
+        "owner": "Ryan Winkler",
+        "phases": ["B4", "B8"],
+        "status": "documented_unverified",
+        "target": {
+          "model": "UGOOS AM6B Plus",
+          "os_target": "Android 9.0",
+          "firmware_target": null,
+          "runtime_capture_requirement": "Record the exact installed Android version, build, security patch, and device firmware before testing."
+        },
+        "install_route": {
+          "package_format": "locally signed APK",
+          "routes": ["ADB over USB", "device-local package installer"],
+          "post_install_network_policy": "network-denied"
+        },
+        "storage_constraints": {
+          "memory": "4 GB LPDDR4",
+          "internal_storage": "32 GB eMMC",
+          "expansion_and_capacity_requirement": "Record free internal capacity and any adopted or removable storage used for installer staging."
+        },
+        "background_environment": {
+          "services_to_capture": [
+            "UGOOS launcher and vendor services",
+            "Google Play Services",
+            "Google Cast services",
+            "Google voice services"
+          ],
+          "measurement_requirement": "Capture exact package and service names, versions, enabled state, and resident-memory attribution; do not assume a service is absent."
+        },
+        "authoritative_source_urls": [
+          "https://ugoos.com/files/uploads/63a38e470077cb39a0f8ca6933db3cbb.pdf"
+        ]
+      }
     },
     {
       "profile": "xiaomi_box_m3",
-      "display_name": "Xiaomi Box M3",
+      "display_name": "Mi Box 3 MDZ-16-AB",
       "role": "packaging_hypothesis",
-      "hypothesis": "A future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
+      "hypothesis": "Test whether a future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
       "qualification_state": "blocking_unassigned",
       "custodian": null,
       "runner_fingerprint": null,
@@ -66,14 +102,48 @@
       "contract_ref": null,
       "evidence_ref": null,
       "results": null,
-      "blocking_reason": "The exact model, runtime, packaging path, device custodian, and measured evidence are unassigned.",
-      "calibration": null
+      "blocking_reason": "The documented packaging spike is unverified; no device custodian or measured qualification evidence is assigned.",
+      "calibration": null,
+      "spike": {
+        "owner": "Ryan Winkler",
+        "phases": ["B4", "B8"],
+        "status": "documented_unverified",
+        "target": {
+          "model": "Mi Box 3 MDZ-16-AB",
+          "os_target": "Factory Android TV",
+          "firmware_target": null,
+          "runtime_capture_requirement": "Record the exact installed Android TV version, build, security patch, and device firmware before testing; the factory target is not evidence of the updated runtime."
+        },
+        "install_route": {
+          "package_format": "locally signed APK",
+          "routes": ["ADB over USB", "device-local package installer"],
+          "post_install_network_policy": "network-denied"
+        },
+        "storage_constraints": {
+          "memory": "2 GB DDR3",
+          "internal_storage": "8 GB eMMC",
+          "expansion_and_capacity_requirement": "Record free internal capacity and installer staging space; do not assume removable storage is available."
+        },
+        "background_environment": {
+          "services_to_capture": [
+            "Xiaomi launcher and vendor services",
+            "Google Play Services",
+            "Google Cast services",
+            "Google voice services"
+          ],
+          "measurement_requirement": "Capture exact package and service names, versions, enabled state, and resident-memory attribution; do not assume a service is absent."
+        },
+        "authoritative_source_urls": [
+          "https://ams-go.buy.mi.com/es/servicecenter/file/Mi_Box_es/?binaryId=11780&namespaceId=2&publicationId=18032",
+          "https://www.mi.com/global/support/terms/declaration/"
+        ]
+      }
     },
     {
       "profile": "nvidia_shield",
-      "display_name": "Nvidia Shield",
+      "display_name": "NVIDIA SHIELD TV Pro (2019, 16 GB)",
       "role": "packaging_hypothesis",
-      "hypothesis": "A future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
+      "hypothesis": "Test whether a future packaged distribution can run the same governed local capabilities within the Fasti memory ceiling on this device.",
       "qualification_state": "blocking_unassigned",
       "custodian": null,
       "runner_fingerprint": null,
@@ -81,14 +151,49 @@
       "contract_ref": null,
       "evidence_ref": null,
       "results": null,
-      "blocking_reason": "The exact model, runtime, packaging path, device custodian, and measured evidence are unassigned.",
-      "calibration": null
+      "blocking_reason": "The documented packaging spike is unverified; no device custodian or measured qualification evidence is assigned.",
+      "calibration": null,
+      "spike": {
+        "owner": "Ryan Winkler",
+        "phases": ["B4", "B8"],
+        "status": "documented_unverified",
+        "target": {
+          "model": "NVIDIA SHIELD TV Pro (2019, 16 GB)",
+          "os_target": "Android 11",
+          "firmware_target": null,
+          "runtime_capture_requirement": "Record the exact installed Android version, SHIELD Experience version, build, and security patch before testing."
+        },
+        "install_route": {
+          "package_format": "locally signed APK",
+          "routes": ["ADB over USB", "device-local package installer"],
+          "post_install_network_policy": "network-denied"
+        },
+        "storage_constraints": {
+          "memory": "3 GB RAM",
+          "internal_storage": "16 GB",
+          "expansion_and_capacity_requirement": "Record free internal capacity and whether USB storage is attached, adopted, or used for installer staging."
+        },
+        "background_environment": {
+          "services_to_capture": [
+            "NVIDIA launcher and vendor services",
+            "Google Play Services",
+            "Google Cast services",
+            "Google voice services",
+            "Plex Media Server and Plex client services"
+          ],
+          "measurement_requirement": "Capture exact package and service names, versions, enabled state, and resident-memory attribution; do not assume a service is absent or disabled."
+        },
+        "authoritative_source_urls": [
+          "https://www.nvidia.com/en-gb/shield/shield-tv-pro/",
+          "https://www.nvidia.com/en-eu/shield/support/shield-tv-pro/"
+        ]
+      }
     },
     {
       "profile": "representative_tv",
-      "display_name": "Representative TV hardware",
+      "display_name": "Sony BRAVIA 3 K-43S30 (2024)",
       "role": "packaging_hypothesis",
-      "hypothesis": "A deliberately selected TV profile can exercise remote-oriented packaging without weakening the same local capability and memory gates.",
+      "hypothesis": "Test whether this deliberately selected TV profile can exercise remote-oriented packaging without weakening the same local capability and memory gates.",
       "qualification_state": "blocking_unassigned",
       "custodian": null,
       "runner_fingerprint": null,
@@ -96,8 +201,42 @@
       "contract_ref": null,
       "evidence_ref": null,
       "results": null,
-      "blocking_reason": "No representative model, runtime, packaging path, device custodian, or measured evidence is assigned.",
-      "calibration": null
+      "blocking_reason": "The documented packaging spike is unverified; no device custodian or measured qualification evidence is assigned.",
+      "calibration": null,
+      "spike": {
+        "owner": "Ryan Winkler",
+        "phases": ["B4", "B8"],
+        "status": "documented_unverified",
+        "target": {
+          "model": "Sony BRAVIA 3 K-43S30 (2024)",
+          "os_target": "Google TV / Android TV",
+          "firmware_target": "6120800301",
+          "runtime_capture_requirement": "Record the exact installed Android version, Google TV build, security patch, and firmware before testing because firmware controls the runtime version."
+        },
+        "install_route": {
+          "package_format": "locally signed APK",
+          "routes": ["ADB over USB", "device-local package installer"],
+          "post_install_network_policy": "network-denied"
+        },
+        "storage_constraints": {
+          "memory": "Record installed and available RAM at spike execution",
+          "internal_storage": "16 GB",
+          "expansion_and_capacity_requirement": "Record free internal capacity and any USB storage used for installer staging; do not infer usable capacity from nominal storage."
+        },
+        "background_environment": {
+          "services_to_capture": [
+            "Sony and Google TV launcher services",
+            "Google Play Services",
+            "Google Cast services",
+            "Google voice services"
+          ],
+          "measurement_requirement": "Capture exact package and service names, versions, enabled state, and resident-memory attribution; do not assume a service is absent."
+        },
+        "authoritative_source_urls": [
+          "https://www.sony.com/electronics/support/televisions-projectors-lcd-tvs-android-/k-43s30/specifications",
+          "https://www.sony.com/electronics/support/product/k-43s30/downloads"
+        ]
+      }
     }
   ]
 }

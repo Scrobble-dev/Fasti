@@ -136,6 +136,64 @@ const canonicalProfiles = [
   "representative_tv",
 ];
 
+const performanceGateOwner = "Ryan Winkler";
+
+const packagingSpikeRequirements = {
+  ugoos_am6b_plus: {
+    model: "UGOOS AM6B Plus",
+    os_target: "Android 9.0",
+    firmware_target: null,
+    memory: "4 GB LPDDR4",
+    internal_storage: "32 GB eMMC",
+    required_service_markers: ["UGOOS", "Google Play", "Cast", "voice"],
+    authoritative_source_urls: [
+      "https://ugoos.com/files/uploads/63a38e470077cb39a0f8ca6933db3cbb.pdf",
+    ],
+  },
+  xiaomi_box_m3: {
+    model: "Mi Box 3 MDZ-16-AB",
+    os_target: "Factory Android TV",
+    firmware_target: null,
+    memory: "2 GB DDR3",
+    internal_storage: "8 GB eMMC",
+    required_service_markers: ["Xiaomi", "Google Play", "Cast", "voice"],
+    authoritative_source_urls: [
+      "https://ams-go.buy.mi.com/es/servicecenter/file/Mi_Box_es/?binaryId=11780&namespaceId=2&publicationId=18032",
+      "https://www.mi.com/global/support/terms/declaration/",
+    ],
+  },
+  nvidia_shield: {
+    model: "NVIDIA SHIELD TV Pro (2019, 16 GB)",
+    os_target: "Android 11",
+    firmware_target: null,
+    memory: "3 GB RAM",
+    internal_storage: "16 GB",
+    required_service_markers: [
+      "NVIDIA",
+      "Google Play",
+      "Cast",
+      "voice",
+      "Plex",
+    ],
+    authoritative_source_urls: [
+      "https://www.nvidia.com/en-gb/shield/shield-tv-pro/",
+      "https://www.nvidia.com/en-eu/shield/support/shield-tv-pro/",
+    ],
+  },
+  representative_tv: {
+    model: "Sony BRAVIA 3 K-43S30 (2024)",
+    os_target: "Google TV / Android TV",
+    firmware_target: "6120800301",
+    memory: "Record installed and available RAM at spike execution",
+    internal_storage: "16 GB",
+    required_service_markers: ["Sony", "Google Play", "Cast", "voice"],
+    authoritative_source_urls: [
+      "https://www.sony.com/electronics/support/televisions-projectors-lcd-tvs-android-/k-43s30/specifications",
+      "https://www.sony.com/electronics/support/product/k-43s30/downloads",
+    ],
+  },
+};
+
 function runnerFingerprint(evidence) {
   const runner = evidence.runner;
   return {
@@ -334,6 +392,10 @@ function validateLedgerDocument(ledger, resolver = fileEvidenceResolver) {
     canonicalProfiles,
     "device hypotheses must appear once in canonical profile order",
   );
+  assert(
+    ledger.performance_gate_owner === performanceGateOwner,
+    `performance gate owner must remain ${performanceGateOwner}`,
+  );
   const devicesByProfile = Object.fromEntries(
     ledger.devices.map((device) => [device.profile, device]),
   );
@@ -352,6 +414,72 @@ function validateLedgerDocument(ledger, resolver = fileEvidenceResolver) {
       device.role === expectedRoles[device.profile],
       `${label} has the wrong qualification role`,
     );
+    const spikeRequirement = packagingSpikeRequirements[device.profile];
+    if (device.role === "packaging_hypothesis") {
+      assert(device.spike !== null, `${label} requires a packaging spike`);
+      assert(
+        device.spike.owner === ledger.performance_gate_owner &&
+          isDeepStrictEqual(device.spike.phases, ["B4", "B8"]) &&
+          device.spike.status === "documented_unverified",
+        `${label} packaging spike ownership, phases, or unverified status changed`,
+      );
+      assertJsonEqual(
+        {
+          model: device.spike.target.model,
+          os_target: device.spike.target.os_target,
+          firmware_target: device.spike.target.firmware_target,
+          memory: device.spike.storage_constraints.memory,
+          internal_storage: device.spike.storage_constraints.internal_storage,
+          authoritative_source_urls: device.spike.authoritative_source_urls,
+        },
+        {
+          model: spikeRequirement.model,
+          os_target: spikeRequirement.os_target,
+          firmware_target: spikeRequirement.firmware_target,
+          memory: spikeRequirement.memory,
+          internal_storage: spikeRequirement.internal_storage,
+          authoritative_source_urls: spikeRequirement.authoritative_source_urls,
+        },
+        `${label} packaging target, constraints, or authoritative sources changed`,
+      );
+      assert(
+        device.spike.install_route.package_format === "locally signed APK" &&
+          isDeepStrictEqual(device.spike.install_route.routes, [
+            "ADB over USB",
+            "device-local package installer",
+          ]) &&
+          device.spike.install_route.post_install_network_policy ===
+            "network-denied",
+        `${label} install route must remain local and network-denied after installation`,
+      );
+      assert(
+        /record the exact installed/i.test(
+          device.spike.target.runtime_capture_requirement,
+        ),
+        `${label} must capture the actual installed runtime rather than infer it from specifications`,
+      );
+      const services = device.spike.background_environment.services_to_capture;
+      for (const marker of spikeRequirement.required_service_markers) {
+        assert(
+          services.some((service) => service.includes(marker)),
+          `${label} background environment omits ${marker}`,
+        );
+      }
+      assert(
+        /resident-memory attribution/i.test(
+          device.spike.background_environment.measurement_requirement,
+        ) &&
+          /do not assume/i.test(
+            device.spike.background_environment.measurement_requirement,
+          ),
+        `${label} must measure background services without assuming absence`,
+      );
+    } else {
+      assert(
+        device.spike === null,
+        `${label} physical qualification profile must not contain a packaging spike`,
+      );
+    }
     const facts = [
       device.custodian,
       device.runner_fingerprint,
@@ -1045,6 +1173,91 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function expectLedgerFailure(ledger, label) {
+  try {
+    validateLedgerDocument(ledger);
+  } catch {
+    return;
+  }
+  throw new Error(`invalid device ledger passed after removing ${label}`);
+}
+
+function validatePackagingSpikeRemovalSentinels() {
+  const ledger = loadJson(ledgerPath);
+  let sentinels = 0;
+
+  const missingGateOwner = clone(ledger);
+  delete missingGateOwner.performance_gate_owner;
+  expectLedgerFailure(missingGateOwner, "performance_gate_owner");
+  sentinels += 1;
+
+  const requiredSpikePaths = [
+    ["owner"],
+    ["phases"],
+    ["status"],
+    ["target"],
+    ["target", "model"],
+    ["target", "os_target"],
+    ["target", "firmware_target"],
+    ["target", "runtime_capture_requirement"],
+    ["install_route"],
+    ["install_route", "package_format"],
+    ["install_route", "routes"],
+    ["install_route", "post_install_network_policy"],
+    ["storage_constraints"],
+    ["storage_constraints", "memory"],
+    ["storage_constraints", "internal_storage"],
+    ["storage_constraints", "expansion_and_capacity_requirement"],
+    ["background_environment"],
+    ["background_environment", "services_to_capture"],
+    ["background_environment", "measurement_requirement"],
+    ["authoritative_source_urls"],
+  ];
+
+  for (const device of ledger.devices.filter(
+    (candidate) => candidate.role === "packaging_hypothesis",
+  )) {
+    const deviceIndex = ledger.devices.findIndex(
+      (candidate) => candidate.profile === device.profile,
+    );
+    const missingSpike = clone(ledger);
+    delete missingSpike.devices[deviceIndex].spike;
+    expectLedgerFailure(missingSpike, `${device.profile}.spike`);
+    sentinels += 1;
+
+    for (const path of requiredSpikePaths) {
+      const missingField = clone(ledger);
+      let parent = missingField.devices[deviceIndex].spike;
+      for (const segment of path.slice(0, -1)) parent = parent[segment];
+      delete parent[path.at(-1)];
+      expectLedgerFailure(
+        missingField,
+        `${device.profile}.spike.${path.join(".")}`,
+      );
+      sentinels += 1;
+    }
+
+    for (
+      let sourceIndex = 0;
+      sourceIndex < device.spike.authoritative_source_urls.length;
+      sourceIndex += 1
+    ) {
+      const missingSource = clone(ledger);
+      missingSource.devices[deviceIndex].spike.authoritative_source_urls.splice(
+        sourceIndex,
+        1,
+      );
+      expectLedgerFailure(
+        missingSource,
+        `${device.profile}.spike.authoritative_source_urls[${sourceIndex}]`,
+      );
+      sentinels += 1;
+    }
+  }
+
+  return sentinels;
+}
+
 function fixtureReference(name, evidence) {
   return {
     path: `evidence/${name}.json`,
@@ -1202,6 +1415,7 @@ function validateLedgerStateTransitions(validEvidence) {
 function runSelfTest() {
   const valid = makeSelfTestEvidence();
   validateEvidence(valid, "valid in-memory self-test fixture");
+  const packagingRemovalSentinels = validatePackagingSpikeRemovalSentinels();
   validateLedgerStateTransitions(valid);
 
   const missing = clone(valid);
@@ -1271,7 +1485,7 @@ function runSelfTest() {
   expectFailure(medianIdleGate, "gate must use the maximum observation");
 
   console.log(
-    "PASS: static schemas, assignable device ledger, evidence semantics, and twelve negative sentinels",
+    `PASS: static schemas, assignable device ledger, evidence semantics, twelve evidence sentinels, and ${packagingRemovalSentinels} packaging-ledger removal sentinels`,
   );
 }
 

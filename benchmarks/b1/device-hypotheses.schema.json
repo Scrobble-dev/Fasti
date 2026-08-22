@@ -4,13 +4,20 @@
   "title": "Fasti device qualification hypotheses",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "schema_version", "policy", "devices"],
+  "required": [
+    "$schema",
+    "schema_version",
+    "policy",
+    "performance_gate_owner",
+    "devices"
+  ],
   "properties": {
     "$schema": { "const": "./device-hypotheses.schema.json" },
-    "schema_version": { "const": "fasti.b1.device-hypotheses.v2" },
+    "schema_version": { "const": "fasti.b1.device-hypotheses.v3" },
     "policy": {
       "const": "A device is not qualified until its observed runner fingerprint, exact source artifacts and contracts, and validated evidence receipt are correlated; calibrated secondary status additionally requires validated champion evidence."
     },
+    "performance_gate_owner": { "const": "Ryan Winkler" },
     "devices": {
       "type": "array",
       "minItems": 6,
@@ -202,6 +209,108 @@
         }
       }
     },
+    "packagingSpike": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "phases",
+        "status",
+        "target",
+        "install_route",
+        "storage_constraints",
+        "background_environment",
+        "authoritative_source_urls"
+      ],
+      "properties": {
+        "owner": { "const": "Ryan Winkler" },
+        "phases": {
+          "type": "array",
+          "prefixItems": [{ "const": "B4" }, { "const": "B8" }],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "status": { "const": "documented_unverified" },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model",
+            "os_target",
+            "firmware_target",
+            "runtime_capture_requirement"
+          ],
+          "properties": {
+            "model": { "$ref": "#/$defs/nonEmptyString" },
+            "os_target": { "$ref": "#/$defs/nonEmptyString" },
+            "firmware_target": { "$ref": "#/$defs/nullableString" },
+            "runtime_capture_requirement": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "install_route": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "package_format",
+            "routes",
+            "post_install_network_policy"
+          ],
+          "properties": {
+            "package_format": { "const": "locally signed APK" },
+            "routes": {
+              "type": "array",
+              "prefixItems": [
+                { "const": "ADB over USB" },
+                { "const": "device-local package installer" }
+              ],
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "post_install_network_policy": { "const": "network-denied" }
+          }
+        },
+        "storage_constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory",
+            "internal_storage",
+            "expansion_and_capacity_requirement"
+          ],
+          "properties": {
+            "memory": { "$ref": "#/$defs/nonEmptyString" },
+            "internal_storage": { "$ref": "#/$defs/nonEmptyString" },
+            "expansion_and_capacity_requirement": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "background_environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["services_to_capture", "measurement_requirement"],
+          "properties": {
+            "services_to_capture": {
+              "type": "array",
+              "minItems": 4,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            },
+            "measurement_requirement": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "authoritative_source_urls": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^https://[^\\s]+$" }
+        }
+      }
+    },
     "device": {
       "type": "object",
       "additionalProperties": false,
@@ -218,7 +327,8 @@
         "evidence_ref",
         "results",
         "blocking_reason",
-        "calibration"
+        "calibration",
+        "spike"
       ],
       "properties": {
         "profile": { "$ref": "#/$defs/profile" },
@@ -258,8 +368,23 @@
         "blocking_reason": { "$ref": "#/$defs/nullableString" },
         "calibration": {
           "oneOf": [{ "$ref": "#/$defs/calibration" }, { "type": "null" }]
+        },
+        "spike": {
+          "oneOf": [{ "$ref": "#/$defs/packagingSpike" }, { "type": "null" }]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "role": { "const": "packaging_hypothesis" } },
+            "required": ["role"]
+          },
+          "then": {
+            "properties": { "spike": { "$ref": "#/$defs/packagingSpike" } }
+          },
+          "else": { "properties": { "spike": { "type": "null" } } }
+        }
+      ]
     }
   }
 }
