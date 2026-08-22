@@ -17,12 +17,12 @@ flowchart LR
 ## B0: Correct the controlling baseline
 
 - [x] Preserve the approved Fasti and Scrobble.dev brand system.
-- [ ] Remove player, placeholder web, replication, connector, and provider-keyed projection boundaries from the active workspace.
-- [ ] Remove false committed HTTP receipts and make planned CLI operations fail explicitly.
-- [ ] Make native, retained JavaScript, and daemon-plus-CLI OCI builds strict and lockfile-bound.
-- [ ] Disable public images, packages, attestations, binary uploads, and GitHub Releases while keeping non-publishing builds.
-- [ ] Establish the constitution, glossary, capability ledger, contract ownership, UAT ownership, and Definition of Done.
-- [ ] Pass repository-truth tests, workflow mutation tests, QA, and the rendered documentation design review.
+- [x] Remove player, placeholder web, replication, connector, and provider-keyed projection boundaries from the active workspace.
+- [x] Remove false committed HTTP receipts and make planned CLI operations fail explicitly.
+- [x] Make native, retained JavaScript, and daemon-plus-CLI OCI builds strict and lockfile-bound.
+- [x] Disable public images, packages, attestations, binary uploads, and GitHub Releases while keeping non-publishing builds.
+- [x] Establish the constitution, glossary, capability ledger, contract ownership, UAT ownership, and Definition of Done.
+- [x] Pass repository-truth tests, workflow mutation tests, QA, and the rendered documentation design review.
 
 ## B1: Build the executable contract spine
 
