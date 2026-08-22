@@ -179,6 +179,12 @@ struct EnrolledState {
     receipts: HashMap<ReceiptId, AcceptObservationReceipt>,
 }
 
+impl Drop for EnrolledState {
+    fn drop(&mut self) {
+        self.credential_secret.fill(0);
+    }
+}
+
 struct StoredOperation {
     capability: CapabilityKey,
     digest: Sha256Digest,
