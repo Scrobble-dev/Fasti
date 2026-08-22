@@ -10,7 +10,14 @@ if [[ "$(docker inspect --format '{{.Config.User}}' "$image")" != "fasti:fasti" 
 fi
 
 container_id="$(docker run --detach --rm --publish 127.0.0.1::8420 "$image")"
-trap 'docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
+isolated_id=""
+cleanup() {
+  docker rm --force "$container_id" >/dev/null 2>&1 || true
+  if [[ -n "$isolated_id" ]]; then
+    docker rm --force "$isolated_id" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 host_port="$(docker port "$container_id" 8420/tcp | head -1 | awk -F: '{print $NF}')"
 
 for attempt in $(seq 1 30); do
@@ -53,10 +60,34 @@ cli_stdout="$(mktemp)"
 cli_stderr="$(mktemp)"
 trap 'rm -f "$cli_stdout" "$cli_stderr"; docker rm --force "$container_id" >/dev/null 2>&1 || true' EXIT
 
-if docker run --rm "$image" /usr/local/bin/fasti verify >"$cli_stdout" 2>"$cli_stderr"; then
+if docker run --rm --network none "$image" /usr/local/bin/fasti verify >"$cli_stdout" 2>"$cli_stderr"; then
   echo "Unavailable verify command reported success" >&2
   exit 1
 fi
+
+isolated_id="$(docker run --detach --rm --network none "$image")"
+for attempt in $(seq 1 30); do
+  if isolated_health="$(docker exec "$isolated_id" wget -q -O - http://127.0.0.1:8420/api/v1/health)"; then
+    break
+  fi
+
+  if [[ "$attempt" -eq 30 ]]; then
+    docker logs "$isolated_id"
+    echo "Daemon did not become healthy with external networking disabled" >&2
+    exit 1
+  fi
+
+  sleep 1
+done
+
+python3 - "$isolated_health" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+if payload.get("status") != "healthy" or not payload.get("version"):
+    raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
+PY
 
 if [[ -s "$cli_stdout" ]] || ! grep -Fq "not available in B0" "$cli_stderr"; then
   echo "Unavailable verify command did not fail explicitly and quietly" >&2
@@ -84,5 +115,5 @@ if ((memory_bytes > memory_limit_bytes)); then
 fi
 
 image_size_bytes="$(docker image inspect "$image" --format '{{.Size}}')"
-printf 'PASS: image=%s user=fasti:fasti health=healthy post_events=404 cli_verify=nonzero idle_memory=%s idle_limit=%sMiB image_size_bytes=%s\n' \
+printf 'PASS: image=%s user=fasti:fasti health=healthy network_denied=pass post_events=404 cli_verify=nonzero idle_memory=%s idle_limit=%sMiB image_size_bytes=%s\n' \
   "$image" "$memory_sample" "$idle_limit_mib" "$image_size_bytes"
