@@ -1,6 +1,6 @@
 --- a/crates/fasti-application/src/receipts.rs
 +++ b/crates/fasti-application/src/receipts.rs
-@@ -20,10 +20,15 @@
+@@ -20,9 +20,13 @@
      profile_id: ProfileId,
      source_client_id: ClientId,
      observation_id: ObservationId,
