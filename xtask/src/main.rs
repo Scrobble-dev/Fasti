@@ -1,3 +1,4 @@
+mod generate;
 mod registry;
 
 use anyhow::bail;
@@ -25,6 +26,8 @@ enum Command {
 enum ContractCommand {
     /// Validate authored capability ownership without claiming complete B1 conformance
     ValidateRegistry,
+    /// Regenerate deterministic checked-in contract artifacts
+    Generate,
     /// Verify every B1 contract surface and emit a receipt only after all gates pass
     Verify {
         /// Require Cargo and package lockfiles throughout nested checks
@@ -48,16 +51,39 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Contract {
+            command: ContractCommand::Generate,
+        } => {
+            let artifacts = generate::generate_checked_in(&root)?;
+            println!("PASS: generated {} contract artifacts", artifacts.len());
+            Ok(())
+        }
+        Command::Contract {
             command: ContractCommand::Verify { locked },
         } => {
-            let _summary = registry::validate(&root)?;
+            let summary = registry::validate(&root)?;
+            let first_directory = tempfile::tempdir()?;
+            let second_directory = tempfile::tempdir()?;
+            let first = generate::generate_to(&root, first_directory.path())?;
+            let second = generate::generate_to(&root, second_directory.path())?;
+
+            generate::compare_outputs(
+                first_directory.path(),
+                second_directory.path(),
+                &first,
+                &second,
+            )?;
+            generate::verify_checked_in(&root, &first)?;
+
             let lock_state = if locked {
                 "locked"
             } else {
                 "lock enforcement not requested"
             };
             bail!(
-                "B1 contract verification is incomplete ({lock_state}): schemas, Utoipa OpenAPI, AsyncAPI, JSON-LD expansion, OKF, examples, UAT ownership, generated SDK parity, deterministic generation, and mutation sentinels are not all executable; no verification receipt was emitted"
+                "B1 contract verification is incomplete ({lock_state}; registry {} with {} capabilities and {} profiles is valid; checked-in OpenAPI, JSON Schemas, and public registry are deterministic): AsyncAPI, JSON-LD expansion, OKF, examples, UAT ownership, generated SDK parity, mutation sentinels, and black-box package gates are not all executable; no verification receipt was emitted",
+                summary.contract_version,
+                summary.capability_count,
+                summary.surface_profile_count
             )
         }
     }

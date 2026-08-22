@@ -1,0 +1,806 @@
+{
+  "capabilities": [
+    {
+      "bounded_context": "client.enrollment",
+      "contract_body": "b1",
+      "examples": [
+        "client.enroll.unavailable"
+      ],
+      "id": "client.enroll",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "client_enroll"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "correction.history",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "correction.chain.append",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "correction_write"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "correction.history",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "correction.chain.inspect",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "correction_read"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "credential.administration",
+      "contract_body": "b1",
+      "examples": [
+        "credential.revoke.unavailable"
+      ],
+      "id": "credential.revoke",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "credential_manage"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "credential.administration",
+      "contract_body": "b1",
+      "examples": [
+        "credential.rotate.unavailable"
+      ],
+      "id": "credential.rotate",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "credential_manage"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.identifiers",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.identifier.attach",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "invalid_identifier",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.records",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.record.create",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "invalid_identifier",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.defer",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.inspect",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_read"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.resolve",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "identity.review",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.review.resume",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "later_body"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "review_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "listener.configure.unavailable"
+      ],
+      "id": "listener.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "listener_configure"
+      ],
+      "surface_profile": "b1_listener",
+      "uat": []
+    },
+    {
+      "bounded_context": "node.administration",
+      "contract_body": "b1",
+      "examples": [
+        "node.initialize.unavailable"
+      ],
+      "id": "node.initialize",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "node_initialize"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "observation.accept.unavailable",
+        "observation.accept.validation_failed"
+      ],
+      "id": "observation.accept",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "idempotency_conflict",
+        "invalid_identifier",
+        "invalid_observation",
+        "invalid_time",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "observation_accept"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": [
+        {
+          "id": "ID-003",
+          "owner_body": "b2",
+          "reason": "B1 fixes the unresolved-safe contract trace; B2 owns durable behavior.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-005",
+          "owner_body": "b2",
+          "reason": "B1 fixes the conflict problem shape; B2 owns no-mutation persistence proof.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-055",
+          "owner_body": "b2",
+          "reason": "B1 fixes a network-independent contract; B2 owns the durable write.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-057",
+          "owner_body": "b2",
+          "reason": "B1 fixes receipt and retry semantics; B2 owns idempotency evidence.",
+          "relationship": "split"
+        },
+        {
+          "id": "ID-064",
+          "owner_body": "b2",
+          "reason": "B1 fixes structured problem fields; B2 owns exact-ID conflict behavior.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "portability.workspace",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "portability.workspace.export",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "workspace_export"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "portability.workspace",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "portability.workspace.restore",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "workspace_restore"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "portability.workspace",
+      "contract_body": "b3",
+      "examples": [],
+      "id": "portability.workspace.verify",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "guarded"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b3",
+      "scopes": [
+        "workspace_verify"
+      ],
+      "surface_profile": "later_b3",
+      "uat": []
+    },
+    {
+      "bounded_context": "profile.preferences",
+      "contract_body": "b1",
+      "examples": [
+        "profile.select.unavailable"
+      ],
+      "id": "profile.select",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_select"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": []
+    },
+    {
+      "bounded_context": "observation.receipts",
+      "contract_body": "b1",
+      "examples": [
+        "receipt.replay.unavailable"
+      ],
+      "id": "receipt.replay",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden",
+        "receipt_not_found",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "receipt_read"
+      ],
+      "surface_profile": "b1_receipt_replay",
+      "uat": [
+        {
+          "id": "ID-057",
+          "owner_body": "b2",
+          "reason": "B1 fixes replay contract semantics; B2 owns durable duplicate detection.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "system.contracts",
+      "contract_body": "b1",
+      "examples": [
+        "system.capabilities.forbidden",
+        "system.capabilities.success"
+      ],
+      "id": "system.capabilities.discover",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "contract_drift",
+        "forbidden"
+      ],
+      "runtime_body": "b1",
+      "scopes": [
+        "capability_read"
+      ],
+      "surface_profile": "b1_http_fixture",
+      "uat": [
+        {
+          "id": "ID-065",
+          "owner_body": "b1",
+          "reason": "B1 owns executable capability discovery contract evidence.",
+          "relationship": "direct"
+        },
+        {
+          "id": "ID-078",
+          "owner_body": "b2",
+          "reason": "B1 binds registry knowledge links while identity-error recovery remains later.",
+          "relationship": "split"
+        }
+      ]
+    },
+    {
+      "bounded_context": "system.operations",
+      "contract_body": "b1",
+      "examples": [
+        "system.health.success"
+      ],
+      "id": "system.health",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b0",
+        "runtime_availability": "implemented"
+      },
+      "problems": [],
+      "runtime_body": "b0",
+      "scopes": [],
+      "surface_profile": "health",
+      "uat": []
+    }
+  ],
+  "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
+  "contract_version": "1.0.0",
+  "surface_profiles": {
+    "b1_http_fixture": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld_okf": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "This capability has no server-sent event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_listener": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld_okf": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "binding": "asyncapi:{capability_id}",
+        "state": "required"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_receipt_replay": {
+      "cli": {
+        "binding": "cli:{capability_id}",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld_okf": {
+        "binding": "json-ld:{capability_id}",
+        "state": "required"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Receipt replay is a finite lookup rather than an event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "health": {
+      "cli": {
+        "reason": "Health is exposed as the process HTTP probe.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "state": "required"
+      },
+      "json_ld_okf": {
+        "reason": "Operational health is not linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:{capability_id}",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:{capability_id}",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:{capability_id}",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Health is a finite request and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "later_b2": {
+      "cli": {
+        "body": "b2",
+        "reason": "Command behavior belongs to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "body": "b2",
+        "reason": "Request and response semantics belong to B2.",
+        "state": "later_body"
+      },
+      "json_ld_okf": {
+        "body": "b2",
+        "reason": "Linked-data meaning belongs to B2.",
+        "state": "later_body"
+      },
+      "json_schema": {
+        "body": "b2",
+        "reason": "Public data shapes belong to B2.",
+        "state": "later_body"
+      },
+      "knowledge": {
+        "body": "b2",
+        "reason": "Recovery knowledge belongs to B2.",
+        "state": "later_body"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "Executable package evidence belongs to B2.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b2",
+        "reason": "Generated client behavior belongs to B2.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "body": "b2",
+        "reason": "Event applicability and semantics belong to B2.",
+        "state": "later_body"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "later_b3": {
+      "cli": {
+        "body": "b3",
+        "reason": "Successful command behavior belongs to B3.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding": "application:{application_key}",
+        "state": "required"
+      },
+      "http_openapi": {
+        "body": "b3",
+        "reason": "Request and response semantics belong to B3.",
+        "state": "later_body"
+      },
+      "json_ld_okf": {
+        "body": "b3",
+        "reason": "Linked-data meaning belongs to B3.",
+        "state": "later_body"
+      },
+      "json_schema": {
+        "body": "b3",
+        "reason": "Public data shapes belong to B3.",
+        "state": "later_body"
+      },
+      "knowledge": {
+        "body": "b3",
+        "reason": "Recovery knowledge belongs to B3.",
+        "state": "later_body"
+      },
+      "package_smoke": {
+        "body": "b3",
+        "reason": "Executable package evidence belongs to B3.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b3",
+        "reason": "Generated client behavior belongs to B3.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "body": "b3",
+        "reason": "Event applicability and semantics belong to B3.",
+        "state": "later_body"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    }
+  }
+}

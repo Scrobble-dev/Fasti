@@ -2,7 +2,7 @@ use anyhow::{ensure, Context};
 use fasti_application::{
     CapabilityBody, CapabilityKey, ContractState, ProblemCode, RuntimeAvailability, ScopeKey,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
@@ -24,16 +24,16 @@ pub struct ValidationSummary {
     pub surface_profile_count: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Registry {
+pub(crate) struct Registry {
     contract_version: String,
     capability_base_uri: String,
     surface_profiles: BTreeMap<String, SurfaceProfile>,
     capabilities: Vec<Capability>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SurfaceProfile {
     domain_application: SurfaceDisposition,
@@ -65,16 +65,19 @@ impl SurfaceProfile {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SurfaceDisposition {
     state: SurfaceState,
+    #[serde(skip_serializing_if = "Option::is_none")]
     binding: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     body: Option<CapabilityBody>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum SurfaceState {
     Required,
@@ -82,9 +85,10 @@ enum SurfaceState {
     NotApplicable,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Capability {
+    #[serde(skip_serializing)]
     application_key: CapabilityKey,
     id: String,
     bounded_context: String,
@@ -98,7 +102,7 @@ struct Capability {
     uat: Vec<UatOwnership>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RegistryLifecycle {
     introduced_in: CapabilityBody,
@@ -106,7 +110,7 @@ struct RegistryLifecycle {
     runtime_availability: RuntimeAvailability,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct UatOwnership {
     id: String,
@@ -115,7 +119,7 @@ struct UatOwnership {
     reason: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum UatRelationship {
     Direct,
@@ -124,6 +128,33 @@ enum UatRelationship {
 }
 
 pub fn validate(workspace_root: &Path) -> anyhow::Result<ValidationSummary> {
+    let registry = load_validated(workspace_root)?;
+
+    Ok(ValidationSummary {
+        contract_version: registry.contract_version,
+        capability_count: registry.capabilities.len(),
+        surface_profile_count: registry.surface_profiles.len(),
+    })
+}
+
+pub(crate) fn normalized_public_json(workspace_root: &Path) -> anyhow::Result<serde_json::Value> {
+    let mut registry = load_validated(workspace_root)?;
+    registry
+        .capabilities
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    for capability in &mut registry.capabilities {
+        capability
+            .scopes
+            .sort_by_key(|scope| serde_json::to_string(scope).unwrap_or_default());
+        capability.problems.sort();
+        capability.examples.sort();
+        capability.uat.sort_by(|left, right| left.id.cmp(&right.id));
+    }
+
+    serde_json::to_value(registry).context("public capability registry is not serializable")
+}
+
+fn load_validated(workspace_root: &Path) -> anyhow::Result<Registry> {
     let path = workspace_root.join(REGISTRY_PATH);
     let source =
         fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
@@ -134,11 +165,7 @@ pub fn validate(workspace_root: &Path) -> anyhow::Result<ValidationSummary> {
     validate_surface_profiles(&registry.surface_profiles)?;
     validate_capabilities(&registry)?;
 
-    Ok(ValidationSummary {
-        contract_version: registry.contract_version,
-        capability_count: registry.capabilities.len(),
-        surface_profile_count: registry.surface_profiles.len(),
-    })
+    Ok(registry)
 }
 
 fn validate_header(registry: &Registry) -> anyhow::Result<()> {

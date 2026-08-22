@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "ProblemActionDto": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ViolationDto": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string"
+        },
+        "pointer": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "pointer",
+        "reason",
+        "expected"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "RFC 9457 representation of the one application problem model.",
+  "properties": {
+    "actual": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "capability_id": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "correlation_id": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "next_actions": {
+      "items": {
+        "$ref": "#/$defs/ProblemActionDto"
+      },
+      "type": "array"
+    },
+    "param": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retryability": {
+      "type": "string"
+    },
+    "safe_state": {
+      "type": "string"
+    },
+    "status": {
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "title": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "violations": {
+      "items": {
+        "$ref": "#/$defs/ViolationDto"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "type",
+    "title",
+    "status",
+    "detail",
+    "code",
+    "capability_id",
+    "safe_state",
+    "retryability",
+    "next_actions",
+    "correlation_id",
+    "violations"
+  ],
+  "title": "ProblemDetails",
+  "type": "object"
+}

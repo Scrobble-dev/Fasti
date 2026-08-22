@@ -1757,9 +1757,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "fasti-api",
  "fasti-application",
+ "fasti-contracts",
+ "schemars",
  "serde",
  "serde-saphyr",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
