@@ -1,19 +1,34 @@
 //! Fasti HTTP REST API definitions and router construction.
 
 use axum::{routing::get, Json, Router};
-use serde::{Deserialize, Serialize};
+use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
+use utoipa::OpenApi;
 
-#[derive(Serialize, Deserialize)]
-pub struct HealthResponse {
-    pub status: &'static str,
-    pub version: &'static str,
-}
-
+#[utoipa::path(
+    get,
+    path = "/api/v1/health",
+    tag = "system",
+    responses(
+        (status = 200, description = "The Fasti service is healthy", body = HealthResponse)
+    )
+)]
 pub async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse {
-        status: "healthy",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "healthy".to_owned(),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
     })
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(health_check),
+    components(schemas(HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto))
+)]
+struct ApiDoc;
+
+/// Builds the OpenAPI 3.1 contract for routes actually mounted by [`api_router`].
+pub fn openapi() -> utoipa::openapi::OpenApi {
+    ApiDoc::openapi()
 }
 
 /// Constructs the primary API router for fastid.
@@ -29,6 +44,46 @@ mod tests {
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
+    use utoipa::openapi::OpenApiVersion;
+
+    #[test]
+    fn openapi_is_3_1_and_documents_the_real_health_route() {
+        let document = openapi();
+
+        assert!(matches!(document.openapi, OpenApiVersion::Version31));
+        assert!(document.paths.paths.contains_key("/api/v1/health"));
+        assert_eq!(document.paths.paths.len(), 1);
+
+        let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
+        assert!(serialized.contains("#/components/schemas/HealthResponse"));
+
+        let schemas = &document.components.expect("OpenAPI components").schemas;
+        for schema in [
+            "HealthResponse",
+            "ProblemActionDto",
+            "ProblemDetails",
+            "ViolationDto",
+        ] {
+            assert!(
+                schemas.contains_key(schema),
+                "missing shared schema {schema}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn documented_health_route_is_mounted() {
+        let response = api_router()
+            .oneshot(
+                Request::get("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 
     #[tokio::test]
     async fn event_submission_is_absent_until_it_can_persist() {

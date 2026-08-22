@@ -1,0 +1,107 @@
+asyncapi: 3.1.0
+id: https://fasti.scrobble.dev/contracts/asyncapi/v1
+info:
+  title: Fasti receipt event contract
+  version: 1.0.0
+  description: >-
+    Transport-only semantics for authenticated receipt delivery and bounded
+    cursor replay. The B1 implementation is a conformance fixture only; this
+    document does not claim that the production daemon exposes the channel.
+defaultContentType: application/json
+servers:
+  local:
+    host: "{host}:{port}"
+    protocol: http
+    protocolVersion: "1.1"
+    description: Operator-configured local Fasti listener.
+    variables:
+      host:
+        default: 127.0.0.1
+        description: Explicit listener host; loopback is the native default.
+      port:
+        default: "8420"
+        description: Explicit listener port.
+channels:
+  receiptEvents:
+    address: /api/v1/receipts/stream
+    description: >-
+      Server-sent receipt events. Reconnect presents Last-Event-ID; the server
+      performs a bounded replay before waiting for new committed receipts.
+    servers:
+      - $ref: "#/servers/local"
+    messages:
+      receiptCommitted:
+        $ref: "#/components/messages/receiptCommitted"
+operations:
+  sendReceiptCommitted:
+    action: send
+    summary: Deliver committed receipts to an authorized client.
+    description: >-
+      Delivery is at least once. Consumers deduplicate by receipt_id. A stale,
+      invalid, or unauthorized cursor fails with a typed problem and never
+      widens the profile boundary.
+    channel:
+      $ref: "#/channels/receiptEvents"
+    messages:
+      - $ref: "#/channels/receiptEvents/messages/receiptCommitted"
+    security:
+      - type: http
+        scheme: bearer
+        bearerFormat: FastiCredential
+        description: A current local credential with receipt_read scope.
+    bindings:
+      http:
+        method: GET
+    x-fasti-capability-id: listener.configure
+    x-fasti-required-scopes:
+      - receipt_read
+    x-fasti-replay:
+      cursorHeader: Last-Event-ID
+      maximumBatch: 100
+      transaction: short_lived
+      retryPolicy: bounded_client_backoff
+    x-fasti-runtime-availability: fixture_only
+components:
+  messages:
+    receiptCommitted:
+      name: receiptCommitted
+      title: Receipt committed
+      summary: An immutable acceptance receipt is available for replay.
+      contentType: application/json
+      correlationId:
+        location: $message.payload#/correlation_id
+      payload:
+        schemaFormat: application/schema+json;version=draft-07
+        schema:
+          type: object
+          additionalProperties: false
+          required:
+            - capability_id
+            - correlation_id
+            - receipt_id
+            - operation_id
+            - observation_id
+            - resolution
+            - committed_at
+          properties:
+            capability_id:
+              type: string
+              const: observation.accept
+            correlation_id:
+              type: string
+              pattern: ^req_[0-9a-f]{32}$
+            receipt_id:
+              type: string
+              pattern: ^rcp_[0-9a-f]{32}$
+            operation_id:
+              type: string
+              pattern: ^op_[0-9a-f]{32}$
+            observation_id:
+              type: string
+              pattern: ^obs_[0-9a-f]{32}$
+            resolution:
+              type: string
+              const: unresolved
+            committed_at:
+              type: string
+              format: date-time

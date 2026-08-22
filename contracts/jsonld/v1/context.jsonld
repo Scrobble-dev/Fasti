@@ -1,0 +1,42 @@
+{
+  "@context": {
+    "@version": 1.1,
+    "@protected": true,
+    "fasti": "https://fasti.scrobble.dev/ns/v1/",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "id": "@id",
+    "type": "@type",
+    "AcceptObservationReceipt": "fasti:AcceptObservationReceipt",
+    "EvidenceReference": "fasti:EvidenceReference",
+    "Observation": "fasti:Observation",
+    "capabilityId": "fasti:capabilityId",
+    "committedAt": {
+      "@id": "fasti:committedAt",
+      "@type": "xsd:dateTime"
+    },
+    "correlationId": "fasti:correlationId",
+    "evidence": {
+      "@id": "fasti:evidence",
+      "@type": "@id"
+    },
+    "evidenceId": "fasti:evidenceId",
+    "observationId": "fasti:observationId",
+    "observedAt": "fasti:observedAt",
+    "occurredAt": "fasti:occurredAt",
+    "operationId": "fasti:operationId",
+    "payloadDigest": "fasti:payloadDigest",
+    "profileId": "fasti:profileId",
+    "receiptId": "fasti:receiptId",
+    "receivedAt": {
+      "@id": "fasti:receivedAt",
+      "@type": "xsd:dateTime"
+    },
+    "resolution": {
+      "@id": "fasti:resolution",
+      "@type": "@vocab"
+    },
+    "unresolved": "fasti:resolution/unresolved",
+    "sourceClientId": "fasti:sourceClientId",
+    "workspaceId": "fasti:workspaceId"
+  }
+}

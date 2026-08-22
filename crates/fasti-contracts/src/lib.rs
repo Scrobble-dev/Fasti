@@ -5,23 +5,25 @@
 //! inward; adapters map them through these DTOs.
 
 use fasti_application::{FastiProblem, ProblemCode};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProblemActionDto {
     pub id: String,
     pub label: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ViolationDto {
     pub code: String,
@@ -32,7 +34,7 @@ pub struct ViolationDto {
 }
 
 /// RFC 9457 representation of the one application problem model.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProblemDetails {
     #[serde(rename = "type")]
@@ -132,6 +134,7 @@ mod tests {
     use super::*;
     use fasti_application::{CapabilityKey, FastiProblem};
     use fasti_domain::RequestCorrelationId;
+    use schemars::generate::SchemaSettings;
 
     #[test]
     fn problem_mapping_uses_registry_owned_capability_id() {
@@ -161,5 +164,18 @@ mod tests {
           "param":null,"actual":null,"violations":[],"extra":true
         }"#;
         assert!(serde_json::from_str::<ProblemDetails>(value).is_err());
+    }
+
+    #[test]
+    fn health_json_schema_explicitly_uses_draft_2020_12() {
+        let schema = SchemaSettings::draft2020_12()
+            .into_generator()
+            .into_root_schema_for::<HealthResponse>();
+        let value = serde_json::to_value(schema).expect("serializable JSON Schema");
+
+        assert_eq!(
+            value.get("$schema").and_then(serde_json::Value::as_str),
+            Some("https://json-schema.org/draft/2020-12/schema")
+        );
     }
 }

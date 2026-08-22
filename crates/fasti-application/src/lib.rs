@@ -5,6 +5,8 @@
 
 pub mod authorization;
 pub mod capabilities;
+#[cfg(feature = "conformance-fixture")]
+pub mod conformance;
 pub mod ports;
 pub mod problems;
 pub mod receipts;

@@ -9,7 +9,9 @@ description = "Shared public DTOs at the Fasti application boundary"
 
 [dependencies]
 fasti-application = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
+utoipa = { workspace = true }
 
 [dev-dependencies]
 fasti-domain = { workspace = true }

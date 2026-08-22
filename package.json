@@ -11,13 +11,19 @@
   },
   "scripts": {
     "build": "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build",
-    "test": "pnpm run build && node scripts/check-js-workspace.mjs && node --test tests/js/*.test.mjs",
+    "contracts:validate-authored": "node scripts/validate-authored-contracts.mjs",
+    "test": "pnpm run build && pnpm contracts:validate-authored && node scripts/check-js-workspace.mjs && node --test tests/js/*.test.mjs",
     "typecheck": "pnpm run build && pnpm --filter @fasti/tokens typecheck && pnpm --filter @fasti/sdk typecheck",
-    "format": "prettier --write package.json pnpm-workspace.yaml tsconfig.base.json \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\"",
-    "format:check": "prettier --check package.json pnpm-workspace.yaml tsconfig.base.json \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\""
+    "format": "prettier --write .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\"",
+    "format:check": "prettier --check .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\""
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "12.1.0",
+    "@asyncapi/parser": "3.6.3",
+    "ajv": "8.20.0",
+    "jsonld": "9.0.0",
     "prettier": "^3.3.3",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "yaml": "2.9.0"
   }
 }

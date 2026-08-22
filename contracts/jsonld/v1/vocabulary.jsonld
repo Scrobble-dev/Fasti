@@ -1,0 +1,33 @@
+{
+  "@context": {
+    "fasti": "https://fasti.scrobble.dev/ns/v1/",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "label": "rdfs:label",
+    "comment": "rdfs:comment"
+  },
+  "@graph": [
+    {
+      "@id": "fasti:Observation",
+      "@type": "rdfs:Class",
+      "label": "Observation",
+      "comment": "Immutable source evidence accepted without inventing a media identity."
+    },
+    {
+      "@id": "fasti:EvidenceReference",
+      "@type": "rdfs:Class",
+      "label": "Evidence reference",
+      "comment": "A verified content digest, byte length, and stable local evidence identity."
+    },
+    {
+      "@id": "fasti:AcceptObservationReceipt",
+      "@type": "rdfs:Class",
+      "label": "Accept observation receipt",
+      "comment": "Capability-bound proof returned only after the applicable durability boundary."
+    },
+    {
+      "@id": "fasti:resolution/unresolved",
+      "label": "Unresolved",
+      "comment": "No safe identity decision has been made; the observation remains valid and exportable."
+    }
+  ]
+}
