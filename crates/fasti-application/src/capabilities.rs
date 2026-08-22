@@ -102,7 +102,7 @@ define_capabilities!(
     (RotateCredential, B1, B2, Finalized, Implemented, Scoped, [CredentialManage], [AuthenticationFailed, Forbidden, StorageUnavailable]),
     (RevokeCredential, B1, B2, Finalized, Implemented, Scoped, [CredentialManage], [AuthenticationFailed, Forbidden, StorageUnavailable]),
     (ConfigureListener, B1, B2, Finalized, Implemented, Scoped, [ListenerConfigure], [AuthenticationFailed, Forbidden, StorageUnavailable, UnsupportedListener, ValidationFailed]),
-    (UploadEvidence, B2, B2, Finalized, Implemented, Scoped, [ObservationAccept], [AuthenticationFailed, CapacityExceeded, Forbidden, IntegrityFailed, PayloadTooLarge, StorageUnavailable]),
+    (UploadEvidence, B2, B2, Finalized, Implemented, Scoped, [ObservationAccept], [AuthenticationFailed, CapacityExceeded, Forbidden, IntegrityFailed, PayloadTooLarge, StorageUnavailable, ValidationFailed]),
     (AcceptObservation, B1, B2, Finalized, Implemented, Scoped, [ObservationAccept], [AuthenticationFailed, CapacityExceeded, EvidenceNotFound, Forbidden, IdempotencyConflict, IntegrityFailed, InvalidObservation, MalformedJson, PayloadTooLarge, StorageUnavailable, UnsupportedMediaType, ValidationFailed]),
     (ReplayReceipt, B1, B2, Finalized, Implemented, Scoped, [ReceiptRead], [AuthenticationFailed, Forbidden, ReceiptNotFound, StorageUnavailable]),
     (StreamReceipts, B1, B2, Finalized, Implemented, Scoped, [ReceiptRead], [AuthenticationFailed, CursorExpired, Forbidden, ReceiptNotFound, StorageUnavailable]),
