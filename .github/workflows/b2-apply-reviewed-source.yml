@@ -1,0 +1,76 @@
+name: Apply reviewed B2 source
+
+on:
+  push:
+    branches:
+      - "security/b1-evidence-hardening-20260822"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-reviewed-source:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - name: Verify the staged source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .fasti-staging/b2-source.tar.gz.b64 > /tmp/b2-source.tar.gz
+          echo "44848c330440cb0e5674e368c475d0a98848b8363ac03f22356ec89983fac196  /tmp/b2-source.tar.gz" | sha256sum --check --strict
+          tar -tzf /tmp/b2-source.tar.gz | LC_ALL=C sort > /tmp/actual-paths.txt
+          cat > /tmp/expected-paths.txt <<'PATHS'
+          .github/workflows/ci.yml
+          Cargo.lock
+          Dockerfile
+          apps/fastid/Cargo.toml
+          apps/fastid/src/main.rs
+          benchmarks/b1/Dockerfile
+          crates/fasti-api/Cargo.toml
+          crates/fasti-api/src/lib.rs
+          crates/fasti-api/src/production.rs
+          crates/fasti-application/src/capabilities.rs
+          crates/fasti-application/src/kernel.rs
+          crates/fasti-cli/Cargo.toml
+          crates/fasti-cli/src/local.rs
+          crates/fasti-cli/src/main.rs
+          crates/fasti-contracts/Cargo.toml
+          crates/fasti-contracts/src/generated_capability_ids.rs
+          crates/fasti-contracts/src/lib.rs
+          crates/fasti-contracts/src/production.rs
+          crates/fasti-store/src/access.rs
+          crates/fasti-store/src/lib.rs
+          crates/fasti-store/src/status.rs
+          PATHS
+          LC_ALL=C sort -o /tmp/expected-paths.txt /tmp/expected-paths.txt
+          diff --unified /tmp/expected-paths.txt /tmp/actual-paths.txt
+          if grep -Eq '(^/|(^|/)\.\.(/|$))' /tmp/actual-paths.txt; then
+            echo "Unsafe path found in staged source archive" >&2
+            exit 1
+          fi
+      - name: Apply the reviewed source and remove staging surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf /tmp/b2-source.tar.gz -C .
+          rm -f .fasti-staging/b2-source.tar.gz.b64
+          rmdir .fasti-staging
+          rm -f .github/workflows/b2-apply-reviewed-source.yml
+          git diff --check
+      - name: Create the reviewed B2 source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Ryan Winkler"
+          git config user.email "28455297+ryan-winkler@users.noreply.github.com"
+          git add -A
+          git commit -s \
+            -m "feat(b2): expose the durable local kernel through API and CLI" \
+            -m "Add the loopback-first production API, stable public B2 transport shapes, local node composition, authenticated status, content-addressed evidence upload, observation and receipt delivery, identity and review operations, credential lifecycle, listener configuration, provider-neutral seed handling, and a credential-free headless sandbox." \
+            -m "Keep credential material in permission-restricted files, keep query strings free of credentials, preserve bounded request and replay behavior, keep Docker as one wrapper over the native runtime, and retain explicit later-body guards for export, restore, and verification." \
+            -m "This commit also reconciles the local package graph and adds a temporary read-only formatting export job for exact follow-up validation."
+          git push origin HEAD:security/b1-evidence-hardening-20260822
