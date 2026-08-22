@@ -1,0 +1,115 @@
+name: One-shot B1 and B2 branch cleanup
+
+on:
+  push:
+    branches:
+      - "security/b1-evidence-hardening-20260822"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-b1-b2-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.actor == 'ryan-winkler' && github.ref == 'refs/heads/security/b1-evidence-hardening-20260822'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt
+      - name: Remove temporary mutation and transfer surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .fasti-staging
+          find .github/workflows -maxdepth 1 -type f \
+            \( -iname '*recovery*.yml' \
+               -o -iname 'b1-*apply*.yml' \
+               -o -iname 'b2-*source*.yml' \
+               -o -iname 'b2-*diagnose*.yml' \
+               -o -iname 'b2-*format-evidence*.yml' \) \
+            ! -name 'one-shot-b1-b2-cleanup.yml' -delete
+      - name: Restore read-only CI and remove temporary jobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('.github/workflows/ci.yml')
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+
+          blocked_key = re.compile(
+              r'^  (?P<key>[A-Za-z0-9_-]*(?:workspace-export|source-export|apply-reviewed|checksum-bound|staging)[A-Za-z0-9_-]*):\s*$'
+          )
+          blocked_name = re.compile(
+              r'^    name:\s*.*(?:workspace export|source export|apply checksum|apply reviewed|staged source).*$',
+              re.IGNORECASE,
+          )
+
+          output = []
+          index = 0
+          while index < len(lines):
+              match = blocked_key.match(lines[index].rstrip('\n'))
+              remove = bool(match)
+              if not remove and re.match(r'^  [A-Za-z0-9_-]+:\s*$', lines[index].rstrip('\n')):
+                  lookahead = index + 1
+                  while lookahead < len(lines) and not re.match(r'^  [A-Za-z0-9_-]+:\s*$', lines[lookahead].rstrip('\n')):
+                      if blocked_name.match(lines[lookahead].rstrip('\n')):
+                          remove = True
+                          break
+                      lookahead += 1
+              if remove:
+                  index += 1
+                  while index < len(lines) and not re.match(r'^  [A-Za-z0-9_-]+:\s*$', lines[index].rstrip('\n')):
+                      index += 1
+                  continue
+              output.append(lines[index])
+              index += 1
+
+          text = ''.join(output)
+          text = re.sub(
+              r'(?m)^permissions:\n(?:  [^\n]+\n)+',
+              'permissions:\n  contents: read\n',
+              text,
+              count=1,
+          )
+          if 'permissions:\n  contents: read\n' not in text:
+              raise SystemExit('CI permissions were not restored to read-only')
+          if re.search(r'(?i)(workspace export|source export|apply checksum|apply reviewed|staged source)', text):
+              raise SystemExit('A temporary CI job remains')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Reconcile the locked graph and format the workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo metadata --format-version 1 --no-deps >/dev/null
+          cargo fmt --all
+          git diff --check
+      - name: Remove this maintenance workflow
+        shell: bash
+        run: rm -f .github/workflows/one-shot-b1-b2-cleanup.yml
+      - name: Commit the deterministic cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No cleanup change was required.'
+            exit 0
+          fi
+          git config user.name 'Ryan Winkler'
+          git config user.email '28455297+ryan-winkler@users.noreply.github.com'
+          git add -A
+          git commit -s \
+            -m 'fix(review): restore a direct and lock-consistent source tree' \
+            -m 'Remove the rejected encoded source archive, staged patch carriers, write-capable review jobs, diagnostic jobs, and temporary workspace export jobs.' \
+            -m 'Restore read-only pull-request permissions, reconcile Cargo.lock from the checked-in manifests, and apply the repository-pinned Rust formatter. No release, package, image, or external service is published.'
+          git push origin HEAD:security/b1-evidence-hardening-20260822
