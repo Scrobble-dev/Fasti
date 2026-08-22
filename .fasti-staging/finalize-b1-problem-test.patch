@@ -1,0 +1,23 @@
+--- a/crates/fasti-application/src/problems.rs
++++ b/crates/fasti-application/src/problems.rs
+@@ -783,13 +783,14 @@
+ 
+     #[test]
+     fn authentication_failure_does_not_expose_the_failed_predicate() {
+-        let problem = FastiProblem::authentication_failed(
+-            CapabilityKey::AcceptObservation,
+-            RequestCorrelationId::new_v7(),
++        let contract = ProblemCode::AuthenticationFailed.contract();
++        assert_eq!(contract.status(), 401);
++        assert_eq!(contract.safe_state(), SafeState::NoMutation);
++        assert_eq!(contract.param_policy(), ProblemParamPolicy::None);
++        assert_eq!(
++            contract.detail(CapabilityKey::AcceptObservation),
++            "the presented local credential is not active"
+         );
+-        assert_eq!(problem.status(), 401);
+-        assert_eq!(problem.actual(), None);
+-        assert!(problem.violations().is_empty());
+     }
+ 
+     #[test]
