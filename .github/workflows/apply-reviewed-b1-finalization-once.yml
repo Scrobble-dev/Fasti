@@ -67,8 +67,9 @@ jobs:
 
           cargo fmt --all
           cargo xtask contract generate
+          rm .github/workflows/apply-reviewed-b1-finalization-once.yml
 
-          allowed='^(crates/fasti-application/src/(capabilities|problems|receipts)\.rs|crates/fasti-contracts/src/generated_capability_ids\.rs|crates/fasti-store/src/(evidence|observation|seed)\.rs|tests/js/sdk-client\.test\.mjs|xtask/src/registry\.rs|contracts/generated/v1/(openapi|conformance-openapi|capabilities|problems)\.json|contracts/examples/v1/system\.capabilities\.success\.json|packages/schemas/schemas/(health-response|problem-details)\.json|packages/sdk/src/generated\.ts)$'
+          allowed='^(\.github/workflows/apply-reviewed-b1-finalization-once\.yml|crates/fasti-application/src/(capabilities|problems|receipts)\.rs|crates/fasti-contracts/src/generated_capability_ids\.rs|crates/fasti-store/src/(evidence|observation|seed)\.rs|tests/js/sdk-client\.test\.mjs|xtask/src/registry\.rs|contracts/generated/v1/(openapi|conformance-openapi|capabilities|problems)\.json|contracts/examples/v1/system\.capabilities\.success\.json|packages/schemas/schemas/(health-response|problem-details)\.json|packages/sdk/src/generated\.ts)$'
           changed="$(git status --short | sed -E 's/^.. //')"
           test -n "$changed"
           while IFS= read -r path; do
@@ -96,6 +97,7 @@ jobs:
           git config user.name "Ryan Winkler"
           git config user.email "28455297+ryan-winkler@users.noreply.github.com"
           git add \
+            .github/workflows/apply-reviewed-b1-finalization-once.yml \
             crates/fasti-application/src/capabilities.rs \
             crates/fasti-application/src/problems.rs \
             crates/fasti-application/src/receipts.rs \
