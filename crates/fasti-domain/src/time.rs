@@ -171,7 +171,7 @@ impl OccurredAt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct ObservedAt(ClaimedTime);
 
@@ -189,8 +189,23 @@ impl ObservedAt {
     }
 }
 
+impl<'de> Deserialize<'de> for ObservedAt {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let claim = ClaimedTime::deserialize(deserializer)?;
+        if claim.instant().is_none() {
+            return Err(serde::de::Error::custom(
+                ClaimedTimeError::ObservedAtRequiresInstant,
+            ));
+        }
+        Ok(Self(claim))
+    }
+}
+
 /// Server-owned ingress time. The application clock supplies the value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct ReceivedAt(DateTime<Utc>);
 
@@ -206,7 +221,7 @@ impl ReceivedAt {
 
 /// Server-owned durable commit time. Persistence supplies this only after the
 /// durability boundary has been crossed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct CommittedAt(DateTime<Utc>);
 
@@ -223,6 +238,12 @@ impl CommittedAt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use static_assertions::{assert_impl_all, assert_not_impl_any};
+
+    assert_impl_all!(ObservedAt: serde::de::DeserializeOwned);
+    assert_not_impl_any!(ReceivedAt: serde::de::DeserializeOwned);
+    assert_not_impl_any!(CommittedAt: serde::de::DeserializeOwned);
 
     #[test]
     fn claimed_time_preserves_original_offset_and_infers_precision() {
@@ -258,5 +279,37 @@ mod tests {
     fn deserialization_rejects_contradictory_precision() {
         let input = r#"{"original":"2026-08-21T23:14:15.120+05:30","precision":"second","trust":"source_claim"}"#;
         assert!(serde_json::from_str::<ClaimedTime>(input).is_err());
+    }
+
+    #[test]
+    fn observed_at_deserialization_rejects_date_only_claims() {
+        let input = r#"{"original":"2026-08-21","precision":"date","trust":"device_observed"}"#;
+        assert!(serde_json::from_str::<ObservedAt>(input).is_err());
+    }
+
+    #[test]
+    fn server_owned_times_are_serializable() {
+        fn assert_serialize<T: Serialize>() {}
+        assert_serialize::<ReceivedAt>();
+        assert_serialize::<CommittedAt>();
+    }
+
+    proptest! {
+        #[test]
+        fn valid_millisecond_claims_preserve_their_source_lexeme(
+            millis in 0_u16..=999,
+            offset_hours in -12_i32..=14,
+        ) {
+            let sign = if offset_hours < 0 { '-' } else { '+' };
+            let value = format!(
+                "2026-08-21T23:14:15.{millis:03}{sign}{:02}:00",
+                offset_hours.unsigned_abs()
+            );
+            let claim = ClaimedTime::parse(value.clone(), ClaimedTrust::SourceClaim)
+                .expect("generated RFC 3339 claim");
+
+            prop_assert_eq!(claim.original(), value);
+            prop_assert_eq!(claim.precision(), ClaimedPrecision::Millisecond);
+        }
     }
 }

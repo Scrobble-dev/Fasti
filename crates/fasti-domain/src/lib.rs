@@ -4,10 +4,14 @@
 //! dependencies. Adapters depend inward on these types; domain policy never
 //! depends outward on an adapter representation.
 
+pub mod evidence;
 pub mod ids;
 pub mod media;
+pub mod observation;
 pub mod time;
 
+pub use evidence::*;
 pub use ids::*;
 pub use media::*;
+pub use observation::*;
 pub use time::*;

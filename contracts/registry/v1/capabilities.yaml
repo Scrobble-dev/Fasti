@@ -1,0 +1,338 @@
+contract_version: 1.0.0
+capability_base_uri: https://fasti.scrobble.dev/ns/capabilities/v1/
+
+# Profiles keep repeated transport dispositions in one place. A required
+# binding is a contract-generation target, not a claim that its runtime exists.
+surface_profiles:
+  health:
+    domain_application: { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi: { state: not_applicable, reason: Health is a finite request and has no event stream. }
+    cli: { state: not_applicable, reason: Health is exposed as the process HTTP probe. }
+    json_schema: { state: required, binding: "schema:{capability_id}" }
+    json_ld_okf: { state: not_applicable, reason: Operational health is not linked-data domain state. }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:{capability_id}" }
+    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+  b1_http_fixture:
+    domain_application: { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi: { state: not_applicable, reason: This capability has no server-sent event channel. }
+    cli: { state: required, binding: "cli:{capability_id}" }
+    json_schema: { state: required, binding: "schema:{capability_id}" }
+    json_ld_okf: { state: required, binding: "json-ld:{capability_id}" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:{capability_id}" }
+    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+  b1_receipt_replay:
+    domain_application: { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi: { state: not_applicable, reason: Receipt replay is a finite lookup rather than an event stream. }
+    cli: { state: required, binding: "cli:{capability_id}" }
+    json_schema: { state: required, binding: "schema:{capability_id}" }
+    json_ld_okf: { state: required, binding: "json-ld:{capability_id}" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:{capability_id}" }
+    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+  b1_listener:
+    domain_application: { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi: { state: required, binding: "asyncapi:{capability_id}" }
+    cli: { state: required, binding: "cli:{capability_id}" }
+    json_schema: { state: required, binding: "schema:{capability_id}" }
+    json_ld_okf: { state: required, binding: "json-ld:{capability_id}" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:{capability_id}" }
+    package_smoke: { state: required, binding: "package-smoke:{capability_id}" }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+  later_b2:
+    domain_application: { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: later_body, body: b2, reason: Request and response semantics belong to B2. }
+    sse_asyncapi: { state: later_body, body: b2, reason: Event applicability and semantics belong to B2. }
+    cli: { state: later_body, body: b2, reason: Command behavior belongs to B2. }
+    json_schema: { state: later_body, body: b2, reason: Public data shapes belong to B2. }
+    json_ld_okf: { state: later_body, body: b2, reason: Linked-data meaning belongs to B2. }
+    sdk: { state: later_body, body: b2, reason: Generated client behavior belongs to B2. }
+    knowledge: { state: later_body, body: b2, reason: Recovery knowledge belongs to B2. }
+    package_smoke: { state: later_body, body: b2, reason: Executable package evidence belongs to B2. }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+  later_b3:
+    domain_application: { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: later_body, body: b3, reason: Request and response semantics belong to B3. }
+    sse_asyncapi: { state: later_body, body: b3, reason: Event applicability and semantics belong to B3. }
+    cli: { state: later_body, body: b3, reason: Successful command behavior belongs to B3. }
+    json_schema: { state: later_body, body: b3, reason: Public data shapes belong to B3. }
+    json_ld_okf: { state: later_body, body: b3, reason: Linked-data meaning belongs to B3. }
+    sdk: { state: later_body, body: b3, reason: Generated client behavior belongs to B3. }
+    knowledge: { state: later_body, body: b3, reason: Recovery knowledge belongs to B3. }
+    package_smoke: { state: later_body, body: b3, reason: Executable package evidence belongs to B3. }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
+capabilities:
+  - application_key: system_health
+    id: system.health
+    bounded_context: system.operations
+    contract_body: b1
+    runtime_body: b0
+    lifecycle: { introduced_in: b0, contract_state: finalized, runtime_availability: implemented }
+    surface_profile: health
+    scopes: []
+    problems: []
+    examples: [system.health.success]
+    uat: []
+
+  - application_key: discover_capabilities
+    id: system.capabilities.discover
+    bounded_context: system.contracts
+    contract_body: b1
+    runtime_body: b1
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [capability_read]
+    problems: [contract_drift, forbidden]
+    examples: [system.capabilities.success, system.capabilities.forbidden]
+    uat:
+      - { id: ID-065, relationship: direct, owner_body: b1, reason: B1 owns executable capability discovery contract evidence. }
+      - { id: ID-078, relationship: split, owner_body: b2, reason: B1 binds registry knowledge links while identity-error recovery remains later. }
+
+  - application_key: initialize_node
+    id: node.initialize
+    bounded_context: node.administration
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [node_initialize]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: [node.initialize.unavailable]
+    uat: []
+
+  - application_key: enroll_first_client
+    id: client.enroll
+    bounded_context: client.enrollment
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [client_enroll]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: [client.enroll.unavailable]
+    uat: []
+
+  - application_key: select_profile
+    id: profile.select
+    bounded_context: profile.preferences
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [profile_select]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: [profile.select.unavailable]
+    uat: []
+
+  - application_key: rotate_credential
+    id: credential.rotate
+    bounded_context: credential.administration
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [credential_manage]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: [credential.rotate.unavailable]
+    uat: []
+
+  - application_key: revoke_credential
+    id: credential.revoke
+    bounded_context: credential.administration
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [credential_manage]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: [credential.revoke.unavailable]
+    uat: []
+
+  - application_key: configure_listener
+    id: listener.configure
+    bounded_context: observation.ingress
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_listener
+    scopes: [listener_configure]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: [listener.configure.unavailable]
+    uat: []
+
+  - application_key: accept_observation
+    id: observation.accept
+    bounded_context: observation.ingress
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_http_fixture
+    scopes: [observation_accept]
+    problems: [capability_unavailable, forbidden, idempotency_conflict, invalid_identifier, invalid_observation, invalid_time, validation_failed]
+    examples: [observation.accept.unavailable, observation.accept.validation_failed]
+    uat:
+      - { id: ID-003, relationship: split, owner_body: b2, reason: B1 fixes the unresolved-safe contract trace; B2 owns durable behavior. }
+      - { id: ID-005, relationship: split, owner_body: b2, reason: B1 fixes the conflict problem shape; B2 owns no-mutation persistence proof. }
+      - { id: ID-055, relationship: split, owner_body: b2, reason: B1 fixes a network-independent contract; B2 owns the durable write. }
+      - { id: ID-057, relationship: split, owner_body: b2, reason: B1 fixes receipt and retry semantics; B2 owns idempotency evidence. }
+      - { id: ID-064, relationship: split, owner_body: b2, reason: B1 fixes structured problem fields; B2 owns exact-ID conflict behavior. }
+
+  - application_key: replay_receipt
+    id: receipt.replay
+    bounded_context: observation.receipts
+    contract_body: b1
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: finalized, runtime_availability: fixture_only }
+    surface_profile: b1_receipt_replay
+    scopes: [receipt_read]
+    problems: [capability_unavailable, forbidden, receipt_not_found, validation_failed]
+    examples: [receipt.replay.unavailable]
+    uat:
+      - { id: ID-057, relationship: split, owner_body: b2, reason: B1 fixes replay contract semantics; B2 owns durable duplicate detection. }
+
+  - application_key: create_record
+    id: identity.record.create
+    bounded_context: identity.records
+    contract_body: b2
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b2
+    scopes: [identity_write]
+    problems: [capability_unavailable, invalid_identifier, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: attach_identifier
+    id: identity.identifier.attach
+    bounded_context: identity.identifiers
+    contract_body: b2
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b2
+    scopes: [identity_write]
+    problems: [capability_unavailable, invalid_identifier, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: inspect_review
+    id: identity.review.inspect
+    bounded_context: identity.review
+    contract_body: b2
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b2
+    scopes: [review_read]
+    problems: [capability_unavailable, forbidden]
+    examples: []
+    uat: []
+
+  - application_key: defer_review
+    id: identity.review.defer
+    bounded_context: identity.review
+    contract_body: b2
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b2
+    scopes: [review_write]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: resume_review
+    id: identity.review.resume
+    bounded_context: identity.review
+    contract_body: b2
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b2
+    scopes: [review_write]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: resolve_review
+    id: identity.review.resolve
+    bounded_context: identity.review
+    contract_body: b2
+    runtime_body: b2
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b2
+    scopes: [review_write]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: append_correction
+    id: correction.chain.append
+    bounded_context: correction.history
+    contract_body: b3
+    runtime_body: b3
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b3
+    scopes: [correction_write]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: inspect_correction_chain
+    id: correction.chain.inspect
+    bounded_context: correction.history
+    contract_body: b3
+    runtime_body: b3
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: later_body }
+    surface_profile: later_b3
+    scopes: [correction_read]
+    problems: [capability_unavailable, forbidden]
+    examples: []
+    uat: []
+
+  - application_key: export_workspace
+    id: portability.workspace.export
+    bounded_context: portability.workspace
+    contract_body: b3
+    runtime_body: b3
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: guarded }
+    surface_profile: later_b3
+    scopes: [workspace_export]
+    problems: [capability_unavailable, forbidden]
+    examples: []
+    uat: []
+
+  - application_key: restore_workspace
+    id: portability.workspace.restore
+    bounded_context: portability.workspace
+    contract_body: b3
+    runtime_body: b3
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: guarded }
+    surface_profile: later_b3
+    scopes: [workspace_restore]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: []
+    uat: []
+
+  - application_key: verify_workspace
+    id: portability.workspace.verify
+    bounded_context: portability.workspace
+    contract_body: b3
+    runtime_body: b3
+    lifecycle: { introduced_in: b1, contract_state: reserved, runtime_availability: guarded }
+    surface_profile: later_b3
+    scopes: [workspace_verify]
+    problems: [capability_unavailable, forbidden, validation_failed]
+    examples: []
+    uat: []

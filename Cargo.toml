@@ -4,9 +4,11 @@ members = [
   "apps/fastid",
   "crates/fasti-domain",
   "crates/fasti-application",
+  "crates/fasti-contracts",
   "crates/fasti-store",
   "crates/fasti-api",
   "crates/fasti-cli",
+  "xtask",
 ]
 
 [workspace.package]
@@ -21,6 +23,7 @@ homepage = "https://scrobble.dev"
 # Internal crates
 fasti-domain = { path = "crates/fasti-domain", version = "0.1.0" }
 fasti-application = { path = "crates/fasti-application", version = "0.1.0" }
+fasti-contracts = { path = "crates/fasti-contracts", version = "0.1.0" }
 fasti-store = { path = "crates/fasti-store", version = "0.1.0" }
 fasti-api = { path = "crates/fasti-api", version = "0.1.0" }
 
@@ -46,3 +49,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1.0"
 anyhow = "1.0"
+serde-saphyr = "1.0.1"
+proptest = "1.6"
+static_assertions = "1.1"

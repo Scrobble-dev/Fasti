@@ -215,6 +215,7 @@ define_fasti_ids!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::collections::HashSet;
 
     #[test]
@@ -235,12 +236,53 @@ mod tests {
     }
 
     #[test]
+    fn executable_and_reserved_assignments_are_exact() {
+        let executable = ID_PREFIX_REGISTRY
+            .iter()
+            .filter(|entry| entry.lifecycle == IdLifecycle::Executable)
+            .map(|entry| entry.prefix)
+            .collect::<HashSet<_>>();
+        let reserved = ID_PREFIX_REGISTRY
+            .iter()
+            .filter(|entry| entry.lifecycle == IdLifecycle::Reserved)
+            .map(|entry| entry.prefix)
+            .collect::<HashSet<_>>();
+
+        assert_eq!(
+            executable,
+            HashSet::from([
+                "wsp_", "prf_", "cli_", "crd_", "grt_", "evd_", "obs_", "op_", "rcp_", "req_",
+            ])
+        );
+        assert_eq!(
+            reserved,
+            HashSet::from([
+                "rec_", "xid_", "asr_", "occ_", "int_", "rev_", "cor_", "rst_", "fld_",
+            ])
+        );
+    }
+
+    #[test]
     fn every_registered_kind_uses_the_shared_round_trip_codec() {
         for spec in ID_PREFIX_REGISTRY {
             let id = PrefixedUuidV7::new(spec.kind);
             let encoded = id.to_string();
             assert!(encoded.starts_with(spec.prefix));
             assert_eq!(encoded.parse::<PrefixedUuidV7>().expect("round trip"), id);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn every_v7_uuid_round_trips_through_a_typed_id(mut bytes in any::<[u8; 16]>()) {
+            bytes[6] = (bytes[6] & 0x0f) | 0x70;
+            bytes[8] = (bytes[8] & 0x3f) | 0x80;
+            let uuid = Uuid::from_bytes(bytes);
+            let typed = ObservationId::from_uuid(uuid).expect("version bits are v7");
+            let encoded = typed.to_string();
+
+            prop_assert_eq!(encoded.parse::<ObservationId>(), Ok(typed));
+            prop_assert!(encoded.parse::<RecordId>().is_err());
         }
     }
 

@@ -26,8 +26,11 @@ define_string_enum!(ProblemCode {
     CapabilityUnavailable => "capability_unavailable",
     ContractDrift => "contract_drift",
     Forbidden => "forbidden",
+    IdempotencyConflict => "idempotency_conflict",
     InvalidIdentifier => "invalid_identifier",
+    InvalidObservation => "invalid_observation",
     InvalidTime => "invalid_time",
+    ReceiptNotFound => "receipt_not_found",
     ValidationFailed => "validation_failed",
 });
 
@@ -86,18 +89,13 @@ impl Violation {
         pointer: impl Into<String>,
         reason: impl Into<String>,
         expected: impl Into<String>,
-        actual: Option<String>,
-        echo_actual: bool,
     ) -> Result<Self, ProblemBuildError> {
-        if actual.is_some() && !echo_actual {
-            return Err(ProblemBuildError::ActualEchoForbidden);
-        }
         let code = code.into();
         let pointer = pointer.into();
         let reason = reason.into();
         let expected = expected.into();
         if code.trim().is_empty()
-            || !pointer.starts_with('/')
+            || !is_valid_json_pointer(&pointer)
             || reason.trim().is_empty()
             || expected.trim().is_empty()
         {
@@ -108,7 +106,7 @@ impl Violation {
             pointer,
             reason,
             expected,
-            actual,
+            actual: None,
         })
     }
 
@@ -129,13 +127,26 @@ impl Violation {
     }
 }
 
+fn is_valid_json_pointer(pointer: &str) -> bool {
+    if !pointer.starts_with('/') {
+        return false;
+    }
+
+    let mut characters = pointer.chars();
+    while let Some(character) = characters.next() {
+        if character == '~' && !matches!(characters.next(), Some('0' | '1')) {
+            return false;
+        }
+    }
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProblemBuildError {
     EmptyAction,
     TooManyActions,
     TooManyViolations,
     InvalidViolation,
-    ActualEchoForbidden,
 }
 
 impl fmt::Display for ProblemBuildError {
@@ -147,7 +158,6 @@ impl fmt::Display for ProblemBuildError {
             Self::InvalidViolation => {
                 "violation fields must be non-empty and pointer must be a JSON Pointer"
             }
-            Self::ActualEchoForbidden => "the field policy forbids echoing the actual value",
         };
         f.write_str(message)
     }
@@ -173,9 +183,9 @@ pub struct FastiProblem {
 impl FastiProblem {
     pub fn capability_unavailable(
         capability: CapabilityKey,
-        owner: &str,
         correlation_id: RequestCorrelationId,
     ) -> Self {
+        let owner = capability.runtime_body().as_str();
         Self {
             code: ProblemCode::CapabilityUnavailable,
             capability,
@@ -191,9 +201,92 @@ impl FastiProblem {
             correlation_id,
             param: None,
             actual: None,
-            documentation_path: Some("problems/capability-unavailable"),
+            documentation_path: Some("v1/problems/capability-unavailable"),
             violations: Vec::new(),
         }
+    }
+
+    pub fn forbidden(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> Self {
+        Self {
+            code: ProblemCode::Forbidden,
+            capability,
+            message: "request is not authorized for this capability".to_owned(),
+            safe_state: SafeState::NoMutation,
+            retryability: Retryability::NotRetryable,
+            next_actions: vec![NextAction {
+                id: "verify_request_authorization".to_owned(),
+                label: "Verify the request context and local grant".to_owned(),
+            }],
+            correlation_id,
+            param: None,
+            actual: None,
+            documentation_path: Some("v1/problems/forbidden"),
+            violations: Vec::new(),
+        }
+    }
+
+    pub fn idempotency_conflict(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self {
+            code: ProblemCode::IdempotencyConflict,
+            capability,
+            message: "operation ID was already used with different request semantics".to_owned(),
+            safe_state: SafeState::PriorStateRetained,
+            retryability: Retryability::RetryAfterCorrection,
+            next_actions: vec![NextAction {
+                id: "use_new_operation_id".to_owned(),
+                label: "Use a new operation ID for a distinct observation".to_owned(),
+            }],
+            correlation_id,
+            param: Some("/operation_id".to_owned()),
+            actual: None,
+            documentation_path: Some("v1/problems/idempotency-conflict"),
+            violations: Vec::new(),
+        }
+    }
+
+    pub fn receipt_not_found(correlation_id: RequestCorrelationId) -> Self {
+        Self {
+            code: ProblemCode::ReceiptNotFound,
+            capability: CapabilityKey::ReplayReceipt,
+            message: "no receipt is available for the requested identifier".to_owned(),
+            safe_state: SafeState::NoMutation,
+            retryability: Retryability::NotRetryable,
+            next_actions: vec![NextAction {
+                id: "verify_receipt_id".to_owned(),
+                label: "Verify the receipt ID and request context".to_owned(),
+            }],
+            correlation_id,
+            param: Some("/receipt_id".to_owned()),
+            actual: None,
+            documentation_path: Some("v1/problems/receipt-not-found"),
+            violations: Vec::new(),
+        }
+    }
+
+    pub fn invalid_observation(
+        correlation_id: RequestCorrelationId,
+        violations: Vec<Violation>,
+    ) -> Result<Self, ProblemBuildError> {
+        Self {
+            code: ProblemCode::InvalidObservation,
+            capability: CapabilityKey::AcceptObservation,
+            message: "observation does not satisfy the governed contract".to_owned(),
+            safe_state: SafeState::NoMutation,
+            retryability: Retryability::RetryAfterCorrection,
+            next_actions: vec![NextAction {
+                id: "correct_observation".to_owned(),
+                label: "Correct the reported fields and submit again".to_owned(),
+            }],
+            correlation_id,
+            param: None,
+            actual: None,
+            documentation_path: Some("v1/problems/invalid-observation"),
+            violations: Vec::new(),
+        }
+        .try_with_violations(violations)
     }
 
     pub fn try_with_next_actions(
@@ -277,7 +370,6 @@ mod tests {
     fn unavailable_problem_preserves_safe_state_and_one_repair() {
         let problem = FastiProblem::capability_unavailable(
             CapabilityKey::ExportWorkspace,
-            "B3",
             RequestCorrelationId::new_v7(),
         );
         assert_eq!(problem.safe_state(), SafeState::NoMutation);
@@ -289,7 +381,6 @@ mod tests {
         let action = || NextAction::try_new("review", "Review status").expect("valid action");
         let problem = FastiProblem::capability_unavailable(
             CapabilityKey::RestoreWorkspace,
-            "B3",
             RequestCorrelationId::new_v7(),
         );
         assert_eq!(
@@ -299,17 +390,51 @@ mod tests {
     }
 
     #[test]
-    fn violation_actual_is_blocked_when_field_policy_forbids_echo() {
-        assert_eq!(
-            Violation::try_new(
-                "invalid_secret",
-                "/credential",
-                "credential is invalid",
-                "a valid credential",
-                Some("do-not-echo".to_owned()),
-                false,
-            ),
-            Err(ProblemBuildError::ActualEchoForbidden)
+    fn violations_cannot_echo_actual_values_before_a_field_policy_exists() {
+        let violation = Violation::try_new(
+            "invalid_secret",
+            "/credential",
+            "credential is invalid",
+            "a valid credential",
+        )
+        .expect("valid redacted violation");
+        assert_eq!(violation.actual(), None);
+    }
+
+    #[test]
+    fn violation_pointer_must_be_a_nonempty_rfc_6901_pointer() {
+        for invalid in ["", "credential", "/field~", "/field~2name"] {
+            assert_eq!(
+                Violation::try_new("invalid", invalid, "invalid field", "valid field"),
+                Err(ProblemBuildError::InvalidViolation)
+            );
+        }
+        for valid in ["/credential", "/field~0name", "/field~1name"] {
+            assert!(Violation::try_new("invalid", valid, "invalid field", "valid field").is_ok());
+        }
+    }
+
+    #[test]
+    fn authorization_problem_does_not_enumerate_the_failed_predicate() {
+        let problem = FastiProblem::forbidden(
+            CapabilityKey::AcceptObservation,
+            RequestCorrelationId::new_v7(),
         );
+        assert_eq!(problem.code(), ProblemCode::Forbidden);
+        assert_eq!(problem.actual(), None);
+        assert_eq!(problem.violations(), &[]);
+        assert!(!problem.message().contains("credential"));
+        assert!(!problem.message().contains("scope"));
+    }
+
+    #[test]
+    fn operation_conflict_preserves_prior_state() {
+        let problem = FastiProblem::idempotency_conflict(
+            CapabilityKey::AcceptObservation,
+            RequestCorrelationId::new_v7(),
+        );
+        assert_eq!(problem.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(problem.param(), Some("/operation_id"));
+        assert_eq!(problem.actual(), None);
     }
 }

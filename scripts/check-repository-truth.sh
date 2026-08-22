@@ -23,15 +23,111 @@ for path in "${retired_paths[@]}"; do
   done < <(git ls-files --cached --others --exclude-standard -- "$path")
 done
 
-if grep -Eqi 'axum|rusqlite|tokio|utoipa|schemars|tauri' crates/fasti-domain/Cargo.toml; then
-  echo "fasti-domain must not depend on adapters, runtimes, or contract generators" >&2
-  exit 1
-fi
+manifest_dependency_names() {
+  local manifest="$1"
 
-if grep -Eqi 'axum|rusqlite|tokio|utoipa|schemars|tauri' crates/fasti-application/Cargo.toml; then
-  echo "fasti-application must depend inward and remain adapter-free" >&2
-  exit 1
-fi
+  # Read dependency keys rather than grepping the whole manifest so package
+  # descriptions and comments cannot produce false boundary failures. This
+  # covers normal, development, build, target-specific, and renamed entries.
+  awk '
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+
+    function unquote(value) {
+      value = trim(value)
+      if (value ~ /^"[^"]+"$/ || value ~ /^\047[^\047]+\047$/) {
+        return substr(value, 2, length(value) - 2)
+      }
+      return value
+    }
+
+    function package_override(line, value) {
+      if (match(line, /package[[:space:]]*=[[:space:]]*["\047][A-Za-z0-9_-]+["\047]/)) {
+        value = substr(line, RSTART, RLENGTH)
+        sub(/^package[[:space:]]*=[[:space:]]*["\047]/, "", value)
+        sub(/["\047]$/, "", value)
+        print value
+      }
+    }
+
+    /^[[:space:]]*\[/ {
+      section = $0
+      sub(/[[:space:]]*#.*/, "", section)
+      section = trim(section)
+      direct = section ~ /^\[(target\..+\.)?(dev-|build-)?dependencies\]$/
+      nested = section ~ /^\[(target\..+\.)?(dev-|build-)?dependencies\.[A-Za-z0-9_-]+\]$/
+
+      if (nested) {
+        dependency = section
+        sub(/^.*dependencies\./, "", dependency)
+        sub(/\]$/, "", dependency)
+        print unquote(dependency)
+      }
+      next
+    }
+
+    direct && /^[[:space:]]*["\047]?[A-Za-z0-9_-]+["\047]?[[:space:]]*=/ {
+      dependency = $0
+      sub(/=.*/, "", dependency)
+      print unquote(dependency)
+      package_override($0)
+      next
+    }
+
+    nested {
+      package_override($0)
+    }
+  ' "$manifest" | sort -u
+}
+
+assert_no_boundary_dependencies() {
+  local crate="$1"
+  shift
+  local dependencies
+  local dependency
+  local forbidden
+
+  dependencies="$(manifest_dependency_names "crates/$crate/Cargo.toml")"
+  for dependency in $dependencies; do
+    for forbidden in "$@"; do
+      if [[ "$dependency" == "$forbidden" ]]; then
+        echo "$crate must not depend on boundary-external package: $dependency" >&2
+        exit 1
+      fi
+    done
+  done
+}
+
+adapter_schema_runtime_dependencies=(
+  "axum"
+  "clap"
+  "fasti-api"
+  "fasti-cli"
+  "fasti-contracts"
+  "fasti-store"
+  "rusqlite"
+  "schemars"
+  "serde-saphyr"
+  "tauri"
+  "tokio"
+  "tower"
+  "tracing"
+  "tracing-subscriber"
+  "utoipa"
+  "utoipa-axum"
+)
+
+assert_no_boundary_dependencies \
+  "fasti-domain" \
+  "fasti-application" \
+  "${adapter_schema_runtime_dependencies[@]}"
+
+assert_no_boundary_dependencies \
+  "fasti-application" \
+  "${adapter_schema_runtime_dependencies[@]}"
 
 while IFS= read -r knowledge_file; do
   if ! grep -Fq "**Status:** Governed design draft; not implemented" "$knowledge_file"; then
@@ -87,4 +183,4 @@ grep -Fiq "discussion" CONTRIBUTING.md
 grep -Fq "Developer Certificate of Origin" CONTRIBUTING.md
 grep -Fq "AGPL-3.0-or-later" README.md
 
-echo "PASS: active repository surfaces match the B0 capability boundary"
+echo "PASS: active repository surfaces match the B0/B1 capability boundaries"
