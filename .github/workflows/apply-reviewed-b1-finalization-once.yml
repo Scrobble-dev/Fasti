@@ -66,8 +66,9 @@ jobs:
           done
 
           cargo fmt --all
+          cargo xtask contract generate
 
-          allowed='^(crates/fasti-application/src/(capabilities|problems|receipts)\.rs|crates/fasti-contracts/src/generated_capability_ids\.rs|crates/fasti-store/src/(evidence|observation|seed)\.rs|tests/js/sdk-client\.test\.mjs|xtask/src/registry\.rs)$'
+          allowed='^(crates/fasti-application/src/(capabilities|problems|receipts)\.rs|crates/fasti-contracts/src/generated_capability_ids\.rs|crates/fasti-store/src/(evidence|observation|seed)\.rs|tests/js/sdk-client\.test\.mjs|xtask/src/registry\.rs|contracts/generated/v1/(openapi|conformance-openapi|capabilities|problems)\.json|contracts/examples/v1/system\.capabilities\.success\.json|packages/schemas/schemas/(health-response|problem-details)\.json|packages/sdk/src/generated\.ts)$'
           changed="$(git status --short | sed -E 's/^.. //')"
           test -n "$changed"
           while IFS= read -r path; do
@@ -103,10 +104,18 @@ jobs:
             crates/fasti-store/src/observation.rs \
             crates/fasti-store/src/seed.rs \
             tests/js/sdk-client.test.mjs \
-            xtask/src/registry.rs
+            xtask/src/registry.rs \
+            contracts/generated/v1/openapi.json \
+            contracts/generated/v1/conformance-openapi.json \
+            contracts/generated/v1/capabilities.json \
+            contracts/generated/v1/problems.json \
+            contracts/examples/v1/system.capabilities.success.json \
+            packages/schemas/schemas/health-response.json \
+            packages/schemas/schemas/problem-details.json \
+            packages/sdk/src/generated.ts
           git commit -s \
             -m "fix(b1): restore exact contract lifecycle and fixture parity" \
             -m "Keep the B1 HTTP and SSE behavior fixture-only, keep B2 identity and review capabilities reserved until their implementing body activates, and remove temporary public capability variants that duplicated existing application ownership." \
-            -m "Keep B2 storage helpers available behind the owning observation and record capabilities without claiming a production route. Keep B2-only problems out of the public B1 registry, preserve the established optional receipt wire shape, align the validation text, and add bounded Rust fixture diagnostics." \
-            -m "Rust lint, workspace tests, contract verification, TypeScript formatting and type checks, and the complete JavaScript contract and SDK suite passed before this commit. No product route, public listener, package, or release is added."
+            -m "Keep B2 storage helpers available behind the owning observation and record capabilities without claiming a production route. Keep B2-only problems out of the public B1 registry, preserve the established optional receipt wire shape, align the validation text, add bounded fixture diagnostics, and regenerate every affected governed contract output." \
+            -m "Rust lint, workspace tests, deterministic contract verification, TypeScript formatting and type checks, and the complete JavaScript contract and SDK suite passed before this commit. No product route, public listener, package, or release is added."
           git push origin HEAD:security/b1-evidence-hardening-20260822
