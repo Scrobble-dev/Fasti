@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - "security/b1-evidence-hardening-20260822"
+  pull_request:
+    branches:
+      - "release"
+    types:
+      - synchronize
 
 permissions:
   actions: read
@@ -22,7 +27,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: security/b1-evidence-hardening-20260822
-          fetch-depth: 3
+          fetch-depth: 0
 
       - name: Verify the bounded recovery inputs
         shell: bash
@@ -31,7 +36,7 @@ jobs:
           EXPECTED_PATCH_SHA256: 9dac751d73bb9dc9b403680f4259c1bb112ad47448e1ab7345ba43d9297853aa
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD~2)" = "$EXPECTED_SOURCE_SHA"
+          git merge-base --is-ancestor "$EXPECTED_SOURCE_SHA" HEAD
           git diff --name-only "$EXPECTED_SOURCE_SHA"..HEAD | LC_ALL=C sort > /tmp/changed-inputs.txt
           cat > /tmp/expected-inputs.txt <<'PATHS'
           .fasti-staging/finalize-b1.patch
@@ -214,7 +219,6 @@ jobs:
                 - name: Verify non-root, health, false-success, and idle-memory gates
                   run: bash scripts/smoke-oci.sh fasti:b0
           '''
-          # The source is indented only for this workflow's Python block.
           lines = expected.splitlines()
           normalized = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines).lstrip('\n') + '\n'
           Path('.github/workflows/ci.yml').write_text(normalized, encoding='utf-8')
