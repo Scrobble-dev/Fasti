@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .fasti-staging/b2-source.tar.gz.b64 > /tmp/b2-source.tar.gz
+          python3 -c 'from base64 import b64decode; from pathlib import Path; source = Path(".fasti-staging/b2-source.tar.gz.b64"); encoded = "".join(source.read_text(encoding="utf-8").split()); encoded += "=" * (-len(encoded) % 4); Path("/tmp/b2-source.tar.gz").write_bytes(b64decode(encoded, validate=True))'
           echo "44848c330440cb0e5674e368c475d0a98848b8363ac03f22356ec89983fac196  /tmp/b2-source.tar.gz" | sha256sum --check --strict
           tar -tzf /tmp/b2-source.tar.gz | LC_ALL=C sort > /tmp/actual-paths.txt
           cat > /tmp/expected-paths.txt <<'PATHS'
