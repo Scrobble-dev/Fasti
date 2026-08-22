@@ -154,6 +154,19 @@ pub(crate) fn normalized_public_json(workspace_root: &Path) -> anyhow::Result<se
     serde_json::to_value(registry).context("public capability registry is not serializable")
 }
 
+pub(crate) fn internal_key_id_pairs(
+    workspace_root: &Path,
+) -> anyhow::Result<Vec<(CapabilityKey, String)>> {
+    let registry = load_validated(workspace_root)?;
+    let mut pairs: Vec<_> = registry
+        .capabilities
+        .into_iter()
+        .map(|capability| (capability.application_key, capability.id))
+        .collect();
+    pairs.sort_by_key(|(key, _)| format!("{key:?}"));
+    Ok(pairs)
+}
+
 fn load_validated(workspace_root: &Path) -> anyhow::Result<Registry> {
     let path = workspace_root.join(REGISTRY_PATH);
     let source =

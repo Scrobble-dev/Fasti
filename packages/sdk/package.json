@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Minimal typed client for the implemented B0 health surface",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "description": "Generated-contract TypeScript client for Fasti HTTP and receipt SSE surfaces",
+  "main": "dist/transport.js",
+  "types": "dist/transport.d.ts",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "build": "tsc -p tsconfig.json",

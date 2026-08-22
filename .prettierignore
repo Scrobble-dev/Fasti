@@ -1,0 +1,4 @@
+# Generated deterministically by `cargo xtask contract generate` and verified
+# byte-for-byte by the contract gate. Authored sources remain Prettier-owned.
+contracts/generated/
+packages/schemas/schemas/
