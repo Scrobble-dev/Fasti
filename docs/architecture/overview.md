@@ -57,6 +57,6 @@ Any failure before the durability boundary returns a typed problem and cannot re
 
 The native daemon and CLI are the current executable shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. There is no supported installation, release, player, persistence kernel, web application, or desktop package.
 
-B1 cannot close on software checks alone. It still requires named physical Raspberry Pi 5 and J4125 RAM measurements under the agreed limits plus mandatory QA and developer-experience receipts. B4 adds a local browser presentation only after B0-B3 prove the headless kernel. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
+B1 cannot close on software checks alone. Its software, mandatory headless QA, and developer-experience gates pass on this branch; named physical Raspberry Pi 5 and J4125 RAM measurements under the agreed limits remain missing. B4 adds a local browser presentation only after B0-B3 prove the headless kernel. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
 
 See [the constitution](../constitution.md), [capability ledger](../capability-ledger.md), and [contract ownership](../../contracts/README.md).

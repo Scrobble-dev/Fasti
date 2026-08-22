@@ -26,6 +26,6 @@ The fixture separates contract proof from availability claims. Its finite routes
 
 Required surfaces are generated or validated from the registry across domain/application ownership, OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, semantic examples, CLI, typed TypeScript HTTP/SSE SDK, knowledge, and package smoke. Reasoned `N/A` is explicit—for example, operational health has no event stream and access administration is not linked-data domain state.
 
-`cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1. Closure also requires named physical Raspberry Pi 5 and J4125 RAM evidence and mandatory QA/developer-experience receipts. Until those exist, B1 remains in progress and B2 is not authorized.
+`cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1. The mandatory headless QA and developer-experience gates also pass on this branch; closure still requires named physical Raspberry Pi 5 and J4125 RAM evidence. Until that exists, B1 remains in progress and B2 is not authorized.
 
 Reserved identifiers do not authorize early request shapes, success behavior, persistence, installation, release, UI, or playback. Fasti records; players play.

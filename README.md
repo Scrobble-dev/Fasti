@@ -38,7 +38,7 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B1 software work is in progress; B2 is not authorized.
+This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. The B1 software, headless QA, and developer-experience gates pass on this branch; the B1 milestone remains open on physical Raspberry Pi 5 and J4125 evidence, so B2 is not authorized.
 
 The production daemon deliberately exposes only behavior it can prove:
 
@@ -107,7 +107,7 @@ B1 now has a machine-readable capability registry as the authoritative ledger. D
 - a generated TypeScript HTTP/SSE SDK with typed parsing, problems, bounded input, and governed reconnect behavior;
 - local `fasti capability list` and `fasti capability show <id>` views of the same public registry.
 
-`cargo xtask contract verify --locked` fails closed on registry, generation, drift, semantic examples, standards, SDK, Rust, package, and repository-truth gates and emits a software receipt only after all checks pass. That receipt does not close B1: named Raspberry Pi 5 and J4125 RAM evidence plus mandatory QA and developer-experience receipts are still required. See [contracts/README.md](contracts/README.md) for ownership and current locations.
+`cargo xtask contract verify --locked` fails closed on registry, generation, drift, semantic examples, standards, SDK, Rust, package, and repository-truth gates and emits a software receipt only after all checks pass. The separate mandatory headless QA and developer-experience reviews also pass on this branch. Those receipts do not close B1: named Raspberry Pi 5 and J4125 RAM evidence is still required. See [contracts/README.md](contracts/README.md) for ownership and current locations.
 
 ## Performance and portability targets
 
@@ -203,7 +203,7 @@ The product interface arrives after the headless contract and local kernel. Its 
 ## Roadmap
 
 - **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
-- **B1: Executable contract spine** — software surfaces are being made executable and drift-proof; closure still requires physical Pi 5/J4125 RAM evidence and mandatory QA/developer-experience receipts.
+- **B1: Executable contract spine** — software surfaces are executable and drift-proof, and the headless QA/developer-experience reviews pass; closure still requires physical Pi 5/J4125 RAM evidence.
 - **B2: Local kernel** — persist evidence, identity, access, operations, and durable receipt replay on constrained hardware.
 - **B3: Corrections and portability** — append-only interpretation revision plus complete export, clean restore, and equality proof.
 - **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
