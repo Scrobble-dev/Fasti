@@ -331,6 +331,11 @@ fn validate_disposition(
 
 fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
     let problem_codes: BTreeSet<_> = ProblemCode::ALL.iter().map(|code| code.as_str()).collect();
+    let finalized_problem_codes: BTreeSet<_> = ProblemCode::ALL
+        .iter()
+        .filter(|code| code.contract_state() == ContractState::Finalized)
+        .map(|code| code.as_str())
+        .collect();
     let all_scopes: HashSet<_> = ScopeKey::ALL.iter().copied().collect();
     let mut seen_keys = HashSet::new();
     let mut seen_ids = BTreeSet::new();
@@ -427,6 +432,18 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 problem_codes.contains(problem.as_str()),
                 "{label}: problem code {problem:?} is not owned by ProblemCode::ALL"
             );
+            let problem_code = ProblemCode::from_code(problem)
+                .with_context(|| format!("{label}: unknown problem code {problem:?}"))?;
+            ensure!(
+                problem_code.contract_state() == ContractState::Finalized,
+                "{label}: reserved problem code {problem:?} cannot enter the public registry before {}",
+                problem_code.introduced_in().as_str()
+            );
+            ensure!(
+                body_rank(problem_code.introduced_in()) <= body_rank(capability.contract_body),
+                "{label}: problem code {problem:?} cannot precede its owning body {}",
+                problem_code.introduced_in().as_str()
+            );
             ensure!(
                 capability_problems.insert(problem.as_str()),
                 "{label}: duplicate problem code {problem:?}"
@@ -479,9 +496,11 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
         all_scopes.difference(&used_scopes).collect::<Vec<_>>()
     );
     ensure!(
-        used_problems == problem_codes,
-        "every ProblemCode::ALL value must be used: unused={:?}",
-        problem_codes.difference(&used_problems).collect::<Vec<_>>()
+        used_problems == finalized_problem_codes,
+        "every finalized ProblemCode value must be used: unused={:?}",
+        finalized_problem_codes
+            .difference(&used_problems)
+            .collect::<Vec<_>>()
     );
     let expected_profiles: BTreeSet<_> = EXPECTED_PROFILES.into_iter().collect();
     ensure!(
@@ -689,6 +708,22 @@ mod tests {
             .expect("initialize capability")
             .authorization = AuthorizationKind::Scoped;
         assert!(validate_capabilities(&registry).is_err());
+    }
+
+    #[test]
+    fn reserved_problem_codes_stay_out_of_the_b1_registry() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let public = normalized_public_json(root).expect("public registry");
+        let rendered = serde_json::to_string(&public).expect("serialize public registry");
+
+        assert!(!rendered.contains(ProblemCode::AuthenticationFailed.as_str()));
+        assert!(!rendered.contains(ProblemCode::StorageUnavailable.as_str()));
+        assert_eq!(
+            ProblemCode::AuthenticationFailed.contract_state(),
+            ContractState::Reserved
+        );
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::CapabilityKey;
+use crate::{CapabilityBody, CapabilityKey, ContractState};
 use fasti_domain::RequestCorrelationId;
 use serde::Serialize;
 use std::borrow::Cow;
@@ -195,7 +195,7 @@ macro_rules! define_problem_catalog {
                         code: "invalid_representation", pointer: "/", reason: "request media type is unsupported", expected: "the documented request media type",
                     }),
                     Self::ValidationFailed => Some(RepresentationViolationContract {
-                        code: "invalid_representation", pointer: "/", reason: "request does not match the governed schema", expected: "the documented request schema",
+                        code: "invalid_representation", pointer: "/", reason: "request JSON does not match the governed schema", expected: "the documented request schema",
                     }),
                     _ => None,
                 }
@@ -382,6 +382,32 @@ define_problem_catalog!(
         param_policy: ProblemParamPolicy::None
     }
 );
+
+impl ProblemCode {
+    pub const fn introduced_in(self) -> CapabilityBody {
+        match self {
+            Self::AlreadyInitialized
+            | Self::AuthenticationFailed
+            | Self::BootstrapClosed
+            | Self::CursorExpired
+            | Self::EvidenceNotFound
+            | Self::IdentityConflict
+            | Self::IntegrityFailed
+            | Self::RecordNotFound
+            | Self::ReviewNotFound
+            | Self::StorageUnavailable
+            | Self::UnsupportedListener => CapabilityBody::B2,
+            _ => CapabilityBody::B1,
+        }
+    }
+
+    pub const fn contract_state(self) -> ContractState {
+        match self.introduced_in() {
+            CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
+            CapabilityBody::B2 | CapabilityBody::B3 => ContractState::Reserved,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextAction {
@@ -783,13 +809,40 @@ mod tests {
 
     #[test]
     fn authentication_failure_does_not_expose_the_failed_predicate() {
-        let problem = FastiProblem::authentication_failed(
-            CapabilityKey::AcceptObservation,
-            RequestCorrelationId::new_v7(),
+        let contract = ProblemCode::AuthenticationFailed.contract();
+        assert_eq!(contract.status(), 401);
+        assert_eq!(contract.safe_state(), SafeState::NoMutation);
+        assert_eq!(contract.param_policy(), ProblemParamPolicy::None);
+        assert_eq!(
+            contract.detail(CapabilityKey::AcceptObservation),
+            "the presented local credential is not active"
         );
-        assert_eq!(problem.status(), 401);
-        assert_eq!(problem.actual(), None);
-        assert!(problem.violations().is_empty());
+    }
+
+    #[test]
+    fn later_problem_contracts_remain_reserved_until_their_body_activates() {
+        for code in [
+            ProblemCode::AlreadyInitialized,
+            ProblemCode::AuthenticationFailed,
+            ProblemCode::BootstrapClosed,
+            ProblemCode::CursorExpired,
+            ProblemCode::EvidenceNotFound,
+            ProblemCode::IdentityConflict,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::RecordNotFound,
+            ProblemCode::ReviewNotFound,
+            ProblemCode::StorageUnavailable,
+            ProblemCode::UnsupportedListener,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::B2);
+            assert_eq!(code.contract_state(), ContractState::Reserved);
+        }
+
+        assert_eq!(ProblemCode::Forbidden.introduced_in(), CapabilityBody::B1);
+        assert_eq!(
+            ProblemCode::Forbidden.contract_state(),
+            ContractState::Finalized
+        );
     }
 
     #[test]

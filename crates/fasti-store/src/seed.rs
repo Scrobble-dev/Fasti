@@ -15,7 +15,7 @@ impl IdentitySeedPort for SqliteKernel {
         &self,
         command: ApplyIdentitySeedCommand,
     ) -> ApplicationResult<ApplyIdentitySeedOutcome> {
-        let capability = CapabilityKey::ApplyIdentitySeed;
+        let capability = CapabilityKey::CreateRecord;
         let correlation_id = command.correlation_id();
         if command.manifest().version().trim().is_empty()
             || command.manifest().entries().len() > MAX_SEED_ENTRIES

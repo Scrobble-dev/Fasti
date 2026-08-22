@@ -1,14 +1,14 @@
 use crate::crypto::{sha256_hex, sha256_reader};
 use crate::identity::matching_record_ids;
 use crate::kernel::{
-    authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp, problem,
+    authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp,
     timestamp, SqliteKernel,
 };
 use fasti_application::{
     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
-    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort, ProblemCode,
-    ReceiptStreamBatch, ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery,
-    StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
+    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort, ReceiptStreamBatch,
+    ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery, StreamReceiptsQuery,
+    MAX_RECEIPT_STREAM_REPLAY,
 };
 use fasti_domain::{
     ClientId, CommittedAt, EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain,

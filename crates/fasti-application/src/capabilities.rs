@@ -107,25 +107,26 @@ define_capabilities!(
     (
         DiscoverCapabilities,
         B1,
-        B2,
+        B1,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [CapabilityRead],
-        [AuthenticationFailed, Forbidden, StorageUnavailable]
+        [Forbidden]
     ),
     (
         InitializeNode,
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         BootstrapOnly,
         [],
         [
-            AlreadyInitialized,
-            CapacityExceeded,
-            StorageUnavailable,
+            Forbidden,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
             ValidationFailed
         ]
     ),
@@ -134,13 +135,14 @@ define_capabilities!(
         B1,
         B2,
         Finalized,
-        Implemented,
-        BootstrapOnly,
-        [],
+        FixtureOnly,
+        Scoped,
+        [ClientEnroll],
         [
-            AuthenticationFailed,
-            BootstrapClosed,
-            StorageUnavailable,
+            Forbidden,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
             ValidationFailed
         ]
     ),
@@ -149,84 +151,56 @@ define_capabilities!(
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [ProfileSelect],
-        [AuthenticationFailed, Forbidden, StorageUnavailable]
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         RotateCredential,
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [CredentialManage],
-        [AuthenticationFailed, Forbidden, StorageUnavailable]
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         RevokeCredential,
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [CredentialManage],
-        [AuthenticationFailed, Forbidden, StorageUnavailable]
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         ConfigureListener,
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [ListenerConfigure],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            StorageUnavailable,
-            UnsupportedListener,
-            ValidationFailed
-        ]
-    ),
-    (
-        UploadEvidence,
-        B2,
-        B2,
-        Finalized,
-        Implemented,
-        Scoped,
-        [ObservationAccept],
-        [
-            AuthenticationFailed,
-            CapacityExceeded,
-            Forbidden,
-            IntegrityFailed,
-            PayloadTooLarge,
-            StorageUnavailable,
-            ValidationFailed
-        ]
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         AcceptObservation,
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [ObservationAccept],
         [
-            AuthenticationFailed,
             CapacityExceeded,
-            EvidenceNotFound,
             Forbidden,
             IdempotencyConflict,
-            IntegrityFailed,
             InvalidObservation,
             MalformedJson,
             PayloadTooLarge,
-            StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
         ]
@@ -236,148 +210,80 @@ define_capabilities!(
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [ReceiptRead],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            ReceiptNotFound,
-            StorageUnavailable
-        ]
+        [Forbidden, ReceiptNotFound]
     ),
     (
         StreamReceipts,
         B1,
         B2,
         Finalized,
-        Implemented,
+        FixtureOnly,
         Scoped,
         [ReceiptRead],
-        [
-            AuthenticationFailed,
-            CursorExpired,
-            Forbidden,
-            ReceiptNotFound,
-            StorageUnavailable
-        ]
+        [Forbidden, ReceiptNotFound]
     ),
     (
         CreateRecord,
         B2,
         B2,
-        Finalized,
-        Implemented,
+        Reserved,
+        LaterBody,
         Scoped,
         [IdentityWrite],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            InvalidIdentifier,
-            StorageUnavailable,
-            ValidationFailed
-        ]
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
     ),
     (
         AttachIdentifier,
         B2,
         B2,
-        Finalized,
-        Implemented,
+        Reserved,
+        LaterBody,
         Scoped,
         [IdentityWrite],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            IdentityConflict,
-            InvalidIdentifier,
-            RecordNotFound,
-            StorageUnavailable,
-            ValidationFailed
-        ]
-    ),
-    (
-        ApplyIdentitySeed,
-        B2,
-        B2,
-        Finalized,
-        Implemented,
-        Scoped,
-        [IdentityWrite],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            IdentityConflict,
-            InvalidIdentifier,
-            StorageUnavailable,
-            ValidationFailed
-        ]
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
     ),
     (
         InspectReview,
         B2,
         B2,
-        Finalized,
-        Implemented,
+        Reserved,
+        LaterBody,
         Scoped,
         [ReviewRead],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            ReviewNotFound,
-            StorageUnavailable
-        ]
+        [CapabilityUnavailable, Forbidden]
     ),
     (
         DeferReview,
         B2,
         B2,
-        Finalized,
-        Implemented,
+        Reserved,
+        LaterBody,
         Scoped,
         [ReviewWrite],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            ReviewNotFound,
-            StorageUnavailable,
-            ValidationFailed
-        ]
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
     ),
     (
         ResumeReview,
         B2,
         B2,
-        Finalized,
-        Implemented,
+        Reserved,
+        LaterBody,
         Scoped,
         [ReviewWrite],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            ReviewNotFound,
-            StorageUnavailable,
-            ValidationFailed
-        ]
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
     ),
     (
         ResolveReview,
         B2,
         B2,
-        Finalized,
-        Implemented,
+        Reserved,
+        LaterBody,
         Scoped,
         [ReviewWrite],
-        [
-            AuthenticationFailed,
-            Forbidden,
-            IdentityConflict,
-            InvalidIdentifier,
-            RecordNotFound,
-            ReviewNotFound,
-            StorageUnavailable,
-            ValidationFailed
-        ]
+        [CapabilityUnavailable, Forbidden, ValidationFailed]
     ),
     (
         AppendCorrection,
@@ -443,21 +349,29 @@ mod tests {
     }
 
     #[test]
-    fn b2_runtime_capabilities_are_explicit() {
+    fn b2_runtime_capabilities_remain_non_production_until_activation() {
         for capability in [
             CapabilityKey::InitializeNode,
-            CapabilityKey::UploadEvidence,
             CapabilityKey::AcceptObservation,
             CapabilityKey::CreateRecord,
             CapabilityKey::ResolveReview,
         ] {
             assert_eq!(capability.runtime_body(), CapabilityBody::B2);
-            assert_eq!(capability.contract_state(), ContractState::Finalized);
-            assert_eq!(
-                capability.runtime_availability(),
-                RuntimeAvailability::Implemented
-            );
+            assert!(!capability.is_production_executable());
         }
+
+        assert_eq!(
+            CapabilityKey::InitializeNode.runtime_availability(),
+            RuntimeAvailability::FixtureOnly
+        );
+        assert_eq!(
+            CapabilityKey::CreateRecord.contract_state(),
+            ContractState::Reserved
+        );
+        assert_eq!(
+            CapabilityKey::CreateRecord.runtime_availability(),
+            RuntimeAvailability::LaterBody
+        );
     }
 
     #[test]

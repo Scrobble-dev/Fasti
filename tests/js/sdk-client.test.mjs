@@ -1021,6 +1021,7 @@ async function withRustFixture(exercise) {
   );
   const child = spawn(executable, ["127.0.0.1:0"], {
     cwd: repositoryRoot,
+    env: { ...process.env, RUST_BACKTRACE: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stderr = "";
@@ -1034,7 +1035,14 @@ async function withRustFixture(exercise) {
     assert.equal(readiness.availability, "fixture_only");
     assert.equal(readiness.durability, "none");
     assert.match(readiness.address, /^127\.0\.0\.1:\d+$/);
-    await exercise(`http://${readiness.address}`);
+    try {
+      await exercise(`http://${readiness.address}`);
+    } catch (error) {
+      throw new Error(
+        `Rust fixture exercise failed: ${fixtureProcessContext(child, stderr)}`,
+        { cause: error },
+      );
+    }
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGINT");
@@ -1045,6 +1053,15 @@ async function withRustFixture(exercise) {
       }
     }
   }
+}
+
+function fixtureProcessContext(child, stderr) {
+  const boundedStderr = stderr.slice(-16 * 1024).trim();
+  return [
+    `exit_code=${child.exitCode ?? "running"}`,
+    `signal=${child.signalCode ?? "none"}`,
+    `stderr=${boundedStderr || "<empty>"}`,
+  ].join(" ");
 }
 
 async function readReadiness(child, stderr) {

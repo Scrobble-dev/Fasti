@@ -20,7 +20,7 @@ impl EvidenceUploadPort for SqliteKernel {
         request: EvidenceUploadRequest,
     ) -> ApplicationResult<Box<dyn EvidenceUploadSession>> {
         let correlation_id = request.correlation_id();
-        let capability = CapabilityKey::UploadEvidence;
+        let capability = CapabilityKey::AcceptObservation;
         let limit = request
             .declared_size()
             .unwrap_or(MAX_EVIDENCE_BYTES)
@@ -109,7 +109,7 @@ struct SqliteEvidenceUpload {
 impl EvidenceUploadSession for SqliteEvidenceUpload {
     fn write_chunk(&mut self, bytes: &[u8]) -> ApplicationResult<()> {
         let correlation_id = self.request.correlation_id();
-        let capability = CapabilityKey::UploadEvidence;
+        let capability = CapabilityKey::AcceptObservation;
         let next = self
             .bytes_written
             .checked_add(bytes.len() as u64)
@@ -138,7 +138,7 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
 
     fn finish(mut self: Box<Self>) -> ApplicationResult<EvidenceReference> {
         let correlation_id = self.request.correlation_id();
-        let capability = CapabilityKey::UploadEvidence;
+        let capability = CapabilityKey::AcceptObservation;
         let mut file = self
             .file
             .take()

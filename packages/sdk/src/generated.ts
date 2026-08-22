@@ -2380,8 +2380,8 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "detail": "request media type is unsupported",
       "next_actions": [
         {
-          "id": "use_json_media_type",
-          "label": "Use Content-Type application/json and retry"
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
         }
       ],
       "param": null,
@@ -2600,8 +2600,8 @@ export const PUBLIC_PROBLEM_CATALOG = {
           "label": "Correct the identifier and retry"
         }
       ],
-      "param": null,
-      "param_policy": "none",
+      "param": "/identifier",
+      "param_policy": "fixed",
       "retryability": "retry_after_correction",
       "safe_state": "no_mutation",
       "status": 422,
@@ -2654,8 +2654,8 @@ export const PUBLIC_PROBLEM_CATALOG = {
           "label": "Correct the identifier and retry"
         }
       ],
-      "param": null,
-      "param_policy": "none",
+      "param": "/identifier",
+      "param_policy": "fixed",
       "retryability": "retry_after_correction",
       "safe_state": "no_mutation",
       "status": 422,
@@ -2974,8 +2974,8 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "detail": "request media type is unsupported",
       "next_actions": [
         {
-          "id": "use_json_media_type",
-          "label": "Use Content-Type application/json and retry"
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
         }
       ],
       "param": null,
@@ -3118,8 +3118,8 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "detail": "request media type is unsupported",
       "next_actions": [
         {
-          "id": "use_json_media_type",
-          "label": "Use Content-Type application/json and retry"
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
         }
       ],
       "param": null,
