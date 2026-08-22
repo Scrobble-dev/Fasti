@@ -1,0 +1,13 @@
+--- a/crates/fasti-store/src/observation.rs
++++ b/crates/fasti-store/src/observation.rs
+@@ -6,9 +6,8 @@
+ };
+ use fasti_application::{
+     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
+-    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort,
+-    ReceiptStreamBatch, ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery,
+-    StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
++    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort, ReceiptStreamBatch,
++    ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery, StreamReceiptsQuery,
++    MAX_RECEIPT_STREAM_REPLAY,
+ };
