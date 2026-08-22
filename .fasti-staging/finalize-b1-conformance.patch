@@ -1,0 +1,28 @@
+--- a/crates/fasti-application/src/problems.rs
++++ b/crates/fasti-application/src/problems.rs
+@@ -195,7 +195,7 @@
+                         code: "invalid_representation", pointer: "/", reason: "request media type is unsupported", expected: "the documented request media type",
+                     }),
+                     Self::ValidationFailed => Some(RepresentationViolationContract {
+-                        code: "invalid_representation", pointer: "/", reason: "request does not match the governed schema", expected: "the documented request schema",
++                        code: "invalid_representation", pointer: "/", reason: "request JSON does not match the governed schema", expected: "the documented request schema",
+                     }),
+                     _ => None,
+                 }
+--- a/crates/fasti-store/src/observation.rs
++++ b/crates/fasti-store/src/observation.rs
+@@ -1,12 +1,12 @@
+ use crate::crypto::{sha256_hex, sha256_reader};
+ use crate::identity::matching_record_ids;
+ use crate::kernel::{
+-    authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp, problem,
++    authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp,
+     timestamp, SqliteKernel,
+ };
+ use fasti_application::{
+     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
+-    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort, ProblemCode,
++    ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort,
+     ReceiptStreamBatch, ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery,
+     StreamReceiptsQuery, MAX_RECEIPT_STREAM_REPLAY,
+ };
