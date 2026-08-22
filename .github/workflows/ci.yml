@@ -102,3 +102,35 @@ jobs:
         run: docker build --tag fasti:b0 .
       - name: Verify non-root, health, false-success, and idle-memory gates
         run: bash scripts/smoke-oci.sh fasti:b0
+
+  b2-workspace-export:
+    name: B2 formatted workspace export
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt
+      - name: Reconcile the local lock graph and format Rust
+        run: |
+          cargo metadata --format-version 1 --no-deps >/dev/null
+          cargo fmt --all
+      - name: Capture the exact source and change
+        run: |
+          git diff --binary > /tmp/fasti-b2-workspace.patch
+          tar \
+            --exclude=.git \
+            --exclude=target \
+            --exclude=node_modules \
+            --exclude='benchmarks/b1/tauri-shell/src-tauri/target' \
+            -czf /tmp/fasti-b2-workspace.tar.gz .
+          test -s /tmp/fasti-b2-workspace.patch
+          test -s /tmp/fasti-b2-workspace.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fasti-b2-workspace
+          path: |
+            /tmp/fasti-b2-workspace.patch
+            /tmp/fasti-b2-workspace.tar.gz
+          if-no-files-found: error
+          retention-days: 1
