@@ -1,3 +1,4 @@
+use crate::{orchestration, verify};
 use anyhow::{bail, ensure, Context};
 use schemars::{schema_for, JsonSchema};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,24 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const SCHEMA_ID: &str = "https://fasti.scrobble.dev/schemas/evidence/manifest-v1.json";
+const EVIDENCE_SUPPORT_FILES: &[&str] = &[
+    "benchmarks/b1/Dockerfile",
+    "benchmarks/b1/budgets.json",
+    "benchmarks/b1/budgets.schema.json",
+    "benchmarks/b1/device-hypotheses.json",
+    "benchmarks/b1/device-hypotheses.schema.json",
+    "benchmarks/b1/evidence.schema.json",
+    "benchmarks/b1/physical-profiles.json",
+    "benchmarks/b1/physical-profiles.schema.json",
+    "benchmarks/b1/validate-evidence.mjs",
+    "benchmarks/b1/tauri-shell/evidence.schema.json",
+    "benchmarks/b1/tauri-shell/fixture-policy.json",
+    "benchmarks/b1/tauri-shell/fixture-policy.schema.json",
+    "benchmarks/b1/tauri-shell/src-tauri/Cargo.lock",
+    "benchmarks/b1/tauri-shell/validate-evidence.mjs",
+    "scripts/benchmark-tauri-b1.py",
+    "scripts/lib/strict-json.mjs",
+];
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub(crate) enum Body {
@@ -54,6 +73,7 @@ enum DesignReviewStatus {
 enum EvidenceKind {
     B1ContractVerification,
     B1DeviceLedger,
+    B1DeviceQualification,
     B1PerformancePi5,
     B1PerformanceJ4125,
     B1TauriShell,
@@ -262,23 +282,32 @@ fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Res
     verify_source_binding(root, &source)?;
 
     let contract_path = PathBuf::from("target/fasti-receipts/b1-contract-verification.json");
+    let portable_path = PathBuf::from("target/fasti-receipts/b1-portable.json");
+    let deep_path = PathBuf::from("target/fasti-receipts/b1-deep.json");
     let ledger_path = PathBuf::from("benchmarks/b1/device-hypotheses.json");
+    let qualification_path =
+        PathBuf::from("target/fasti-evidence/qualification/b1-device-qualification.json");
     let qa_path = PathBuf::from("target/fasti-evidence/qa/b1-qa.json");
     let physical_root = PathBuf::from("benchmarks/b1/evidence");
     let tauri_root = PathBuf::from("benchmarks/b1/tauri-shell/evidence");
     let contract_root = PathBuf::from("target/fasti-receipts");
     let qa_root = PathBuf::from("target/fasti-evidence/qa");
 
-    for required in [&contract_path, &ledger_path, &qa_path] {
+    for required in [
+        &contract_path,
+        &portable_path,
+        &deep_path,
+        &ledger_path,
+        &qa_path,
+    ] {
         ensure!(
             root.join(required).is_file(),
             "required B1 evidence is missing: {}",
             required.display()
         );
     }
-    let ledger = read_json(root.join(&ledger_path))?;
-    let pi_path = physical_evidence_path(&ledger, "raspberry_pi_5_champion")?;
-    let j4125_path = physical_evidence_path(&ledger, "j4125_calibrated")?;
+    let (pi_path, j4125_path) = physical_evidence_paths(root)?;
+    write_device_qualification(root, &qualification_path, &pi_path, &j4125_path)?;
     let physical_artifacts = physical_retained_artifacts(root, [&pi_path, &j4125_path])?;
     let tauri_path = exactly_one_json(root, &tauri_root, "Tauri")?;
     let tauri_receipt = read_json(root.join(&tauri_path))?;
@@ -305,6 +334,13 @@ fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Res
         )?,
         evidence_entry(
             root,
+            "b1-device-qualification",
+            EvidenceKind::B1DeviceQualification,
+            qualification_path,
+        )?,
+        evidence_entry(root, "b1-deep-gates", EvidenceKind::RawResult, deep_path)?,
+        evidence_entry(
+            root,
             "b1-performance-j4125",
             EvidenceKind::B1PerformanceJ4125,
             j4125_path,
@@ -316,6 +352,12 @@ fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Res
             pi_path,
         )?,
         evidence_entry(root, "b1-qa", EvidenceKind::QaReview, qa_path)?,
+        evidence_entry(
+            root,
+            "b1-portable-gates",
+            EvidenceKind::RawResult,
+            portable_path,
+        )?,
         evidence_entry(
             root,
             "b1-tauri-shell",
@@ -339,18 +381,27 @@ fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Res
         entries.push(artifact);
     }
     entries.sort_by(|left, right| (&left.id, &left.path).cmp(&(&right.id, &right.path)));
-    let mut evidence_roots = vec![contract_root, physical_root, tauri_root, qa_root];
+    let qualification_root = PathBuf::from("target/fasti-evidence/qualification");
+    let mut evidence_roots = vec![
+        contract_root,
+        physical_root,
+        tauri_root,
+        qa_root,
+        qualification_root,
+    ];
     evidence_roots.sort();
 
-    verify_entry_files(root, &entries)?;
+    let snapshot = snapshot_evidence_files(root, &source, &entries)?;
+    let ci = current_ci_binding()?;
     verify_evidence_inventory(root, &evidence_roots, &entries)?;
     for entry in &entries {
-        validate_entry_semantics(root, entry, &source)?;
+        validate_entry_semantics(root, snapshot.path(), entry, &source, &ci)?;
     }
-    verify_b1_device_ledger(root, &entries)?;
-    let qa = validate_qa_receipt(root, &entries, &source)?;
+    verify_b1_device_qualification(snapshot.path(), &entries)?;
+    let qa = validate_qa_receipt(snapshot.path(), &entries, &source)?;
+    verify_source_binding(root, &source)?;
 
-    let corpus_bytes = fs::read(root.join("benchmarks/b1/budgets.json"))
+    let corpus_bytes = fs::read(snapshot.path().join("benchmarks/b1/budgets.json"))
         .context("failed to read the governed B1 budget/corpus seed input")?;
     let count = entries.len();
     let manifest = EvidenceManifest {
@@ -360,7 +411,7 @@ fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Res
         },
         body: Body::B1,
         source,
-        ci: current_ci_binding(),
+        ci,
         command: "cargo xtask test milestone --body B1".to_owned(),
         runner: current_runner_binding(root)?,
         environment: EnvironmentBinding {
@@ -420,16 +471,11 @@ fn verify_envelope(root: &Path, manifest_path: &Path) -> anyhow::Result<Verified
     validate_manifest_shape(&envelope)?;
     verify_manifest_digest(&envelope)?;
     verify_source_binding(root, &envelope.manifest.source)?;
-    verify_entry_files(root, &envelope.manifest.evidence)?;
     verify_evidence_inventory(
         root,
         &envelope.manifest.evidence_roots,
         &envelope.manifest.evidence,
     )?;
-
-    for entry in &envelope.manifest.evidence {
-        validate_entry_semantics(root, entry, &envelope.manifest.source)?;
-    }
 
     Ok(VerifiedManifest {
         manifest: envelope.manifest,
@@ -484,6 +530,7 @@ fn verify_b1_manifest_requirements(root: &Path, manifest: &EvidenceManifest) -> 
     let required = [
         EvidenceKind::B1ContractVerification,
         EvidenceKind::B1DeviceLedger,
+        EvidenceKind::B1DeviceQualification,
         EvidenceKind::B1PerformancePi5,
         EvidenceKind::B1PerformanceJ4125,
         EvidenceKind::B1TauriShell,
@@ -500,6 +547,19 @@ fn verify_b1_manifest_requirements(root: &Path, manifest: &EvidenceManifest) -> 
             "B1 milestone requires exactly one passing {kind:?} evidence entry; found {count}"
         );
     }
+    let raw_results = manifest
+        .evidence
+        .iter()
+        .filter(|entry| entry.kind == EvidenceKind::RawResult && entry.status == ResultStatus::Pass)
+        .collect::<Vec<_>>();
+    ensure!(
+        raw_results.len() == 2
+            && raw_results
+                .iter()
+                .any(|entry| entry.id == "b1-portable-gates")
+            && raw_results.iter().any(|entry| entry.id == "b1-deep-gates"),
+        "B1 milestone requires exactly the portable and deep passing raw-result receipts"
+    );
 
     let qa_entry = manifest
         .evidence
@@ -511,10 +571,22 @@ fn verify_b1_manifest_requirements(root: &Path, manifest: &EvidenceManifest) -> 
         "qa.evidence_id must resolve to the passing QA review entry"
     );
 
-    validate_qa_receipt(root, &manifest.evidence, &manifest.source)?;
-    verify_b1_device_ledger(root, &manifest.evidence)?;
-    verify_physical_artifact_bindings(root, &manifest.evidence)?;
-    verify_tauri_artifact_binding(root, &manifest.evidence)?;
+    let snapshot = snapshot_evidence_files(root, &manifest.source, &manifest.evidence)?;
+    for entry in &manifest.evidence {
+        validate_entry_semantics(root, snapshot.path(), entry, &manifest.source, &manifest.ci)?;
+    }
+    validate_qa_receipt(snapshot.path(), &manifest.evidence, &manifest.source)?;
+    verify_b1_device_qualification(snapshot.path(), &manifest.evidence)?;
+    verify_physical_artifact_bindings(snapshot.path(), &manifest.evidence)?;
+    verify_tauri_artifact_binding(snapshot.path(), &manifest.evidence)?;
+    let corpus_bytes = fs::read(snapshot.path().join("benchmarks/b1/budgets.json"))
+        .context("failed to read the snapshotted B1 budget/corpus seed input")?;
+    ensure!(
+        manifest.corpus.seed == "b1-empty-process-and-contract-v1"
+            && manifest.corpus.sha256 == sha256_bytes(&corpus_bytes),
+        "B1 corpus binding does not recompute from the governed budget seed"
+    );
+    verify_source_binding(root, &manifest.source)?;
     println!("PASS: B1 milestone evidence is complete, physical, current, and fail-closed");
     Ok(())
 }
@@ -554,6 +626,7 @@ fn validate_manifest_shape(envelope: &EvidenceEnvelope) -> anyhow::Result<()> {
             "manifest binding strings must not be empty"
         );
     }
+    validate_ci_binding(&manifest.ci)?;
     ensure!(
         !manifest.runner.tool_versions.is_empty()
             && manifest
@@ -680,35 +753,10 @@ fn verify_source_binding(root: &Path, source: &SourceBinding) -> anyhow::Result<
     Ok(())
 }
 
+#[cfg(test)]
 fn verify_entry_files(root: &Path, entries: &[EvidenceEntry]) -> anyhow::Result<()> {
-    let canonical_root = root
-        .canonicalize()
-        .context("failed to canonicalize workspace root")?;
     for entry in entries {
-        reject_symlink_components(root, &entry.path)?;
-        let path = root.join(&entry.path);
-        let metadata = fs::symlink_metadata(&path)
-            .with_context(|| format!("bound evidence is missing: {}", entry.path.display()))?;
-        ensure!(
-            metadata.is_file(),
-            "bound evidence is not a regular file: {}",
-            entry.path.display()
-        );
-        ensure!(
-            !metadata.file_type().is_symlink(),
-            "bound evidence must not be a symlink: {}",
-            entry.path.display()
-        );
-        let canonical = path
-            .canonicalize()
-            .with_context(|| format!("failed to canonicalize {}", entry.path.display()))?;
-        ensure!(
-            canonical.starts_with(&canonical_root),
-            "bound evidence escapes the workspace: {}",
-            entry.path.display()
-        );
-        let bytes = fs::read(&canonical)
-            .with_context(|| format!("failed to read {}", entry.path.display()))?;
+        let bytes = read_bound_file_once(root, &entry.path)?;
         ensure!(
             sha256_bytes(&bytes) == entry.sha256,
             "bound evidence digest mismatch: {}",
@@ -716,6 +764,144 @@ fn verify_entry_files(root: &Path, entries: &[EvidenceEntry]) -> anyhow::Result<
         );
     }
     Ok(())
+}
+
+fn snapshot_evidence_files(
+    root: &Path,
+    source: &SourceBinding,
+    entries: &[EvidenceEntry],
+) -> anyhow::Result<tempfile::TempDir> {
+    let snapshot_parent = root.join("target/fasti-verifier-snapshots");
+    fs::create_dir_all(&snapshot_parent).context("failed to create verifier snapshot parent")?;
+    let snapshot = tempfile::tempdir_in(snapshot_parent)
+        .context("failed to create verifier-owned evidence snapshot")?;
+    for entry in entries {
+        let bytes = match read_tracked_file_at(root, &source.git_commit, &entry.path)? {
+            Some(bytes) => bytes,
+            None => read_bound_file_once(root, &entry.path)?,
+        };
+        ensure!(
+            sha256_bytes(&bytes) == entry.sha256,
+            "bound evidence digest mismatch: {}",
+            entry.path.display()
+        );
+        write_snapshot_file(snapshot.path(), &entry.path, &bytes)?;
+    }
+    for relative in EVIDENCE_SUPPORT_FILES {
+        let relative = Path::new(relative);
+        if snapshot.path().join(relative).exists() {
+            continue;
+        }
+        let bytes =
+            read_tracked_file_at(root, &source.git_commit, relative)?.with_context(|| {
+                format!(
+                    "evidence validator support file is not tracked at {}: {}",
+                    source.git_commit,
+                    relative.display()
+                )
+            })?;
+        write_snapshot_file(snapshot.path(), relative, &bytes)?;
+    }
+    Ok(snapshot)
+}
+
+fn read_tracked_file_at(
+    root: &Path,
+    commit: &str,
+    relative: &Path,
+) -> anyhow::Result<Option<Vec<u8>>> {
+    let relative = relative
+        .to_str()
+        .context("tracked evidence path is not UTF-8")?;
+    let listing = Command::new("git")
+        .args(["ls-tree", commit, "--", relative])
+        .current_dir(root)
+        .output()
+        .context("failed to inspect the bound Git tree for evidence bytes")?;
+    ensure!(
+        listing.status.success(),
+        "git ls-tree failed for bound evidence path {relative}: {}",
+        String::from_utf8_lossy(&listing.stderr).trim()
+    );
+    if listing.stdout.is_empty() {
+        return Ok(None);
+    }
+    let listing = String::from_utf8(listing.stdout)
+        .context("git ls-tree emitted non-UTF-8 evidence metadata")?;
+    let mut lines = listing.lines();
+    let line = lines.next().context("git ls-tree emitted an empty entry")?;
+    ensure!(
+        lines.next().is_none(),
+        "bound evidence path resolved to more than one Git entry: {relative}"
+    );
+    let (metadata, listed_path) = line
+        .split_once('\t')
+        .context("git ls-tree evidence entry is malformed")?;
+    ensure!(
+        listed_path == relative,
+        "git ls-tree substituted the bound evidence path"
+    );
+    let mut metadata = metadata.split_whitespace();
+    let mode = metadata.next().context("git ls-tree entry omits mode")?;
+    let kind = metadata.next().context("git ls-tree entry omits kind")?;
+    let object = metadata
+        .next()
+        .context("git ls-tree entry omits object ID")?;
+    ensure!(
+        matches!(mode, "100644" | "100755") && kind == "blob" && metadata.next().is_none(),
+        "bound tracked evidence is not a regular file: {relative}"
+    );
+    let blob = Command::new("git")
+        .args(["cat-file", "blob", object])
+        .current_dir(root)
+        .output()
+        .context("failed to read bound evidence bytes from Git")?;
+    ensure!(
+        blob.status.success(),
+        "git cat-file failed for bound evidence path {relative}: {}",
+        String::from_utf8_lossy(&blob.stderr).trim()
+    );
+    Ok(Some(blob.stdout))
+}
+
+fn read_bound_file_once(root: &Path, relative: &Path) -> anyhow::Result<Vec<u8>> {
+    let canonical_root = root
+        .canonicalize()
+        .context("failed to canonicalize workspace root")?;
+    reject_symlink_components(root, relative)?;
+    let path = root.join(relative);
+    let metadata = fs::symlink_metadata(&path)
+        .with_context(|| format!("bound evidence is missing: {}", relative.display()))?;
+    ensure!(
+        metadata.is_file(),
+        "bound evidence is not a regular file: {}",
+        relative.display()
+    );
+    ensure!(
+        !metadata.file_type().is_symlink(),
+        "bound evidence must not be a symlink: {}",
+        relative.display()
+    );
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("failed to canonicalize {}", relative.display()))?;
+    ensure!(
+        canonical.starts_with(&canonical_root),
+        "bound evidence escapes the workspace: {}",
+        relative.display()
+    );
+    fs::read(&canonical).with_context(|| format!("failed to read {}", relative.display()))
+}
+
+fn write_snapshot_file(root: &Path, relative: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let path = root.join(relative);
+    let parent = path
+        .parent()
+        .context("evidence snapshot path has no parent")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create evidence snapshot {}", parent.display()))?;
+    fs::write(&path, bytes)
+        .with_context(|| format!("failed to write evidence snapshot {}", relative.display()))
 }
 
 fn verify_evidence_inventory(
@@ -823,9 +1009,11 @@ fn reject_symlink_components(root: &Path, relative: &Path) -> anyhow::Result<()>
 }
 
 fn validate_entry_semantics(
-    root: &Path,
+    source_root: &Path,
+    evidence_root: &Path,
     entry: &EvidenceEntry,
     source: &SourceBinding,
+    ci: &CiBinding,
 ) -> anyhow::Result<()> {
     match entry.kind {
         EvidenceKind::B1DeviceLedger => {
@@ -833,8 +1021,9 @@ fn validate_entry_semantics(
                 entry.path == Path::new("benchmarks/b1/device-hypotheses.json"),
                 "the B1 device ledger kind must bind the canonical ledger path"
             );
-            run(
-                root,
+            run_with_evidence_root(
+                source_root,
+                evidence_root,
                 "node",
                 &["benchmarks/b1/validate-evidence.mjs", "--static"],
             )
@@ -844,7 +1033,13 @@ fn validate_entry_semantics(
                 entry.path == Path::new("target/fasti-receipts/b1-contract-verification.json"),
                 "the B1 contract receipt kind must bind the canonical receipt path"
             );
-            let value = read_json(root.join(&entry.path))?;
+            let value = read_json(evidence_root.join(&entry.path))?;
+            ensure!(
+                value.get("receipt_version").and_then(Value::as_str) == Some("2.0.0")
+                    && value.get("kind").and_then(Value::as_str)
+                        == Some("fasti.b1.contract-verification"),
+                "contract receipt version or kind is invalid"
+            );
             ensure!(
                 value.get("kind").and_then(Value::as_str) == Some("fasti.b1.contract-verification"),
                 "contract receipt kind is invalid"
@@ -852,20 +1047,15 @@ fn validate_entry_semantics(
             ensure!(
                 value.pointer("/source/git_commit").and_then(Value::as_str)
                     == Some(source.git_commit.as_str())
+                    && value.pointer("/source/git_tree").and_then(Value::as_str)
+                        == Some(source.git_tree.as_str())
                     && value.pointer("/source/dirty").and_then(Value::as_bool) == Some(false),
                 "contract receipt is stale or was produced from dirty source"
             );
-            let gates = value
-                .get("gates")
-                .and_then(Value::as_array)
-                .context("contract receipt omits gates")?;
-            ensure!(
-                value.get("gate_count").and_then(Value::as_u64) == Some(gates.len() as u64)
-                    && gates
-                        .iter()
-                        .all(|gate| { gate.get("status").and_then(Value::as_str) == Some("pass") }),
-                "contract receipt gate claims do not recompute to pass"
-            );
+            let expected = verify::contract_gate_inventory(true)?;
+            validate_gate_records(&value, true, &expected)?;
+            validate_contract_internal_gate_facts(&value)?;
+            validate_receipt_ci(&value, ci)?;
             ensure!(
                 value
                     .pointer("/dependency_lock_enforcement/passed")
@@ -880,15 +1070,17 @@ fn validate_entry_semantics(
             Ok(())
         }
         EvidenceKind::B1PerformancePi5 | EvidenceKind::B1PerformanceJ4125 => {
-            run(
-                root,
+            let receipt_path = evidence_root.join(&entry.path);
+            let receipt_argument = receipt_path
+                .to_str()
+                .context("physical B1 evidence path is not UTF-8")?;
+            run_with_evidence_root(
+                source_root,
+                evidence_root,
                 "node",
-                &[
-                    "benchmarks/b1/validate-evidence.mjs",
-                    &entry.path.to_string_lossy(),
-                ],
+                &["benchmarks/b1/validate-evidence.mjs", receipt_argument],
             )?;
-            let value = read_json(root.join(&entry.path))?;
+            let value = read_json(receipt_path)?;
             ensure_receipt_source(&value, source)?;
             ensure!(
                 value.pointer("/status").and_then(Value::as_str) == Some("complete"),
@@ -916,21 +1108,27 @@ fn validate_entry_semantics(
             Ok(())
         }
         EvidenceKind::B1TauriShell => {
-            run(
-                root,
+            let receipt_path = evidence_root.join(&entry.path);
+            let receipt_argument = receipt_path
+                .to_str()
+                .context("Tauri evidence path is not UTF-8")?;
+            run_with_evidence_root(
+                source_root,
+                evidence_root,
                 "node",
                 &[
                     "benchmarks/b1/tauri-shell/validate-evidence.mjs",
-                    &entry.path.to_string_lossy(),
+                    receipt_argument,
                 ],
             )?;
-            let value = read_json(root.join(&entry.path))?;
+            let value = read_json(receipt_path)?;
             ensure_receipt_source(&value, source)?;
             ensure!(
                 value.get("status").and_then(Value::as_str) == Some("complete"),
                 "Tauri evidence must be a complete receipt, not a test fixture"
             );
-            let fixture_tree = git_output(root, &["rev-parse", "HEAD:benchmarks/b1/tauri-shell"])?;
+            let fixture_spec = format!("{}:benchmarks/b1/tauri-shell", source.git_commit);
+            let fixture_tree = git_output(source_root, &["rev-parse", &fixture_spec])?;
             ensure!(
                 value
                     .pointer("/source/fixture_tree")
@@ -939,111 +1137,231 @@ fn validate_entry_semantics(
                 "Tauri receipt fixture tree is stale or substituted"
             );
             verify_json_file_binding(
-                root,
+                evidence_root,
                 &value,
                 "benchmarks/b1/tauri-shell/src-tauri/Cargo.lock",
                 "/source/cargo_lock_sha256",
             )?;
             verify_json_file_binding(
-                root,
+                evidence_root,
                 &value,
                 "scripts/benchmark-tauri-b1.py",
                 "/source/harness_script_sha256",
             )?;
-            run(
-                root,
+            run_with_evidence_root(
+                source_root,
+                evidence_root,
                 "python3",
                 &["-B", "scripts/benchmark-tauri-b1.py", "policy-check"],
             )?;
             Ok(())
         }
-        EvidenceKind::QaReview | EvidenceKind::RawResult | EvidenceKind::BuiltArtifact => Ok(()),
+        EvidenceKind::RawResult => {
+            let value = read_json(evidence_root.join(&entry.path))?;
+            let (expected_path, expected_kind, expected_command, expected_gates) =
+                match entry.id.as_str() {
+                    "b1-portable-gates" => (
+                        "target/fasti-receipts/b1-portable.json",
+                        "fasti.b1.portable-gates",
+                        "cargo xtask test pr",
+                        verify::process_gate_inventory(&orchestration::portable_b1_gates())?,
+                    ),
+                    "b1-deep-gates" => (
+                        "target/fasti-receipts/b1-deep.json",
+                        "fasti.b1.deep-gates",
+                        "cargo xtask test deep",
+                        verify::process_gate_inventory(&orchestration::deep_b1_gates())?,
+                    ),
+                    _ => bail!("unexpected B1 raw-result evidence ID: {}", entry.id),
+                };
+            ensure!(
+                entry.path == Path::new(expected_path)
+                    && value.get("receipt_version").and_then(Value::as_str) == Some("1.0.0")
+                    && value.get("kind").and_then(Value::as_str) == Some(expected_kind)
+                    && value.get("command").and_then(Value::as_str) == Some(expected_command),
+                "B1 raw-result receipt path, version, kind, or command is invalid"
+            );
+            ensure_receipt_source(&value, source)?;
+            validate_receipt_ci(&value, ci)?;
+            ensure!(
+                value.pointer("/source/dirty").and_then(Value::as_bool) == Some(false),
+                "B1 raw-result receipt was produced from dirty source"
+            );
+            validate_gate_records(&value, false, &expected_gates)
+        }
+        EvidenceKind::B1DeviceQualification
+        | EvidenceKind::QaReview
+        | EvidenceKind::BuiltArtifact => Ok(()),
     }
 }
 
-fn verify_b1_device_ledger(root: &Path, entries: &[EvidenceEntry]) -> anyhow::Result<()> {
-    let ledger = read_json(root.join("benchmarks/b1/device-hypotheses.json"))?;
-    ensure!(
-        ledger
-            .get("performance_gate_owner")
-            .and_then(Value::as_str)
-            .is_some_and(|owner| !owner.trim().is_empty()),
-        "B1 performance gate owner is unassigned"
-    );
-    let devices = ledger
-        .get("devices")
+fn validate_gate_records(
+    receipt: &Value,
+    allow_in_process: bool,
+    expected: &[verify::GateInventoryEntry],
+) -> anyhow::Result<()> {
+    let gates = receipt
+        .get("gates")
         .and_then(Value::as_array)
-        .context("B1 device ledger omits devices")?;
-    for (profile, kind, allowed_states) in [
-        (
-            "raspberry_pi_5_champion",
-            EvidenceKind::B1PerformancePi5,
-            &["qualified"][..],
-        ),
-        (
-            "j4125_calibrated",
-            EvidenceKind::B1PerformanceJ4125,
-            &["calibrated"][..],
-        ),
-    ] {
-        let device = devices
-            .iter()
-            .find(|device| device.get("profile").and_then(Value::as_str) == Some(profile))
-            .with_context(|| format!("B1 device ledger omits {profile}"))?;
-        let state = device
-            .get("qualification_state")
+        .context("gate receipt omits gates")?;
+    ensure!(
+        !gates.is_empty()
+            && receipt.get("gate_count").and_then(Value::as_u64) == Some(gates.len() as u64),
+        "gate receipt count is missing or stale"
+    );
+    ensure!(
+        gates.len() == expected.len(),
+        "gate receipt inventory count differs from the canonical suite"
+    );
+    let mut ids = BTreeSet::new();
+    for (gate, (expected_id, expected_execution, expected_command)) in gates.iter().zip(expected) {
+        let id = gate
+            .get("id")
             .and_then(Value::as_str)
-            .context("physical device qualification_state is absent")?;
+            .context("gate record omits id")?;
         ensure!(
-            allowed_states.contains(&state),
-            "{profile} is {state}; physical qualification remains incomplete"
+            !id.trim().is_empty() && ids.insert(id),
+            "gate IDs must be nonempty and unique"
+        );
+        let execution = gate
+            .get("execution")
+            .and_then(Value::as_str)
+            .context("gate record omits execution")?;
+        ensure!(
+            execution == "process" || (allow_in_process && execution == "in_process"),
+            "gate record has an unsupported execution mode"
+        );
+        let command = gate
+            .get("command")
+            .and_then(Value::as_array)
+            .context("gate record omits structured command argv")?;
+        ensure!(
+            !command.is_empty()
+                && command
+                    .iter()
+                    .all(|part| part.as_str().is_some_and(|part| !part.is_empty())),
+            "gate record command argv is empty or invalid"
+        );
+        let actual_command = command
+            .iter()
+            .map(|part| part.as_str().expect("command strings checked above"))
+            .collect::<Vec<_>>();
+        ensure!(
+            id == expected_id
+                && execution == expected_execution
+                && actual_command
+                    == expected_command.iter().map(String::as_str).collect::<Vec<_>>(),
+            "gate receipt inventory, order, execution mode, or exact argv differs from the canonical suite"
         );
         ensure!(
-            device
-                .get("custodian")
+            gate.get("status").and_then(Value::as_str) == Some("pass")
+                && gate.get("exit_code").and_then(Value::as_i64) == Some(0)
+                && gate
+                    .get("tool_version")
+                    .and_then(Value::as_str)
+                    .is_some_and(|version| !version.trim().is_empty()),
+            "gate record is not a passing, version-bound execution"
+        );
+        for (output_key, digest_key) in [("stdout", "stdout_sha256"), ("stderr", "stderr_sha256")] {
+            let output = gate
+                .get(output_key)
                 .and_then(Value::as_str)
-                .is_some_and(|v| !v.trim().is_empty()),
-            "{profile} has no named physical custodian"
-        );
-        ensure!(
-            device
-                .get("runner_fingerprint")
-                .is_some_and(Value::is_object),
-            "{profile} has no runner fingerprint"
-        );
-        ensure!(
-            device
-                .pointer("/results/all_applicable_budgets_passed")
-                .and_then(Value::as_bool)
-                == Some(true),
-            "{profile} does not pass every applicable B1 budget"
-        );
-        let reference = device
-            .get("evidence_ref")
-            .and_then(Value::as_object)
-            .context("physical device has no evidence_ref")?;
-        let relative = reference
-            .get("path")
+                .with_context(|| format!("gate record omits {output_key}"))?;
+            let digest = gate
+                .get(digest_key)
+                .and_then(Value::as_str)
+                .with_context(|| format!("gate record omits {digest_key}"))?;
+            ensure_sha256(digest, digest_key)?;
+            ensure!(
+                sha256_bytes(output.as_bytes()) == digest,
+                "gate record {output_key} digest does not recompute"
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_contract_internal_gate_facts(receipt: &Value) -> anyhow::Result<()> {
+    let facts = receipt
+        .get("contract")
+        .context("contract receipt omits contract facts")?;
+    let canonical = serde_json_canonicalizer::to_vec(facts)
+        .context("failed to canonicalize contract receipt facts")?;
+    let facts_sha256 = sha256_bytes(&canonical);
+    for gate in receipt
+        .get("gates")
+        .and_then(Value::as_array)
+        .context("contract receipt omits gates")?
+    {
+        if gate.get("execution").and_then(Value::as_str) != Some("in_process") {
+            continue;
+        }
+        let id = gate
+            .get("id")
             .and_then(Value::as_str)
-            .context("physical evidence_ref omits path")?;
-        let digest = reference
-            .get("sha256")
-            .and_then(Value::as_str)
-            .context("physical evidence_ref omits sha256")?;
-        let workspace_path = PathBuf::from("benchmarks/b1").join(relative);
-        let entry = entries
-            .iter()
-            .find(|entry| entry.kind == kind)
-            .context("physical ledger reference has no matching manifest entry")?;
+            .context("internal gate omits id")?;
+        let expected = format!("PASS [{id}] facts_sha256={facts_sha256}\n");
         ensure!(
-            entry.path == workspace_path,
-            "physical ledger and manifest paths disagree"
-        );
-        ensure!(
-            entry.sha256 == digest,
-            "physical ledger and manifest digests disagree"
+            gate.get("stdout").and_then(Value::as_str) == Some(expected.as_str()),
+            "internal contract gate is not bound to the receipt facts"
         );
     }
+    Ok(())
+}
+
+fn validate_ci_binding(ci: &CiBinding) -> anyhow::Result<()> {
+    match ci.provider.as_str() {
+        "local" => ensure!(
+            ci.run == "local-unpublished" && ci.job == "local-milestone",
+            "local evidence CI binding is not canonical"
+        ),
+        "github_actions" => ensure!(
+            !ci.run.is_empty()
+                && ci.run.bytes().all(|byte| byte.is_ascii_digit())
+                && !ci.job.trim().is_empty(),
+            "GitHub Actions evidence CI binding is incomplete or invalid"
+        ),
+        _ => bail!("unsupported evidence CI provider: {}", ci.provider),
+    }
+    Ok(())
+}
+
+fn validate_receipt_ci(receipt: &Value, expected: &CiBinding) -> anyhow::Result<()> {
+    ensure!(
+        receipt.pointer("/ci/provider").and_then(Value::as_str) == Some(expected.provider.as_str())
+            && receipt.pointer("/ci/run").and_then(Value::as_str) == Some(expected.run.as_str())
+            && receipt.pointer("/ci/job").and_then(Value::as_str) == Some(expected.job.as_str()),
+        "gate receipt CI binding does not match the evidence manifest"
+    );
+    validate_ci_binding(expected)
+}
+
+fn verify_b1_device_qualification(
+    evidence_root: &Path,
+    entries: &[EvidenceEntry],
+) -> anyhow::Result<()> {
+    let qualification = entries
+        .iter()
+        .find(|entry| entry.kind == EvidenceKind::B1DeviceQualification)
+        .context("B1 generated device qualification entry is missing")?;
+    let pi = entries
+        .iter()
+        .find(|entry| entry.kind == EvidenceKind::B1PerformancePi5)
+        .context("B1 Raspberry Pi 5 receipt entry is missing")?;
+    let j4125 = entries
+        .iter()
+        .find(|entry| entry.kind == EvidenceKind::B1PerformanceJ4125)
+        .context("B1 J4125 receipt entry is missing")?;
+    let expected = build_device_qualification(
+        evidence_root,
+        &evidence_root.join(&pi.path),
+        &evidence_root.join(&j4125.path),
+    )?;
+    let actual = read_json(evidence_root.join(&qualification.path))?;
+    ensure!(
+        actual == expected,
+        "generated B1 device qualification does not recompute from the two bound physical receipts"
+    );
     Ok(())
 }
 
@@ -1228,23 +1546,91 @@ fn evidence_entry(
     })
 }
 
-fn physical_evidence_path(ledger: &Value, profile: &str) -> anyhow::Result<PathBuf> {
-    let device = ledger
-        .get("devices")
-        .and_then(Value::as_array)
-        .and_then(|devices| {
-            devices
-                .iter()
-                .find(|device| device.get("profile").and_then(Value::as_str) == Some(profile))
-        })
-        .with_context(|| format!("B1 device ledger omits {profile}"))?;
-    let relative = device
-        .pointer("/evidence_ref/path")
-        .and_then(Value::as_str)
-        .with_context(|| format!("{profile} has no physical evidence receipt reference"))?;
-    let path = PathBuf::from("benchmarks/b1").join(relative);
-    validate_relative_path(&path)?;
-    Ok(path)
+fn physical_evidence_paths(root: &Path) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let relative = PathBuf::from("benchmarks/b1/evidence");
+    let directory = root.join(&relative);
+    ensure!(
+        directory.is_dir(),
+        "required physical B1 evidence directory is missing: {}",
+        relative.display()
+    );
+    let mut by_profile = BTreeMap::new();
+    for entry in fs::read_dir(&directory)
+        .with_context(|| format!("failed to inspect {}", relative.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file()
+            || entry.path().extension().and_then(|value| value.to_str()) != Some("json")
+        {
+            continue;
+        }
+        let value = read_json(entry.path())?;
+        let profile = value
+            .pointer("/runner/hardware_profile")
+            .and_then(Value::as_str)
+            .context("physical B1 receipt omits runner.hardware_profile")?;
+        ensure!(
+            matches!(profile, "raspberry_pi_5_champion" | "j4125_calibrated"),
+            "physical evidence directory contains an unexpected profile: {profile}"
+        );
+        let path = relative.join(entry.file_name());
+        ensure!(
+            by_profile.insert(profile.to_owned(), path).is_none(),
+            "physical evidence directory contains more than one {profile} receipt"
+        );
+    }
+    let pi = by_profile
+        .remove("raspberry_pi_5_champion")
+        .context("B1 Raspberry Pi 5 physical receipt is missing")?;
+    let j4125 = by_profile
+        .remove("j4125_calibrated")
+        .context("B1 J4125 physical receipt is missing")?;
+    ensure!(
+        by_profile.is_empty(),
+        "physical evidence directory contains an unexpected receipt"
+    );
+    Ok((pi, j4125))
+}
+
+fn build_device_qualification(
+    evidence_root: &Path,
+    pi_path: &Path,
+    j4125_path: &Path,
+) -> anyhow::Result<Value> {
+    let script = evidence_root.join("benchmarks/b1/validate-evidence.mjs");
+    let script = script
+        .to_str()
+        .context("B1 qualification script path is not UTF-8")?;
+    let pi_path = pi_path
+        .to_str()
+        .context("Raspberry Pi evidence path is not UTF-8")?;
+    let j4125_path = j4125_path
+        .to_str()
+        .context("J4125 evidence path is not UTF-8")?;
+    let output = Command::new("node")
+        .args([script, "--build-qualification", pi_path, j4125_path])
+        .current_dir(evidence_root)
+        .env("FASTI_EVIDENCE_WORKSPACE_ROOT", evidence_root)
+        .output()
+        .context("failed to start the canonical B1 device qualification builder")?;
+    ensure!(
+        output.status.success(),
+        "B1 device qualification could not be derived: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    serde_json::from_slice(&output.stdout)
+        .context("canonical B1 device qualification builder emitted invalid JSON")
+}
+
+fn write_device_qualification(
+    root: &Path,
+    output_path: &Path,
+    pi_path: &Path,
+    j4125_path: &Path,
+) -> anyhow::Result<()> {
+    let qualification = build_device_qualification(root, pi_path, j4125_path)?;
+    remove_if_present(&root.join(output_path))?;
+    write_json_atomic(&root.join(output_path), &qualification)
 }
 
 fn exactly_one_json(root: &Path, relative: &Path, label: &str) -> anyhow::Result<PathBuf> {
@@ -1278,19 +1664,30 @@ fn current_source_binding(root: &Path) -> anyhow::Result<SourceBinding> {
     })
 }
 
-fn current_ci_binding() -> CiBinding {
+fn current_ci_binding() -> anyhow::Result<CiBinding> {
     if env::var_os("GITHUB_ACTIONS").is_some() {
-        CiBinding {
+        let run =
+            env::var("GITHUB_RUN_ID").context("GitHub Actions evidence omits GITHUB_RUN_ID")?;
+        let job = env::var("GITHUB_JOB").context("GitHub Actions evidence omits GITHUB_JOB")?;
+        ensure!(
+            !run.is_empty() && run.bytes().all(|byte| byte.is_ascii_digit()),
+            "GitHub Actions evidence has an invalid GITHUB_RUN_ID"
+        );
+        ensure!(
+            !job.trim().is_empty(),
+            "GitHub Actions evidence has an empty GITHUB_JOB"
+        );
+        Ok(CiBinding {
             provider: "github_actions".to_owned(),
-            run: env::var("GITHUB_RUN_ID").unwrap_or_else(|_| "missing-run-id".to_owned()),
-            job: env::var("GITHUB_JOB").unwrap_or_else(|_| "missing-job-id".to_owned()),
-        }
+            run,
+            job,
+        })
     } else {
-        CiBinding {
+        Ok(CiBinding {
             provider: "local".to_owned(),
             run: "local-unpublished".to_owned(),
             job: "local-milestone".to_owned(),
-        }
+        })
     }
 }
 
@@ -1425,18 +1822,38 @@ fn read_json(path: PathBuf) -> anyhow::Result<Value> {
     serde_json::from_slice(&bytes).with_context(|| format!("{} is not valid JSON", path.display()))
 }
 
-fn run(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<()> {
+fn run_with_evidence_root(
+    source_root: &Path,
+    evidence_root: &Path,
+    program: &str,
+    args: &[&str],
+) -> anyhow::Result<()> {
+    run_with_optional_evidence_root(source_root, Some(evidence_root), program, args)
+}
+
+fn run_with_optional_evidence_root(
+    root: &Path,
+    evidence_root: Option<&Path>,
+    program: &str,
+    args: &[&str],
+) -> anyhow::Result<()> {
     let rendered = std::iter::once(program)
         .chain(args.iter().copied())
         .collect::<Vec<_>>()
         .join(" ");
     println!("RUN [evidence.semantic]: {rendered}");
-    let status = Command::new(program)
+    let mut command = Command::new(program);
+    let current_directory = evidence_root.unwrap_or(root);
+    command
         .args(args)
-        .current_dir(root)
+        .current_dir(current_directory)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some(evidence_root) = evidence_root {
+        command.env("FASTI_EVIDENCE_WORKSPACE_ROOT", evidence_root);
+    }
+    let status = command
         .status()
         .with_context(|| format!("failed to start evidence validator `{rendered}`"))?;
     ensure!(status.success(), "evidence validator failed: {rendered}");
@@ -1525,8 +1942,8 @@ mod tests {
                 },
                 ci: CiBinding {
                     provider: "local".to_owned(),
-                    run: "local".to_owned(),
-                    job: "local".to_owned(),
+                    run: "local-unpublished".to_owned(),
+                    job: "local-milestone".to_owned(),
                 },
                 command: "cargo xtask test milestone --body B1".to_owned(),
                 runner: RunnerBinding {
@@ -1577,6 +1994,70 @@ mod tests {
             sha256: "d".repeat(64),
             status: ResultStatus::Pass,
         }
+    }
+
+    fn gate_receipt() -> (Value, Vec<verify::GateInventoryEntry>) {
+        let stdout = "verified\n";
+        let stderr = "";
+        (
+            serde_json::json!({
+                "gate_count": 1,
+                "gates": [{
+                    "id": "gate.one",
+                    "execution": "process",
+                    "command": ["tool", "check"],
+                    "status": "pass",
+                    "exit_code": 0,
+                    "stdout_sha256": sha256_bytes(stdout.as_bytes()),
+                    "stderr_sha256": sha256_bytes(stderr.as_bytes()),
+                    "tool_version": "tool 1.0.0",
+                    "stdout": stdout,
+                    "stderr": stderr,
+                }],
+            }),
+            vec![(
+                "gate.one".to_owned(),
+                "process".to_owned(),
+                vec!["tool".to_owned(), "check".to_owned()],
+            )],
+        )
+    }
+
+    #[test]
+    fn gate_receipts_recompute_outputs_and_exact_inventory() {
+        let (receipt, expected) = gate_receipt();
+        validate_gate_records(&receipt, false, &expected).expect("valid gate receipt");
+
+        let mut output_mutation = receipt.clone();
+        output_mutation["gates"][0]["stdout"] = Value::String("substituted\n".to_owned());
+        let error = validate_gate_records(&output_mutation, false, &expected)
+            .expect_err("output mutation fails");
+        assert!(error.to_string().contains("digest does not recompute"));
+
+        let mut command_mutation = receipt;
+        command_mutation["gates"][0]["command"][1] = Value::String("publish".to_owned());
+        let error = validate_gate_records(&command_mutation, false, &expected)
+            .expect_err("command mutation fails");
+        assert!(error.to_string().contains("exact argv"));
+    }
+
+    #[test]
+    fn receipt_ci_must_equal_the_manifest_binding() {
+        let expected = CiBinding {
+            provider: "local".to_owned(),
+            run: "local-unpublished".to_owned(),
+            job: "local-milestone".to_owned(),
+        };
+        let receipt = serde_json::json!({
+            "ci": {
+                "provider": "github_actions",
+                "run": "12345",
+                "job": "b1-deep",
+            }
+        });
+        let error =
+            validate_receipt_ci(&receipt, &expected).expect_err("substituted receipt CI must fail");
+        assert!(error.to_string().contains("does not match"));
     }
 
     #[test]
@@ -1773,6 +2254,19 @@ mod tests {
     }
 
     #[test]
+    fn tracked_snapshot_bytes_come_from_the_bound_commit_not_the_live_checkout() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let commit = git_output(root.path(), &["rev-parse", "HEAD"]).expect("commit");
+        fs::write(root.path().join("tracked.txt"), "substituted\n").expect("mutate live file");
+
+        let bytes = read_tracked_file_at(root.path(), &commit, Path::new("tracked.txt"))
+            .expect("read bound Git blob")
+            .expect("tracked file exists at commit");
+        assert_eq!(bytes, b"one\n");
+    }
+
+    #[test]
     fn missing_evidence_emits_only_an_incomplete_candidate() {
         let root = tempfile::tempdir().expect("temporary workspace");
         initialize_git(root.path());
@@ -1886,33 +2380,15 @@ mod tests {
     }
 
     #[test]
-    fn b1_milestone_rejects_unassigned_physical_runners() {
+    fn b1_milestone_requires_generated_qualification_inputs_not_a_tracked_assignment() {
         let root = tempfile::tempdir().expect("temporary workspace");
-        let ledger_path = root.path().join("benchmarks/b1/device-hypotheses.json");
-        fs::create_dir_all(ledger_path.parent().expect("ledger parent"))
-            .expect("create ledger directory");
-        fs::write(
-            &ledger_path,
-            r#"{
-              "performance_gate_owner": "Ryan Winkler",
-              "devices": [
-                {
-                  "profile": "raspberry_pi_5_champion",
-                  "qualification_state": "blocking_unassigned"
-                },
-                {
-                  "profile": "j4125_calibrated",
-                  "qualification_state": "blocking_unassigned"
-                }
-              ]
-            }"#,
-        )
-        .expect("write ledger");
-        let error = verify_b1_device_ledger(root.path(), &[])
-            .expect_err("unassigned physical evidence blocks B1");
+        fs::create_dir_all(root.path().join("benchmarks/b1/evidence"))
+            .expect("create physical evidence directory");
+        let error = physical_evidence_paths(root.path())
+            .expect_err("missing physical receipts block generated qualification");
         assert!(error
             .to_string()
-            .contains("physical qualification remains incomplete"));
+            .contains("Raspberry Pi 5 physical receipt"));
     }
 
     #[test]

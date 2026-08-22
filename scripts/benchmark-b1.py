@@ -636,14 +636,23 @@ def validate_profile_requirements(
             raise CaptureError(
                 f"Raspberry Pi champion requires the locked runtime OS release fields, observed {os_image!r}"
             )
-        approved_images = policy["approved_image_sha256"]
+        approved_images = policy["approved_images"]
         if not approved_images:
             raise CaptureError(
                 "Raspberry Pi champion OS image approval is blocked: no official image digest is pinned in benchmarks/b1/physical-profiles.json"
             )
-        if retained_os_image["sha256"] not in approved_images:
+        approved_image = next(
+            (
+                image
+                for image in approved_images
+                if image["sha256"] == retained_os_image["sha256"]
+                and image["file_name"] == retained_os_image["file_name"]
+            ),
+            None,
+        )
+        if approved_image is None:
             raise CaptureError(
-                "retained Raspberry Pi OS image digest is not approved by benchmarks/b1/physical-profiles.json"
+                "retained Raspberry Pi OS image filename and digest are not approved by benchmarks/b1/physical-profiles.json"
             )
         memory = policy["memory_bytes"]
         if not memory["minimum"] <= total_memory_bytes <= memory["maximum"]:

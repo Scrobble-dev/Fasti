@@ -20,7 +20,13 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
+import { parseStrictJson } from "../../scripts/lib/strict-json.mjs";
+
+const moduleHere = dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = resolve(
+  process.env.FASTI_EVIDENCE_WORKSPACE_ROOT ?? resolve(moduleHere, "../.."),
+);
+const here = join(repositoryRoot, "benchmarks/b1");
 const evidenceSchemaPath = join(here, "evidence.schema.json");
 const budgetsPath = join(here, "budgets.json");
 const budgetsSchemaPath = join(here, "budgets.schema.json");
@@ -31,7 +37,7 @@ const physicalProfilesPath = join(here, "physical-profiles.json");
 const physicalProfilesSchemaPath = join(here, "physical-profiles.schema.json");
 
 function loadJson(path) {
-  return JSON.parse(readFileSync(path, "utf8"));
+  return parseStrictJson(readFileSync(path, "utf8"), path);
 }
 
 function sha256(path) {
@@ -720,9 +726,11 @@ function validateRunnerEnvironment(runner, label) {
         requirements.overclock?.status === piProfile.overclock.status &&
         requirements.overclock?.policy_sha256 === profilePolicySha256 &&
         runner.os_image.approval === "approved_by_canonical_digest_policy" &&
-        piProfile.approved_image_sha256.length > 0 &&
-        piProfile.approved_image_sha256.includes(
-          runner.os_image.retained_image.sha256,
+        piProfile.approved_images.length > 0 &&
+        piProfile.approved_images.some(
+          (image) =>
+            image.sha256 === runner.os_image.retained_image.sha256 &&
+            image.file_name === runner.os_image.retained_image.file_name,
         ) &&
         runner.cgroup.oci_memory_limit_bytes ===
           piProfile.oci.memory_limit_bytes &&
@@ -862,7 +870,10 @@ function fileEvidenceResolver(reference) {
     "device evidence receipt",
   );
   return {
-    evidence: JSON.parse(snapshot.bytes.toString("utf8")),
+    evidence: parseStrictJson(
+      snapshot.bytes.toString("utf8"),
+      `${reference.path} receipt`,
+    ),
     digest: snapshot.digest,
     path,
   };
@@ -1190,10 +1201,10 @@ function validateStaticFiles() {
     "physical-profiles.json",
   );
   assert(
-    (piProfile.approved_image_sha256.length === 0 &&
+    (piProfile.approved_images.length === 0 &&
       piProfile.os_image_policy_status ===
         "blocking_until_official_digest_pinned") ||
-      (piProfile.approved_image_sha256.length > 0 &&
+      (piProfile.approved_images.length > 0 &&
         piProfile.os_image_policy_status === "approved_digest_allowlist"),
     "Raspberry Pi image approval status does not match its exact digest allowlist",
   );
@@ -2277,6 +2288,67 @@ function assignDeviceFromEvidence(device, evidence, evidence_ref, state) {
   device.blocking_reason = null;
 }
 
+function resolvedPhysicalReceipt(inputPath, expectedProfile) {
+  const evidenceRoot = resolve(here, "evidence");
+  const path = resolve(inputPath);
+  const snapshot = readContainedRegularFileOnce(
+    evidenceRoot,
+    path,
+    `${expectedProfile} evidence receipt`,
+  );
+  const evidence = parseStrictJson(
+    snapshot.bytes.toString("utf8"),
+    `${expectedProfile} evidence receipt`,
+  );
+  validateEvidence(evidence, `${expectedProfile} evidence`, true, path);
+  assert(
+    evidence.status === "complete" &&
+      evidence.runner.hardware_profile === expectedProfile,
+    `${expectedProfile} qualification requires one complete matching receipt`,
+  );
+  return {
+    evidence,
+    digest: snapshot.digest,
+    path,
+    reference: {
+      path: relative(here, path),
+      sha256: snapshot.digest,
+    },
+  };
+}
+
+export function buildQualificationLedger(piPath, j4125Path) {
+  const pi = resolvedPhysicalReceipt(piPath, "raspberry_pi_5_champion");
+  const j4125 = resolvedPhysicalReceipt(j4125Path, "j4125_calibrated");
+  const ledger = loadJson(ledgerPath);
+  assignDeviceFromEvidence(
+    ledger.devices[0],
+    pi.evidence,
+    pi.reference,
+    "qualified",
+  );
+  assignDeviceFromEvidence(
+    ledger.devices[1],
+    j4125.evidence,
+    j4125.reference,
+    "calibrated",
+  );
+  ledger.devices[1].calibration = {
+    reference_profile: "raspberry_pi_5_champion",
+    state: "validated",
+    method:
+      "Same immutable B1 workload and budget contract measured on both named runners.",
+    reference_evidence_ref: pi.reference,
+    measured_relation: calibrationRelation(j4125.evidence, pi.evidence),
+  };
+  const receipts = new Map([
+    [pi.reference.path, pi],
+    [j4125.reference.path, j4125],
+  ]);
+  validateLedgerDocument(ledger, (reference) => receipts.get(reference.path));
+  return ledger;
+}
+
 function configureJ4125Fixture(evidence, custodian) {
   evidence.status = "complete";
   evidence.runner.hardware_profile = "j4125_calibrated";
@@ -2346,12 +2418,17 @@ function makeJ4125SelfTestEvidence() {
 
 function validateLedgerStateTransitions(validEvidence) {
   const piEvidence = clone(validEvidence);
-  // The checked-in Pi image allowlist is intentionally empty until an official
-  // digest is pinned. This in-memory-only digest exercises ledger mechanics
-  // without turning a fixture digest into repository policy.
-  piProfile.approved_image_sha256.push(
-    piEvidence.runner.os_image.retained_image.sha256,
-  );
+  // Add a self-test-only image beside the checked-in official allowlist entry.
+  // This exercises ledger mechanics without turning fixture bytes into policy.
+  piProfile.approved_images.push({
+    release_reference: "self-test-only",
+    file_name: piEvidence.runner.os_image.retained_image.file_name,
+    sha256: piEvidence.runner.os_image.retained_image.sha256,
+    image_url:
+      "https://downloads.raspberrypi.com/raspios_lite_arm64/images/self-test.img.xz",
+    checksum_url:
+      "https://downloads.raspberrypi.com/raspios_lite_arm64/images/self-test.img.xz.sha256",
+  });
   piEvidence.status = "complete";
   piEvidence.runner.hardware_profile = "raspberry_pi_5_champion";
   piEvidence.runner.device_model = "Raspberry Pi 5 Model B Rev 1.0";
@@ -2525,10 +2602,10 @@ function validateLedgerStateTransitions(validEvidence) {
       error.message.includes("artifact reference does not match"),
       `unexpected ledger-correlation failure: ${error.message}`,
     );
-    piProfile.approved_image_sha256.pop();
+    piProfile.approved_images.pop();
     return;
   }
-  piProfile.approved_image_sha256.pop();
+  piProfile.approved_images.pop();
   throw new Error(
     "ledger accepted an artifact reference unrelated to evidence",
   );
@@ -2818,13 +2895,17 @@ if (args.length === 1 && args[0] === "--self-test") {
 } else if (args.length === 1 && args[0] === "--static") {
   validateStaticFiles();
   console.log("PASS: B1 benchmark budgets and device hypothesis ledger");
+} else if (args.length === 3 && args[0] === "--build-qualification") {
+  process.stdout.write(
+    `${JSON.stringify(buildQualificationLedger(args[1], args[2]), null, 2)}\n`,
+  );
 } else if (args.length === 1 && !args[0].startsWith("--")) {
   const path = resolve(args[0]);
   validateEvidence(loadJson(path), path, true, path);
   console.log(`PASS: ${path}`);
 } else {
   console.error(
-    "Usage: node benchmarks/b1/validate-evidence.mjs --static|--self-test|--emit-j4125-test-fixture|<evidence.json>",
+    "Usage: node benchmarks/b1/validate-evidence.mjs --static|--self-test|--emit-j4125-test-fixture|--build-qualification <pi.json> <j4125.json>|<evidence.json>",
   );
   process.exit(2);
 }

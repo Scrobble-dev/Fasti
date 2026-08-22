@@ -15,20 +15,31 @@ import { isDeepStrictEqual } from "node:util";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = resolve(here, "../../..");
+import { parseStrictJson } from "../../../scripts/lib/strict-json.mjs";
+
+const moduleHere = dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = resolve(
+  process.env.FASTI_EVIDENCE_WORKSPACE_ROOT ?? resolve(moduleHere, "../../.."),
+);
+const here = join(repositoryRoot, "benchmarks/b1/tauri-shell");
 const artifactRoot = resolve(here, "evidence/artifacts");
-const schema = JSON.parse(
+const schema = parseStrictJson(
   readFileSync(join(here, "evidence.schema.json"), "utf8"),
+  "Tauri evidence schema",
 );
-const performanceSchema = JSON.parse(
+const performanceSchema = parseStrictJson(
   readFileSync(join(here, "..", "evidence.schema.json"), "utf8"),
+  "B1 performance evidence schema",
 );
-const fixturePolicySchema = JSON.parse(
+const fixturePolicySchema = parseStrictJson(
   readFileSync(join(here, "fixture-policy.schema.json"), "utf8"),
+  "Tauri fixture policy schema",
 );
 const fixturePolicyBytes = readFileSync(join(here, "fixture-policy.json"));
-const fixturePolicy = JSON.parse(fixturePolicyBytes.toString("utf8"));
+const fixturePolicy = parseStrictJson(
+  fixturePolicyBytes.toString("utf8"),
+  "Tauri fixture policy",
+);
 const fixturePolicySha256 = createHash("sha256")
   .update(fixturePolicyBytes)
   .digest("hex");
@@ -495,7 +506,9 @@ if (process.argv[2] === "--self-test") {
   }
   console.log("PASS: canonical hidden Tauri fixture policy schema");
 } else if (process.argv.length === 3) {
-  validateEvidence(JSON.parse(readFileSync(process.argv[2], "utf8")));
+  validateEvidence(
+    parseStrictJson(readFileSync(process.argv[2], "utf8"), process.argv[2]),
+  );
   console.log(`PASS: validated Tauri shell evidence ${process.argv[2]}`);
 } else {
   console.error(

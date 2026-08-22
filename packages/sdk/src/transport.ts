@@ -323,7 +323,15 @@ export class FastiClient {
       authenticated: operation.authenticated,
       problemContract: operation,
       retryMode: "safe",
-      responseParser: parseReplayReceiptResponse,
+      responseParser: (value) => {
+        const response = parseReplayReceiptResponse(value);
+        if (response.receipt.receipt_id !== safeReceiptId) {
+          throw new FastiContractParseError(
+            "Receipt replay response does not match the requested receipt id",
+          );
+        }
+        return response;
+      },
       responseLabel: "Receipt replay response",
       options,
     });
@@ -885,9 +893,12 @@ function protocolError(error: unknown, message: string): Error {
 }
 
 function contentTypeIs(response: Response, expected: string): boolean {
-  return (
-    response.headers.get("content-type")?.split(";", 1)[0]?.trim() === expected
-  );
+  const actual = response.headers
+    .get("content-type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  return actual === expected.toLowerCase();
 }
 
 function retryDelayMs(policy: RetryPolicy, failedAttempt: number): number {
@@ -899,8 +910,14 @@ function retryDelayMs(policy: RetryPolicy, failedAttempt: number): number {
 
 function retryAfterMs(response: Response, maximum: number): number | undefined {
   const header = response.headers.get("retry-after");
-  if (header === null || !/^\d+$/.test(header)) return undefined;
-  return Math.min(maximum, Number(header) * 1_000);
+  if (header === null) return undefined;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) {
+    return Math.min(maximum, Number(value) * 1_000);
+  }
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return undefined;
+  return Math.min(maximum, Math.max(0, retryAt - Date.now()));
 }
 
 async function delay(
@@ -980,7 +997,14 @@ async function* parseSse(
     if (value.startsWith(" ")) value = value.slice(1);
     switch (field) {
       case "id":
-        id = validateCursor(value);
+        try {
+          id = validateCursor(value);
+        } catch (error) {
+          throw new FastiProtocolError(
+            "Receipt SSE event contains an invalid cursor id",
+            { cause: error },
+          );
+        }
         return undefined;
       case "event":
         event = value;

@@ -1,6 +1,9 @@
 use anyhow::{bail, ensure, Context};
+use serde::Serialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -51,12 +54,28 @@ impl CommandGate {
         }
     }
 
-    fn display(&self) -> String {
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> &'static str {
+        self.id
+    }
+
+    pub(crate) fn display(&self) -> String {
         std::iter::once(OsStr::new(self.program))
             .chain(self.args.iter().map(OsString::as_os_str))
             .map(|part| format!("{:?}", part.to_string_lossy()))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    fn argv(&self) -> anyhow::Result<Vec<String>> {
+        std::iter::once(OsStr::new(self.program))
+            .chain(self.args.iter().map(OsString::as_os_str))
+            .map(|part| {
+                part.to_str()
+                    .map(str::to_owned)
+                    .context("gate command argv contains non-UTF-8 bytes")
+            })
+            .collect()
     }
 }
 
@@ -64,7 +83,30 @@ impl CommandGate {
 struct GateOutcome {
     success: bool,
     status: String,
+    exit_code: Option<i32>,
+    stdout_sha256: String,
+    stderr_sha256: String,
+    tool_version: String,
+    stdout: String,
+    stderr: String,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GateRecord {
+    id: String,
+    execution: String,
+    command: Vec<String>,
+    status: String,
+    exit_code: Option<i32>,
+    stdout_sha256: String,
+    stderr_sha256: String,
+    tool_version: String,
+    stdout: String,
+    stderr: String,
+}
+
+pub(crate) type GateInventoryEntry = (String, String, Vec<String>);
 
 trait GateExecutor {
     fn execute(&mut self, root: &Path, gate: &CommandGate) -> anyhow::Result<GateOutcome>;
@@ -74,13 +116,11 @@ struct ProcessGateExecutor;
 
 impl GateExecutor for ProcessGateExecutor {
     fn execute(&mut self, root: &Path, gate: &CommandGate) -> anyhow::Result<GateOutcome> {
-        let status = Command::new(gate.program)
+        let output = Command::new(gate.program)
             .args(&gate.args)
             .current_dir(root)
             .stdin(Stdio::inherit())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
+            .output()
             .with_context(|| {
                 format!(
                     "gate {} could not start `{}`; ensure `{}` is installed and rerun the verifier",
@@ -89,9 +129,25 @@ impl GateExecutor for ProcessGateExecutor {
                     gate.program
                 )
             })?;
+        let stdout = String::from_utf8(output.stdout)
+            .with_context(|| format!("gate {} stdout was not UTF-8", gate.id))?;
+        let stderr = String::from_utf8(output.stderr)
+            .with_context(|| format!("gate {} stderr was not UTF-8", gate.id))?;
+        std::io::stdout()
+            .write_all(stdout.as_bytes())
+            .context("failed to replay captured gate stdout")?;
+        std::io::stderr()
+            .write_all(stderr.as_bytes())
+            .context("failed to replay captured gate stderr")?;
         Ok(GateOutcome {
-            success: status.success(),
-            status: status.to_string(),
+            success: output.status.success(),
+            status: output.status.to_string(),
+            exit_code: output.status.code(),
+            stdout_sha256: sha256_bytes(stdout.as_bytes()),
+            stderr_sha256: sha256_bytes(stderr.as_bytes()),
+            tool_version: tool_version(root, gate)?,
+            stdout,
+            stderr,
         })
     }
 }
@@ -209,7 +265,7 @@ pub(crate) fn run_and_write_receipt(
 ) -> anyhow::Result<PathBuf> {
     let gates = command_gates(locked);
     let mut executor = ProcessGateExecutor;
-    let passed = run_command_gates(root, &gates, &mut executor)?;
+    let passed = run_contract_command_gates(root, &gates, &mut executor, facts)?;
     let source = read_source_state(root)?;
     write_receipt(root, locked, facts, &passed, &source)
 }
@@ -218,18 +274,81 @@ fn run_command_gates(
     root: &Path,
     gates: &[CommandGate],
     executor: &mut impl GateExecutor,
-) -> anyhow::Result<Vec<String>> {
-    let mut passed = Vec::with_capacity(PREFLIGHT_GATES.len() + gates.len());
-    passed.extend(PREFLIGHT_GATES.iter().map(|gate| (*gate).to_owned()));
+) -> anyhow::Result<Vec<GateRecord>> {
+    run_command_gates_from(root, gates, executor, Vec::new())
+}
+
+fn run_contract_command_gates(
+    root: &Path,
+    gates: &[CommandGate],
+    executor: &mut impl GateExecutor,
+    facts: &VerificationFacts,
+) -> anyhow::Result<Vec<GateRecord>> {
+    let passed = internal_gate_records(facts)?;
     run_command_gates_from(root, gates, executor, passed)
+}
+
+fn internal_gate_records(facts: &VerificationFacts) -> anyhow::Result<Vec<GateRecord>> {
+    let binding = json!({
+        "contract_version": facts.contract_version,
+        "capability_count": facts.capability_count,
+        "surface_profile_count": facts.surface_profile_count,
+        "generated_artifact_count": facts.generated_artifact_count,
+        "example_count": facts.example_count,
+    });
+    let binding = serde_json_canonicalizer::to_vec(&binding)
+        .context("failed to canonicalize in-process contract verification facts")?;
+    let binding_sha256 = sha256_bytes(&binding);
+    Ok(PREFLIGHT_GATES
+        .iter()
+        .map(|id| {
+            let stdout = format!("PASS [{id}] facts_sha256={binding_sha256}\n");
+            GateRecord {
+                id: (*id).to_owned(),
+                execution: "in_process".to_owned(),
+                command: vec![format!("xtask-internal:{id}")],
+                status: "pass".to_owned(),
+                exit_code: Some(0),
+                stdout_sha256: sha256_bytes(stdout.as_bytes()),
+                stderr_sha256: sha256_bytes(&[]),
+                tool_version: format!("xtask {}", env!("CARGO_PKG_VERSION")),
+                stdout,
+                stderr: String::new(),
+            }
+        })
+        .collect())
+}
+
+pub(crate) fn contract_gate_inventory(locked: bool) -> anyhow::Result<Vec<GateInventoryEntry>> {
+    let mut inventory = PREFLIGHT_GATES
+        .iter()
+        .map(|id| {
+            (
+                (*id).to_owned(),
+                "in_process".to_owned(),
+                vec![format!("xtask-internal:{id}")],
+            )
+        })
+        .collect::<Vec<_>>();
+    inventory.extend(process_gate_inventory(&command_gates(locked))?);
+    Ok(inventory)
+}
+
+pub(crate) fn process_gate_inventory(
+    gates: &[CommandGate],
+) -> anyhow::Result<Vec<GateInventoryEntry>> {
+    gates
+        .iter()
+        .map(|gate| Ok((gate.id.to_owned(), "process".to_owned(), gate.argv()?)))
+        .collect()
 }
 
 fn run_command_gates_from(
     root: &Path,
     gates: &[CommandGate],
     executor: &mut impl GateExecutor,
-    mut passed: Vec<String>,
-) -> anyhow::Result<Vec<String>> {
+    mut passed: Vec<GateRecord>,
+) -> anyhow::Result<Vec<GateRecord>> {
     for gate in gates {
         println!("RUN [{}]: {}", gate.id, gate.display());
         std::io::stdout()
@@ -245,7 +364,18 @@ fn run_command_gates_from(
             gate.display()
         );
         println!("PASS [{}]", gate.id);
-        passed.push(gate.id.to_owned());
+        passed.push(GateRecord {
+            id: gate.id.to_owned(),
+            execution: "process".to_owned(),
+            command: gate.argv()?,
+            status: "pass".to_owned(),
+            exit_code: outcome.exit_code,
+            stdout_sha256: outcome.stdout_sha256,
+            stderr_sha256: outcome.stderr_sha256,
+            tool_version: outcome.tool_version,
+            stdout: outcome.stdout,
+            stderr: outcome.stderr,
+        });
     }
     Ok(passed)
 }
@@ -253,9 +383,9 @@ fn run_command_gates_from(
 pub(crate) fn run_additional_gates(
     root: &Path,
     gates: &[CommandGate],
-) -> anyhow::Result<Vec<String>> {
+) -> anyhow::Result<Vec<GateRecord>> {
     let mut executor = ProcessGateExecutor;
-    run_command_gates_from(root, gates, &mut executor, Vec::new())
+    run_command_gates(root, gates, &mut executor)
 }
 
 fn command_gates(locked: bool) -> Vec<CommandGate> {
@@ -438,14 +568,17 @@ fn cargo_args<const N: usize>(locked: bool, args: [&str; N]) -> Vec<OsString> {
 #[derive(Debug, Eq, PartialEq)]
 struct SourceState {
     git_commit: String,
+    git_tree: String,
     dirty: bool,
 }
 
 fn read_source_state(root: &Path) -> anyhow::Result<SourceState> {
     let commit = git_output(root, ["rev-parse", "--verify", "HEAD"])?;
+    let tree = git_output(root, ["rev-parse", "HEAD^{tree}"])?;
     let status = git_output(root, ["status", "--porcelain=v1", "--untracked-files=all"])?;
     Ok(SourceState {
         git_commit: commit.trim().to_owned(),
+        git_tree: tree.trim().to_owned(),
         dirty: !status.trim().is_empty(),
     })
 }
@@ -464,11 +597,149 @@ fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> anyhow::Result<St
     String::from_utf8(output.stdout).context("git emitted non-UTF-8 source metadata")
 }
 
+fn tool_version(root: &Path, gate: &CommandGate) -> anyhow::Result<String> {
+    let version_args: &[&str] = if gate.program == "docker"
+        && gate
+            .args
+            .first()
+            .is_some_and(|argument| argument == "buildx")
+    {
+        &["buildx", "version"]
+    } else {
+        &["--version"]
+    };
+    let output = Command::new(gate.program)
+        .args(version_args)
+        .current_dir(root)
+        .output()
+        .with_context(|| {
+            format!(
+                "failed to bind the {} version for a gate receipt",
+                gate.program
+            )
+        })?;
+    ensure!(
+        output.status.success(),
+        "{} {} failed while binding a gate receipt",
+        gate.program,
+        version_args.join(" ")
+    );
+    let stdout = String::from_utf8(output.stdout)
+        .with_context(|| format!("{} version stdout was not UTF-8", gate.program))?;
+    let stderr = String::from_utf8(output.stderr)
+        .with_context(|| format!("{} version stderr was not UTF-8", gate.program))?;
+    let rendered = if stdout.trim().is_empty() {
+        stderr.trim()
+    } else {
+        stdout.trim()
+    };
+    ensure!(
+        !rendered.is_empty(),
+        "{} version command emitted no version text",
+        gate.program
+    );
+    Ok(rendered.to_owned())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn current_ci_metadata() -> anyhow::Result<Value> {
+    if env::var_os("GITHUB_ACTIONS").is_some() {
+        let run =
+            env::var("GITHUB_RUN_ID").context("GitHub Actions receipt omits GITHUB_RUN_ID")?;
+        let job = env::var("GITHUB_JOB").context("GitHub Actions receipt omits GITHUB_JOB")?;
+        ensure!(
+            !run.is_empty() && run.bytes().all(|byte| byte.is_ascii_digit()),
+            "GitHub Actions receipt has an invalid GITHUB_RUN_ID"
+        );
+        ensure!(
+            !job.trim().is_empty(),
+            "GitHub Actions receipt has an empty GITHUB_JOB"
+        );
+        Ok(json!({ "provider": "github_actions", "run": run, "job": job }))
+    } else {
+        Ok(json!({
+            "provider": "local",
+            "run": "local-unpublished",
+            "job": "local-milestone",
+        }))
+    }
+}
+
+pub(crate) fn write_gate_suite_receipt(
+    root: &Path,
+    relative_path: &Path,
+    kind: &str,
+    command: &str,
+    gates: &[GateRecord],
+) -> anyhow::Result<PathBuf> {
+    ensure!(
+        relative_path.starts_with("target/fasti-receipts")
+            && relative_path.extension().and_then(OsStr::to_str) == Some("json")
+            && !relative_path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir)),
+        "gate suite receipts must be JSON files below target/fasti-receipts"
+    );
+    ensure!(!kind.trim().is_empty(), "gate suite receipt kind is empty");
+    ensure!(!command.trim().is_empty(), "gate suite command is empty");
+    ensure!(!gates.is_empty(), "gate suite receipt has no gate records");
+    ensure!(
+        gates.iter().all(|gate| gate.status == "pass"),
+        "gate suite receipt contains a non-passing gate"
+    );
+    let source = read_source_state(root)?;
+    ensure!(
+        !source.dirty,
+        "source tree is dirty after gate execution; no suite receipt was emitted"
+    );
+    let receipt = json!({
+        "receipt_version": "1.0.0",
+        "kind": kind,
+        "command": command,
+        "ci": current_ci_metadata()?,
+        "source": {
+            "git_commit": source.git_commit,
+            "git_tree": source.git_tree,
+            "dirty": source.dirty,
+        },
+        "gate_count": gates.len(),
+        "gates": gates,
+    });
+    let path = root.join(relative_path);
+    let parent = path
+        .parent()
+        .context("gate suite receipt path has no parent")?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create receipt directory {}", parent.display()))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).with_context(|| {
+        format!(
+            "failed to create a temporary receipt in {}",
+            parent.display()
+        )
+    })?;
+    {
+        let mut writer = BufWriter::new(temporary.as_file_mut());
+        serde_json::to_writer_pretty(&mut writer, &receipt)
+            .context("gate suite receipt is not serializable")?;
+        writer.write_all(b"\n")?;
+        writer.flush()?;
+    }
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(&path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("failed to atomically publish receipt {}", path.display()))?;
+    Ok(path)
+}
+
 fn write_receipt(
     root: &Path,
     locked: bool,
     facts: &VerificationFacts,
-    passed_gates: &[String],
+    passed_gates: &[GateRecord],
     source: &SourceState,
 ) -> anyhow::Result<PathBuf> {
     let path = root.join(RECEIPT_PATH);
@@ -485,14 +756,11 @@ fn write_receipt(
         .duration_since(UNIX_EPOCH)
         .context("system clock is before the Unix epoch")?
         .as_secs();
-    let gates: Vec<_> = passed_gates
-        .iter()
-        .map(|id| json!({ "id": id, "status": "pass" }))
-        .collect();
     let receipt = json!({
-        "receipt_version": "1.0.0",
+        "receipt_version": "2.0.0",
         "kind": "fasti.b1.contract-verification",
         "verified_at_unix_seconds": verified_at_unix_seconds,
+        "ci": current_ci_metadata()?,
         "contract": {
             "version": facts.contract_version,
             "capability_count": facts.capability_count,
@@ -508,6 +776,7 @@ fn write_receipt(
         },
         "source": {
             "git_commit": source.git_commit,
+            "git_tree": source.git_tree,
             "dirty": source.dirty,
         },
         "scope": {
@@ -516,8 +785,8 @@ fn write_receipt(
             "physical_hardware_verified": false,
             "declaration": "This receipt proves software contract gates only. It is not performance or physical-device evidence.",
         },
-        "gate_count": gates.len(),
-        "gates": gates,
+        "gate_count": passed_gates.len(),
+        "gates": passed_gates,
     });
 
     let mut temporary = tempfile::NamedTempFile::new_in(parent).with_context(|| {
@@ -563,6 +832,12 @@ mod tests {
                     "exit status: 0"
                 }
                 .to_owned(),
+                exit_code: Some(if failed { 7 } else { 0 }),
+                stdout_sha256: sha256_bytes(b"fake stdout\n"),
+                stderr_sha256: sha256_bytes(b""),
+                tool_version: "fake 1.0.0".to_owned(),
+                stdout: "fake stdout\n".to_owned(),
+                stderr: String::new(),
             })
         }
     }
@@ -642,6 +917,43 @@ mod tests {
     }
 
     #[test]
+    fn internal_gate_receipts_bind_distinct_operation_results() {
+        let facts = VerificationFacts {
+            contract_version: "1.0.0".to_owned(),
+            capability_count: 22,
+            surface_profile_count: 6,
+            generated_artifact_count: 9,
+            example_count: 12,
+        };
+        let records = internal_gate_records(&facts).expect("internal gate records");
+        assert_eq!(records.len(), PREFLIGHT_GATES.len());
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.stdout_sha256.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            PREFLIGHT_GATES.len(),
+            "each in-process operation binds its own result transcript"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exact_gate_argv_rejects_non_utf8_bytes() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let gate = CommandGate {
+            id: "invalid.argv",
+            program: "tool",
+            args: vec![OsString::from_vec(vec![0xff])],
+            remediation: "use exact UTF-8 arguments",
+        };
+        let error = gate.argv().expect_err("lossy argv must be rejected");
+        assert!(error.to_string().contains("non-UTF-8"));
+    }
+
+    #[test]
     fn command_failure_is_actionable_and_stops_later_gates() {
         let gates = vec![
             CommandGate::new("first", "one", ["a"], "fix first"),
@@ -694,12 +1006,14 @@ mod tests {
         };
         let source = SourceState {
             git_commit: "0123456789abcdef".to_owned(),
+            git_tree: "fedcba9876543210".to_owned(),
             dirty: false,
         };
-        let gates = vec![
-            "registry.validate".to_owned(),
-            "examples.inventory".to_owned(),
-        ];
+        let gates = internal_gate_records(&facts)
+            .expect("internal records")
+            .into_iter()
+            .take(2)
+            .collect::<Vec<_>>();
         let path = write_receipt(root.path(), true, &facts, &gates, &source)
             .expect("write verification receipt");
         let receipt: Value = serde_json::from_reader(File::open(path).expect("open receipt"))
@@ -739,6 +1053,7 @@ mod tests {
         };
         let source = SourceState {
             git_commit: "0123456789abcdef".to_owned(),
+            git_tree: "fedcba9876543210".to_owned(),
             dirty: true,
         };
         let error = write_receipt(root.path(), true, &facts, &[], &source)

@@ -2,7 +2,14 @@
 set -euo pipefail
 
 image="${1:-fasti:b0}"
+expected_architecture="${2:-}"
 idle_limit_mib="${FASTI_IDLE_MEMORY_LIMIT_MIB:-64}"
+
+if [[ -n "$expected_architecture" ]] && \
+  [[ "$(docker image inspect "$image" --format '{{.Architecture}}')" != "$expected_architecture" ]]; then
+  echo "OCI image architecture does not match required $expected_architecture" >&2
+  exit 1
+fi
 
 if [[ "$(docker inspect --format '{{.Config.User}}' "$image")" != "fasti:fasti" ]]; then
   echo "OCI image must run as fasti:fasti" >&2
@@ -96,7 +103,10 @@ if payload.get("status") != "healthy" or not payload.get("version"):
     raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
 PY
 
-if [[ -s "$cli_stdout" ]] || ! grep -Fq "not available in B0" "$cli_stderr"; then
+if [[ -s "$cli_stdout" ]] || \
+  ! grep -Fq "capability_id=portability.workspace.verify" "$cli_stderr" || \
+  ! grep -Fq "not available in the current runtime" "$cli_stderr" || \
+  ! grep -Fq "owned by B3" "$cli_stderr"; then
   echo "Unavailable verify command did not fail explicitly and quietly" >&2
   exit 1
 fi

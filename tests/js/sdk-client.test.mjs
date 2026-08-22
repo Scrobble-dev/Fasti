@@ -62,6 +62,17 @@ test("health omits credentials and returns the exact public contract", async () 
   );
 });
 
+test("media types are matched case-insensitively", async () => {
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () =>
+      new Response(JSON.stringify({ status: "healthy", version: "0.1.0" }), {
+        headers: { "content-type": "Application/JSON; Charset=UTF-8" },
+      }),
+  });
+  assert.equal((await client.health()).status, "healthy");
+});
+
 test("RFC 9457 responses become typed Fasti problem errors", async () => {
   const problem = {
     type: "https://fasti.scrobble.dev/v1/problems/forbidden",
@@ -254,6 +265,33 @@ test("transient health retries are bounded by the declared policy", async () => 
   );
 });
 
+test("Retry-After HTTP dates apply the bounded server delay", async () => {
+  let attempts = 0;
+  const startedAt = Date.now();
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    retryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 40 },
+    fetch: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return new Response(null, {
+          status: 503,
+          headers: {
+            "retry-after": new Date(Date.now() + 60_000).toUTCString(),
+          },
+        });
+      }
+      return new Response(
+        JSON.stringify({ status: "healthy", version: "0.1.0" }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+  assert.equal((await client.health()).status, "healthy");
+  assert.equal(attempts, 2);
+  assert.ok(Date.now() - startedAt >= 30);
+});
+
 test("receipt SSE treats clean finite fixture EOF as successful completion", async () => {
   let connections = 0;
   const credential = "receipt-reader-secret";
@@ -323,6 +361,25 @@ test("receipt SSE refuses a cursor that differs from the governed receipt id", a
       await assert.rejects(events.next(), /cursor must equal.*receipt_id/);
     },
   );
+});
+
+test("receipt replay rejects a response for a different receipt", async () => {
+  const replayed = observationResponse();
+  delete replayed.disposition;
+  replayed.receipt.receipt_id = ids.receiptB;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () =>
+      new Response(JSON.stringify(replayed), {
+        headers: { "content-type": "application/json" },
+      }),
+  });
+  await assert.rejects(client.replayReceipt(ids.receiptA), (error) => {
+    assert.ok(error instanceof FastiProtocolError);
+    assert.match(error.message, /violates the generated contract/);
+    assert.match(error.cause.message, /requested receipt id/);
+    return true;
+  });
 });
 
 test("credentials are header-only on authenticated surfaces and no offline queue is exposed", async () => {
@@ -446,6 +503,14 @@ test("exact generated parsers reject inherited fields, class instances, and impo
       parseReceiptCommittedEvent({
         ...receipt(ids.receiptA),
         committed_at: "2026-02-30T03:00:00Z",
+      }),
+    /real RFC3339/,
+  );
+  assert.throws(
+    () =>
+      parseReceiptCommittedEvent({
+        ...receipt(ids.receiptA),
+        committed_at: "2026-08-22T03:00:00.1234567890Z",
       }),
     /real RFC3339/,
   );
@@ -659,6 +724,15 @@ test("invalid SSE UTF-8 is a protocol failure and is never reconnected", async (
   });
   await assert.rejects(events.next(), FastiProtocolError);
   assert.equal(connections, 1);
+});
+
+test("invalid server-provided SSE cursor is a typed protocol failure", async () => {
+  const events = streamClient(
+    `id: \nevent: receiptCommitted\ndata: ${JSON.stringify(receipt(ids.receiptA))}\n\n`,
+  ).receiptEvents({
+    retryPolicy: { maxAttempts: 1, baseDelayMs: 0, maxDelayMs: 0 },
+  });
+  await assert.rejects(events.next(), FastiProtocolError);
 });
 
 test("SSE event limits count empty data lines and aggregate bytes", async (context) => {

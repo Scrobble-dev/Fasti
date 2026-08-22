@@ -452,7 +452,7 @@ class LockedProfileTests(unittest.TestCase):
                 8,
                 8 * 1024**3,
                 self.valid_storage(),
-                {"sha256": "a" * 64},
+                {"file_name": "unknown.img.xz", "sha256": "a" * 64},
             )
         storage = self.valid_storage()
         storage["storage_class"] = "emmc_or_flash"
@@ -464,7 +464,7 @@ class LockedProfileTests(unittest.TestCase):
                 4,
                 8 * 1024**3,
                 storage,
-                {"sha256": "a" * 64},
+                {"file_name": "unknown.img.xz", "sha256": "a" * 64},
             )
 
     def test_pi_requires_trixie_usb3_ssd_and_four_gb_class(self) -> None:
@@ -490,19 +490,22 @@ class LockedProfileTests(unittest.TestCase):
                 storage,
                 {"sha256": "a" * 64},
             )
-        with self.assertRaisesRegex(benchmark.CaptureError, "no official image digest"):
-            benchmark.validate_profile_requirements(
-                "raspberry_pi_5_champion",
-                {"id": "raspbian", "version_codename": "trixie"},
-                "aarch64",
-                4,
-                4 * 1024**3,
-                storage,
-                {"sha256": "a" * 64},
-            )
+        blocked_profile = json.loads(json.dumps(benchmark.PI_PROFILE))
+        blocked_profile["approved_images"] = []
+        blocked_profile["os_image_policy_status"] = "blocking_until_official_digest_pinned"
+        with patch.object(benchmark, "PI_PROFILE", blocked_profile):
+            with self.assertRaisesRegex(benchmark.CaptureError, "no official image digest"):
+                benchmark.validate_profile_requirements(
+                    "raspberry_pi_5_champion",
+                    {"id": "raspbian", "version_codename": "trixie"},
+                    "aarch64",
+                    4,
+                    4 * 1024**3,
+                    storage,
+                    {"file_name": "unknown.img.xz", "sha256": "a" * 64},
+                )
+        approved_image = benchmark.PI_PROFILE["approved_images"][0]
         approved_profile = json.loads(json.dumps(benchmark.PI_PROFILE))
-        approved_profile["approved_image_sha256"] = ["a" * 64]
-        approved_profile["os_image_policy_status"] = "approved_digest_allowlist"
         with patch.object(benchmark, "PI_PROFILE", approved_profile), patch.object(
             benchmark,
             "parse_pi_active_cooling",
@@ -519,7 +522,10 @@ class LockedProfileTests(unittest.TestCase):
                 4,
                 4 * 1024**3,
                 storage,
-                {"sha256": "a" * 64},
+                {
+                    "file_name": approved_image["file_name"],
+                    "sha256": approved_image["sha256"],
+                },
             )
         self.assertEqual(result["storage"], "usb3_ssd")
 

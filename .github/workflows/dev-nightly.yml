@@ -11,12 +11,42 @@ permissions:
   contents: read
 
 jobs:
-  oci-smoke:
-    name: Build and smoke local OCI image
+  b1-deep:
+    name: Canonical B1 deep gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: bash scripts/check-no-publish.sh
-      - run: docker build --tag fasti:nightly-readiness .
-      - name: Verify image without publishing it
-        run: bash scripts/smoke-oci.sh fasti:nightly-readiness
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.22.0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Install locked Tauri Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch both locked Rust dependency graphs
+        run: |
+          cargo fetch --locked
+          cargo fetch --manifest-path benchmarks/b1/tauri-shell/src-tauri/Cargo.toml --locked
+      - run: cargo xtask test deep

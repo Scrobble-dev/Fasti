@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
+import { parseStrictJson } from "../../scripts/lib/strict-json.mjs";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const schema = JSON.parse(
   readFileSync(join(here, "runner-bundle.schema.json"), "utf8"),
@@ -19,6 +21,10 @@ export function validateManifest(manifest) {
     throw new Error(ajv.errorsText(validateSchema.errors, { separator: "\n" }));
   }
   return manifest;
+}
+
+export function parseManifest(source, label = "runner bundle manifest") {
+  return validateManifest(parseStrictJson(source, label));
 }
 
 function fixture() {
@@ -55,8 +61,17 @@ function selfTest() {
   try {
     validateManifest(mutation);
   } catch {
-    console.log("PASS: canonical private runner bundle schema sentinel");
-    return;
+    const duplicate = JSON.stringify(valid, null, 2).replace(
+      `    "git_tree": "${"2".repeat(40)}",`,
+      `    "git_tree": "${"9".repeat(40)}",\n    "git_tree": "${"2".repeat(40)}",`,
+    );
+    try {
+      parseManifest(duplicate, "duplicate-key sentinel");
+    } catch {
+      console.log("PASS: canonical private runner bundle schema sentinel");
+      return;
+    }
+    throw new Error("duplicate runner bundle manifest key passed validation");
   }
   throw new Error("invalid runner bundle manifest passed validation");
 }
@@ -66,10 +81,10 @@ if (process.argv[2] === "--self-test") {
 } else if (process.argv[2] === "--stdin") {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
-  validateManifest(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+  parseManifest(Buffer.concat(chunks).toString("utf8"), "stdin manifest");
   console.log("PASS: canonical runner bundle manifest");
 } else if (process.argv.length === 3) {
-  validateManifest(JSON.parse(readFileSync(process.argv[2], "utf8")));
+  parseManifest(readFileSync(process.argv[2], "utf8"), process.argv[2]);
   console.log(`PASS: canonical runner bundle manifest ${process.argv[2]}`);
 } else {
   console.error(

@@ -86,11 +86,26 @@ def source_identity(cwd: Path = ROOT) -> dict[str, str]:
     }
 
 
-def validate_manifest(manifest: Any) -> dict[str, Any]:
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise BundleError(f"runner bundle manifest contains duplicate key {key!r}")
+        value[key] = item
+    return value
+
+
+def validate_manifest_source(source: str) -> dict[str, Any]:
+    try:
+        manifest = json.loads(source, object_pairs_hook=_reject_duplicate_keys)
+    except BundleError:
+        raise
+    except (json.JSONDecodeError, UnicodeError) as error:
+        raise BundleError("runner bundle manifest is not strict JSON") from error
     result = subprocess.run(
         ["node", str(MANIFEST_VALIDATOR), "--stdin"],
         cwd=ROOT,
-        input=json.dumps(manifest),
+        input=source,
         text=True,
         capture_output=True,
         check=False,
@@ -103,6 +118,10 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
     return manifest
 
 
+def validate_manifest(manifest: Any) -> dict[str, Any]:
+    return validate_manifest_source(json.dumps(manifest))
+
+
 def verify_bundle(bundle_path: Path, manifest_path: Path) -> dict[str, Any]:
     if not bundle_path.is_file() or not manifest_path.is_file():
         raise BundleError("bundle and manifest files are both required")
@@ -112,9 +131,7 @@ def verify_bundle(bundle_path: Path, manifest_path: Path) -> dict[str, Any]:
         snapshot_manifest = snapshot_root / manifest_path.name
         snapshot_regular_file(bundle_path, snapshot_bundle, "bundle")
         snapshot_regular_file(manifest_path, snapshot_manifest, "manifest")
-        manifest = validate_manifest(
-            json.loads(snapshot_manifest.read_text(encoding="utf-8"))
-        )
+        manifest = validate_manifest_source(snapshot_manifest.read_text(encoding="utf-8"))
         artifact = manifest["bundle"]
         if artifact["filename"] != bundle_path.name:
             raise BundleError("manifest filename does not match the supplied bundle")

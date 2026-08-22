@@ -18,6 +18,7 @@ edition = "2021"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/Scrobble-dev/Fasti"
 homepage = "https://scrobble.dev"
+publish = false
 
 [workspace.dependencies]
 # Internal crates

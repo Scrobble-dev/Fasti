@@ -1,11 +1,29 @@
-use crate::verify::{run_additional_gates, CommandGate};
+use crate::verify::{run_additional_gates, write_gate_suite_receipt, CommandGate};
 use anyhow::{ensure, Context};
 use std::path::Path;
 use std::process::Command;
 
 pub(crate) fn run_portable_b1(root: &Path) -> anyhow::Result<()> {
     let source_before = git_status(root)?;
-    let gates = [
+    let gates = portable_b1_gates();
+    let records = run_additional_gates(root, &gates)?;
+    let source_after = git_status(root)?;
+    ensure!(
+        source_after == source_before,
+        "portable B1 gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
+    );
+    write_gate_suite_receipt(
+        root,
+        Path::new("target/fasti-receipts/b1-portable.json"),
+        "fasti.b1.portable-gates",
+        "cargo xtask test pr",
+        &records,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn portable_b1_gates() -> [CommandGate; 11] {
+    [
         CommandGate::new(
             "performance.static",
             "node",
@@ -92,28 +110,61 @@ pub(crate) fn run_portable_b1(root: &Path) -> anyhow::Result<()> {
             ],
             "repair the private runner bundle schema and digest tests",
         ),
-    ];
-    run_additional_gates(root, &gates)?;
-    let source_after = git_status(root)?;
-    ensure!(
-        source_after == source_before,
-        "portable B1 gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
-    );
-    Ok(())
+    ]
 }
 
 pub(crate) fn run_deep_b1(root: &Path) -> anyhow::Result<()> {
-    let gates = [CommandGate::new(
-        "rust.documentation_tests",
-        "cargo",
-        ["test", "--workspace", "--doc", "--locked", "--offline"],
-        "fix the deep documentation test failure without weakening the PR gate",
-    )];
-    run_additional_gates(root, &gates)?;
-    println!(
-        "NOT APPLICABLE: B2/B3 crash, persistence, corpus-load, restart, and restore matrices do not exist in the B1 headless contract body"
+    let source_before = git_status(root)?;
+    let gates = deep_b1_gates();
+    let records = run_additional_gates(root, &gates)?;
+    let source_after = git_status(root)?;
+    ensure!(
+        source_after == source_before,
+        "deep B1 gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
     );
+    println!(
+        "NOT APPLICABLE: B2/B3 crash, persistence, corpus-load, restart, restore, and writer-saturation matrices do not exist in the B1 headless contract body"
+    );
+    write_gate_suite_receipt(
+        root,
+        Path::new("target/fasti-receipts/b1-deep.json"),
+        "fasti.b1.deep-gates",
+        "cargo xtask test deep",
+        &records,
+    )?;
     Ok(())
+}
+
+pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
+    [
+        CommandGate::new(
+            "rust.documentation_tests",
+            "cargo",
+            ["test", "--workspace", "--doc", "--locked", "--offline"],
+            "fix the deep documentation test failure without weakening the PR gate",
+        ),
+        CommandGate::new(
+            "package.arm64_oci_build",
+            "docker",
+            [
+                "buildx",
+                "build",
+                "--platform",
+                "linux/arm64",
+                "--load",
+                "--tag",
+                "fasti:deep-arm64",
+                ".",
+            ],
+            "install Docker Buildx with arm64 execution support and repair the locked OCI package",
+        ),
+        CommandGate::new(
+            "package.arm64_oci_smoke",
+            "bash",
+            ["scripts/smoke-oci.sh", "fasti:deep-arm64", "arm64"],
+            "repair the arm64 daemon/CLI package or its network-denied smoke journey",
+        ),
+    ]
 }
 
 fn git_status(root: &Path) -> anyhow::Result<String> {
@@ -148,5 +199,22 @@ mod tests {
         let after = git_status(root.path()).expect("changed status");
         assert_ne!(before, after);
         assert!(after.contains("generated.pyc"));
+    }
+
+    #[test]
+    fn deep_gate_executes_the_arm64_package_under_network_denial() {
+        let gates = deep_b1_gates();
+        assert_eq!(
+            gates.iter().map(CommandGate::id).collect::<Vec<_>>(),
+            [
+                "rust.documentation_tests",
+                "package.arm64_oci_build",
+                "package.arm64_oci_smoke",
+            ]
+        );
+        assert!(gates[1].display().contains("linux/arm64"));
+        assert!(gates[1].display().contains("--load"));
+        assert!(gates[2].display().contains("scripts/smoke-oci.sh"));
+        assert!(gates[2].display().contains("arm64"));
     }
 }

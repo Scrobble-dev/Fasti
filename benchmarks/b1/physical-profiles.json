@@ -21,8 +21,16 @@
         "version_codename": "trixie",
         "claim_scope": "runtime_os_release_only"
       },
-      "approved_image_sha256": [],
-      "os_image_policy_status": "blocking_until_official_digest_pinned",
+      "approved_images": [
+        {
+          "release_reference": "2026-06-18",
+          "file_name": "2026-06-18-raspios-trixie-arm64-lite.img.xz",
+          "sha256": "acff736ca7945e3b305f07cda4abdb870910e12634991da69783611756e381b3",
+          "image_url": "https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-06-19/2026-06-18-raspios-trixie-arm64-lite.img.xz",
+          "checksum_url": "https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-06-19/2026-06-18-raspios-trixie-arm64-lite.img.xz.sha256"
+        }
+      ],
+      "os_image_policy_status": "approved_digest_allowlist",
       "storage": {
         "class": "ssd",
         "transport": "usb",

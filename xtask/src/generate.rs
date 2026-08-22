@@ -1681,7 +1681,7 @@ const RECEIPT_ID = new RegExp({receipt_pattern});
 const OPERATION_ID = new RegExp({operation_pattern});
 const OBSERVATION_ID = new RegExp({observation_pattern});
 // prettier-ignore
-const RFC3339_INSTANT = /^(\d{{4}})-(\d{{2}})-(\d{{2}})T(\d{{2}}):(\d{{2}}):(\d{{2}})(?:\.\d+)?(Z|[+-](\d{{2}}):(\d{{2}}))$/;
+const RFC3339_INSTANT = /^(\d{{4}})-(\d{{2}})-(\d{{2}})T(\d{{2}}):(\d{{2}}):(\d{{2}})(?:\.\d{{1,9}})?(Z|[+-](\d{{2}}):(\d{{2}}))$/;
 
 // prettier-ignore
 export function parseHealthResponse(value: unknown): HealthResponse {{

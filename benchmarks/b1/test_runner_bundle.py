@@ -57,6 +57,15 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaises(bundle.BundleError):
             bundle.validate_manifest(value)
 
+    def test_duplicate_manifest_keys_fail_before_schema_validation(self) -> None:
+        source = json.dumps(fixture(), indent=2).replace(
+            '    "git_tree": "' + "2" * 40 + '",',
+            '    "git_tree": "' + "9" * 40 + '",\n'
+            '    "git_tree": "' + "2" * 40 + '",',
+        )
+        with self.assertRaisesRegex(bundle.BundleError, "duplicate key 'git_tree'"):
+            bundle.validate_manifest_source(source)
+
 
 class HandoffIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:

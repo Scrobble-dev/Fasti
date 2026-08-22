@@ -3474,7 +3474,7 @@ const RECEIPT_ID = new RegExp("^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
 const OPERATION_ID = new RegExp("^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$");
 const OBSERVATION_ID = new RegExp("^obs_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$");
 // prettier-ignore
-const RFC3339_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/;
+const RFC3339_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-](\d{2}):(\d{2}))$/;
 
 // prettier-ignore
 export function parseHealthResponse(value: unknown): HealthResponse {

@@ -51,7 +51,7 @@
         "logical_cpu_count",
         "memory_bytes",
         "running_os_release",
-        "approved_image_sha256",
+        "approved_images",
         "os_image_policy_status",
         "storage",
         "cooling_status",
@@ -101,10 +101,39 @@
             "claim_scope": { "$ref": "#/$defs/nonEmptyString" }
           }
         },
-        "approved_image_sha256": {
+        "approved_images": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "release_reference",
+              "file_name",
+              "sha256",
+              "image_url",
+              "checksum_url"
+            ],
+            "properties": {
+              "release_reference": { "$ref": "#/$defs/nonEmptyString" },
+              "file_name": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}-raspios-trixie-arm64-lite\\.img\\.xz$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "image_url": {
+                "type": "string",
+                "pattern": "^https://downloads\\.raspberrypi\\.com/raspios_lite_arm64/images/"
+              },
+              "checksum_url": {
+                "type": "string",
+                "pattern": "^https://downloads\\.raspberrypi\\.com/raspios_lite_arm64/images/.*\\.sha256$"
+              }
+            }
+          }
         },
         "os_image_policy_status": {
           "enum": [
@@ -176,12 +205,12 @@
           },
           "then": {
             "properties": {
-              "approved_image_sha256": { "type": "array", "maxItems": 0 }
+              "approved_images": { "type": "array", "maxItems": 0 }
             }
           },
           "else": {
             "properties": {
-              "approved_image_sha256": { "type": "array", "minItems": 1 }
+              "approved_images": { "type": "array", "minItems": 1 }
             }
           }
         }

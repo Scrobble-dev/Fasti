@@ -2,6 +2,8 @@ mod capabilities;
 
 use capabilities::{CapabilityCatalog, CliFailure, OutputFormat};
 use clap::{Parser, Subcommand};
+use fasti_application::CapabilityKey;
+use fasti_contracts::public_capability_id;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
@@ -50,24 +52,16 @@ enum CapabilityCommand {
     },
 }
 
-fn unavailable(command: &str, body: &str) -> CliFailure {
+fn unavailable(command: &str, capability: CapabilityKey) -> CliFailure {
+    let body = capability.runtime_body().as_str();
     CliFailure::new(
         "capability_unavailable",
-        capability_for_stub(command),
+        public_capability_id(capability),
         format!(
-            "{command} is not available in B0; it is owned by {body}. No data was changed and no success receipt was emitted."
+            "{command} is not available in the current runtime; it is owned by {body}. No data was changed and no success receipt was emitted."
         ),
         format!("Wait for the {body} implementation gate before retrying {command}."),
     )
-}
-
-fn capability_for_stub(command: &str) -> &'static str {
-    match command {
-        "export" => "portability.workspace.export",
-        "restore" => "portability.workspace.restore",
-        "verify" => "portability.workspace.verify",
-        _ => "system.capabilities.discover",
-    }
 }
 
 fn execute(cli: Cli) -> Result<String, CliFailure> {
@@ -79,9 +73,13 @@ fn execute(cli: Cli) -> Result<String, CliFailure> {
                 CapabilityCommand::Show { id, output } => catalog.show(&id, output),
             }
         }
-        Commands::Export { output: _ } => Err(unavailable("export", "B3")),
-        Commands::Restore { input: _ } => Err(unavailable("restore", "B3")),
-        Commands::Verify => Err(unavailable("verify", "B3")),
+        Commands::Export { output: _ } => {
+            Err(unavailable("export", CapabilityKey::ExportWorkspace))
+        }
+        Commands::Restore { input: _ } => {
+            Err(unavailable("restore", CapabilityKey::RestoreWorkspace))
+        }
+        Commands::Verify => Err(unavailable("verify", CapabilityKey::VerifyWorkspace)),
     }
 }
 
