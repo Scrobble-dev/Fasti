@@ -35,6 +35,7 @@ jobs:
           EXPECTED_SOURCE_SHA: 24516cff2b67474475748a7a236c5b7a1cb5c6a7
           EXPECTED_PATCH_SHA256: 9dac751d73bb9dc9b403680f4259c1bb112ad47448e1ab7345ba43d9297853aa
           EXPECTED_CONFORMANCE_PATCH_SHA256: 4737c1fc1480bb5043754dadf0d6b994e5457f2873b905ec67ee82ff2edfdcda
+          EXPECTED_FORMAT_PATCH_SHA256: e37dd875f108728ad010c5cdcd8c773056a95a3399d66e3c25500581f75a1de3
           EXPECTED_CI_SHA256: 3d33f68460f14a53cbcd22f74e851d6a1f63be8bd407c4fa83445d9ad517d747
         run: |
           set -euo pipefail
@@ -43,15 +44,18 @@ jobs:
           cat > /tmp/expected-inputs.txt <<'PATHS'
           .fasti-staging/ci.yml
           .fasti-staging/finalize-b1-conformance.patch
+          .fasti-staging/finalize-b1-format.patch
           .fasti-staging/finalize-b1.patch
           .github/workflows/b2-apply-reviewed-source.yml
           PATHS
           diff --unified /tmp/expected-inputs.txt /tmp/changed-inputs.txt
           cp .fasti-staging/finalize-b1.patch /tmp/finalize-b1.patch
           cp .fasti-staging/finalize-b1-conformance.patch /tmp/finalize-b1-conformance.patch
+          cp .fasti-staging/finalize-b1-format.patch /tmp/finalize-b1-format.patch
           cp .fasti-staging/ci.yml /tmp/ci.yml
           echo "$EXPECTED_PATCH_SHA256  /tmp/finalize-b1.patch" | sha256sum --check --strict
           echo "$EXPECTED_CONFORMANCE_PATCH_SHA256  /tmp/finalize-b1-conformance.patch" | sha256sum --check --strict
+          echo "$EXPECTED_FORMAT_PATCH_SHA256  /tmp/finalize-b1-format.patch" | sha256sum --check --strict
           echo "$EXPECTED_CI_SHA256  /tmp/ci.yml" | sha256sum --check --strict
 
       - name: Download and verify the formatter-produced workspace
@@ -119,6 +123,8 @@ jobs:
           git apply /tmp/finalize-b1.patch
           git apply --check /tmp/finalize-b1-conformance.patch
           git apply /tmp/finalize-b1-conformance.patch
+          git apply --check /tmp/finalize-b1-format.patch
+          git apply /tmp/finalize-b1-format.patch
           rm -rf .fasti-staging
           rm -f .github/workflows/b2-apply-reviewed-source.yml
           rm -f .github/workflows/b2-diagnose-source.yml
