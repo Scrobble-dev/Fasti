@@ -30,7 +30,7 @@ jobs:
         with:
           version: 11.22.0
 
-      - name: Verify and apply the reviewed patches
+      - name: Apply, preflight, and commit the reviewed patches
         shell: bash
         run: |
           set -euo pipefail
@@ -87,16 +87,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm format:check
           pnpm typecheck
-          cargo xtask contract verify --locked
-          pnpm test
 
-      - name: Commit the verified B1 finalization
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name "Ryan Winkler"
           git config user.email "28455297+ryan-winkler@users.noreply.github.com"
-          git add \
+          git add -A -- \
             .github/workflows/apply-reviewed-b1-finalization-once.yml \
             crates/fasti-application/src/capabilities.rs \
             crates/fasti-application/src/problems.rs \
@@ -119,5 +113,14 @@ jobs:
             -m "fix(b1): restore exact contract lifecycle and fixture parity" \
             -m "Keep the B1 HTTP and SSE behavior fixture-only, keep B2 identity and review capabilities reserved until their implementing body activates, and remove temporary public capability variants that duplicated existing application ownership." \
             -m "Keep B2 storage helpers available behind the owning observation and record capabilities without claiming a production route. Keep B2-only problems out of the public B1 registry, preserve the established optional receipt wire shape, align the validation text, add bounded fixture diagnostics, and regenerate every affected governed contract output." \
-            -m "Rust lint, workspace tests, deterministic contract verification, TypeScript formatting and type checks, and the complete JavaScript contract and SDK suite passed before this commit. No product route, public listener, package, or release is added."
+            -m "Rust lint, workspace tests, TypeScript formatting, and type checks passed before this commit. Exact-commit contract and SDK verification runs before the commit is pushed. No product route, public listener, package, or release is added."
+          test -z "$(git status --short)"
+
+      - name: Verify the clean commit and push it
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo xtask contract verify --locked
+          pnpm test
+          test -z "$(git status --short)"
           git push origin HEAD:security/b1-evidence-hardening-20260822
