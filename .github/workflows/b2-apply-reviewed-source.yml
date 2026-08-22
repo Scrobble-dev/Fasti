@@ -37,6 +37,7 @@ jobs:
           EXPECTED_CONFORMANCE_PATCH_SHA256: 4737c1fc1480bb5043754dadf0d6b994e5457f2873b905ec67ee82ff2edfdcda
           EXPECTED_FORMAT_PATCH_SHA256: 0ed7d9ffde16f9cb51b83df49336040a3d67e7f1bc8c4feb0c4591bff3b44355
           EXPECTED_PROBLEM_TEST_PATCH_SHA256: 72f0d33c08a51c68a3c15ff537b162cd1ba7523eab225cfc0aec8360e161e365
+          EXPECTED_RECEIPT_PATCH_SHA256: adea6831ede696c111f9fbada185f4ebe8d88a73201a787f9c19cce8ae0d3585
           EXPECTED_CI_SHA256: 3d33f68460f14a53cbcd22f74e851d6a1f63be8bd407c4fa83445d9ad517d747
         run: |
           set -euo pipefail
@@ -47,6 +48,7 @@ jobs:
           .fasti-staging/finalize-b1-conformance.patch
           .fasti-staging/finalize-b1-format.patch
           .fasti-staging/finalize-b1-problem-test.patch
+          .fasti-staging/finalize-b1-receipt-shape.patch
           .fasti-staging/finalize-b1.patch
           .github/workflows/b2-apply-reviewed-source.yml
           PATHS
@@ -55,11 +57,13 @@ jobs:
           cp .fasti-staging/finalize-b1-conformance.patch /tmp/finalize-b1-conformance.patch
           cp .fasti-staging/finalize-b1-format.patch /tmp/finalize-b1-format.patch
           cp .fasti-staging/finalize-b1-problem-test.patch /tmp/finalize-b1-problem-test.patch
+          cp .fasti-staging/finalize-b1-receipt-shape.patch /tmp/finalize-b1-receipt-shape.patch
           cp .fasti-staging/ci.yml /tmp/ci.yml
           echo "$EXPECTED_PATCH_SHA256  /tmp/finalize-b1.patch" | sha256sum --check --strict
           echo "$EXPECTED_CONFORMANCE_PATCH_SHA256  /tmp/finalize-b1-conformance.patch" | sha256sum --check --strict
           echo "$EXPECTED_FORMAT_PATCH_SHA256  /tmp/finalize-b1-format.patch" | sha256sum --check --strict
           echo "$EXPECTED_PROBLEM_TEST_PATCH_SHA256  /tmp/finalize-b1-problem-test.patch" | sha256sum --check --strict
+          echo "$EXPECTED_RECEIPT_PATCH_SHA256  /tmp/finalize-b1-receipt-shape.patch" | sha256sum --check --strict
           echo "$EXPECTED_CI_SHA256  /tmp/ci.yml" | sha256sum --check --strict
 
       - name: Download and verify the formatter-produced workspace
@@ -131,6 +135,8 @@ jobs:
           git apply /tmp/finalize-b1-format.patch
           git apply --check /tmp/finalize-b1-problem-test.patch
           git apply /tmp/finalize-b1-problem-test.patch
+          git apply --check /tmp/finalize-b1-receipt-shape.patch
+          git apply /tmp/finalize-b1-receipt-shape.patch
           rm -rf .fasti-staging
           rm -f .github/workflows/b2-apply-reviewed-source.yml
           rm -f .github/workflows/b2-diagnose-source.yml
@@ -168,7 +174,7 @@ jobs:
           git add -A
           git commit -s \
             -m "fix(b1): restore governed capability truth and CI" \
-            -m "Restore B1 lifecycle, authorization, scope, problem metadata, validation wording, and contract-level authentication redaction proof to the checked-in capability registry and governed examples. This prevents first-client enrollment from entering the wrong authorization path and then terminating the loopback fixture while constructing an undeclared problem." \
+            -m "Restore B1 lifecycle, authorization, scope, problem metadata, validation wording, contract-level authentication redaction proof, and unresolved receipt JSON shape to the checked-in capability registry and governed examples. This prevents first-client enrollment from entering the wrong authorization path and prevents future B2 identifiers from appearing as null fields in B1 receipts." \
             -m "Keep the partial B2 storage work behind existing owning operations: evidence upload remains part of observation acceptance, and provider-neutral identity seed application reuses record creation instead of adding unregistered public capabilities." \
             -m "Reconcile Cargo.lock, apply the pinned formatter to the workspace, remove the corrupted staged archive and all write-enabled recovery workflows, restore read-only CI permissions, remove obsolete imports, and add bounded Rust fixture stderr and exit diagnostics for future failures." \
             -m "Validated before commit with locked Rust workspace tests, JavaScript formatting/type/contract/SDK tests, repository truth, no-publish mutation tests, and documentation-link checks. Product UI remains absent, so screenshots and visual accessibility review are not applicable to this repair."
