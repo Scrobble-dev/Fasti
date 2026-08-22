@@ -17,7 +17,9 @@ const markdownFiles = execFileSync(
   .filter(Boolean);
 
 const inlineLink = /!?\[[^\]]*\]\(([^)]+)\)/g;
-const definitionLink = /^\[[^\]]+\]:\s+(\S+)/gm;
+// Markdown footnotes use the same leading shape as reference-link
+// definitions, but the text after `:` is prose rather than a path.
+const definitionLink = /^\[(?!\^)[^\]]+\]:\s+(\S+)/gm;
 const failures = [];
 
 function checkTarget(file, rawTarget) {
