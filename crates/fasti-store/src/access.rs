@@ -239,8 +239,7 @@ impl AccessAdministrationPort for SqliteKernel {
         else {
             return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
         };
-        let (Some(stored_proof_digest), Some(expires_at)) =
-            (stored_proof_digest, expires_at)
+        let (Some(stored_proof_digest), Some(expires_at)) = (stored_proof_digest, expires_at)
         else {
             return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
         };
@@ -849,10 +848,12 @@ mod tests {
         let node = TestNode::new();
         let replay_proof = SecretMaterial::try_from_hex(&node.initialization_proof_hex)
             .expect("copy consumed proof for replay");
-        let error = match node.kernel.enroll_first_client(EnrollFirstClientCommand::new(
-            RequestCorrelationId::new_v7(),
-            replay_proof,
-        )) {
+        let error = match node
+            .kernel
+            .enroll_first_client(EnrollFirstClientCommand::new(
+                RequestCorrelationId::new_v7(),
+                replay_proof,
+            )) {
             Ok(_) => panic!("consumed proof must not enroll again"),
             Err(error) => error,
         };
