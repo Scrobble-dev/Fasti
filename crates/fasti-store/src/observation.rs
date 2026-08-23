@@ -798,7 +798,9 @@ mod tests {
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{ProblemCode, ScopeKey};
-    use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
+    use fasti_domain::{
+        ClaimedTrust, ExternalIdentifierClaim, ObservedAt, RequestCorrelationId,
+    };
 
     fn observed_at() -> ObservedAt {
         ObservedAt::parse("2026-08-23T10:30:00Z", ClaimedTrust::DeviceObserved)
