@@ -801,11 +801,8 @@ mod tests {
     use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
 
     fn observed_at() -> ObservedAt {
-        ObservedAt::parse(
-            "2026-08-23T10:30:00Z",
-            ClaimedTrust::DeviceObserved,
-        )
-        .expect("observed time")
+        ObservedAt::parse("2026-08-23T10:30:00Z", ClaimedTrust::DeviceObserved)
+            .expect("observed time")
     }
 
     fn claim(namespace: &str, value: &str) -> ExternalIdentifierClaim {
@@ -877,10 +874,9 @@ mod tests {
             )
             .expect("prepare clue query");
         let stored = statement
-            .query_map(
-                [committed.receipt().observation_id().to_string()],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
+            .query_map([committed.receipt().observation_id().to_string()], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .expect("query clues")
             .collect::<Result<Vec<_>, _>>()
             .expect("collect clues");
