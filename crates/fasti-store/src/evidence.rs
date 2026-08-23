@@ -52,17 +52,16 @@ impl EvidenceUploadPort for SqliteKernel {
                 correlation_id,
             )?;
             let mut budget = self.lock_upload_budget(capability, correlation_id)?;
-            let next_reserved_bytes = budget
-                .reserved_bytes
-                .checked_add(reserved)
-                .ok_or_else(|| {
+            let next_reserved_bytes =
+                budget.reserved_bytes.checked_add(reserved).ok_or_else(|| {
                     Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
                 })?;
-            let next_prepared_bytes = prepared_bytes
-                .checked_add(next_reserved_bytes)
-                .ok_or_else(|| {
-                    Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
-                })?;
+            let next_prepared_bytes =
+                prepared_bytes
+                    .checked_add(next_reserved_bytes)
+                    .ok_or_else(|| {
+                        Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
+                    })?;
             if budget.active >= MAX_CONCURRENT_UPLOADS
                 || next_reserved_bytes > MAX_TEMP_EVIDENCE_BYTES
                 || next_prepared_bytes > MAX_PREPARED_EVIDENCE_BYTES
@@ -242,13 +241,13 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
         }
 
         let relative_path = relative_evidence_path(&digest_hex);
-        let parent = self
-            .kernel
-            .inner
-            .current_root
-            .join(relative_path.parent().ok_or_else(|| {
-                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-            })?);
+        let parent =
+            self.kernel
+                .inner
+                .current_root
+                .join(relative_path.parent().ok_or_else(|| {
+                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                })?);
         let parent_created = match fs::symlink_metadata(&parent) {
             Ok(_) => false,
             Err(error) if error.kind() == ErrorKind::NotFound => true,
@@ -565,11 +564,8 @@ mod tests {
             node.access,
             OperationId::new_v7(),
             None,
-            ObservedAt::parse(
-                "2026-08-23T10:30:00Z",
-                ClaimedTrust::DeviceObserved,
-            )
-            .expect("observed time"),
+            ObservedAt::parse("2026-08-23T10:30:00Z", ClaimedTrust::DeviceObserved)
+                .expect("observed time"),
             evidence,
         );
 
