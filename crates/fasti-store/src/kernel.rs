@@ -21,6 +21,11 @@ use std::os::unix::fs::PermissionsExt;
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_EVIDENCE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_TEMP_EVIDENCE_BYTES: u64 = 32 * 1024 * 1024;
+/// Maximum prepared, not-yet-accepted evidence retained by one workspace.
+///
+/// Accepted Chronicle evidence is not counted. This bounds abandoned upload
+/// state before later retention and operator cleanup capabilities exist.
+pub const MAX_PREPARED_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_CONCURRENT_UPLOADS: usize = 4;
 
 #[derive(Debug, Error)]
@@ -151,7 +156,7 @@ fn unsafe_path(path: &Path, reason: &'static str) -> StoreOpenError {
     }
 }
 
-fn prepare_private_directory(path: &Path) -> Result<(), StoreOpenError> {
+pub(crate) fn prepare_private_directory(path: &Path) -> Result<(), StoreOpenError> {
     fs::create_dir_all(path)?;
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
@@ -164,7 +169,7 @@ fn prepare_private_directory(path: &Path) -> Result<(), StoreOpenError> {
     Ok(())
 }
 
-fn reject_unsafe_existing_file(path: &Path) -> Result<(), StoreOpenError> {
+pub(crate) fn reject_unsafe_existing_file(path: &Path) -> Result<(), StoreOpenError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -179,7 +184,7 @@ fn reject_unsafe_existing_file(path: &Path) -> Result<(), StoreOpenError> {
     Ok(())
 }
 
-fn harden_private_regular_file(path: &Path) -> Result<(), StoreOpenError> {
+pub(crate) fn harden_private_regular_file(path: &Path) -> Result<(), StoreOpenError> {
     reject_unsafe_existing_file(path)?;
     set_owner_only_file_permissions(path)?;
     Ok(())

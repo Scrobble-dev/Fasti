@@ -1,14 +1,15 @@
 use crate::crypto::{sha256_hex, sha256_reader};
+use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
 use crate::identity::matching_record_ids;
 use crate::kernel::{
     authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp,
-    timestamp, SqliteKernel,
+    reject_unsafe_existing_file, timestamp, SqliteKernel,
 };
 use fasti_application::{
     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
     ApplicationResult, CapabilityKey, FastiProblem, ObservationAcceptancePort, ReceiptStreamBatch,
     ReceiptStreamEvent, ReceiptStreamPort, ReplayReceiptQuery, StreamReceiptsQuery,
-    MAX_RECEIPT_STREAM_REPLAY,
+    MAX_IDENTITY_CLAIMS, MAX_RECEIPT_STREAM_REPLAY,
 };
 use fasti_domain::{
     ClientId, CommittedAt, EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain,
@@ -28,8 +29,16 @@ impl ObservationAcceptancePort for SqliteKernel {
     ) -> ApplicationResult<AcceptObservationOutcome> {
         let correlation_id = command.correlation_id();
         let capability = CapabilityKey::AcceptObservation;
+        if command.identity_clues().len() > MAX_IDENTITY_CLAIMS {
+            return Err(Box::new(FastiProblem::from_code(
+                fasti_application::ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            )));
+        }
+        let canonical_clues = canonical_identity_clues(command.identity_clues());
         let evidence = validate_prepared_evidence(self, &command)?;
-        let semantic_digest = semantic_digest(&command)?;
+        let semantic_digest = semantic_digest(&command, &canonical_clues)?;
 
         let mut connection = self.lock_connection(capability, correlation_id)?;
         let transaction = map_sql(
@@ -81,7 +90,7 @@ impl ObservationAcceptancePort for SqliteKernel {
             return Ok(AcceptObservationOutcome::Replayed(receipt));
         }
 
-        let selected_claims = selected_claims(&command);
+        let selected_claims = selected_claims(command.target_grain(), &canonical_clues);
         let matches = matching_record_ids(
             &transaction,
             command.access().workspace_id(),
@@ -144,7 +153,7 @@ impl ObservationAcceptancePort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        for (ordinal, claim) in command.identity_clues().iter().enumerate() {
+        for (ordinal, claim) in canonical_clues.iter().enumerate() {
             map_sql(
                 transaction.execute(
                     r#"
@@ -314,17 +323,24 @@ impl ObservationAcceptancePort for SqliteKernel {
     ) -> ApplicationResult<AcceptObservationReceipt> {
         let capability = CapabilityKey::ReplayReceipt;
         let correlation_id = query.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
-        authorize_connection(&connection, capability, query.access(), correlation_id)?;
-        load_receipt(
-            &connection,
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Deferred),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
+        let receipt = load_receipt(
+            &transaction,
             query.receipt_id(),
             query.access().workspace_id(),
             query.access().profile_id(),
             query.access().client_id(),
             capability,
             correlation_id,
-        )
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(receipt)
     }
 }
 
@@ -335,14 +351,19 @@ impl ReceiptStreamPort for SqliteKernel {
     ) -> ApplicationResult<ReceiptStreamBatch> {
         let capability = CapabilityKey::StreamReceipts;
         let correlation_id = query.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
-        authorize_connection(&connection, capability, query.access(), correlation_id)?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Deferred),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
         let after_sequence = if let Some(cursor) = query.last_event_id() {
             let receipt_id = cursor
                 .parse::<ReceiptId>()
                 .map_err(|_| Box::new(FastiProblem::cursor_expired(correlation_id)))?;
             map_sql(
-                connection
+                transaction
                     .query_row(
                         r#"
                         SELECT sequence FROM receipts
@@ -365,42 +386,47 @@ impl ReceiptStreamPort for SqliteKernel {
         } else {
             0
         };
-        let mut statement = map_sql(
-            connection.prepare(
-                r#"
-                SELECT receipt_id FROM receipts
-                WHERE workspace_id = ?1 AND profile_id = ?2 AND client_id = ?3
-                  AND sequence > ?4
-                ORDER BY sequence ASC
-                LIMIT ?5
-                "#,
-            ),
-            capability,
-            correlation_id,
-        )?;
-        let rows = map_sql(
-            statement.query_map(
-                params![
-                    query.access().workspace_id().to_string(),
-                    query.access().profile_id().to_string(),
-                    query.access().client_id().to_string(),
-                    after_sequence,
-                    i64::try_from(MAX_RECEIPT_STREAM_REPLAY).unwrap_or(100)
-                ],
-                |row| row.get::<_, String>(0),
-            ),
-            capability,
-            correlation_id,
-        )?;
-        let mut events = Vec::new();
-        for row in rows {
-            let receipt_id = map_sql(row, capability, correlation_id)?
-                .parse::<ReceiptId>()
-                .map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-                })?;
+        let receipt_ids = {
+            let mut statement = map_sql(
+                transaction.prepare(
+                    r#"
+                    SELECT receipt_id FROM receipts
+                    WHERE workspace_id = ?1 AND profile_id = ?2 AND client_id = ?3
+                      AND sequence > ?4
+                    ORDER BY sequence ASC
+                    LIMIT ?5
+                    "#,
+                ),
+                capability,
+                correlation_id,
+            )?;
+            let rows = map_sql(
+                statement.query_map(
+                    params![
+                        query.access().workspace_id().to_string(),
+                        query.access().profile_id().to_string(),
+                        query.access().client_id().to_string(),
+                        after_sequence,
+                        i64::try_from(MAX_RECEIPT_STREAM_REPLAY).unwrap_or(100)
+                    ],
+                    |row| row.get::<_, String>(0),
+                ),
+                capability,
+                correlation_id,
+            )?;
+            let mut receipt_ids = Vec::new();
+            for row in rows {
+                receipt_ids.push(map_sql(row, capability, correlation_id)?);
+            }
+            receipt_ids
+        };
+        let mut events = Vec::with_capacity(receipt_ids.len());
+        for receipt_id in receipt_ids {
+            let receipt_id = receipt_id.parse::<ReceiptId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
             let receipt = load_receipt(
-                &connection,
+                &transaction,
                 receipt_id,
                 query.access().workspace_id(),
                 query.access().profile_id(),
@@ -410,6 +436,7 @@ impl ReceiptStreamPort for SqliteKernel {
             )?;
             events.push(ReceiptStreamEvent::new(correlation_id, receipt));
         }
+        map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(ReceiptStreamBatch::new(events))
     }
 }
@@ -458,7 +485,18 @@ fn validate_prepared_evidence(
             correlation_id,
         )));
     }
-    let full_path = kernel.inner.current_root.join(path);
+    let digest_hex = canonical_digest_hex(&digest)
+        .ok_or_else(|| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let expected_relative_path = relative_evidence_path(digest_hex);
+    if path != path_to_storage_value(&expected_relative_path) {
+        return Err(Box::new(FastiProblem::integrity_failed(
+            capability,
+            correlation_id,
+        )));
+    }
+    let full_path = kernel.inner.current_root.join(expected_relative_path);
+    reject_unsafe_existing_file(&full_path)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let file = File::open(full_path)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let (observed_digest, observed_size) = sha256_reader(file)
@@ -505,11 +543,32 @@ fn verify_evidence_row(
     Ok(())
 }
 
-fn semantic_digest(command: &AcceptObservationCommand) -> ApplicationResult<String> {
+fn canonical_identity_clues(
+    identity_clues: &[ExternalIdentifierClaim],
+) -> Vec<ExternalIdentifierClaim> {
+    let mut claims = identity_clues.to_vec();
+    claims.sort_by(|left, right| {
+        (left.namespace(), left.grain().as_str(), left.value()).cmp(&(
+            right.namespace(),
+            right.grain().as_str(),
+            right.value(),
+        ))
+    });
+    claims.dedup_by(|left, right| {
+        left.namespace() == right.namespace()
+            && left.grain() == right.grain()
+            && left.value() == right.value()
+    });
+    claims
+}
+
+fn semantic_digest(
+    command: &AcceptObservationCommand,
+    canonical_clues: &[ExternalIdentifierClaim],
+) -> ApplicationResult<String> {
     let capability = CapabilityKey::AcceptObservation;
     let correlation_id = command.correlation_id();
-    let mut clues = command
-        .identity_clues()
+    let clues = canonical_clues
         .iter()
         .map(|claim| {
             json!({
@@ -519,10 +578,10 @@ fn semantic_digest(command: &AcceptObservationCommand) -> ApplicationResult<Stri
             })
         })
         .collect::<Vec<_>>();
-    clues.sort_by_key(ToString::to_string);
-    clues.dedup();
     let value = json!({
         "capability": "accept_observation",
+        "workspace_id": command.access().workspace_id().to_string(),
+        "profile_id": command.access().profile_id().to_string(),
         "evidence": command.prepared_evidence().digest().as_str(),
         "occurred_at": command.occurred_at(),
         "observed_at": command.observed_at(),
@@ -533,22 +592,23 @@ fn semantic_digest(command: &AcceptObservationCommand) -> ApplicationResult<Stri
     Ok(format!("sha256:{}", sha256_hex(&bytes)))
 }
 
-fn selected_claims(command: &AcceptObservationCommand) -> Vec<ExternalIdentifierClaim> {
-    if let Some(target) = command.target_grain() {
-        return command
-            .identity_clues()
+fn selected_claims(
+    target_grain: Option<Grain>,
+    canonical_clues: &[ExternalIdentifierClaim],
+) -> Vec<ExternalIdentifierClaim> {
+    if let Some(target) = target_grain {
+        return canonical_clues
             .iter()
             .filter(|claim| claim.grain() == target)
             .cloned()
             .collect();
     }
-    let grains = command
-        .identity_clues()
+    let grains = canonical_clues
         .iter()
         .map(ExternalIdentifierClaim::grain)
         .collect::<BTreeSet<_>>();
     if grains.len() == 1 {
-        command.identity_clues().to_vec()
+        canonical_clues.to_vec()
     } else {
         Vec::new()
     }
@@ -575,8 +635,14 @@ pub(crate) fn load_receipt(
                     o.occurred_at_json, o.observed_at_json,
                     e.size_bytes
                 FROM receipts r
-                JOIN observations o ON o.observation_id = r.observation_id
-                JOIN evidence e ON e.evidence_id = r.evidence_id
+                JOIN observations o
+                  ON o.observation_id = r.observation_id
+                 AND o.workspace_id = r.workspace_id
+                 AND o.profile_id = r.profile_id
+                 AND o.source_client_id = r.client_id
+                JOIN evidence e
+                  ON e.evidence_id = r.evidence_id
+                 AND e.workspace_id = r.workspace_id
                 WHERE r.receipt_id = ?1 AND r.workspace_id = ?2
                   AND r.profile_id = ?3 AND r.client_id = ?4
                 "#,
@@ -724,5 +790,163 @@ fn resolution_storage_value(value: ObservationResolution) -> &'static str {
         ObservationResolution::Unresolved => "unresolved",
         ObservationResolution::Resolved => "resolved",
         ObservationResolution::Conflicted => "conflicted",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestNode;
+    use fasti_application::{ProblemCode, ScopeKey};
+    use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
+
+    fn observed_at() -> ObservedAt {
+        ObservedAt::parse(
+            "2026-08-23T10:30:00Z",
+            ClaimedTrust::DeviceObserved,
+        )
+        .expect("observed time")
+    }
+
+    fn claim(namespace: &str, value: &str) -> ExternalIdentifierClaim {
+        ExternalIdentifierClaim::try_new(namespace, Grain::Release, value)
+            .expect("valid exact identifier")
+    }
+
+    #[test]
+    fn canonical_clues_drive_replay_and_persist_once() {
+        let node = TestNode::new();
+        let evidence = node.upload(b"canonical clue evidence");
+        let operation_id = OperationId::new_v7();
+        let first = AcceptObservationCommand::new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            operation_id,
+            None,
+            observed_at(),
+            evidence.clone(),
+        )
+        .with_identity_clues(
+            vec![
+                claim("kitsu", "42"),
+                claim("imdb", "tt0903747"),
+                claim("kitsu", "42"),
+            ],
+            Some(Grain::Release),
+        );
+        let committed = node
+            .kernel
+            .authorize_and_accept(first)
+            .expect("accept canonical clues");
+        assert!(!committed.is_replay());
+
+        let replay = AcceptObservationCommand::new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            operation_id,
+            None,
+            observed_at(),
+            evidence,
+        )
+        .with_identity_clues(
+            vec![claim("imdb", "tt0903747"), claim("kitsu", "42")],
+            Some(Grain::Release),
+        );
+        let replayed = node
+            .kernel
+            .authorize_and_accept(replay)
+            .expect("equivalent clues replay");
+        assert!(replayed.is_replay());
+        assert_eq!(
+            replayed.receipt().receipt_id(),
+            committed.receipt().receipt_id()
+        );
+
+        let connection = node
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("SQLite connection");
+        let mut statement = connection
+            .prepare(
+                r#"
+                SELECT namespace, value FROM observation_clues
+                WHERE observation_id = ?1 ORDER BY ordinal
+                "#,
+            )
+            .expect("prepare clue query");
+        let stored = statement
+            .query_map(
+                [committed.receipt().observation_id().to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .expect("query clues")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect clues");
+        assert_eq!(
+            stored,
+            vec![
+                ("imdb".to_owned(), "tt0903747".to_owned()),
+                ("kitsu".to_owned(), "42".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn operation_identity_is_bound_to_the_target_profile() {
+        let node = TestNode::new();
+        let evidence = node.upload(b"profile-bound operation");
+        let operation_id = OperationId::new_v7();
+        let first = AcceptObservationCommand::new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            operation_id,
+            None,
+            observed_at(),
+            evidence.clone(),
+        );
+        node.kernel
+            .authorize_and_accept(first)
+            .expect("first profile accepts operation");
+
+        let second_access = node.add_profile_with_scopes(&[ScopeKey::ObservationAccept]);
+        let second = AcceptObservationCommand::new(
+            RequestCorrelationId::new_v7(),
+            second_access,
+            operation_id,
+            None,
+            observed_at(),
+            evidence,
+        );
+        let error = node
+            .kernel
+            .authorize_and_accept(second)
+            .expect_err("same operation cannot target another profile");
+        assert_eq!(error.code(), ProblemCode::IdempotencyConflict);
+    }
+
+    #[test]
+    fn observation_rejects_unbounded_identity_clues_before_storage_work() {
+        let node = TestNode::new();
+        let evidence = node.upload(b"bounded clue evidence");
+        let clues = (0..=MAX_IDENTITY_CLAIMS)
+            .map(|index| claim("tmdb", &index.to_string()))
+            .collect();
+        let command = AcceptObservationCommand::new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            OperationId::new_v7(),
+            None,
+            observed_at(),
+            evidence,
+        )
+        .with_identity_clues(clues, Some(Grain::Release));
+
+        let error = node
+            .kernel
+            .authorize_and_accept(command)
+            .expect_err("identity-clue limit");
+        assert_eq!(error.code(), ProblemCode::ValidationFailed);
     }
 }

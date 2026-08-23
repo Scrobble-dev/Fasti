@@ -3,7 +3,7 @@ use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel
 use fasti_application::{
     ApplicationResult, CapabilityKey, FastiProblem, ResolveReviewCommand, ResolveReviewOutcome,
     ReviewAction, ReviewActionCommand, ReviewItemView, ReviewPort, ReviewQuery,
-    ReviewResolutionTarget,
+    ReviewResolutionTarget, MAX_IDENTITY_CLAIMS,
 };
 use fasti_domain::{InterpretationId, ObservationId, RecordId, ReviewItemId, ReviewStatus};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
@@ -14,24 +14,18 @@ impl ReviewPort for SqliteKernel {
     fn inspect_reviews(&self, query: ReviewQuery) -> ApplicationResult<Vec<ReviewItemView>> {
         let capability = CapabilityKey::InspectReview;
         let correlation_id = query.correlation_id();
-        let connection = self.lock_connection(capability, correlation_id)?;
-        let snapshot = crate::kernel::load_access_snapshot(
-            &connection,
-            query.access(),
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Deferred),
             capability,
             correlation_id,
         )?;
-        fasti_application::authorize(
-            &fasti_application::AuthorizationRequirement::for_capability(capability),
-            Some(query.access()),
-            Some(&snapshot),
-        )
-        .map_err(|_| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
+        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
 
         let mut values = Vec::new();
         if let Some(review_item_id) = query.review_item_id() {
             if let Some(value) = load_review_view(
-                &connection,
+                &transaction,
                 query.access().workspace_id(),
                 query.access().profile_id(),
                 review_item_id,
@@ -42,7 +36,7 @@ impl ReviewPort for SqliteKernel {
             }
         } else {
             let mut statement = map_sql(
-                connection.prepare(
+                transaction.prepare(
                     r#"
                     SELECT review_item_id FROM review_items
                     WHERE workspace_id = ?1 AND profile_id = ?2
@@ -73,7 +67,7 @@ impl ReviewPort for SqliteKernel {
                         Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                     })?;
                 if let Some(value) = load_review_view(
-                    &connection,
+                    &transaction,
                     query.access().workspace_id(),
                     query.access().profile_id(),
                     id,
@@ -84,6 +78,7 @@ impl ReviewPort for SqliteKernel {
                 }
             }
         }
+        map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(values)
     }
 
@@ -160,6 +155,13 @@ impl ReviewPort for SqliteKernel {
     ) -> ApplicationResult<ResolveReviewOutcome> {
         let capability = CapabilityKey::ResolveReview;
         let correlation_id = command.correlation_id();
+        if command.identifiers().len() > MAX_IDENTITY_CLAIMS {
+            return Err(Box::new(FastiProblem::from_code(
+                fasti_application::ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            )));
+        }
         let mut connection = self.lock_connection(capability, correlation_id)?;
         let transaction = map_sql(
             connection.transaction_with_behavior(TransactionBehavior::Immediate),
@@ -422,5 +424,37 @@ fn review_status_value(status: ReviewStatus) -> &'static str {
         ReviewStatus::Open => "open",
         ReviewStatus::Deferred => "deferred",
         ReviewStatus::Resolved => "resolved",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestNode;
+    use fasti_application::ProblemCode;
+    use fasti_domain::{ExternalIdentifierClaim, Grain, RequestCorrelationId};
+
+    #[test]
+    fn review_resolution_rejects_unbounded_identifier_sets() {
+        let node = TestNode::new();
+        let identifiers = (0..=MAX_IDENTITY_CLAIMS)
+            .map(|index| {
+                ExternalIdentifierClaim::try_new("tmdb", Grain::Release, index.to_string())
+                    .expect("valid identifier")
+            })
+            .collect();
+        let command = ResolveReviewCommand::new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            ReviewItemId::new_v7(),
+            ReviewResolutionTarget::New(Grain::Release),
+            identifiers,
+        );
+
+        let error = node
+            .kernel
+            .resolve_review(command)
+            .expect_err("identifier limit");
+        assert_eq!(error.code(), ProblemCode::ValidationFailed);
     }
 }

@@ -9,5 +9,7 @@ mod observation;
 mod review;
 mod schema;
 mod seed;
+#[cfg(test)]
+mod test_support;
 
 pub use kernel::{SqliteKernel, StoreOpenError};
