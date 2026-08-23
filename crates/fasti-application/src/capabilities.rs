@@ -61,12 +61,24 @@ impl CapabilityProblemPolicy {
         Self { public, staged }
     }
 
-    pub fn contains(self, code: &ProblemCode) -> bool {
-        self.public.contains(code) || self.staged.contains(code)
+    /// Return the problem codes that belong to the active public contract.
+    pub const fn public(self) -> &'static [ProblemCode] {
+        self.public
     }
 
+    /// Return implemented runtime failures that are not public yet.
+    pub const fn staged(self) -> &'static [ProblemCode] {
+        self.staged
+    }
+
+    /// Return true when runtime validation permits the problem for this capability.
+    pub fn contains(self, code: &ProblemCode) -> bool {
+        self.public().contains(code) || self.staged().contains(code)
+    }
+
+    /// Iterate only the active public problem contract.
     pub fn iter(self) -> std::slice::Iter<'static, ProblemCode> {
-        self.public.iter()
+        self.public().iter()
     }
 }
 
@@ -470,5 +482,48 @@ mod tests {
         assert!(!review
             .iter()
             .any(|code| code.contract_state() == ContractState::Reserved));
+    }
+
+    #[test]
+    fn every_problem_policy_is_unique_disjoint_and_explicit() {
+        fn assert_unique(capability: CapabilityKey, set_name: &str, codes: &[ProblemCode]) {
+            for (index, code) in codes.iter().enumerate() {
+                assert!(
+                    !codes[index + 1..].contains(code),
+                    "{capability:?} has duplicate {set_name} problem {}",
+                    code.as_str()
+                );
+            }
+        }
+
+        for capability in CapabilityKey::ALL {
+            let policy = capability.allowed_problem_codes();
+            assert_unique(*capability, "public", policy.public());
+            assert_unique(*capability, "staged", policy.staged());
+
+            for code in policy.public() {
+                assert!(
+                    !policy.staged().contains(code),
+                    "{capability:?} exposes problem {} as both public and staged",
+                    code.as_str()
+                );
+                assert!(policy.contains(code));
+            }
+
+            for code in policy.staged() {
+                assert!(policy.contains(code));
+                assert!(
+                    !policy.iter().any(|published| published == code),
+                    "{capability:?} publishes staged problem {}",
+                    code.as_str()
+                );
+            }
+
+            assert_eq!(
+                policy.iter().copied().collect::<Vec<_>>().as_slice(),
+                policy.public(),
+                "{capability:?} public iteration must remain exact"
+            );
+        }
     }
 }
