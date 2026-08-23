@@ -53,6 +53,8 @@ impl AccessAdministrationPort for SqliteKernel {
         let workspace_id = WorkspaceId::new_v7();
         let profile_id = ProfileId::new_v7();
         let client_id = ClientId::new_v7();
+        let enrollment_credential_id = CredentialId::new_v7();
+        let enrollment_grant_id = ProfileGrantId::new_v7();
         let proof = random_secret(capability, correlation_id)?;
         let proof_digest = digest_secret(&proof);
         let created_at = now();
@@ -106,8 +108,55 @@ impl AccessAdministrationPort for SqliteKernel {
         )?;
         map_sql(
             transaction.execute(
-                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, ?2, 'active', 0, ?3)",
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, ?2, 'active', 1, ?3)",
                 params![client_id.to_string(), workspace_id.to_string(), created_at_text],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                r#"
+                INSERT INTO credentials(
+                    credential_id, workspace_id, client_id, digest, epoch, status, created_at
+                ) VALUES (?1, ?2, ?3, ?4, 1, 'active', ?5)
+                "#,
+                params![
+                    enrollment_credential_id.to_string(),
+                    workspace_id.to_string(),
+                    client_id.to_string(),
+                    proof_digest,
+                    created_at_text
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                r#"
+                INSERT INTO profile_grants(
+                    grant_id, workspace_id, profile_id, client_id, status, created_at
+                ) VALUES (?1, ?2, ?3, ?4, 'active', ?5)
+                "#,
+                params![
+                    enrollment_grant_id.to_string(),
+                    workspace_id.to_string(),
+                    profile_id.to_string(),
+                    client_id.to_string(),
+                    created_at_text
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, ?2)",
+                params![
+                    enrollment_grant_id.to_string(),
+                    scope_storage_key(ScopeKey::ClientEnroll)
+                ],
             ),
             capability,
             correlation_id,
@@ -152,7 +201,6 @@ impl AccessAdministrationPort for SqliteKernel {
         let credential_digest = digest_secret(&credential);
         let presented_proof_digest = digest_secret(command.initialization_proof());
         let credential_id = CredentialId::new_v7();
-        let grant_id = ProfileGrantId::new_v7();
         let created_at = now();
 
         let mut connection = self.lock_connection(capability, correlation_id)?;
@@ -176,8 +224,8 @@ impl AccessAdministrationPort for SqliteKernel {
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
-                            row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, Option<String>>(4)?,
                             row.get::<_, Option<String>>(5)?,
                         ))
                     },
@@ -191,6 +239,11 @@ impl AccessAdministrationPort for SqliteKernel {
         else {
             return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
         };
+        let (Some(stored_proof_digest), Some(expires_at)) =
+            (stored_proof_digest, expires_at)
+        else {
+            return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
+        };
         let expires_at = DateTime::parse_from_rfc3339(&expires_at)
             .map(|value| value.with_timezone(&Utc))
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
@@ -200,12 +253,6 @@ impl AccessAdministrationPort for SqliteKernel {
         {
             return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
         }
-        authorize(
-            &AuthorizationRequirement::for_capability(capability),
-            None,
-            Some(&AccessSnapshot::bootstrap_open()),
-        )
-        .map_err(|_| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
 
         let workspace_id = workspace
             .parse::<WorkspaceId>()
@@ -216,18 +263,105 @@ impl AccessAdministrationPort for SqliteKernel {
         let client_id = client
             .parse::<ClientId>()
             .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-        let created_at_text = timestamp(created_at);
+        let provisional = map_sql(
+            transaction
+                .query_row(
+                    r#"
+                    SELECT cr.credential_id, pg.grant_id, cr.epoch
+                    FROM credentials cr
+                    JOIN clients c
+                      ON c.client_id = cr.client_id
+                     AND c.workspace_id = cr.workspace_id
+                    JOIN profile_grants pg
+                      ON pg.client_id = cr.client_id
+                     AND pg.workspace_id = cr.workspace_id
+                    JOIN profiles p
+                      ON p.profile_id = pg.profile_id
+                     AND p.workspace_id = cr.workspace_id
+                    JOIN grant_scopes gs
+                      ON gs.grant_id = pg.grant_id
+                     AND gs.scope_key = ?5
+                    WHERE cr.digest = ?1
+                      AND cr.workspace_id = ?2
+                      AND cr.client_id = ?3
+                      AND pg.profile_id = ?4
+                      AND cr.status = 'active'
+                      AND c.status = 'active'
+                      AND pg.status = 'active'
+                      AND cr.epoch = c.current_credential_epoch
+                      AND NOT EXISTS (
+                          SELECT 1 FROM grant_scopes extra
+                          WHERE extra.grant_id = pg.grant_id
+                            AND extra.scope_key <> ?5
+                      )
+                    "#,
+                    params![
+                        stored_proof_digest,
+                        workspace,
+                        client,
+                        profile,
+                        scope_storage_key(ScopeKey::ClientEnroll)
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )
+                .optional(),
+            capability,
+            correlation_id,
+        )?;
+        let Some((provisional_credential, grant, epoch)) = provisional else {
+            return Err(Box::new(FastiProblem::bootstrap_closed(correlation_id)));
+        };
+        let provisional_credential_id = provisional_credential
+            .parse::<CredentialId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let grant_id = grant
+            .parse::<ProfileGrantId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let epoch = u64::try_from(epoch)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let epoch_storage = i64::try_from(epoch)
+            .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+        let provisional_access = RequestAccessContext::new(
+            workspace_id,
+            profile_id,
+            client_id,
+            provisional_credential_id,
+            grant_id,
+            epoch,
+        );
+        authorize_transaction(
+            &transaction,
+            capability,
+            &provisional_access,
+            correlation_id,
+        )?;
 
+        let created_at_text = timestamp(created_at);
         let changed = map_sql(
             transaction.execute(
                 r#"
-                UPDATE clients SET current_credential_epoch = 1
-                WHERE client_id = ?1
-                  AND workspace_id = ?2
+                UPDATE credentials SET status = 'revoked', revoked_at = ?1
+                WHERE credential_id = ?2
+                  AND workspace_id = ?3
+                  AND client_id = ?4
+                  AND digest = ?5
+                  AND epoch = ?6
                   AND status = 'active'
-                  AND current_credential_epoch = 0
                 "#,
-                params![client, workspace],
+                params![
+                    created_at_text,
+                    provisional_credential,
+                    workspace,
+                    client,
+                    stored_proof_digest,
+                    epoch_storage
+                ],
             ),
             capability,
             correlation_id,
@@ -238,42 +372,34 @@ impl AccessAdministrationPort for SqliteKernel {
                 r#"
                 INSERT INTO credentials(
                     credential_id, workspace_id, client_id, digest, epoch, status, created_at
-                ) VALUES (?1, ?2, ?3, ?4, 1, 'active', ?5)
+                ) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6)
                 "#,
                 params![
                     credential_id.to_string(),
                     workspace,
                     client,
                     credential_digest,
+                    epoch_storage,
                     created_at_text
                 ],
             ),
             capability,
             correlation_id,
         )?;
-        map_sql(
+        let changed = map_sql(
             transaction.execute(
-                r#"
-                INSERT INTO profile_grants(
-                    grant_id, workspace_id, profile_id, client_id, status, created_at
-                ) VALUES (?1, ?2, ?3, ?4, 'active', ?5)
-                "#,
-                params![
-                    grant_id.to_string(),
-                    workspace,
-                    profile,
-                    client,
-                    created_at_text
-                ],
+                "DELETE FROM grant_scopes WHERE grant_id = ?1",
+                [grant.as_str()],
             ),
             capability,
             correlation_id,
         )?;
+        require_one_row(changed, capability, correlation_id)?;
         for scope in B2_ADMIN_SCOPES {
             map_sql(
                 transaction.execute(
                     "INSERT INTO grant_scopes(grant_id, scope_key) VALUES (?1, ?2)",
-                    params![grant_id.to_string(), scope_storage_key(*scope)],
+                    params![grant, scope_storage_key(*scope)],
                 ),
                 capability,
                 correlation_id,
@@ -288,10 +414,10 @@ impl AccessAdministrationPort for SqliteKernel {
                     initialization_expires_at = NULL
                 WHERE singleton = 1
                   AND initialization_consumed_at IS NULL
-                  AND initialization_digest IS NOT NULL
-                  AND initialization_expires_at IS NOT NULL
+                  AND initialization_digest = ?2
+                  AND initialization_expires_at = ?3
                 "#,
-                [created_at_text.as_str()],
+                params![created_at_text, stored_proof_digest, timestamp(expires_at)],
             ),
             capability,
             correlation_id,
@@ -306,7 +432,7 @@ impl AccessAdministrationPort for SqliteKernel {
                 client_id,
                 credential_id,
                 grant_id,
-                1,
+                epoch,
             ),
             credential,
         ))
@@ -623,6 +749,7 @@ mod tests {
         profile_id: ProfileId,
         client_id: ClientId,
         grant_id: ProfileGrantId,
+        initialization_proof_hex: String,
         credential_hex: String,
     }
 
@@ -633,9 +760,9 @@ mod tests {
             let initialized = kernel
                 .initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
                 .expect("initialize node");
-            let proof =
-                SecretMaterial::try_from_hex(&initialized.initialization_proof().expose_hex())
-                    .expect("copy one-time proof for enrollment");
+            let initialization_proof_hex = initialized.initialization_proof().expose_hex();
+            let proof = SecretMaterial::try_from_hex(&initialization_proof_hex)
+                .expect("copy one-time proof for enrollment");
             let enrolled = kernel
                 .enroll_first_client(EnrollFirstClientCommand::new(
                     RequestCorrelationId::new_v7(),
@@ -650,6 +777,7 @@ mod tests {
                 profile_id: enrolled.access().profile_id(),
                 client_id: enrolled.access().client_id(),
                 grant_id: enrolled.access().grant_id(),
+                initialization_proof_hex,
                 credential_hex: enrolled.credential().expose_hex(),
             }
         }
@@ -713,6 +841,55 @@ mod tests {
                 )
                 .expect("insert capability scope");
             grant_id
+        }
+    }
+
+    #[test]
+    fn enrollment_consumes_the_proof_and_replaces_its_only_scope() {
+        let node = TestNode::new();
+        let replay_proof = SecretMaterial::try_from_hex(&node.initialization_proof_hex)
+            .expect("copy consumed proof for replay");
+        let error = match node.kernel.enroll_first_client(EnrollFirstClientCommand::new(
+            RequestCorrelationId::new_v7(),
+            replay_proof,
+        )) {
+            Ok(_) => panic!("consumed proof must not enroll again"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), ProblemCode::BootstrapClosed);
+
+        let authentication_proof = SecretMaterial::try_from_hex(&node.initialization_proof_hex)
+            .expect("copy consumed proof for authentication");
+        assert!(node
+            .kernel
+            .authenticate_credential(AuthenticateCredentialQuery::new(
+                RequestCorrelationId::new_v7(),
+                authentication_proof,
+            ))
+            .is_err());
+
+        let connection = node
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("SQLite connection");
+        let mut statement = connection
+            .prepare("SELECT scope_key FROM grant_scopes WHERE grant_id = ?1 ORDER BY scope_key")
+            .expect("prepare scope query");
+        let scopes = statement
+            .query_map([node.grant_id.to_string()], |row| row.get::<_, String>(0))
+            .expect("query final scopes")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect final scopes");
+        assert_eq!(scopes.len(), B2_ADMIN_SCOPES.len());
+        assert!(!scopes
+            .iter()
+            .any(|scope| scope == scope_storage_key(ScopeKey::ClientEnroll)));
+        for required_scope in B2_ADMIN_SCOPES {
+            assert!(scopes
+                .iter()
+                .any(|scope| scope == scope_storage_key(*required_scope)));
         }
     }
 
