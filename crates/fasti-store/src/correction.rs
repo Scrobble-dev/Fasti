@@ -457,8 +457,7 @@ mod tests {
         IdentityPort, ObservationAcceptancePort,
     };
     use fasti_domain::{
-        ClaimedTrust, ExternalIdentifierClaim, Grain, ObservedAt, OperationId,
-        RequestCorrelationId,
+        ClaimedTrust, ExternalIdentifierClaim, Grain, ObservedAt, OperationId, RequestCorrelationId,
     };
 
     fn observed_at() -> ObservedAt {
