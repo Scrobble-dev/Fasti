@@ -30,11 +30,7 @@ impl TestNode {
             ))
             .expect("enroll first client");
         {
-            let connection = kernel
-                .inner
-                .connection
-                .lock()
-                .expect("SQLite connection");
+            let connection = kernel.inner.connection.lock().expect("SQLite connection");
             for scope in [ScopeKey::CorrectionRead, ScopeKey::CorrectionWrite] {
                 connection
                     .execute(
