@@ -71,7 +71,7 @@ impl CapabilityProblemPolicy {
 }
 
 macro_rules! define_capabilities {
-    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),)], [$($staged_problem:ident),)])),+ $(,)?) => {
+    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*], [$($staged_problem:ident),*])),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum CapabilityKey {
@@ -274,7 +274,7 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavaile, InvalidIdentifier, ValidationFailed],
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [Forbidden, IntegrityFailed, StorageUnavailable]
     ),
     (
@@ -447,7 +447,7 @@ mod tests {
         );
         assert_eq!(
             CapabilityKey::ExportWorkspace.runtime_availability(),
-            RuntimeAvaility::Guarded
+            RuntimeAvailability::Guarded
         );
     }
 
