@@ -1,8 +1,21 @@
 use rusqlite::{Connection, Result};
 
-pub(crate) const SCHEMA_VERSION: i64 = 1;
+pub(crate) const SCHEMA_VERSION: i64 = 2;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 0 {
+        migrate_v1(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 1 {
+        migrate_v2(connection)?;
+    }
+    Ok(())
+}
+
+fn migrate_v1(connection: &Connection) -> Result<()> {
     connection.execute_batch(
         r#"
         BEGIN IMMEDIATE;
@@ -215,4 +228,76 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
         "#,
     )?;
     Ok(())
+}
+
+fn migrate_v2(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE corrections (
+            correction_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            observation_id TEXT NOT NULL REFERENCES observations(observation_id),
+            prior_interpretation_id TEXT NOT NULL UNIQUE REFERENCES interpretations(interpretation_id),
+            replacement_interpretation_id TEXT NOT NULL UNIQUE REFERENCES interpretations(interpretation_id),
+            actor_client_id TEXT NOT NULL REFERENCES clients(client_id),
+            record_id TEXT REFERENCES records(record_id),
+            reason TEXT NOT NULL CHECK (length(reason) > 0 AND length(reason) <= 1024),
+            created_at TEXT NOT NULL
+        ) STRICT;
+        CREATE INDEX corrections_scope_observation_idx
+            ON corrections(workspace_id, profile_id, observation_id, created_at, correction_id);
+
+        PRAGMA user_version = 2;
+        COMMIT;
+        "#,
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_database_reaches_current_schema() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate(&connection).expect("migrate fresh database");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user version");
+        assert_eq!(version, SCHEMA_VERSION);
+        let corrections: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'corrections'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("find corrections table");
+        assert_eq!(corrections, 1);
+    }
+
+    #[test]
+    fn version_one_database_upgrades_without_replaying_base_schema() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("create version one database");
+        let before: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read version one");
+        assert_eq!(before, 1);
+
+        migrate(&connection).expect("upgrade version one database");
+        let after: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read version two");
+        assert_eq!(after, SCHEMA_VERSION);
+    }
 }
