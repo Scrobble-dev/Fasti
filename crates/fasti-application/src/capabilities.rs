@@ -71,7 +71,7 @@ impl CapabilityProblemPolicy {
 }
 
 macro_rules! define_capabilities {
-    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*], [$($staged_problem:ident),*])),+ $(,)?) => {
+    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),)], [$($staged_problem:ident),)])),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum CapabilityKey {
@@ -274,7 +274,7 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
+        [CapabilityUnavaile, InvalidIdentifier, ValidationFailed],
         [Forbidden, IntegrityFailed, StorageUnavailable]
     ),
     (
@@ -286,7 +286,13 @@ define_capabilities!(
         Scoped,
         [IdentityWrite],
         [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
-        [Forbidden, IdentityConflict, IntegrityFailed, RecordNotFound, StorageUnavailable]
+        [
+            Forbidden,
+            IdentityConflict,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         InspectReview,
@@ -330,7 +336,14 @@ define_capabilities!(
         Scoped,
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IdentityConflict, IntegrityFailed, InvalidIdentifier, RecordNotFound, ReviewNotFound, StorageUnavailable]
+        [
+            IdentityConflict,
+            IntegrityFailed,
+            InvalidIdentifier,
+            RecordNotFound,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         AppendCorrection,
@@ -434,7 +447,7 @@ mod tests {
         );
         assert_eq!(
             CapabilityKey::ExportWorkspace.runtime_availability(),
-            RuntimeAvailability::Guarded
+            RuntimeAvaility::Guarded
         );
     }
 
