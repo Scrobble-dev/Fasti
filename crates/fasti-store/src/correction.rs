@@ -7,7 +7,7 @@ use fasti_application::{
     MAX_CORRECTION_REASON_BYTES,
 };
 use fasti_domain::{CorrectionId, InterpretationId, ObservationId, OccurrenceId, RecordId};
-use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{params, Transaction, TransactionBehavior};
 
 impl CorrectionPort for SqliteKernel {
     fn append_correction(
@@ -244,55 +244,58 @@ impl CorrectionPort for SqliteKernel {
             correlation_id,
         )?;
 
-        let mut statement = map_sql(
-            transaction.prepare(
-                r#"
-                SELECT correction_id, prior_interpretation_id,
-                       replacement_interpretation_id, record_id, reason
-                FROM corrections
-                WHERE workspace_id = ?1 AND profile_id = ?2 AND observation_id = ?3
-                ORDER BY created_at, correction_id
-                LIMIT ?4
-                "#,
-            ),
-            capability,
-            correlation_id,
-        )?;
-        let rows = map_sql(
-            statement.query_map(
-                params![
-                    query.access().workspace_id().to_string(),
-                    query.access().profile_id().to_string(),
-                    query.observation_id().to_string(),
-                    i64::try_from(MAX_CORRECTION_CHAIN_PAGE + 1).unwrap_or(101)
-                ],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Option<String>>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                },
-            ),
-            capability,
-            correlation_id,
-        )?;
-        let mut corrections = Vec::new();
-        for row in rows {
-            let (correction, prior, replacement, record, reason) =
-                map_sql(row, capability, correlation_id)?;
-            corrections.push(CorrectionEntryView::new(
-                parse_id::<CorrectionId>(&correction, capability, correlation_id)?,
-                parse_id::<InterpretationId>(&prior, capability, correlation_id)?,
-                parse_id::<InterpretationId>(&replacement, capability, correlation_id)?,
-                record
-                    .map(|value| parse_id::<RecordId>(&value, capability, correlation_id))
-                    .transpose()?,
-                reason,
-            ));
-        }
+        let mut corrections = {
+            let mut statement = map_sql(
+                transaction.prepare(
+                    r#"
+                    SELECT correction_id, prior_interpretation_id,
+                           replacement_interpretation_id, record_id, reason
+                    FROM corrections
+                    WHERE workspace_id = ?1 AND profile_id = ?2 AND observation_id = ?3
+                    ORDER BY created_at, correction_id
+                    LIMIT ?4
+                    "#,
+                ),
+                capability,
+                correlation_id,
+            )?;
+            let rows = map_sql(
+                statement.query_map(
+                    params![
+                        query.access().workspace_id().to_string(),
+                        query.access().profile_id().to_string(),
+                        query.observation_id().to_string(),
+                        i64::try_from(MAX_CORRECTION_CHAIN_PAGE + 1).unwrap_or(101)
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                ),
+                capability,
+                correlation_id,
+            )?;
+            let mut corrections = Vec::new();
+            for row in rows {
+                let (correction, prior, replacement, record, reason) =
+                    map_sql(row, capability, correlation_id)?;
+                corrections.push(CorrectionEntryView::new(
+                    parse_id::<CorrectionId>(&correction, capability, correlation_id)?,
+                    parse_id::<InterpretationId>(&prior, capability, correlation_id)?,
+                    parse_id::<InterpretationId>(&replacement, capability, correlation_id)?,
+                    record
+                        .map(|value| parse_id::<RecordId>(&value, capability, correlation_id))
+                        .transpose()?,
+                    reason,
+                ));
+            }
+            corrections
+        };
         let truncated = corrections.len() > MAX_CORRECTION_CHAIN_PAGE;
         corrections.truncate(MAX_CORRECTION_CHAIN_PAGE);
         map_sql(transaction.commit(), capability, correlation_id)?;
