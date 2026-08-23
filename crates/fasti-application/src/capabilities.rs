@@ -45,8 +45,33 @@ pub enum AuthorizationKind {
     Scoped,
 }
 
+/// Problem policy for one capability.
+///
+/// Iteration exposes only the finalized public contract. Runtime validation also
+/// accepts staged failures that are implemented in the current local kernel but
+/// remain reserved until their owning contract body is activated.
+#[derive(Debug, Clone, Copy)]
+pub struct CapabilityProblemPolicy {
+    public: &'static [ProblemCode],
+    staged: &'static [ProblemCode],
+}
+
+impl CapabilityProblemPolicy {
+    const fn new(public: &'static [ProblemCode], staged: &'static [ProblemCode]) -> Self {
+        Self { public, staged }
+    }
+
+    pub fn contains(self, code: &ProblemCode) -> bool {
+        self.public.contains(code) || self.staged.contains(code)
+    }
+
+    pub fn iter(self) -> std::slice::Iter<'static, ProblemCode> {
+        self.public.iter()
+    }
+}
+
 macro_rules! define_capabilities {
-    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*])),+ $(,)?) => {
+    ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*], [$($staged_problem:ident),*])),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
         pub enum CapabilityKey {
@@ -80,8 +105,13 @@ macro_rules! define_capabilities {
                 match self { $(Self::$variant => &[$(ScopeKey::$scope),*]),+ }
             }
 
-            pub const fn allowed_problem_codes(self) -> &'static [ProblemCode] {
-                match self { $(Self::$variant => &[$(ProblemCode::$problem),*]),+ }
+            pub const fn allowed_problem_codes(self) -> CapabilityProblemPolicy {
+                match self {
+                    $(Self::$variant => CapabilityProblemPolicy::new(
+                        &[$(ProblemCode::$problem),*],
+                        &[$(ProblemCode::$staged_problem),*],
+                    )),+
+                }
             }
 
             pub const fn is_production_executable(self) -> bool {
@@ -102,6 +132,7 @@ define_capabilities!(
         Implemented,
         Unauthenticated,
         [],
+        [],
         []
     ),
     (
@@ -112,7 +143,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [CapabilityRead],
-        [Forbidden]
+        [Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         InitializeNode,
@@ -128,7 +160,8 @@ define_capabilities!(
             PayloadTooLarge,
             UnsupportedMediaType,
             ValidationFailed
-        ]
+        ],
+        [AlreadyInitialized, IntegrityFailed, StorageUnavailable]
     ),
     (
         EnrollFirstClient,
@@ -144,7 +177,8 @@ define_capabilities!(
             PayloadTooLarge,
             UnsupportedMediaType,
             ValidationFailed
-        ]
+        ],
+        [BootstrapClosed, IntegrityFailed, StorageUnavailable]
     ),
     (
         SelectProfile,
@@ -154,7 +188,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [ProfileSelect],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        [IntegrityFailed, StorageUnavailable]
     ),
     (
         RotateCredential,
@@ -164,7 +199,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [CredentialManage],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        [IntegrityFailed, StorageUnavailable]
     ),
     (
         RevokeCredential,
@@ -174,7 +210,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [CredentialManage],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         ConfigureListener,
@@ -184,7 +221,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [ListenerConfigure],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        [IntegrityFailed, StorageUnavailable, UnsupportedListener]
     ),
     (
         AcceptObservation,
@@ -203,7 +241,8 @@ define_capabilities!(
             PayloadTooLarge,
             UnsupportedMediaType,
             ValidationFailed
-        ]
+        ],
+        [EvidenceNotFound, IntegrityFailed, StorageUnavailable]
     ),
     (
         ReplayReceipt,
@@ -213,7 +252,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [ReceiptRead],
-        [Forbidden, ReceiptNotFound]
+        [Forbidden, ReceiptNotFound],
+        [IntegrityFailed, StorageUnavailable]
     ),
     (
         StreamReceipts,
@@ -223,7 +263,8 @@ define_capabilities!(
         FixtureOnly,
         Scoped,
         [ReceiptRead],
-        [Forbidden, ReceiptNotFound]
+        [Forbidden, ReceiptNotFound],
+        [CursorExpired, IntegrityFailed, StorageUnavailable]
     ),
     (
         CreateRecord,
@@ -233,7 +274,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
+        [Forbidden, IntegrityFailed, StorageUnavailable]
     ),
     (
         AttachIdentifier,
@@ -243,7 +285,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed]
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
+        [Forbidden, IdentityConflict, IntegrityFailed, RecordNotFound, StorageUnavailable]
     ),
     (
         InspectReview,
@@ -253,7 +296,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [ReviewRead],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        [IntegrityFailed, StorageUnavailable]
     ),
     (
         DeferReview,
@@ -263,7 +307,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [ReviewWrite],
-        [CapabilityUnavailable, Forbidden, ValidationFailed]
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [IntegrityFailed, ReviewNotFound, StorageUnavailable]
     ),
     (
         ResumeReview,
@@ -273,7 +318,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [ReviewWrite],
-        [CapabilityUnavailable, Forbidden, ValidationFailed]
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [IntegrityFailed, ReviewNotFound, StorageUnavailable]
     ),
     (
         ResolveReview,
@@ -283,7 +329,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [ReviewWrite],
-        [CapabilityUnavailable, Forbidden, ValidationFailed]
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [IdentityConflict, IntegrityFailed, InvalidIdentifier, RecordNotFound, ReviewNotFound, StorageUnavailable]
     ),
     (
         AppendCorrection,
@@ -293,7 +340,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [CorrectionWrite],
-        [CapabilityUnavailable, Forbidden, ValidationFailed]
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        []
     ),
     (
         InspectCorrectionChain,
@@ -303,7 +351,8 @@ define_capabilities!(
         LaterBody,
         Scoped,
         [CorrectionRead],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        []
     ),
     (
         ExportWorkspace,
@@ -313,7 +362,8 @@ define_capabilities!(
         Guarded,
         Scoped,
         [WorkspaceExport],
-        [CapabilityUnavailable, Forbidden]
+        [CapabilityUnavailable, Forbidden],
+        []
     ),
     (
         RestoreWorkspace,
@@ -323,7 +373,8 @@ define_capabilities!(
         Guarded,
         Scoped,
         [WorkspaceRestore],
-        [CapabilityUnavailable, Forbidden, ValidationFailed]
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        []
     ),
     (
         VerifyWorkspace,
@@ -333,7 +384,8 @@ define_capabilities!(
         Guarded,
         Scoped,
         [WorkspaceVerify],
-        [CapabilityUnavailable, Forbidden, ValidationFailed]
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        []
     ),
 );
 
@@ -384,5 +436,26 @@ mod tests {
             CapabilityKey::ExportWorkspace.runtime_availability(),
             RuntimeAvailability::Guarded
         );
+    }
+
+    #[test]
+    fn staged_runtime_failures_are_checked_but_not_published() {
+        let discovery = CapabilityKey::DiscoverCapabilities.allowed_problem_codes();
+        assert!(discovery.contains(&ProblemCode::AuthenticationFailed));
+        assert!(!discovery
+            .iter()
+            .any(|code| *code == ProblemCode::AuthenticationFailed));
+
+        let enrollment = CapabilityKey::EnrollFirstClient.allowed_problem_codes();
+        assert!(enrollment.contains(&ProblemCode::BootstrapClosed));
+        assert!(!enrollment
+            .iter()
+            .any(|code| *code == ProblemCode::BootstrapClosed));
+
+        let review = CapabilityKey::ResolveReview.allowed_problem_codes();
+        assert!(review.contains(&ProblemCode::ReviewNotFound));
+        assert!(!review
+            .iter()
+            .any(|code| code.contract_state() == ContractState::Reserved));
     }
 }
