@@ -4,9 +4,7 @@
 //! observation, evidence, or occurrence.
 
 use crate::{ApplicationResult, RequestAccessContext};
-use fasti_domain::{
-    CorrectionId, InterpretationId, ObservationId, RecordId, RequestCorrelationId,
-};
+use fasti_domain::{CorrectionId, InterpretationId, ObservationId, RecordId, RequestCorrelationId};
 
 pub const MAX_CORRECTION_REASON_BYTES: usize = 1024;
 pub const MAX_CORRECTION_CHAIN_PAGE: usize = 100;
