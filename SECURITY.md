@@ -10,16 +10,22 @@ Report privately through [GitHub Security Advisories](https://github.com/Scrobbl
 
 The project will acknowledge and investigate reports as maintainer availability permits, keep the reporter informed, and agree on disclosure timing where coordination is appropriate. This development-stage policy does not promise a fixed response SLA or a published patched binary.
 
-## Implemented B0 controls
+## Implemented review controls
 
 - Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value.
 - The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.
 - Planned export, restore, and verify commands exit nonzero and change no data.
-- The active B0 source contains no analytics or phone-home implementation.
+- The active source contains no analytics or phone-home implementation.
+- The B2 review kernel opens owner-only data directories and files, requires SQLite foreign keys, WAL, `synchronous=FULL`, and a bounded busy timeout, and refuses unsupported settings.
+- Node initialization and first-client enrollment are transactional. The one-time proof expires, is consumed once, and is cleared after successful enrollment. Long-lived credential material is stored as a digest rather than plaintext.
+- Credential authentication binds the selected profile, client, grant, credential epoch, and workspace. Ambiguous active grants, ungranted profiles, revoked state, and cross-workspace grants fail closed.
+- Evidence upload authorizes before temporary-file creation, enforces concurrent and byte budgets, hashes while streaming, rechecks authorization before durable promotion, and verifies existing content before deduplication.
+- Operation receipts bind workspace, client, operation, capability, and semantic digest. Replay and receipt streams remain profile/client scoped and bounded.
+- B2-only bootstrap, authentication, integrity, storage, cursor, evidence, identity, and review failures are accepted by the internal kernel policy but remain absent from finalized B1 public contract output.
 
-These controls make the development baseline honest; they do not make it a production service.
+These controls make the development baseline and B2 review implementation safer; they do not mount B2 in production or make Fasti a supported service.
 
 ## Current threat model
 
@@ -38,12 +44,11 @@ Current trust boundaries are the production loopback listener, the feature-gated
 
 The system must fail closed when authorization, durability, limits, source identity, evidence, or hardware identity is missing or stale. Missing behavior must not return a success receipt. Provider data must not become canonical identity. Secrets must not enter URLs, arguments, logs, screenshots, fixtures, or proof bundles.
 
-## Required future invariants
+## Remaining proof obligations
 
-B1-B8 must prove, rather than merely document:
+B2-B8 must still prove, rather than merely document:
 
-- atomic first-client enrollment and closed bootstrap after success;
-- separate client, credential, and grant lifecycles with rotation, revocation, recovery, expiry, current-epoch authorization, and profile isolation;
+- first-client enrollment, closed bootstrap, rotation, revocation, expiry, current-epoch authorization, and profile isolation under process-crash, restart, concurrency, and supported physical-storage tests;
 - strict body, stream, byte, temporary-space, archive, and concurrency limits before expensive work;
 - streamed evidence hashing, same-filesystem durable promotion, orphan quotas, and safe cleanup;
 - SQLite durability settings verified by readback, bounded writer transactions, receipt replay, and crash or controlled power-cut survival;
