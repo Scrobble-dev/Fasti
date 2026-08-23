@@ -1,43 +1,94 @@
 # AGENTS.md
 
-## Master integrator handoff
+## Start here
 
 Before planning or implementation, read:
 
-[`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
+1. [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
+2. [`README.md`](README.md)
+3. [`docs/constitution.md`](docs/constitution.md)
+4. [`docs/definition-of-done.md`](docs/definition-of-done.md)
+5. [`ROADMAP.md`](ROADMAP.md)
+6. [`docs/capability-ledger.md`](docs/capability-ledger.md)
+7. [`contracts/README.md`](contracts/README.md)
+8. [`SECURITY.md`](SECURITY.md)
 
-This document is the repository entry point for new integrators. It explains the product boundary, source-of-truth order, B0-B8 roadmap, architecture rules, current PR context, required evidence, and known mistakes to avoid.
+The master handoff is the onboarding map. It does not replace the detailed engineering, test, security, and design documents.
 
-## Skill routing
+## Product boundary
 
-When the user's request matches an available skill, invoke it. When in doubt, use the review or planning skill before implementation.
+Fasti records. Players play.
 
-Key routing rules:
+Do not add playback, transcoding, decoding, stream selection, or player claims.
 
-- Product ideas or brainstorming → `/office-hours`
-- Strategy or scope → `/plan-ceo-review`
-- Architecture → `/plan-eng-review`
-- Design-system or design-plan review → `/design-consultation` or `/plan-design-review`
-- Full review pipeline → `/autoplan`
-- Bugs or errors → `/investigate`
-- QA or behavior testing → `/qa` or `/qa-only`
-- Code or diff review → `/review`
-- Visual polish → `/design-review`
-- Shipping, deployment, or pull requests → `/ship` or `/land-and-deploy`
-- Save progress → `/context-save`
-- Resume context → `/context-restore`
-- Backlog-ready specification or issue → `/spec`
+Provider identifiers are evidence, not canonical identity.
 
-## Read before changing the repository
+## Architecture rules
 
-Read these surfaces before planning or implementation:
+- Domain rules own meaning.
+- Application services own capabilities and authorization.
+- Contracts project the same meaning into APIs, events, schemas, SDKs, and docs.
+- Adapters must not redefine business rules.
+- Reuse existing ownership before creating new abstractions.
+- Keep provider integrations modular.
 
-1. [`README.md`](README.md)
-2. [`docs/constitution.md`](docs/constitution.md)
-3. [`docs/definition-of-done.md`](docs/definition-of-done.md)
-4. [`ROADMAP.md`](ROADMAP.md)
-5. [`docs/capability-ledger.md`](docs/capability-ledger.md)
-6. [`contracts/README.md`](contracts/README.md)
-7. [`SECURITY.md`](SECURITY.md)
+## Contract changes
 
-The full guidance remains below this handoff entry point.
+Any capability change must consider:
+
+- OpenAPI 3.1;
+- AsyncAPI 3.x;
+- JSON Schema 2020-12;
+- JSON-LD;
+- SDK;
+- CLI;
+- permissions;
+- typed problems;
+- examples;
+- documentation.
+
+Generated files are outputs, not sources of truth.
+
+## Offline, security, and performance
+
+- Local operation must work without external services.
+- Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
+- Keep secrets out of logs, URLs, fixtures, and documentation.
+- Bound memory, files, requests, archives, and retries.
+- Validate recovery and interruption paths.
+
+Performance targets remain:
+
+- 64 MiB idle;
+- 96 MiB normal operation;
+- 160 MiB heavy operation;
+- 192 MiB absolute ceiling.
+
+Physical Pi 5 and J4125 evidence cannot be replaced by hosted runners.
+
+## QA
+
+Run applicable checks:
+
+```bash
+cargo xtask test pr
+```
+
+Also run focused checks for changed surfaces. Add regression tests for fixed defects.
+
+UI changes require design review. Headless changes should state when visual evidence is not applicable.
+
+## Review and handoff
+
+Preserve issue and PR history. Do not edit another contributor's original body.
+
+Document:
+
+- user impact;
+- contract impact;
+- offline impact;
+- security impact;
+- performance evidence;
+- accessibility impact;
+- tests;
+- rollback.
