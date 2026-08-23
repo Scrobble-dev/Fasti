@@ -58,6 +58,26 @@ impl TestNode {
         upload.finish().expect("finish evidence")
     }
 
+    pub(crate) fn add_scopes(&self, scopes: &[ScopeKey]) {
+        let connection = self
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("SQLite connection");
+        for scope in scopes {
+            connection
+                .execute(
+                    "INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key) VALUES (?1, ?2)",
+                    params![
+                        self.access.grant_id().to_string(),
+                        scope_storage_key(*scope)
+                    ],
+                )
+                .expect("add staged test scope");
+        }
+    }
+
     pub(crate) fn add_profile_with_scopes(&self, scopes: &[ScopeKey]) -> RequestAccessContext {
         let profile_id = ProfileId::new_v7();
         let grant_id = ProfileGrantId::new_v7();
