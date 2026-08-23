@@ -366,7 +366,7 @@ define_capabilities!(
         Scoped,
         [CorrectionWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        []
+        [IntegrityFailed, RecordNotFound, StorageUnavailable]
     ),
     (
         InspectCorrectionChain,
@@ -377,7 +377,7 @@ define_capabilities!(
         Scoped,
         [CorrectionRead],
         [CapabilityUnavailable, Forbidden],
-        []
+        [ValidationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         ExportWorkspace,
