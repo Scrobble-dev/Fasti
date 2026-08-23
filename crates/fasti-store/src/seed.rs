@@ -167,10 +167,8 @@ mod tests {
             .expect_err("identifier limit");
         assert_eq!(error.code(), ProblemCode::ValidationFailed);
 
-        let manifest = IdentitySeedManifest::new(
-            "x".repeat(MAX_IDENTITY_SEED_VERSION_BYTES + 1),
-            Vec::new(),
-        );
+        let manifest =
+            IdentitySeedManifest::new("x".repeat(MAX_IDENTITY_SEED_VERSION_BYTES + 1), Vec::new());
         let command = ApplyIdentitySeedCommand::new(
             RequestCorrelationId::new_v7(),
             node.access,
