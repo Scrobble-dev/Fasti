@@ -21,22 +21,44 @@ for binary in "$daemon" "$cli"; do
   fi
 done
 
-if ! unshare --user --map-root-user --net -- true 2>/dev/null; then
-  echo "This host cannot create a user+network namespace; native offline proof cannot run here" >&2
+# Pick a way into an isolated network namespace. Unprivileged user namespaces
+# work on a developer box; GitHub Actions runners restrict them, so fall back to
+# sudo, which runners have passwordless. If neither works the script FAILS
+# rather than skipping: a gate that quietly does nothing is worse than no gate.
+if unshare --user --map-root-user --net -- true 2>/dev/null; then
+  isolate=(unshare --user --map-root-user --net --)
+  privileged=0
+elif sudo -n true 2>/dev/null && sudo unshare --net -- true 2>/dev/null; then
+  isolate=(sudo unshare --net --)
+  privileged=1
+else
+  # Report what was actually tried, so the next failure explains itself instead
+  # of needing a local repro. Ubuntu 24.04 sets
+  # kernel.apparmor_restrict_unprivileged_userns=1, which is why the
+  # unprivileged route works on many developer machines and not on CI runners.
+  {
+    echo "Cannot create a network namespace by either route; native offline proof cannot run here."
+    echo "  unprivileged userns : $(unshare --user --map-root-user --net -- true 2>&1 || true)"
+    echo "  passwordless sudo   : $(sudo -n true 2>&1 && echo available || echo unavailable)"
+    echo "  apparmor restriction: $(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo unknown)"
+  } >&2
   exit 1
 fi
 
+idle_limit_mib="${FASTI_IDLE_MEMORY_LIMIT_MIB:-64}"
 work_dir="$(mktemp -d)"
-cleanup() { rm -rf "$work_dir"; }
+# Under the sudo route the daemon writes as root, so plain rm can fail.
+cleanup() { rm -rf "$work_dir" 2>/dev/null || sudo rm -rf "$work_dir" 2>/dev/null || true; }
 trap cleanup EXIT
 
 # Everything below runs inside a namespace with no interface except loopback.
 # `ip link set lo up` is required: a fresh netns has lo present but DOWN, so a
 # daemon binding 127.0.0.1 would fail for the wrong reason.
-unshare --user --map-root-user --net -- bash -euo pipefail -c '
+"${isolate[@]}" bash -euo pipefail -c '
 work_dir="$1"
 daemon="$2"
 cli="$3"
+idle_limit_mib="$4"
 
 ip link set lo up
 
@@ -106,5 +128,22 @@ if payload.get("status") != "healthy" or not payload.get("version"):
     raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
 PY
 
-echo "native offline smoke: CLI guard and daemon health both pass with no network"
-' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")"
+# Idle memory. scripts/smoke-oci.sh already holds the container path to this
+# budget; the native path was unbounded, so the readiness gate could pass with a
+# daemon over the 64 MiB idle target. Measured from /proc rather than enforced
+# with a cgroup, matching the OCI smoke, which also measures. An enforced limit
+# would change what the test proves: it would show the daemon SURVIVES a cap,
+# not what it actually uses.
+rss_kib="$(awk "/^VmRSS:/ {print \$2}" "/proc/${daemon_pid}/status")"
+if [[ -z "$rss_kib" ]]; then
+  echo "Could not read idle memory for the native daemon" >&2
+  exit 1
+fi
+rss_mib=$(( rss_kib / 1024 ))
+if (( rss_mib > idle_limit_mib )); then
+  echo "Native daemon idle memory ${rss_mib} MiB exceeds the ${idle_limit_mib} MiB budget" >&2
+  exit 1
+fi
+
+echo "native offline smoke: CLI guard, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"
