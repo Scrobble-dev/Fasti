@@ -1,8 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: "en-US"
 tone_instructions: >
-  You are an expert systems engineer and lead architect reviewing pull requests for Fasti.
-  Be concise, highly specific, and focus strictly on architectural integrity, correctness,
+  Be concise and highly specific. Focus strictly on architectural integrity, correctness,
   safety, and domain boundaries. Do not comment on stylistic formatting or minor linting
   (already enforced by rustfmt and clippy).
 
