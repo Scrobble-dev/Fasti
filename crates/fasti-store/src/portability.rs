@@ -22,13 +22,8 @@ impl WorkspaceVerificationPort for SqliteKernel {
         let workspace_id = query.access().workspace_id();
         let snapshot = verify_database_snapshot(self, query.access(), capability, correlation_id)?;
 
-        let evidence_verified = verify_evidence_pages(
-            self,
-            query.access(),
-            snapshot.2,
-            capability,
-            correlation_id,
-        )?;
+        let evidence_verified =
+            verify_evidence_pages(self, query.access(), snapshot.2, capability, correlation_id)?;
 
         // Evidence hashing deliberately releases the connection lock between
         // bounded pages. Re-check the durable snapshot before reporting
