@@ -488,6 +488,7 @@ dependencies = [
  "getrandom 0.3.4",
  "rusqlite",
  "rustix",
+ "serde",
  "serde_json",
  "sha2",
  "tar",

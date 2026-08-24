@@ -148,12 +148,19 @@ post-commit secret generation exists.
 The store migration adds only nullable `node_state.recovery_restore_attempt_id`.
 The private prepare transaction core requires absent `node_state`, empty
 authorization tables, and an exact existing workspace/profile relation. It is
-not wired to `RecoveryBootstrapPort`: the stopped-node adapter must first prove
-the matching filesystem restore marker is COMPLETE. That verifier is not yet
-implemented, so there is deliberately no runtime dispatch seam, CLI, HTTP, or
-SDK activation. Ordinary initialization retains its existing closed result for
-a restored workspace until that durable marker proof can support a distinct
-recovery-required classification.
+not wired to `RecoveryBootstrapPort`. The private Linux activation foundation
+now writes create-new `received`, `staging`, `verified`, and `activating`
+sentinels, then moves one canonical digest-bound marker with the verified
+staging directory by no-replace rename. It writes the create-new `complete`
+sentinel only after the data-root parent sync. A descriptor-rooted verifier can
+finish the single post-rename/pre-complete crash state and can bind a COMPLETE
+marker to one restore attempt and workspace without opening an unverified
+database. Strict import, pre-rename rejection cleanup, composition with the
+private recovery transactions, and runtime dispatch are still absent. There is
+deliberately no CLI, HTTP, SDK, or public capability activation. Ordinary
+initialization retains its existing closed result for a restored workspace
+until that complete composition supports a distinct recovery-required
+classification.
 
 The store predecessor for final archive assembly keeps the frozen entity SQL
 and row codec in one place. It can stream exactly one plain NDJSON entity from
@@ -175,12 +182,16 @@ surface.
 The internal online assembler now combines those primitives without activating
 the public two-mode port. It preflights the destination for the conservative
 uncompressed archive plus cleanup reserve, and separately admits scratch space
-for one bounded snapshot plus one stream file. It releases the live snapshot
-connection before archive generation, reauthorizes at bounded disclosure
-points, opens evidence from the locked data-root descriptor on Linux, validates
-the same opened inode while copying, and keeps the destination under an abort
-guard until consuming completion succeeds. Public activation remains blocked
-on the distinct stopped-node export and clean-restore paths.
+for one bounded snapshot plus one stream file while reserving the configured
+WAL-growth allowance on the shared filesystem. An owner lock protects every
+active attempt; the next exporter reclaims crash-stale plaintext attempts
+before admission, and success performs fallible cleanup before publication. It
+releases the live snapshot connection before archive generation, reauthorizes
+at bounded disclosure points and once more after final flush, opens evidence
+from the locked data-root descriptor on Linux, validates the same opened inode
+while copying, and keeps the destination under an abort guard until consuming
+completion succeeds. Public activation remains blocked on the distinct
+stopped-node export and clean-restore paths.
 
 ## Consequences
 

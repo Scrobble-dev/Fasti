@@ -11,6 +11,7 @@ mod observation;
 mod online_archive;
 mod portability;
 mod restore;
+mod restore_activation;
 mod review;
 mod schema;
 mod seed;

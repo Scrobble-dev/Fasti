@@ -60,6 +60,8 @@ pub enum ArchiveError {
     DestinationExists,
     #[error("activation crossed a filesystem boundary")]
     CrossFilesystemActivation,
+    #[error("activation path is not a regular file")]
+    UnsafeActivationFile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -623,7 +625,7 @@ pub fn create_staging_attempt(
 }
 
 #[cfg(target_os = "linux")]
-fn open_private_directory(parent: &File, name: &str) -> Result<File, ArchiveError> {
+pub(crate) fn open_private_directory(parent: &File, name: &str) -> Result<File, ArchiveError> {
     let fd = rustix::fs::openat2(
         parent,
         name,
@@ -642,6 +644,11 @@ fn open_private_directory(parent: &File, name: &str) -> Result<File, ArchiveErro
     rustix::fs::fchmod(&directory, rustix::fs::Mode::from_raw_mode(0o700))
         .map_err(errno_to_archive_error)?;
     Ok(directory)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn open_private_directory(_parent: &File, _name: &str) -> Result<File, ArchiveError> {
+    Err(ArchiveError::UnsupportedPlatform)
 }
 
 /// Creates a new owner-only regular file beneath an already-open data root.
@@ -667,6 +674,35 @@ pub fn open_new_file_beneath(root: &File, relative: &Path) -> Result<File, Archi
     )
     .map_err(errno_to_archive_error)?;
     Ok(File::from(fd))
+}
+
+/// Opens one existing regular file beneath an already-open private directory.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)] // consumed by the private restore activation coordinator
+pub(crate) fn open_existing_file_beneath(
+    root: &File,
+    relative: &Path,
+) -> Result<File, ArchiveError> {
+    let relative = relative
+        .to_str()
+        .ok_or(ArchiveError::UnsafeActivationName)?;
+    validate_canonical_path(relative).map_err(|_| ArchiveError::UnsafeActivationName)?;
+    let fd = rustix::fs::openat2(
+        root,
+        relative,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(errno_to_archive_error)?;
+    let file = File::from(fd);
+    if !file.metadata()?.is_file() {
+        return Err(ArchiveError::UnsafeActivationFile);
+    }
+    Ok(file)
 }
 
 /// Atomically moves one child between opened parents without replacing a live
@@ -710,6 +746,15 @@ fn errno_to_archive_error(error: rustix::io::Errno) -> ArchiveError {
 
 #[cfg(not(target_os = "linux"))]
 pub fn open_new_file_beneath(_root: &File, _relative: &Path) -> Result<File, ArchiveError> {
+    Err(ArchiveError::UnsupportedPlatform)
+}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)] // consumed by the private restore activation coordinator
+pub(crate) fn open_existing_file_beneath(
+    _root: &File,
+    _relative: &Path,
+) -> Result<File, ArchiveError> {
     Err(ArchiveError::UnsupportedPlatform)
 }
 
