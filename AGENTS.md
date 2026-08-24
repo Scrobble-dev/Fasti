@@ -2,9 +2,14 @@
 
 ## Start here
 
-Before changing code, read [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md).
+Before changing code, read these files in order:
 
-The handoff defines the current product boundary, source-of-truth order, B0-B8 programme state, architecture and security invariants, required evidence, and the first 48-hour onboarding sequence for a new implementation harness.
+1. [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
+2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md)
+
+The master handoff defines the durable product boundary, source-of-truth order, architecture and security invariants, programme model, required evidence, and first 48-hour onboarding sequence.
+
+The dated context save records the active pull-request topology, current B0-B8 disposition, known evidence gaps, exact continuation order, relationships, and required handoff output for a new harness with no access to prior chat or local gstack state.
 
 Then inspect the current repository state, active pull requests, exact-head checks, and controlling plans. A dated handoff never overrides newer source or evidence.
 
