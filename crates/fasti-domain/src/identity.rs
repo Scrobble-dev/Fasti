@@ -60,12 +60,30 @@ pub enum ExternalIdentifierError {
 /// It is never a Fasti Record identity. Namespace normalization is limited to
 /// an ASCII lowercase key. The identifier value is trimmed but otherwise kept
 /// exact because providers do not share one case or punctuation policy.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ExternalIdentifierClaim {
     namespace: String,
     grain: Grain,
     value: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExternalIdentifierClaimRaw {
+    namespace: String,
+    grain: Grain,
+    value: String,
+}
+
+impl<'de> Deserialize<'de> for ExternalIdentifierClaim {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = ExternalIdentifierClaimRaw::deserialize(deserializer)?;
+        ExternalIdentifierClaim::try_new(raw.namespace, raw.grain, raw.value)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl ExternalIdentifierClaim {

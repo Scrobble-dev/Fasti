@@ -25,7 +25,7 @@ authored capability registry
 
 Dependencies point inward. Domain meaning is owned once and projected outward; HTTP, CLI, SDK, provider, storage, and later presentation types cannot become domain primitives. The retired `fasti-core`, `fasti-activity`, and `fasti-auth` scaffolds are not compatibility layers. Their raw IDs, collapsed activity envelope, caller-controlled server times, and token claims were not proven domain primitives.
 
-`fasti-store` is intentionally empty until B2 implements and proves the local kernel. Production `fastid` mounts only `GET /api/v1/health`, and its generated OpenAPI document contains only that route. B1’s separate conformance server is compile-time feature-gated, binds only to IPv4 loopback, holds bounded data in memory, and labels every success as fixture-only with no durability. It exercises the frozen contract without claiming durable observation acceptance, production access control, identity resolution, export, restore, or replication.
+`fasti-store` implements the B2 local kernel but is not mounted in production. The production `fastid` binary does not depend on `fasti-store`, and `api_router()` mounts only `GET /api/v1/health`; its generated OpenAPI document contains only that route. B1's separate conformance server is compile-time feature-gated behind `conformance-fixture`, binds only to IPv4 loopback, holds bounded data in memory, and labels every success as fixture-only with no durability. It exercises the frozen contract without claiming durable observation acceptance, production access control, identity resolution, export, restore, or replication.
 
 ## Target bounded contexts
 

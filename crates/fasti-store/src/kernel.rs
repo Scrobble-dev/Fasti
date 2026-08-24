@@ -324,9 +324,12 @@ pub(crate) fn load_access_snapshot(
                     pg.status,
                     c.current_credential_epoch
                 FROM credentials cr
-                JOIN clients c ON c.client_id = cr.client_id
+                JOIN clients c
+                  ON c.client_id = cr.client_id
+                 AND c.workspace_id = cr.workspace_id
                 JOIN profile_grants pg
                   ON pg.client_id = cr.client_id
+                 AND pg.workspace_id = cr.workspace_id
                  AND pg.grant_id = ?2
                 WHERE cr.credential_id = ?1
                 "#,

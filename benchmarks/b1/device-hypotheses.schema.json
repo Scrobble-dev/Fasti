@@ -398,6 +398,26 @@
             "properties": { "spike": { "$ref": "#/$defs/packagingSpike" } }
           },
           "else": { "properties": { "spike": { "type": "null" } } }
+        },
+        {
+          "if": {
+            "properties": { "qualification_state": { "const": "qualified" } },
+            "required": ["qualification_state"]
+          },
+          "then": {
+            "properties": {
+              "runner_fingerprint": {
+                "$ref": "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json#/$defs/runner"
+              },
+              "artifact_ref": { "$ref": "#/$defs/artifactRef" },
+              "contract_ref": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              },
+              "evidence_ref": { "$ref": "#/$defs/evidenceRef" },
+              "results": { "$ref": "#/$defs/results" }
+            }
+          }
         }
       ]
     }

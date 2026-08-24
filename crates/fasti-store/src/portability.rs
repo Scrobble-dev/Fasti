@@ -7,6 +7,7 @@ use fasti_application::{
 };
 use rusqlite::{params, Transaction, TransactionBehavior};
 use std::fs::File;
+use std::io::Read;
 
 const EVIDENCE_VERIFY_PAGE: i64 = 128;
 type EvidenceRow = (i64, String, i64, String);
@@ -364,14 +365,15 @@ fn verify_evidence_file(
     if path_to_storage_value(&expected_relative) != stored_path {
         return integrity_failure(capability, correlation_id);
     }
+    let expected_size = u64::try_from(size_bytes)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let path = kernel.inner.current_root.join(&expected_relative);
     reject_unsafe_existing_file(&path)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let file = File::open(&path)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let (actual_digest, actual_size) = sha256_reader(file)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let expected_size = u64::try_from(size_bytes)
+    let bounded_reader = file.take(expected_size.saturating_add(1));
+    let (actual_digest, actual_size) = sha256_reader(bounded_reader)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     if encode_hex(&actual_digest) != digest_hex || actual_size != expected_size {
         return integrity_failure(capability, correlation_id);
