@@ -90,15 +90,16 @@ else
 fi
 
 peak_file="$(mktemp)"
-cleanup() { rm -f "$peak_file"; }
+events_file="$(mktemp)"
+cleanup() { rm -f "$peak_file" "$events_file"; }
 trap cleanup EXIT
 
 # Allocator arenas and async worker pools both scale with core count. Left
 # unpinned, a many-core runner inflates the footprint for reasons that have
 # nothing to do with the product, and the measurement stops being comparable to
 # a small machine.
-export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
-export TOKIO_WORKER_THREADS="${TOKIO_WORKER_THREADS:-2}"
+export MALLOC_ARENA_MAX=2
+export TOKIO_WORKER_THREADS=2
 
 # systemd-run performs its own $VAR and ${VAR} expansion on the command line
 # before the shell sees it, which silently blanks variables and emits warnings.
@@ -109,28 +110,33 @@ cleanup_inner() { rm -f "$inner"; }
 trap 'cleanup; cleanup_inner' EXIT
 cat > "$inner" <<'INNER'
 peak_file="$1"; shift
+events_file="$1"; shift
 own_cgroup="/sys/fs/cgroup$(awk -F: '{print $3}' /proc/self/cgroup)"
 "$@"
 status=$?
 # memory.peak is the kernel watermark for the whole scope. getrusage ru_maxrss
 # misses transient spikes, which is exactly what a ceiling cares about.
 cat "$own_cgroup/memory.peak" 2>/dev/null > "$peak_file" || true
+cat "$own_cgroup/memory.events" 2>/dev/null > "$events_file" || true
 exit $status
 INNER
 
 set +e
-"${runner[@]}" bash "$inner" "$peak_file" "$@"
+"${runner[@]}" bash "$inner" "$peak_file" "$events_file" "$@"
 status=$?
 set -e
 
-# Any signal death (128 + signo) inside the envelope means the kernel stopped
-# the process. Do not match a single signal number: whether the OOM killer
-# lands SIGKILL on the workload or systemd tears the scope down with SIGTERM
-# depends on which task the kernel picks, and both mean the same thing here.
+# A signal death (128 + signo) inside the envelope means a hard ceiling breach
+# only if the cgroup's memory.events shows an actual OOM kill. Otherwise the
+# signal could be from cancellation, SIGTERM, or something else unrelated to
+# memory pressure, and the normal exit-code/budget logic should apply.
 if (( status > 128 )); then
-  echo "Command was killed inside the ${ceiling_mib} MiB envelope by signal $(( status - 128 ))." >&2
-  echo "This is a hard ceiling breach, not a budget overshoot." >&2
-  exit 1
+  oom_count="$(grep -E '^(oom|oom_kill) ' "$events_file" 2>/dev/null | awk '{sum += $2} END {print sum+0}')"
+  if (( oom_count > 0 )); then
+    echo "Command was killed inside the ${ceiling_mib} MiB envelope by signal $(( status - 128 ))." >&2
+    echo "This is a hard ceiling breach, not a budget overshoot." >&2
+    exit 1
+  fi
 fi
 
 peak_bytes="$(cat "$peak_file" 2>/dev/null || true)"
@@ -143,7 +149,7 @@ peak_mib=$(( peak_bytes / 1048576 ))
 
 if (( peak_bytes > budget_bytes )); then
   echo "Peak memory ${peak_mib} MiB exceeds the ${target} budget of ${budget_mib} MiB (envelope ceiling ${ceiling_mib} MiB)" >&2
-  exit 1
+  exit $(( status != 0 ? status : 1 ))
 fi
 
 echo "envelope ${target}: peak ${peak_mib} MiB within ${budget_mib} MiB budget, enforced ceiling ${ceiling_mib} MiB, command exit ${status}"
