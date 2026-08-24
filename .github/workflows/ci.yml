@@ -144,7 +144,11 @@ jobs:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
       - name: Generate Rust coverage
-        run: cargo llvm-cov --workspace --locked --lcov --output-path coverage/rust-lcov.info
+        # cargo llvm-cov does not create the parent directory for --output-path.
+        # The JS coverage step creates it, but runs after this one.
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --locked --lcov --output-path coverage/rust-lcov.info
       - name: Generate JavaScript coverage
         run: pnpm run test:coverage
       - name: Upload coverage to Codecov
