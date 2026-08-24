@@ -1975,9 +1975,10 @@ mod tests {
         AppendCorrectionCommand, CancellationSignal, CompleteRecoveryBootstrapRequest,
         CorrectionPort, CorrectionTarget, CreateRecordCommand, ExportWorkspaceQuery,
         ExportWorkspaceRequest, IdentityPort, ObservationAcceptancePort,
-        PrepareRecoveryBootstrapRequest, RegisterNamespaceDefinitionCommand, ResolveReviewCommand,
-        RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial,
-        WorkspaceArchiveDestination, WorkspaceManifest, WorkspaceStreamDescriptor,
+        PrepareRecoveryBootstrapRequest, RecoveryBootstrapPort, RegisterNamespaceDefinitionCommand,
+        ResolveReviewCommand, RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget,
+        ScopeKey, SecretMaterial, WorkspaceArchiveDestination, WorkspaceManifest,
+        WorkspaceRestorePort, WorkspaceStreamDescriptor,
     };
     use fasti_contracts::CanonicalWorkspaceManifestProjection;
     use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
@@ -2604,9 +2605,10 @@ mod tests {
         let workspace_id = fixture.node.access.workspace_id();
         let archive = fixture.archive;
         let restore_root = tempfile::tempdir().expect("restore root");
+        let adapter = crate::StoppedNodePortabilityAdapter::new(restore_root.path());
         let attempt_id = RestoreAttemptId::new_v7();
-        let outcome = crate::restore_coordinator::restore_clean_workspace(
-            restore_root.path(),
+        let outcome = WorkspaceRestorePort::restore_workspace(
+            &adapter,
             RestoreWorkspaceRequest::new(
                 attempt_id,
                 RequestCorrelationId::new_v7(),
@@ -2619,8 +2621,8 @@ mod tests {
         assert_eq!(outcome.restore_attempt_id(), attempt_id);
         assert_eq!(outcome.workspace_id(), workspace_id);
 
-        let refused = crate::restore_coordinator::restore_clean_workspace(
-            restore_root.path(),
+        let refused = WorkspaceRestorePort::restore_workspace(
+            &adapter,
             RestoreWorkspaceRequest::new(
                 RestoreAttemptId::new_v7(),
                 RequestCorrelationId::new_v7(),
@@ -2688,8 +2690,9 @@ mod tests {
         drop(connection);
         drop(kernel);
 
-        let prepared = crate::recovery_coordinator::prepare_recovery_bootstrap(
-            restore_root.path(),
+        let adapter = crate::StoppedNodePortabilityAdapter::new(restore_root.path());
+        let prepared = RecoveryBootstrapPort::prepare_recovery_bootstrap(
+            &adapter,
             PrepareRecoveryBootstrapRequest::new(
                 attempt_id,
                 RequestCorrelationId::new_v7(),
@@ -2700,8 +2703,8 @@ mod tests {
         )
         .expect("prepare recovery bootstrap after COMPLETE proof");
         let proof = SecretMaterial::from_bytes(*prepared.initialization_proof().expose_bytes());
-        let completed = crate::recovery_coordinator::complete_recovery_bootstrap(
-            restore_root.path(),
+        let completed = RecoveryBootstrapPort::complete_recovery_bootstrap(
+            &adapter,
             CompleteRecoveryBootstrapRequest::new(
                 attempt_id,
                 RequestCorrelationId::new_v7(),

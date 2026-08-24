@@ -1,8 +1,7 @@
-//! Internal production of the staged B3 `.fasti` archive.
+//! Store production of the staged B3 `.fasti` archive.
 //!
-//! This module intentionally does not implement the complete public archive
-//! port. Online and stopped-node production remain crate-private so a later
-//! coordinated adapter must activate both modes together.
+//! The live kernel owns online export. A distinct stopped-node adapter owns
+//! offline export so neither mode can resolve paths through the wrong owner.
 
 use crate::archive::{ArchiveError, ArchiveLimits, ArchiveWriter};
 use crate::crypto::encode_hex;
@@ -17,8 +16,8 @@ use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceRequest, FastiProblem,
     PortabilityFailureReceipt, PortabilityLimits, PortabilityResult, ProblemCode,
     StoppedNodeExportRequest, WorkspaceArchiveDestination, WorkspaceArchiveExportOutcome,
-    WorkspaceExportEntity, WorkspaceManifest, MAX_PORTABLE_JSON_INTEGER,
-    WORKSPACE_ARCHIVE_CONTRACT_VERSION,
+    WorkspaceArchiveExportPort, WorkspaceExportEntity, WorkspaceManifest,
+    MAX_PORTABLE_JSON_INTEGER, WORKSPACE_ARCHIVE_CONTRACT_VERSION,
 };
 use fasti_contracts::CanonicalWorkspaceManifestProjection;
 use fasti_domain::{RequestCorrelationId, Sha256Digest, ARCHIVE_MAX_IO_CHUNK_BYTES};
@@ -39,13 +38,13 @@ use std::time::Duration;
 
 const SQLITE_MINIMUM_PAGE_BYTES: u64 = 512;
 
-/// Produce one complete online archive without activating the two-mode port.
+/// Produce one complete online archive.
 ///
 /// The destination remains guarded until its consuming `complete` call begins.
-/// Any earlier return drops the guard and invokes `abort`. Because `complete`
-/// consumes the destination, its implementation owns removal of its partial
-/// artifact if publication fails.
-#[allow(dead_code)] // consumed by the later coordinated online/stopped-node adapter
+/// Any earlier failure explicitly invokes `abort` and replaces the failure with
+/// `storage_unavailable` if cleanup fails. Because `complete` consumes the
+/// destination, its implementation owns removal of its partial artifact if
+/// publication fails.
 pub(crate) fn export_online_workspace_archive(
     kernel: &SqliteKernel,
     request: ExportWorkspaceRequest,
@@ -61,8 +60,10 @@ pub(crate) fn export_online_workspace_archive(
             let workspace_id = projection.application_manifest().workspace_id();
             let workspace_revision = projection.application_manifest().workspace_revision();
             let manifest_digest = projection.manifest_digest().clone();
-            monitor_export(kernel, &request, true)
-                .map_err(|problem| online_receipt(&request, problem))?;
+            if let Err(problem) = monitor_export(kernel, &request, true) {
+                let problem = destination.abort_problem(problem, correlation_id);
+                return Err(online_receipt(&request, problem));
+            }
             destination
                 .complete(&archive_digest, &manifest_digest)
                 .map_err(|_| {
@@ -82,15 +83,47 @@ pub(crate) fn export_online_workspace_archive(
                 archive_digest,
             ))
         }
-        Err(problem) => Err(online_receipt(&request, problem)),
+        Err(problem) => {
+            let problem = destination.abort_problem(problem, correlation_id);
+            Err(online_receipt(&request, problem))
+        }
     }
 }
 
-/// Produce one complete stopped-node archive without activating a public port.
+impl WorkspaceArchiveExportPort for SqliteKernel {
+    fn export_workspace_archive(
+        &self,
+        request: ExportWorkspaceRequest,
+        destination: Box<dyn WorkspaceArchiveDestination>,
+    ) -> PortabilityResult<WorkspaceArchiveExportOutcome> {
+        export_online_workspace_archive(self, request, destination)
+    }
+
+    fn export_stopped_node_workspace_archive(
+        &self,
+        request: StoppedNodeExportRequest,
+        destination: Box<dyn WorkspaceArchiveDestination>,
+    ) -> PortabilityResult<WorkspaceArchiveExportOutcome> {
+        let correlation_id = request.query().correlation_id();
+        let problem = if destination.abort().is_ok() {
+            Box::new(FastiProblem::data_root_locked(
+                CapabilityKey::ExportWorkspace,
+                correlation_id,
+            ))
+        } else {
+            Box::new(FastiProblem::storage_unavailable(
+                CapabilityKey::ExportWorkspace,
+                correlation_id,
+            ))
+        };
+        Err(stopped_receipt(&request, problem))
+    }
+}
+
+/// Produce one complete stopped-node archive for the stopped-node adapter.
 ///
 /// This seam owns the shared data-root lock for the complete operation. It is
-/// intentionally crate-private until the coordinated two-mode adapter exists.
-#[allow(dead_code)] // consumed by the later coordinated online/stopped-node adapter
+/// crate-private so callers cannot bypass the adapter's ownership split.
 pub(crate) fn export_stopped_node_workspace_archive(
     data_root: impl AsRef<Path>,
     request: StoppedNodeExportRequest,
@@ -100,15 +133,20 @@ pub(crate) fn export_stopped_node_workspace_archive(
     #[cfg(not(target_os = "linux"))]
     {
         let _ = data_root;
-        return Err(stopped_receipt(
-            &request,
-            unsupported_platform_problem(request.query().correlation_id()),
-        ));
+        let correlation_id = request.query().correlation_id();
+        let problem =
+            destination.abort_problem(unsupported_platform_problem(correlation_id), correlation_id);
+        return Err(stopped_receipt(&request, problem));
     }
     #[cfg(target_os = "linux")]
     {
-        build_stopped_node_archive(data_root.as_ref(), &request, &mut destination)
-            .map_err(|problem| stopped_receipt(&request, problem))
+        match build_stopped_node_archive(data_root.as_ref(), &request, &mut destination) {
+            Ok(outcome) => Ok(outcome),
+            Err(problem) => {
+                let problem = destination.abort_problem(problem, request.query().correlation_id());
+                Err(stopped_receipt(&request, problem))
+            }
+        }
     }
 }
 
@@ -1132,6 +1170,22 @@ impl DestinationGuard {
             .ok_or_else(|| io::Error::other("archive destination is no longer available"))?
             .complete(archive_digest, manifest_digest)
     }
+
+    fn abort_problem(
+        &mut self,
+        problem: Box<FastiProblem>,
+        correlation_id: RequestCorrelationId,
+    ) -> Box<FastiProblem> {
+        if self
+            .destination
+            .take()
+            .is_some_and(|destination| destination.abort().is_err())
+        {
+            storage_failure(correlation_id)
+        } else {
+            problem
+        }
+    }
 }
 
 impl Write for DestinationGuard {
@@ -1601,7 +1655,7 @@ fn map_archive_error(
     }
 }
 
-fn online_receipt(
+pub(crate) fn online_receipt(
     request: &ExportWorkspaceRequest,
     problem: Box<FastiProblem>,
 ) -> PortabilityFailureReceipt {
@@ -1609,7 +1663,7 @@ fn online_receipt(
         .expect("online archive failures always name ExportWorkspace")
 }
 
-fn stopped_receipt(
+pub(crate) fn stopped_receipt(
     request: &StoppedNodeExportRequest,
     problem: Box<FastiProblem>,
 ) -> PortabilityFailureReceipt {
@@ -1687,6 +1741,7 @@ mod tests {
         preflight_action: Mutex<Option<Box<dyn FnOnce() + Send>>>,
         write_action: Option<Box<dyn FnOnce() + Send>>,
         flush_action: Option<Box<dyn FnOnce() + Send>>,
+        abort_fails: bool,
     }
 
     struct CleanupOnFailedCompleteDestination {
@@ -1755,6 +1810,7 @@ mod tests {
                 preflight_action: Mutex::new(None),
                 write_action: None,
                 flush_action: None,
+                abort_fails: false,
             }
         }
 
@@ -1770,6 +1826,11 @@ mod tests {
 
         fn on_flush(mut self, action: impl FnOnce() + Send + 'static) -> Self {
             self.flush_action = Some(Box::new(action));
+            self
+        }
+
+        fn with_failed_abort(mut self) -> Self {
+            self.abort_fails = true;
             self
         }
     }
@@ -1821,7 +1882,11 @@ mod tests {
 
         fn abort(self: Box<Self>) -> io::Result<()> {
             self.state.lock().expect("destination state").aborted = true;
-            Ok(())
+            if self.abort_fails {
+                Err(io::Error::other("simulated abort failure"))
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -2101,6 +2166,26 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn live_archive_port_aborts_stopped_mode_without_resolving_its_path() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+        let failure = WorkspaceArchiveExportPort::export_stopped_node_workspace_archive(
+            &node.kernel,
+            stopped_request(node.access, CancellationSignal::new(), limits()),
+            Box::new(TestDestination::new(Arc::clone(&state))),
+        )
+        .expect_err("live port cannot run stopped-node export");
+
+        assert_eq!(failure.problem().code(), ProblemCode::DataRootLocked);
+        let state = state.lock().expect("destination state");
+        assert!(state.aborted);
+        assert!(!state.completed);
+        assert!(state.bytes.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn stopped_node_cancellation_aborts_partial_output_and_cleans_scratch() {
         let node = TestNode::new();
         grant_export(&node);
@@ -2210,6 +2295,77 @@ mod tests {
         assert!(!state.completed);
         assert!(!state.bytes.is_empty());
         drop(state);
+        assert_scratch_path_clean(&current);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn failed_abort_masks_prepublication_failure_in_both_export_modes() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let online_state = Arc::new(Mutex::new(DestinationState::default()));
+        let kernel = node.kernel.clone();
+        let grant_id = node.access.grant_id().to_string();
+        let online_destination = TestDestination::new(Arc::clone(&online_state))
+            .on_flush(move || {
+                kernel
+                    .inner
+                    .connection
+                    .lock()
+                    .expect("SQLite connection")
+                    .execute(
+                        "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = ?2",
+                        params![grant_id, scope_storage_key(ScopeKey::WorkspaceExport)],
+                    )
+                    .expect("revoke online export scope before publication");
+            })
+            .with_failed_abort();
+        let online_failure = export(&node, online_destination)
+            .expect_err("failed online abort must replace the prior failure");
+        assert_eq!(
+            online_failure.problem().code(),
+            ProblemCode::StorageUnavailable
+        );
+        let online_state = online_state.lock().expect("online destination state");
+        assert!(online_state.aborted);
+        assert!(!online_state.completed);
+        assert!(!online_state.bytes.is_empty());
+        drop(online_state);
+        assert_scratch_clean(&node);
+
+        let node = TestNode::new();
+        grant_export(&node);
+        let (root, access) = node.into_stopped();
+        let current = root.path().join("current");
+        let database = current.join("fasti.sqlite3");
+        let grant_id = access.grant_id().to_string();
+        let stopped_state = Arc::new(Mutex::new(DestinationState::default()));
+        let stopped_destination = TestDestination::new(Arc::clone(&stopped_state))
+            .on_flush(move || {
+                Connection::open(&database)
+                    .expect("stopped database writer")
+                    .execute(
+                        "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = ?2",
+                        params![grant_id, scope_storage_key(ScopeKey::WorkspaceExport)],
+                    )
+                    .expect("revoke stopped export scope before publication");
+            })
+            .with_failed_abort();
+        let stopped_failure = export_stopped_node_workspace_archive(
+            root.path(),
+            stopped_request(access, CancellationSignal::new(), limits()),
+            Box::new(stopped_destination),
+        )
+        .expect_err("failed stopped abort must replace the prior failure");
+        assert_eq!(
+            stopped_failure.problem().code(),
+            ProblemCode::StorageUnavailable
+        );
+        let stopped_state = stopped_state.lock().expect("stopped destination state");
+        assert!(stopped_state.aborted);
+        assert!(!stopped_state.completed);
+        assert!(!stopped_state.bytes.is_empty());
+        drop(stopped_state);
         assert_scratch_path_clean(&current);
     }
 

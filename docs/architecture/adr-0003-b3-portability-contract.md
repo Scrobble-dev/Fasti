@@ -94,9 +94,9 @@ Only after those checks does it set the exact manifest revision and commit.
 The staged database contains portable client shells but no `node_state`,
 credentials, grants, scopes, or initialization proof. Staging cleanup follows
 retained directory descriptors, reports cleanup failure, and never writes a
-COMPLETE marker or renames the attempt to `current`. Marker creation, atomic
-activation, recovery dispatch, and public adapter wiring remain separate
-gated slices.
+COMPLETE marker or renames the attempt to `current`; the activation coordinator
+owns those later steps. Runtime, CLI, HTTP, SDK, and capability-registry
+activation remain separate gated slices.
 
 Operating-system paths, archive headers, lock handles, compression objects,
 temporary filenames, staging directories, synchronization calls, and atomic
@@ -182,11 +182,13 @@ data-root descriptor rather than the replaceable configured path.
 
 Private recovery composition verifies the full COMPLETE marker before and
 after opening the activated database, then calls the prepare or completion
-transaction. These seams are not wired to `WorkspaceRestorePort` or
-`RecoveryBootstrapPort`. There is deliberately no CLI, HTTP, SDK, or public
-capability activation. Ordinary initialization retains its existing closed
-result for a restored workspace until runtime dispatch supports a distinct
-recovery-required classification.
+transaction. `SqliteKernel` implements only live archive export. A distinct
+stopped-node adapter implements stopped export, clean restore, and recovery;
+wrong-mode calls abort their destination and return typed failures without
+re-resolving a live kernel path. There is deliberately no CLI, HTTP, SDK, or
+public capability activation. Ordinary initialization retains its existing
+closed result for a restored workspace until runtime dispatch supports a
+distinct recovery-required classification.
 
 The store predecessor for final archive assembly keeps the frozen entity SQL
 and row codec in one place. It can stream exactly one plain NDJSON entity from
@@ -206,7 +208,7 @@ not create the tar stream, publish a destination, or activate a public export
 surface.
 
 The internal archive assembler now combines those primitives without activating
-the public two-mode port. Online export preflights the destination for the
+runtime or public discovery. Online export preflights the destination for the
 conservative uncompressed archive plus cleanup reserve, and separately admits
 scratch space for one bounded snapshot plus one stream file while reserving the
 configured WAL-growth allowance on the shared filesystem. Stopped-node export
@@ -220,9 +222,8 @@ export releases the live snapshot connection before archive generation. Both
 modes reauthorize at bounded disclosure points and once more after final flush,
 open evidence from the locked data-root descriptor on Linux, validate the same
 opened inode while copying, and keep the destination under an abort guard until
-consuming completion succeeds. These store seams remain crate-private. Public
-activation remains blocked on the coordinated two-mode adapter and clean-restore
-path.
+consuming completion succeeds. The orchestration seams remain crate-private
+behind the two ownership-specific store port implementations.
 
 ## Consequences
 

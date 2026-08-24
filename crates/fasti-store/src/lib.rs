@@ -19,9 +19,11 @@ mod review;
 mod schema;
 mod seed;
 mod snapshot;
+mod stopped_portability;
 #[cfg(test)]
 mod test_support;
 
 pub use kernel::{LockedDataRoot, SqliteKernel, StoreOpenError};
 pub use portability::map_offline_verify_open_error;
 pub use snapshot::{SnapshotError, SnapshotLimits, SnapshotMetadata, SnapshotProgress};
+pub use stopped_portability::StoppedNodePortabilityAdapter;
