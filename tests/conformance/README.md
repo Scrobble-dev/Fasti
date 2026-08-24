@@ -52,3 +52,62 @@ node scripts/validate-okf-uat.mjs
 The check enforces header, row count, complete ordered ID set, controlled vocabularies for category, phase, risk, and automation class, and non-empty persona, precondition, action, expected result, and source basis on every identity row.
 
 The `conformance.yml` workflow validates draft schema shape and YAML syntax. Full OpenAPI, AsyncAPI, JSON-LD, OKF, generated SDK, and semantic mutation gates run from B1.
+
+## B6 neutral source conformance
+
+Lives in [`crates/fasti-application/tests/b6_client_conformance.rs`](../../crates/fasti-application/tests/b6_client_conformance.rs), not in this directory, because it is an executable suite rather than a matrix.
+
+### What it proves, and why it is not what B6 sounds like
+
+The public acceptance contract carries an opaque evidence digest, not source structure:
+
+```rust
+// crates/fasti-contracts/src/conformance.rs
+pub struct AcceptObservationRequest {
+    pub operation_id: String,
+    pub occurred_at: Option<OccurredTimeDto>,
+    pub observed_at: ObservedTimeDto,
+    pub evidence: EvidenceReferenceDto,
+}
+```
+
+There is no `media`, `source`, or `progress` field. A batch importer and a live player send byte-identical request shapes, so the contract is source-neutral **by construction**. Pushing several source payloads through it proves nothing: every payload takes one code path.
+
+What can diverge between client shapes is behavior. The suite models four archetypes with different operational patterns and asserts they share one outcome table:
+
+| Archetype           | Operational pattern                                                          |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `batch_importer`    | Historical backfill, `SourceClaim` time, deterministic operation ids         |
+| `live_player`       | High-frequency heartbeats, `DeviceObserved` time, reconnect burst redelivery |
+| `browser_extension` | Ephemeral, no durable device identity, cross-tab duplicate submission        |
+| `polling_sync`      | Periodic diff pulls with overlapping windows, `Inferred` time                |
+
+Outcome table, identical for all four:
+
+| Submission                     | Result                                                        |
+| ------------------------------ | ------------------------------------------------------------- |
+| First submit                   | `Committed`                                                   |
+| Resubmit, same semantic digest | `Replayed`, receipt value equal                               |
+| Resubmit, changed digest       | `IdempotencyConflict`, nothing mutated                        |
+| Foreign access context         | Denied as `Forbidden`; operation and receipt counts stay zero |
+
+A vendor-specific branch anywhere in the acceptance path makes exactly one archetype diverge and fails `every_archetype_shares_one_outcome_table`.
+
+Receipt equality here is **semantic**, not byte-level. The assertion is `PartialEq` on the in-memory application receipt; it does not serialize `AcceptObservationResponse`, so it does not prove byte-identical transport output. Proving that needs an API-level test, which does not exist yet.
+
+### The property that matters most
+
+`derive_operation_id` models how a client turns a source key into an operation id. A client that mints a random id per attempt duplicates its entire backfill after a crash; one that derives the id from the source row survives a restart because the server recognises the replay. Fasti cannot tell the two apart from a single request, so the client-side contract has to be tested. `batch_importer_survives_a_restart_without_duplicating_its_backfill` covers it.
+
+### Deliberately not covered
+
+- **Outbox draining.** No outbox exists in `crates/`. Offline behaviour is covered only as far as the contract reaches: a delayed or reordered resubmission still deduplicates.
+- **Payload byte handling.** Already covered by the evidence upload tests in `crates/fasti-store/src/evidence.rs`.
+
+### Running it
+
+```bash
+cargo test -p fasti-application --features conformance-fixture --test b6_client_conformance
+```
+
+The suite is verified by mutation, not only by passing. Breaking determinism in `derive_operation_id` fails three tests; injecting a vendor-specific branch into the command builder fails exactly one.
