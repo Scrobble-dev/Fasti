@@ -36,16 +36,23 @@ pub fn map_offline_verify_open_error(
     error: StoreOpenError,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> Box<FastiProblem> {
+    map_offline_open_error(error, CapabilityKey::VerifyWorkspace, correlation_id)
+}
+
+pub(crate) fn map_offline_open_error(
+    error: StoreOpenError,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> Box<FastiProblem> {
     match error {
-        StoreOpenError::DataRootLocked => Box::new(FastiProblem::data_root_locked(
-            CapabilityKey::VerifyWorkspace,
-            correlation_id,
-        )),
+        StoreOpenError::DataRootLocked => {
+            Box::new(FastiProblem::data_root_locked(capability, correlation_id))
+        }
         StoreOpenError::Io(error) if transient_io_error(error.kind()) => Box::new(
-            FastiProblem::storage_unavailable(CapabilityKey::VerifyWorkspace, correlation_id),
+            FastiProblem::storage_unavailable(capability, correlation_id),
         ),
         StoreOpenError::Sqlite(error) if transient_sqlite_error(&error) => Box::new(
-            FastiProblem::storage_unavailable(CapabilityKey::VerifyWorkspace, correlation_id),
+            FastiProblem::storage_unavailable(capability, correlation_id),
         ),
         StoreOpenError::Io(_)
         | StoreOpenError::UnsafePath { .. }
@@ -53,10 +60,9 @@ pub fn map_offline_verify_open_error(
         | StoreOpenError::JournalMode(_)
         | StoreOpenError::SynchronousLevel(_)
         | StoreOpenError::SchemaVersion { .. }
-        | StoreOpenError::RestoreActivation => Box::new(FastiProblem::integrity_failed(
-            CapabilityKey::VerifyWorkspace,
-            correlation_id,
-        )),
+        | StoreOpenError::RestoreActivation => {
+            Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+        }
     }
 }
 

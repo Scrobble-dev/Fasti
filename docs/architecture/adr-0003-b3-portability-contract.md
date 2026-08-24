@@ -181,19 +181,24 @@ blob digests before later archive code copies any bytes. These primitives do
 not create the tar stream, publish a destination, or activate a public export
 surface.
 
-The internal online assembler now combines those primitives without activating
-the public two-mode port. It preflights the destination for the conservative
-uncompressed archive plus cleanup reserve, and separately admits scratch space
-for one bounded snapshot plus one stream file while reserving the configured
-WAL-growth allowance on the shared filesystem. An owner lock protects every
-active attempt; the next exporter reclaims crash-stale plaintext attempts
-before admission, and success performs fallible cleanup before publication. It
-releases the live snapshot connection before archive generation, reauthorizes
-at bounded disclosure points and once more after final flush, opens evidence
-from the locked data-root descriptor on Linux, validates the same opened inode
-while copying, and keeps the destination under an abort guard until consuming
-completion succeeds. Public activation remains blocked on the distinct
-stopped-node export and clean-restore paths.
+The internal archive assembler now combines those primitives without activating
+the public two-mode port. Online export preflights the destination for the
+conservative uncompressed archive plus cleanup reserve, and separately admits
+scratch space for one bounded snapshot plus one stream file while reserving the
+configured WAL-growth allowance on the shared filesystem. Stopped-node export
+owns the same exclusive `LockedDataRoot`, skips the unnecessary snapshot, and
+admits one stream file plus cleanup reserve without crediting compression. Both
+modes use the same ordered entity and blob encoder, canonical final manifest,
+bounded destination writer, authorization checks, and owner-safe stale scratch
+sweep. The next exporter reclaims crash-stale plaintext attempts before
+admission, and success performs fallible cleanup before publication. Online
+export releases the live snapshot connection before archive generation. Both
+modes reauthorize at bounded disclosure points and once more after final flush,
+open evidence from the locked data-root descriptor on Linux, validate the same
+opened inode while copying, and keep the destination under an abort guard until
+consuming completion succeeds. These store seams remain crate-private. Public
+activation remains blocked on the coordinated two-mode adapter and clean-restore
+path.
 
 ## Consequences
 

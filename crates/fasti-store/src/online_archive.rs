@@ -1,22 +1,24 @@
-//! Internal online production of the staged B3 `.fasti` archive.
+//! Internal production of the staged B3 `.fasti` archive.
 //!
 //! This module intentionally does not implement the complete public archive
-//! port. Stopped-node export remains a separate required method, so the later
+//! port. Online and stopped-node production remain crate-private so a later
 //! coordinated adapter must activate both modes together.
 
 use crate::archive::{ArchiveError, ArchiveLimits, ArchiveWriter};
 use crate::crypto::encode_hex;
-use crate::kernel::{authorize_transaction, map_sql, SqliteKernel};
+use crate::kernel::{authorize_transaction, map_sql, LockedDataRoot, SqliteKernel};
 use crate::portability::{
-    schema_fingerprint, snapshot_evidence_blobs, stream_archive_entity, SnapshotEvidenceBlob,
+    map_offline_open_error, schema_fingerprint, snapshot_evidence_blobs, stream_archive_entity,
+    SnapshotEvidenceBlob,
 };
 use crate::schema::workspace_revision;
 use crate::{SnapshotError, SnapshotLimits};
 use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceRequest, FastiProblem,
     PortabilityFailureReceipt, PortabilityLimits, PortabilityResult, ProblemCode,
-    WorkspaceArchiveDestination, WorkspaceArchiveExportOutcome, WorkspaceExportEntity,
-    WorkspaceManifest, MAX_PORTABLE_JSON_INTEGER, WORKSPACE_ARCHIVE_CONTRACT_VERSION,
+    StoppedNodeExportRequest, WorkspaceArchiveDestination, WorkspaceArchiveExportOutcome,
+    WorkspaceExportEntity, WorkspaceManifest, MAX_PORTABLE_JSON_INTEGER,
+    WORKSPACE_ARCHIVE_CONTRACT_VERSION,
 };
 use fasti_contracts::CanonicalWorkspaceManifestProjection;
 use fasti_domain::{RequestCorrelationId, Sha256Digest, ARCHIVE_MAX_IO_CHUNK_BYTES};
@@ -84,6 +86,74 @@ pub(crate) fn export_online_workspace_archive(
     }
 }
 
+/// Produce one complete stopped-node archive without activating a public port.
+///
+/// This seam owns the shared data-root lock for the complete operation. It is
+/// intentionally crate-private until the coordinated two-mode adapter exists.
+#[allow(dead_code)] // consumed by the later coordinated online/stopped-node adapter
+pub(crate) fn export_stopped_node_workspace_archive(
+    data_root: impl AsRef<Path>,
+    request: StoppedNodeExportRequest,
+    destination: Box<dyn WorkspaceArchiveDestination>,
+) -> PortabilityResult<WorkspaceArchiveExportOutcome> {
+    let mut destination = DestinationGuard::new(destination);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = data_root;
+        return Err(stopped_receipt(
+            &request,
+            unsupported_platform_problem(request.query().correlation_id()),
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        build_stopped_node_archive(data_root.as_ref(), &request, &mut destination)
+            .map_err(|problem| stopped_receipt(&request, problem))
+    }
+}
+
+trait ExportMonitor {
+    fn check(&self, started: bool) -> ApplicationResult<()>;
+}
+
+struct OnlineExportMonitor<'a> {
+    kernel: &'a SqliteKernel,
+    request: &'a ExportWorkspaceRequest,
+}
+
+impl ExportMonitor for OnlineExportMonitor<'_> {
+    fn check(&self, started: bool) -> ApplicationResult<()> {
+        monitor_export(self.kernel, self.request, started)
+    }
+}
+
+struct StoppedNodeExportMonitor<'a> {
+    connection: &'a Connection,
+    request: &'a StoppedNodeExportRequest,
+}
+
+impl ExportMonitor for StoppedNodeExportMonitor<'_> {
+    fn check(&self, _started: bool) -> ApplicationResult<()> {
+        let capability = CapabilityKey::ExportWorkspace;
+        let correlation_id = self.request.query().correlation_id();
+        if self.request.cancellation().is_cancelled() {
+            return Err(Box::new(FastiProblem::export_canceled(correlation_id)));
+        }
+        let transaction = map_sql(
+            self.connection.unchecked_transaction(),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(
+            &transaction,
+            capability,
+            self.request.query().access(),
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)
+    }
+}
+
 fn build_online_archive(
     kernel: &SqliteKernel,
     root: &AnchoredOnlineRoot,
@@ -106,7 +176,7 @@ fn build_online_archive(
         return capacity_failure(correlation_id);
     }
 
-    let mut scratch = root.create_scratch(request, &bounds)?;
+    let mut scratch = root.create_scratch(correlation_id, &bounds)?;
     let snapshot_path = scratch.snapshot_path(correlation_id)?;
     let initial_wal_bytes = root.wal_bytes(correlation_id)?;
     monitor_snapshot_resources(
@@ -177,12 +247,99 @@ fn build_online_archive(
     // kernel connection is borrowed only for short reauthorization transactions.
     let snapshot_file = scratch.open_snapshot_file(correlation_id)?;
     let snapshot_connection = open_read_only_snapshot(&snapshot_file, correlation_id)?;
-    monitor_export(kernel, request, true)?;
+    let monitor = OnlineExportMonitor { kernel, request };
+    let completed = assemble_workspace_archive(
+        root,
+        &snapshot_connection,
+        request.query().access().workspace_id(),
+        limits,
+        bounds.archive_expanded_bytes,
+        &mut scratch,
+        destination,
+        &monitor,
+        correlation_id,
+    );
+    drop(snapshot_connection);
+    drop(snapshot_file);
+    let completed = completed?;
+    scratch.cleanup(correlation_id)?;
+    Ok(completed)
+}
+
+#[cfg(target_os = "linux")]
+fn build_stopped_node_archive(
+    data_root: &Path,
+    request: &StoppedNodeExportRequest,
+    destination: &mut DestinationGuard,
+) -> ApplicationResult<WorkspaceArchiveExportOutcome> {
+    let capability = CapabilityKey::ExportWorkspace;
+    let correlation_id = request.query().correlation_id();
+    let limits = request.limits();
+    let locked = LockedDataRoot::acquire(data_root)
+        .map_err(|error| map_offline_open_error(error, capability, correlation_id))?;
+    let root = AnchoredOnlineRoot::open_locked(&locked, correlation_id)?;
+    let authorization_connection = root.open_authorization_connection(limits, correlation_id)?;
+    let monitor = StoppedNodeExportMonitor {
+        connection: &authorization_connection,
+        request,
+    };
+    monitor.check(false)?;
+    let bounds = AdmissionBounds::try_stopped(limits, correlation_id)?;
+    destination
+        .preflight(bounds.destination_bytes)
+        .map_err(|_| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+    monitor.check(true)?;
+
+    let source_connection = root.open_source_connection(limits, correlation_id)?;
+    let mut scratch = root.create_scratch(correlation_id, &bounds)?;
+    let (archive_bytes, archive_digest, projection) = assemble_workspace_archive(
+        &root,
+        &source_connection,
+        request.workspace_id(),
+        limits,
+        bounds.archive_expanded_bytes,
+        &mut scratch,
+        destination,
+        &monitor,
+        correlation_id,
+    )?;
+    drop(source_connection);
+    scratch.cleanup(correlation_id)?;
+
+    let workspace_id = projection.application_manifest().workspace_id();
+    let workspace_revision = projection.application_manifest().workspace_revision();
+    let manifest_digest = projection.manifest_digest().clone();
+    monitor.check(true)?;
+    destination
+        .complete(&archive_digest, &manifest_digest)
+        .map_err(|_| storage_failure(correlation_id))?;
+    drop(authorization_connection);
+    drop(locked);
+    Ok(WorkspaceArchiveExportOutcome::new(
+        workspace_id,
+        workspace_revision,
+        manifest_digest,
+        archive_bytes,
+        archive_digest,
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn assemble_workspace_archive(
+    root: &AnchoredOnlineRoot,
+    source_connection: &Connection,
+    workspace_id: fasti_domain::WorkspaceId,
+    limits: PortabilityLimits,
+    archive_expanded_bytes: u64,
+    scratch: &mut ExportScratch,
+    destination: &mut DestinationGuard,
+    monitor: &dyn ExportMonitor,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<(u64, Sha256Digest, CanonicalWorkspaceManifestProjection)> {
+    let capability = CapabilityKey::ExportWorkspace;
+    monitor.check(true)?;
     let revision = map_sql(
-        workspace_revision(
-            &snapshot_connection,
-            &request.query().access().workspace_id().to_string(),
-        ),
+        workspace_revision(source_connection, &workspace_id.to_string()),
         capability,
         correlation_id,
     )?;
@@ -190,15 +347,11 @@ fn build_online_archive(
         .ok()
         .filter(|revision| *revision <= MAX_PORTABLE_JSON_INTEGER)
         .ok_or_else(|| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    monitor_export(kernel, request, true)?;
-    let fingerprint = schema_fingerprint(&snapshot_connection, correlation_id)?;
-    monitor_export(kernel, request, true)?;
-    let inventory = snapshot_evidence_blobs(
-        &snapshot_connection,
-        request.query().access().workspace_id(),
-        limits,
-        correlation_id,
-    )?;
+    monitor.check(true)?;
+    let fingerprint = schema_fingerprint(source_connection, correlation_id)?;
+    monitor.check(true)?;
+    let inventory =
+        snapshot_evidence_blobs(source_connection, workspace_id, limits, correlation_id)?;
     let entry_count = u64::try_from(WorkspaceExportEntity::ALL.len())
         .ok()
         .and_then(|count| count.checked_add(u64::try_from(inventory.len()).ok()?))
@@ -211,27 +364,31 @@ fn build_online_archive(
         limits.max_archive_bytes.get(),
         limits.max_entries.get(),
         limits.max_entry_bytes.get(),
-        bounds.archive_expanded_bytes,
+        archive_expanded_bytes,
     )
     .map_err(|error| map_archive_error(error, None, correlation_id))?;
     let monitor_problem = Rc::new(RefCell::new(None));
-    let output =
-        MonitoredArchiveOutput::new(destination, kernel, request, Rc::clone(&monitor_problem));
+    let output = MonitoredArchiveOutput::new(
+        destination,
+        monitor,
+        limits.max_archive_bytes.get(),
+        Rc::clone(&monitor_problem),
+    );
     let mut archive = ArchiveWriter::new(output, archive_limits)
         .map_err(|error| map_archive_error(error, Some(&monitor_problem), correlation_id))?;
 
     let mut streams = Vec::with_capacity(WorkspaceExportEntity::ALL.len());
     let mut content_bytes = 0_u64;
     for entity in WorkspaceExportEntity::ALL {
-        monitor_export(kernel, request, true)?;
+        monitor.check(true)?;
         let mut stream_file = scratch.create_stream_file(correlation_id)?;
         let descriptor = stream_archive_entity(
-            &snapshot_connection,
-            request.query().access().workspace_id(),
+            source_connection,
+            workspace_id,
             entity,
             limits,
             &mut stream_file,
-            &mut || monitor_export(kernel, request, true),
+            &mut || monitor.check(true),
             correlation_id,
         )?;
         stream_file
@@ -274,7 +431,7 @@ fn build_online_archive(
 
     let mut blobs = Vec::with_capacity(inventory.len());
     for blob in &inventory {
-        monitor_export(kernel, request, true)?;
+        monitor.check(true)?;
         content_bytes = append_blob(
             &mut archive,
             root,
@@ -287,9 +444,9 @@ fn build_online_archive(
         blobs.push(blob.descriptor().clone());
     }
 
-    monitor_export(kernel, request, true)?;
+    monitor.check(true)?;
     let manifest = WorkspaceManifest::try_new(
-        request.query().access().workspace_id(),
+        workspace_id,
         revision,
         WORKSPACE_ARCHIVE_CONTRACT_VERSION.to_owned(),
         fingerprint.migration_version(),
@@ -320,9 +477,6 @@ fn build_online_archive(
         .finish()
         .map_err(|error| map_archive_error(error, Some(&monitor_problem), correlation_id))?;
     let (archive_bytes, archive_digest) = output.finish(correlation_id)?;
-    drop(snapshot_connection);
-    drop(snapshot_file);
-    scratch.cleanup(correlation_id)?;
     Ok((archive_bytes, archive_digest, projection))
 }
 
@@ -338,6 +492,21 @@ impl AdmissionBounds {
         limits: PortabilityLimits,
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<Self> {
+        Self::try_for(limits, correlation_id, true)
+    }
+
+    fn try_stopped(
+        limits: PortabilityLimits,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Self> {
+        Self::try_for(limits, correlation_id, false)
+    }
+
+    fn try_for(
+        limits: PortabilityLimits,
+        correlation_id: RequestCorrelationId,
+        needs_snapshot: bool,
+    ) -> ApplicationResult<Self> {
         let capability = CapabilityKey::ExportWorkspace;
         let minimum_entries = u64::try_from(WorkspaceExportEntity::ALL.len())
             .ok()
@@ -350,15 +519,27 @@ impl AdmissionBounds {
             .archive_expanded_ceiling()
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
         let scratch_ceiling_bytes = limits
-            .max_snapshot_bytes
+            .max_entry_bytes
             .get()
-            .checked_add(limits.max_entry_bytes.get())
-            .and_then(|bytes| bytes.checked_add(limits.cleanup_reserve_bytes.get()))
+            .checked_add(limits.cleanup_reserve_bytes.get())
+            .and_then(|bytes| {
+                if needs_snapshot {
+                    bytes.checked_add(limits.max_snapshot_bytes.get())
+                } else {
+                    Some(bytes)
+                }
+            })
             .filter(|bytes| *bytes <= limits.scratch_ceiling_bytes.get())
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
-        let scratch_bytes = scratch_ceiling_bytes
-            .checked_add(limits.max_wal_growth_bytes.get())
-            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        let scratch_bytes = if needs_snapshot {
+            scratch_ceiling_bytes
+                .checked_add(limits.max_wal_growth_bytes.get())
+                .ok_or_else(|| {
+                    Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
+                })?
+        } else {
+            scratch_ceiling_bytes
+        };
         let destination_bytes = archive_expanded_bytes
             .checked_add(limits.cleanup_reserve_bytes.get())
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
@@ -385,9 +566,14 @@ impl AnchoredOnlineRoot {
         kernel: &SqliteKernel,
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<Self> {
-        let data_root = kernel
-            .inner
-            .data_root
+        Self::open_locked(&kernel.inner.data_root, correlation_id)
+    }
+
+    fn open_locked(
+        locked: &LockedDataRoot,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Self> {
+        let data_root = locked
             .anchored_directory()
             .ok_or_else(|| unsupported_platform_problem(correlation_id))?;
         let current = open_directory_beneath(data_root, "current", correlation_id)?;
@@ -406,6 +592,23 @@ impl AnchoredOnlineRoot {
         &self,
         limits: PortabilityLimits,
         correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Connection> {
+        self.open_database_connection(limits, correlation_id, true)
+    }
+
+    fn open_authorization_connection(
+        &self,
+        limits: PortabilityLimits,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Connection> {
+        self.open_database_connection(limits, correlation_id, false)
+    }
+
+    fn open_database_connection(
+        &self,
+        limits: PortabilityLimits,
+        correlation_id: RequestCorrelationId,
+        pin_read_transaction: bool,
     ) -> ApplicationResult<Connection> {
         let retained =
             open_regular_beneath(&self.current, Path::new("fasti.sqlite3"), correlation_id)?;
@@ -434,9 +637,11 @@ impl AnchoredOnlineRoot {
         {
             return integrity_failure(correlation_id);
         }
-        connection
-            .execute_batch("BEGIN DEFERRED")
-            .map_err(|_| storage_failure(correlation_id))?;
+        if pin_read_transaction {
+            connection
+                .execute_batch("BEGIN DEFERRED")
+                .map_err(|_| storage_failure(correlation_id))?;
+        }
         connection
             .query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
                 row.get::<_, i64>(0)
@@ -471,10 +676,9 @@ impl AnchoredOnlineRoot {
 
     fn create_scratch(
         &self,
-        request: &ExportWorkspaceRequest,
+        correlation_id: RequestCorrelationId,
         bounds: &AdmissionBounds,
     ) -> ApplicationResult<ExportScratch> {
-        let correlation_id = request.query().correlation_id();
         match rustix::fs::mkdirat(&self.scratch, "exports", rustix::fs::Mode::RWXU) {
             Ok(()) => {}
             Err(error) if error == rustix::io::Errno::EXIST => {}
@@ -536,7 +740,22 @@ impl AnchoredOnlineRoot {
         Err(unsupported_platform_problem(correlation_id))
     }
 
+    fn open_locked(
+        _locked: &LockedDataRoot,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Self> {
+        Err(unsupported_platform_problem(correlation_id))
+    }
+
     fn open_source_connection(
+        &self,
+        _limits: PortabilityLimits,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<Connection> {
+        Err(unsupported_platform_problem(correlation_id))
+    }
+
+    fn open_authorization_connection(
         &self,
         _limits: PortabilityLimits,
         correlation_id: RequestCorrelationId,
@@ -558,12 +777,10 @@ impl AnchoredOnlineRoot {
 
     fn create_scratch(
         &self,
-        request: &ExportWorkspaceRequest,
+        correlation_id: RequestCorrelationId,
         _bounds: &AdmissionBounds,
     ) -> ApplicationResult<ExportScratch> {
-        Err(unsupported_platform_problem(
-            request.query().correlation_id(),
-        ))
+        Err(unsupported_platform_problem(correlation_id))
     }
 
     fn require_available_bytes(
@@ -943,8 +1160,8 @@ impl Drop for DestinationGuard {
 
 struct MonitoredArchiveOutput<'a> {
     destination: &'a mut DestinationGuard,
-    kernel: &'a SqliteKernel,
-    request: &'a ExportWorkspaceRequest,
+    monitor: &'a dyn ExportMonitor,
+    max_archive_bytes: u64,
     problem: Rc<RefCell<Option<Box<FastiProblem>>>>,
     hasher: Sha256,
     bytes: u64,
@@ -953,14 +1170,14 @@ struct MonitoredArchiveOutput<'a> {
 impl<'a> MonitoredArchiveOutput<'a> {
     fn new(
         destination: &'a mut DestinationGuard,
-        kernel: &'a SqliteKernel,
-        request: &'a ExportWorkspaceRequest,
+        monitor: &'a dyn ExportMonitor,
+        max_archive_bytes: u64,
         problem: Rc<RefCell<Option<Box<FastiProblem>>>>,
     ) -> Self {
         Self {
             destination,
-            kernel,
-            request,
+            monitor,
+            max_archive_bytes,
             problem,
             hasher: Sha256::new(),
             bytes: 0,
@@ -990,7 +1207,7 @@ impl Write for MonitoredArchiveOutput<'_> {
                 "archive writer exceeded the bounded I/O chunk",
             ));
         }
-        if let Err(problem) = monitor_export(self.kernel, self.request, true) {
+        if let Err(problem) = self.monitor.check(true) {
             *self.problem.borrow_mut() = Some(problem);
             return Err(io::Error::other("archive output was canceled"));
         }
@@ -1001,7 +1218,7 @@ impl Write for MonitoredArchiveOutput<'_> {
                     .map_err(|_| io::Error::other("archive byte count overflow"))?,
             )
             .ok_or_else(|| io::Error::other("archive byte count overflow"))?;
-        if next > self.request.limits().max_archive_bytes.get() {
+        if next > self.max_archive_bytes {
             return Err(io::Error::other("archive byte ceiling exceeded"));
         }
         self.destination.write_all(bytes)?;
@@ -1392,6 +1609,14 @@ fn online_receipt(
         .expect("online archive failures always name ExportWorkspace")
 }
 
+fn stopped_receipt(
+    request: &StoppedNodeExportRequest,
+    problem: Box<FastiProblem>,
+) -> PortabilityFailureReceipt {
+    PortabilityFailureReceipt::try_stopped_node_export(request, problem)
+        .expect("stopped-node archive failures always name ExportWorkspace")
+}
+
 fn capacity_failure<T>(correlation_id: RequestCorrelationId) -> ApplicationResult<T> {
     Err(Box::new(FastiProblem::capacity_exceeded(
         CapabilityKey::ExportWorkspace,
@@ -1436,7 +1661,9 @@ mod tests {
     use crate::archive::visit_archive_entries;
     use crate::kernel::{prepare_private_directory, scope_storage_key};
     use crate::test_support::TestNode;
-    use fasti_application::{CancellationSignal, ExportWorkspaceQuery, ScopeKey};
+    use fasti_application::{
+        CancellationSignal, ExportWorkspaceQuery, ScopeKey, StoppedNodeExportRequest,
+    };
     use fasti_contracts::ChecksummedWorkspaceManifestDto;
     use fasti_domain::RecordId;
     use rusqlite::params;
@@ -1653,6 +1880,18 @@ mod tests {
         )
     }
 
+    fn stopped_request(
+        access: fasti_application::RequestAccessContext,
+        cancellation: CancellationSignal,
+        limits: PortabilityLimits,
+    ) -> StoppedNodeExportRequest {
+        StoppedNodeExportRequest::new(
+            ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), access),
+            limits,
+            cancellation,
+        )
+    }
+
     fn export(
         node: &TestNode,
         destination: TestDestination,
@@ -1684,12 +1923,11 @@ mod tests {
     }
 
     fn assert_scratch_clean(node: &TestNode) {
-        let exports = node
-            .kernel
-            .inner
-            .current_root
-            .join("scratch")
-            .join("exports");
+        assert_scratch_path_clean(&node.kernel.inner.current_root);
+    }
+
+    fn assert_scratch_path_clean(current_root: &Path) {
+        let exports = current_root.join("scratch").join("exports");
         if exports.exists() {
             let mut attempts = fs::read_dir(exports)
                 .expect("export scratch directory")
@@ -1793,6 +2031,186 @@ mod tests {
             .try_into_application(limits())
             .expect("strict manifest conversion");
         assert_scratch_clean(&node);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stopped_node_archive_is_byte_identical_to_online_for_the_same_state() {
+        let node = TestNode::new();
+        grant_export(&node);
+        node.upload(b"same immutable evidence");
+        let online_state = Arc::new(Mutex::new(DestinationState::default()));
+        let online =
+            export(&node, TestDestination::new(Arc::clone(&online_state))).expect("online archive");
+        let online_bytes = online_state
+            .lock()
+            .expect("online destination")
+            .bytes
+            .clone();
+        let (root, access) = node.into_stopped();
+        let current = root.path().join("current");
+
+        let stale = current.join("scratch/exports/stale-completed-process");
+        prepare_private_directory(&stale).expect("stale stopped export");
+        fs::write(stale.join("stream.ndjson"), b"stale stream").expect("stale stream");
+
+        let stopped_state = Arc::new(Mutex::new(DestinationState::default()));
+        let stopped = export_stopped_node_workspace_archive(
+            root.path(),
+            stopped_request(access, CancellationSignal::new(), limits()),
+            Box::new(TestDestination::new(Arc::clone(&stopped_state))),
+        )
+        .expect("stopped-node archive");
+        let stopped_state = stopped_state.lock().expect("stopped destination");
+
+        assert_eq!(stopped_state.bytes, online_bytes);
+        assert_eq!(stopped.archive_digest(), online.archive_digest());
+        assert_eq!(stopped.manifest_digest(), online.manifest_digest());
+        assert_eq!(stopped.workspace_revision(), online.workspace_revision());
+        assert_eq!(stopped.archive_bytes(), online.archive_bytes());
+        assert!(stopped_state.completed);
+        assert!(!stopped_state.aborted);
+        assert!(stopped_state.maximum_write <= ARCHIVE_MAX_IO_CHUNK_BYTES);
+        let expected_destination = limits().archive_expanded_ceiling().expect("archive bound")
+            + limits().cleanup_reserve_bytes.get();
+        assert_eq!(stopped_state.required_bytes, Some(expected_destination));
+        assert!(!stale.exists(), "owner-free stale scratch was swept");
+        drop(stopped_state);
+        assert_scratch_path_clean(&current);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stopped_node_export_refuses_a_live_kernel_lock() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+        let failure = export_stopped_node_workspace_archive(
+            node.kernel.data_root(),
+            stopped_request(node.access, CancellationSignal::new(), limits()),
+            Box::new(TestDestination::new(Arc::clone(&state))),
+        )
+        .expect_err("live daemon lock must exclude stopped export");
+
+        assert_eq!(failure.problem().code(), ProblemCode::DataRootLocked);
+        let state = state.lock().expect("destination state");
+        assert!(state.aborted);
+        assert!(!state.completed);
+        assert!(state.bytes.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stopped_node_cancellation_aborts_partial_output_and_cleans_scratch() {
+        let node = TestNode::new();
+        grant_export(&node);
+        node.upload(b"checked evidence");
+        let (root, access) = node.into_stopped();
+        let current = root.path().join("current");
+        let cancellation = CancellationSignal::new();
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+        let destination = TestDestination::new(Arc::clone(&state)).on_first_write({
+            let cancellation = cancellation.clone();
+            move || cancellation.cancel()
+        });
+
+        let failure = export_stopped_node_workspace_archive(
+            root.path(),
+            stopped_request(access, cancellation, limits()),
+            Box::new(destination),
+        )
+        .expect_err("stopped export canceled after output begins");
+
+        assert_eq!(failure.problem().code(), ProblemCode::ExportCanceled);
+        let state = state.lock().expect("destination state");
+        assert!(state.aborted);
+        assert!(!state.completed);
+        assert!(!state.bytes.is_empty());
+        assert!(state.maximum_write <= ARCHIVE_MAX_IO_CHUNK_BYTES);
+        drop(state);
+        assert_scratch_path_clean(&current);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stopped_node_admission_reserves_entry_and_cleanup_capacity_without_snapshot_credit() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let (root, access) = node.into_stopped();
+        let mut configured = limits();
+        configured.scratch_ceiling_bytes =
+            nonzero(configured.max_entry_bytes.get() + configured.cleanup_reserve_bytes.get() - 1);
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+
+        let failure = export_stopped_node_workspace_archive(
+            root.path(),
+            stopped_request(access, CancellationSignal::new(), configured),
+            Box::new(TestDestination::new(Arc::clone(&state))),
+        )
+        .expect_err("insufficient stopped scratch reserve");
+
+        assert_eq!(failure.problem().code(), ProblemCode::CapacityExceeded);
+        let state = state.lock().expect("destination state");
+        assert!(state.aborted);
+        assert!(!state.completed);
+        assert!(state.bytes.is_empty());
+        assert_eq!(state.required_bytes, None);
+        drop(state);
+
+        let mut unavailable = limits();
+        unavailable.max_entry_bytes = nonzero(1_u64 << 50);
+        unavailable.scratch_ceiling_bytes =
+            nonzero(unavailable.max_entry_bytes.get() + unavailable.cleanup_reserve_bytes.get());
+        let unavailable_state = Arc::new(Mutex::new(DestinationState::default()));
+        let failure = export_stopped_node_workspace_archive(
+            root.path(),
+            stopped_request(access, CancellationSignal::new(), unavailable),
+            Box::new(TestDestination::new(Arc::clone(&unavailable_state))),
+        )
+        .expect_err("filesystem cannot satisfy the conservative scratch reservation");
+
+        assert_eq!(failure.problem().code(), ProblemCode::CapacityExceeded);
+        let unavailable_state = unavailable_state.lock().expect("destination state");
+        assert!(unavailable_state.aborted);
+        assert!(!unavailable_state.completed);
+        assert!(unavailable_state.required_bytes.is_some());
+        assert!(unavailable_state.bytes.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stopped_node_final_reauthorization_prevents_publication() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let (root, access) = node.into_stopped();
+        let current = root.path().join("current");
+        let database = current.join("fasti.sqlite3");
+        let grant_id = access.grant_id().to_string();
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+        let destination = TestDestination::new(Arc::clone(&state)).on_flush(move || {
+            Connection::open(&database)
+                .expect("stopped database writer")
+                .execute(
+                    "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = ?2",
+                    params![grant_id, scope_storage_key(ScopeKey::WorkspaceExport)],
+                )
+                .expect("revoke stopped export scope before publication");
+        });
+
+        let failure = export_stopped_node_workspace_archive(
+            root.path(),
+            stopped_request(access, CancellationSignal::new(), limits()),
+            Box::new(destination),
+        )
+        .expect_err("revoked stopped export cannot publish");
+
+        assert_eq!(failure.problem().code(), ProblemCode::Forbidden);
+        let state = state.lock().expect("destination state");
+        assert!(state.aborted);
+        assert!(!state.completed);
+        assert!(!state.bytes.is_empty());
+        drop(state);
+        assert_scratch_path_clean(&current);
     }
 
     #[test]
@@ -2098,7 +2516,7 @@ mod tests {
         let bounds =
             AdmissionBounds::try_new(request.limits(), correlation_id).expect("admission bounds");
         let scratch = root
-            .create_scratch(&request, &bounds)
+            .create_scratch(correlation_id, &bounds)
             .expect("export scratch");
         let source = root
             .open_source_connection(request.limits(), correlation_id)

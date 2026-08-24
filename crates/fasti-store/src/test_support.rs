@@ -51,6 +51,16 @@ impl TestNode {
         }
     }
 
+    pub(crate) fn into_stopped(self) -> (TempDir, RequestAccessContext) {
+        let Self {
+            _root,
+            kernel,
+            access,
+        } = self;
+        drop(kernel);
+        (_root, access)
+    }
+
     pub(crate) fn upload(&self, bytes: &[u8]) -> fasti_domain::EvidenceReference {
         self.upload_for(self.access, bytes)
     }
