@@ -176,8 +176,7 @@ fn add_correction_scopes(kernel: &SqliteKernel, access: RequestAccessContext) {
 }
 
 fn observed_at() -> ObservedAt {
-    ObservedAt::parse("2026-08-24T10:00:00Z", ClaimedTrust::DeviceObserved)
-        .expect("observed time")
+    ObservedAt::parse("2026-08-24T10:00:00Z", ClaimedTrust::DeviceObserved).expect("observed time")
 }
 
 #[test]
