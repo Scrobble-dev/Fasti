@@ -56,3 +56,6 @@ serde-saphyr = "1.0.1"
 proptest = "1.6"
 static_assertions = "1.1"
 getrandom = "0.3"
+rustix = { version = "1.1.4", features = ["fs"] }
+tar = { version = "0.4.46", default-features = false }
+zstd = { version = "0.13.3", default-features = false }

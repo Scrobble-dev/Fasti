@@ -1,6 +1,7 @@
 //! SQLite and content-addressed filesystem adapters for the Fasti local kernel.
 
 mod access;
+pub mod archive;
 mod correction;
 mod crypto;
 mod evidence;
