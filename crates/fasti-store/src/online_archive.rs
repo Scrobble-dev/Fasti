@@ -16,7 +16,7 @@ use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceRequest, FastiProblem,
     PortabilityFailureReceipt, PortabilityLimits, PortabilityResult, ProblemCode,
     WorkspaceArchiveDestination, WorkspaceArchiveExportOutcome, WorkspaceExportEntity,
-    WorkspaceManifest, MAX_PORTABLE_JSON_INTEGER,
+    WorkspaceManifest, MAX_PORTABLE_JSON_INTEGER, WORKSPACE_ARCHIVE_CONTRACT_VERSION,
 };
 use fasti_contracts::CanonicalWorkspaceManifestProjection;
 use fasti_domain::{RequestCorrelationId, Sha256Digest, ARCHIVE_MAX_IO_CHUNK_BYTES};
@@ -29,15 +29,13 @@ use std::num::NonZeroU32;
 use std::ops::ControlFlow;
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-const ARCHIVE_CONTRACT_VERSION: &str = "1.0.0";
 const SQLITE_MINIMUM_PAGE_BYTES: u64 = 512;
-const TAR_HEADER_BYTES: u64 = 512;
-const TAR_MAX_PADDING_BYTES: u64 = 511;
-const TAR_TRAILER_BYTES: u64 = 1024;
 
 /// Produce one complete online archive without activating the two-mode port.
 ///
@@ -108,7 +106,7 @@ fn build_online_archive(
         return capacity_failure(correlation_id);
     }
 
-    let scratch = root.create_scratch(request, &bounds)?;
+    let mut scratch = root.create_scratch(request, &bounds)?;
     let snapshot_path = scratch.snapshot_path(correlation_id)?;
     let initial_wal_bytes = root.wal_bytes(correlation_id)?;
     monitor_snapshot_resources(
@@ -118,6 +116,7 @@ fn build_online_archive(
         limits,
         correlation_id,
         false,
+        true,
     )?;
 
     let snapshot_limits = snapshot_limits(limits, correlation_id)?;
@@ -136,6 +135,7 @@ fn build_online_archive(
                     initial_wal_bytes,
                     limits,
                     correlation_id,
+                    true,
                     true,
                 )
             });
@@ -169,6 +169,7 @@ fn build_online_archive(
         limits,
         correlation_id,
         true,
+        false,
     )?;
 
     // The live source connection is released before archive generation. Rows
@@ -290,7 +291,7 @@ fn build_online_archive(
     let manifest = WorkspaceManifest::try_new(
         request.query().access().workspace_id(),
         revision,
-        ARCHIVE_CONTRACT_VERSION.to_owned(),
+        WORKSPACE_ARCHIVE_CONTRACT_VERSION.to_owned(),
         fingerprint.migration_version(),
         fingerprint.digest().clone(),
         streams,
@@ -319,6 +320,9 @@ fn build_online_archive(
         .finish()
         .map_err(|error| map_archive_error(error, Some(&monitor_problem), correlation_id))?;
     let (archive_bytes, archive_digest) = output.finish(correlation_id)?;
+    drop(snapshot_connection);
+    drop(snapshot_file);
+    scratch.cleanup(correlation_id)?;
     Ok((archive_bytes, archive_digest, projection))
 }
 
@@ -342,23 +346,18 @@ impl AdmissionBounds {
         if limits.max_entries.get() < minimum_entries {
             return capacity_failure(correlation_id);
         }
-        let container_overhead = limits
-            .max_entries
-            .get()
-            .checked_mul(TAR_HEADER_BYTES + TAR_MAX_PADDING_BYTES)
-            .and_then(|bytes| bytes.checked_add(TAR_TRAILER_BYTES))
-            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
         let archive_expanded_bytes = limits
-            .max_uncompressed_bytes
-            .get()
-            .checked_add(container_overhead)
+            .archive_expanded_ceiling()
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
-        let scratch_bytes = limits
+        let scratch_ceiling_bytes = limits
             .max_snapshot_bytes
             .get()
             .checked_add(limits.max_entry_bytes.get())
             .and_then(|bytes| bytes.checked_add(limits.cleanup_reserve_bytes.get()))
             .filter(|bytes| *bytes <= limits.scratch_ceiling_bytes.get())
+            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        let scratch_bytes = scratch_ceiling_bytes
+            .checked_add(limits.max_wal_growth_bytes.get())
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
         let destination_bytes = archive_expanded_bytes
             .checked_add(limits.cleanup_reserve_bytes.get())
@@ -408,6 +407,11 @@ impl AnchoredOnlineRoot {
         limits: PortabilityLimits,
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<Connection> {
+        let retained =
+            open_regular_beneath(&self.current, Path::new("fasti.sqlite3"), correlation_id)?;
+        let retained_metadata = retained
+            .metadata()
+            .map_err(|_| storage_failure(correlation_id))?;
         let path = descriptor_child_path(&self.current, "fasti.sqlite3");
         let connection = Connection::open_with_flags(
             path,
@@ -419,6 +423,24 @@ impl AnchoredOnlineRoot {
             .map_err(|_| storage_failure(correlation_id))?;
         connection
             .pragma_update(None, "query_only", "ON")
+            .map_err(|_| storage_failure(correlation_id))?;
+        let opened_path = connection
+            .path()
+            .ok_or_else(|| integrity_problem(correlation_id))?;
+        let opened_metadata =
+            fs::metadata(opened_path).map_err(|_| integrity_problem(correlation_id))?;
+        if opened_metadata.dev() != retained_metadata.dev()
+            || opened_metadata.ino() != retained_metadata.ino()
+        {
+            return integrity_failure(correlation_id);
+        }
+        connection
+            .execute_batch("BEGIN DEFERRED")
+            .map_err(|_| storage_failure(correlation_id))?;
+        connection
+            .query_row("SELECT COUNT(*) FROM sqlite_schema", [], |row| {
+                row.get::<_, i64>(0)
+            })
             .map_err(|_| storage_failure(correlation_id))?;
         Ok(connection)
     }
@@ -461,6 +483,11 @@ impl AnchoredOnlineRoot {
         let exports = open_directory_beneath(&self.scratch, "exports", correlation_id)?;
         rustix::fs::fchmod(&exports, rustix::fs::Mode::RWXU)
             .map_err(|_| storage_failure(correlation_id))?;
+        let sweep_lock = open_private_lock(&exports, ".sweep.lock", false, correlation_id)?;
+        sweep_lock
+            .lock()
+            .map_err(|_| storage_failure(correlation_id))?;
+        sweep_stale_exports(&exports, correlation_id)?;
         require_available_handle_bytes(&exports, bounds.scratch_bytes, correlation_id, false)?;
 
         for _ in 0..8 {
@@ -472,10 +499,15 @@ impl AnchoredOnlineRoot {
                     let root = open_directory_beneath(&exports, name.as_str(), correlation_id)?;
                     rustix::fs::fchmod(&root, rustix::fs::Mode::RWXU)
                         .map_err(|_| storage_failure(correlation_id))?;
+                    let owner = open_private_lock(&root, ".owner", true, correlation_id)?;
+                    owner.lock().map_err(|_| storage_failure(correlation_id))?;
                     return Ok(ExportScratch {
                         exports,
                         root,
                         name,
+                        _owner: owner,
+                        correlation_id,
+                        cleaned: false,
                     });
                 }
                 Err(error) if error == rustix::io::Errno::EXIST => {}
@@ -549,6 +581,9 @@ struct ExportScratch {
     exports: File,
     root: File,
     name: String,
+    _owner: File,
+    correlation_id: RequestCorrelationId,
+    cleaned: bool,
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -609,25 +644,21 @@ impl ExportScratch {
         rustix::fs::unlinkat(&self.root, "stream.ndjson", rustix::fs::AtFlags::empty())
             .map_err(|_| storage_failure(correlation_id))
     }
+
+    fn cleanup(&mut self, correlation_id: RequestCorrelationId) -> ApplicationResult<()> {
+        cleanup_export_attempt(&self.exports, &self.root, &self.name, correlation_id)?;
+        self.cleaned = true;
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "linux")]
 impl Drop for ExportScratch {
     fn drop(&mut self) {
-        for name in [
-            "stream.ndjson",
-            "snapshot.sqlite3-shm",
-            "snapshot.sqlite3-wal",
-            "snapshot.sqlite3-journal",
-            "snapshot.sqlite3",
-        ] {
-            let _ = rustix::fs::unlinkat(&self.root, name, rustix::fs::AtFlags::empty());
+        if !self.cleaned {
+            let _ =
+                cleanup_export_attempt(&self.exports, &self.root, &self.name, self.correlation_id);
         }
-        let _ = rustix::fs::unlinkat(
-            &self.exports,
-            self.name.as_str(),
-            rustix::fs::AtFlags::REMOVEDIR,
-        );
     }
 }
 
@@ -717,6 +748,93 @@ fn open_regular_beneath(
             integrity_problem(correlation_id)
         }
     })
+}
+
+#[cfg(target_os = "linux")]
+fn open_private_lock(
+    parent: &File,
+    name: &str,
+    exclusive: bool,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<File> {
+    let mut flags = rustix::fs::OFlags::RDWR
+        | rustix::fs::OFlags::CREATE
+        | rustix::fs::OFlags::CLOEXEC
+        | rustix::fs::OFlags::NOFOLLOW;
+    if exclusive {
+        flags |= rustix::fs::OFlags::EXCL;
+    }
+    let fd = rustix::fs::openat2(
+        parent,
+        name,
+        flags,
+        rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+        secure_resolve_flags(),
+    )
+    .map_err(|_| storage_failure(correlation_id))?;
+    let file = File::from(fd);
+    if !file
+        .metadata()
+        .map_err(|_| storage_failure(correlation_id))?
+        .is_file()
+    {
+        return integrity_failure(correlation_id);
+    }
+    Ok(file)
+}
+
+#[cfg(target_os = "linux")]
+fn sweep_stale_exports(
+    exports: &File,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let directory = PathBuf::from(format!("/proc/self/fd/{}", exports.as_raw_fd()));
+    for entry in fs::read_dir(directory).map_err(|_| storage_failure(correlation_id))? {
+        let entry = entry.map_err(|_| storage_failure(correlation_id))?;
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| integrity_problem(correlation_id))?;
+        if name == ".sweep.lock" {
+            continue;
+        }
+        let attempt = open_directory_beneath(exports, &name, correlation_id)?;
+        let owner = open_private_lock(&attempt, ".owner", false, correlation_id)?;
+        match owner.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => continue,
+            Err(std::fs::TryLockError::Error(_)) => {
+                return Err(storage_failure(correlation_id));
+            }
+        }
+        cleanup_export_attempt(exports, &attempt, &name, correlation_id)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn cleanup_export_attempt(
+    exports: &File,
+    attempt: &File,
+    name: &str,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    for child in [
+        "stream.ndjson",
+        "snapshot.sqlite3-shm",
+        "snapshot.sqlite3-wal",
+        "snapshot.sqlite3-journal",
+        "snapshot.sqlite3",
+        ".owner",
+    ] {
+        match rustix::fs::unlinkat(attempt, child, rustix::fs::AtFlags::empty()) {
+            Ok(()) => {}
+            Err(error) if error == rustix::io::Errno::NOENT => {}
+            Err(_) => return Err(storage_failure(correlation_id)),
+        }
+    }
+    rustix::fs::unlinkat(exports, name, rustix::fs::AtFlags::REMOVEDIR)
+        .map_err(|_| storage_failure(correlation_id))
 }
 
 #[cfg(target_os = "linux")]
@@ -1057,6 +1175,7 @@ fn monitor_snapshot_resources(
     limits: PortabilityLimits,
     correlation_id: RequestCorrelationId,
     started: bool,
+    snapshot_can_grow: bool,
 ) -> ApplicationResult<()> {
     let snapshot_bytes = scratch.snapshot_bytes(correlation_id)?;
     let current_wal_bytes = root.wal_bytes(correlation_id)?;
@@ -1070,16 +1189,31 @@ fn monitor_snapshot_resources(
             capacity_failure(correlation_id)
         };
     }
-    let pending_scratch = limits
-        .max_entry_bytes
-        .get()
-        .checked_add(limits.cleanup_reserve_bytes.get())
+    let pending_snapshot = if snapshot_can_grow {
+        limits.max_snapshot_bytes.get() - snapshot_bytes
+    } else {
+        0
+    };
+    let pending_wal = if snapshot_can_grow {
+        limits.max_wal_growth_bytes.get() - wal_growth
+    } else {
+        0
+    };
+    let pending_scratch = pending_snapshot
+        .checked_add(limits.max_entry_bytes.get())
+        .and_then(|bytes| bytes.checked_add(limits.cleanup_reserve_bytes.get()))
         .ok_or_else(|| {
             Box::new(FastiProblem::capacity_exceeded(
                 CapabilityKey::ExportWorkspace,
                 correlation_id,
             ))
         })?;
+    let pending_filesystem = pending_scratch.checked_add(pending_wal).ok_or_else(|| {
+        Box::new(FastiProblem::capacity_exceeded(
+            CapabilityKey::ExportWorkspace,
+            correlation_id,
+        ))
+    })?;
     let scratch_bytes = scratch
         .current_bytes(correlation_id)?
         .checked_add(pending_scratch)
@@ -1095,7 +1229,7 @@ fn monitor_snapshot_resources(
             }
         })?;
     debug_assert!(scratch_bytes >= pending_scratch);
-    root.require_available_bytes(pending_scratch, correlation_id, started)
+    root.require_available_bytes(pending_filesystem, correlation_id, started)
 }
 
 fn snapshot_limits(
@@ -1325,6 +1459,7 @@ mod tests {
         state: Arc<Mutex<DestinationState>>,
         preflight_action: Mutex<Option<Box<dyn FnOnce() + Send>>>,
         write_action: Option<Box<dyn FnOnce() + Send>>,
+        flush_action: Option<Box<dyn FnOnce() + Send>>,
     }
 
     struct CleanupOnFailedCompleteDestination {
@@ -1392,6 +1527,7 @@ mod tests {
                 state,
                 preflight_action: Mutex::new(None),
                 write_action: None,
+                flush_action: None,
             }
         }
 
@@ -1402,6 +1538,11 @@ mod tests {
 
         fn on_first_write(mut self, action: impl FnOnce() + Send + 'static) -> Self {
             self.write_action = Some(Box::new(action));
+            self
+        }
+
+        fn on_flush(mut self, action: impl FnOnce() + Send + 'static) -> Self {
+            self.flush_action = Some(Box::new(action));
             self
         }
     }
@@ -1418,6 +1559,9 @@ mod tests {
         }
 
         fn flush(&mut self) -> io::Result<()> {
+            if let Some(action) = self.flush_action.take() {
+                action();
+            }
             Ok(())
         }
     }
@@ -1528,7 +1672,7 @@ mod tests {
             let mut content = Vec::new();
             reader.read_to_end(&mut content)?;
             entries.push((path.to_owned(), content));
-            Ok(())
+            Ok::<(), ArchiveError>(())
         })
         .expect("valid produced archive");
         entries
@@ -1546,13 +1690,13 @@ mod tests {
             .current_root
             .join("scratch")
             .join("exports");
-        assert!(
-            !exports.exists()
-                || fs::read_dir(exports)
-                    .expect("export scratch directory")
-                    .next()
-                    .is_none()
-        );
+        if exports.exists() {
+            let mut attempts = fs::read_dir(exports)
+                .expect("export scratch directory")
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_name() != ".sweep.lock");
+            assert!(attempts.next().is_none());
+        }
     }
 
     #[test]
@@ -1612,7 +1756,10 @@ mod tests {
         let manifest_bytes = &entries.last().expect("manifest entry").1;
         let manifest: ChecksummedWorkspaceManifestDto =
             serde_json::from_slice(manifest_bytes).expect("manifest DTO");
-        assert_eq!(manifest.manifest.contract_version, ARCHIVE_CONTRACT_VERSION);
+        assert_eq!(
+            manifest.manifest.contract_version,
+            WORKSPACE_ARCHIVE_CONTRACT_VERSION
+        );
         assert_eq!(
             manifest.manifest.workspace_revision,
             first.workspace_revision()
@@ -1664,11 +1811,9 @@ mod tests {
         )
         .expect("small compressed archive within its independent ceiling");
 
-        let container_overhead = configured.max_entries.get()
-            * (TAR_HEADER_BYTES + TAR_MAX_PADDING_BYTES)
-            + TAR_TRAILER_BYTES;
-        let expected = configured.max_uncompressed_bytes.get()
-            + container_overhead
+        let expected = configured
+            .archive_expanded_ceiling()
+            .expect("archive ceiling")
             + configured.cleanup_reserve_bytes.get();
         assert_eq!(
             state.lock().expect("destination state").required_bytes,
@@ -1733,6 +1878,54 @@ mod tests {
     }
 
     #[test]
+    fn final_reauthorization_prevents_publication_after_archive_flush() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+        let kernel = node.kernel.clone();
+        let grant_id = node.access.grant_id().to_string();
+        let destination = TestDestination::new(Arc::clone(&state)).on_flush(move || {
+            kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection")
+                .execute(
+                    "DELETE FROM grant_scopes WHERE grant_id = ?1 AND scope_key = ?2",
+                    params![grant_id, scope_storage_key(ScopeKey::WorkspaceExport)],
+                )
+                .expect("revoke export scope after final flush");
+        });
+
+        let failure = export(&node, destination).expect_err("revoked before publication");
+        assert_eq!(
+            failure.problem().code(),
+            ProblemCode::StoppedNodeExportRequired
+        );
+        let state = state.lock().expect("destination state");
+        assert!(state.aborted);
+        assert!(!state.completed);
+        assert!(!state.bytes.is_empty());
+        drop(state);
+        assert_scratch_clean(&node);
+    }
+
+    #[test]
+    fn admission_reserves_wal_growth_outside_the_scratch_ceiling() {
+        let mut configured = limits();
+        let scratch_ceiling = configured.max_snapshot_bytes.get()
+            + configured.max_entry_bytes.get()
+            + configured.cleanup_reserve_bytes.get();
+        configured.scratch_ceiling_bytes = nonzero(scratch_ceiling);
+        let bounds = AdmissionBounds::try_new(configured, RequestCorrelationId::new_v7())
+            .expect("WAL is filesystem headroom, not scratch content");
+        assert_eq!(
+            bounds.scratch_bytes,
+            scratch_ceiling + configured.max_wal_growth_bytes.get()
+        );
+    }
+
+    #[test]
     fn failed_consuming_completion_removes_its_partial_artifact() {
         let node = TestNode::new();
         grant_export(&node);
@@ -1763,6 +1956,8 @@ mod tests {
         prepare_private_directory(&exports).expect("exports scratch root");
         let stale = exports.join(correlation_id.to_string());
         prepare_private_directory(&stale).expect("stale prior scratch directory");
+        fs::write(stale.join("snapshot.sqlite3"), b"stale plaintext snapshot")
+            .expect("stale snapshot");
 
         let request = ExportWorkspaceRequest::new(
             ExportWorkspaceQuery::new(correlation_id, node.access),
@@ -1777,9 +1972,66 @@ mod tests {
         )
         .expect("fresh random scratch suffix");
 
-        assert!(stale.is_dir(), "the stale directory was not reused");
-        fs::remove_dir(&stale).expect("remove test stale directory");
+        assert!(!stale.exists(), "the stale attempt was reclaimed");
         assert_scratch_clean(&node);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stale_sweep_preserves_an_owner_locked_attempt() {
+        let node = TestNode::new();
+        grant_export(&node);
+        let exports = node
+            .kernel
+            .inner
+            .current_root
+            .join("scratch")
+            .join("exports");
+        prepare_private_directory(&exports).expect("exports scratch root");
+        let active = exports.join("active-attempt");
+        prepare_private_directory(&active).expect("active attempt");
+        let owner = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(active.join(".owner"))
+            .expect("owner lock file");
+        owner.lock().expect("hold owner lock");
+        fs::write(active.join("snapshot.sqlite3"), b"active snapshot").expect("active snapshot");
+
+        let state = Arc::new(Mutex::new(DestinationState::default()));
+        export(&node, TestDestination::new(state)).expect("concurrent export");
+        assert!(active.join("snapshot.sqlite3").is_file());
+
+        drop(owner);
+        fs::remove_file(active.join("snapshot.sqlite3")).expect("remove active snapshot");
+        fs::remove_file(active.join(".owner")).expect("remove owner file");
+        fs::remove_dir(active).expect("remove active attempt");
+        assert_scratch_clean(&node);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_database_child_symlink_is_rejected() {
+        let node = TestNode::new();
+        let correlation_id = RequestCorrelationId::new_v7();
+        let root = AnchoredOnlineRoot::open(&node.kernel, correlation_id).expect("anchored root");
+        let database = node.kernel.inner.current_root.join("fasti.sqlite3");
+        let retained = node
+            .kernel
+            .inner
+            .current_root
+            .join("fasti-retained.sqlite3");
+        fs::rename(&database, &retained).expect("retain database inode");
+        std::os::unix::fs::symlink(&retained, &database).expect("substitute database symlink");
+
+        let problem = root
+            .open_source_connection(limits(), correlation_id)
+            .expect_err("SQLite must not follow the final symlink");
+        assert_eq!(problem.code(), ProblemCode::IntegrityFailed);
+
+        fs::remove_file(&database).expect("remove symlink");
+        fs::rename(&retained, &database).expect("restore database path");
     }
 
     #[cfg(target_os = "linux")]
@@ -1991,7 +2243,7 @@ mod tests {
             registry
                 .get("contract_version")
                 .and_then(serde_json::Value::as_str),
-            Some(ARCHIVE_CONTRACT_VERSION)
+            Some(WORKSPACE_ARCHIVE_CONTRACT_VERSION)
         );
     }
 }
