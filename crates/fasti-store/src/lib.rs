@@ -7,6 +7,7 @@ mod evidence;
 mod identity;
 mod kernel;
 mod observation;
+mod portability;
 mod review;
 mod schema;
 mod seed;

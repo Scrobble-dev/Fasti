@@ -410,7 +410,7 @@ define_capabilities!(
         Scoped,
         [WorkspaceVerify],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        []
+        [IntegrityFailed, StorageUnavailable]
     ),
 );
 
