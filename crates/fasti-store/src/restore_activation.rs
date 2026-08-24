@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{self, Read, Write};
 #[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use thiserror::Error;
@@ -38,6 +40,8 @@ pub(crate) enum RestoreActivationError {
     MarkerMismatch,
     #[error("restore activation phase is missing or invalid")]
     InvalidPhase,
+    #[error("an incomplete restore staging attempt requires offline cleanup")]
+    IncompleteStaging,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,18 +66,34 @@ struct RestoreActivationMarkerDto {
 }
 
 impl RestoreActivationMarker {
+    pub(crate) fn new(
+        restore_attempt_id: RestoreAttemptId,
+        workspace_id: WorkspaceId,
+        workspace_revision: u64,
+        archive_digest: Sha256Digest,
+        manifest_digest: Sha256Digest,
+    ) -> Self {
+        Self {
+            restore_attempt_id,
+            workspace_id,
+            workspace_revision,
+            archive_digest,
+            manifest_digest,
+        }
+    }
+
     pub(crate) fn from_preflight(
         restore_attempt_id: RestoreAttemptId,
         preflight: &VerifiedArchivePreflight,
     ) -> Self {
         let manifest = preflight.manifest().manifest();
-        Self {
+        Self::new(
             restore_attempt_id,
-            workspace_id: manifest.workspace_id(),
-            workspace_revision: manifest.workspace_revision(),
-            archive_digest: preflight.archive_digest().clone(),
-            manifest_digest: preflight.manifest().manifest_digest().clone(),
-        }
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            preflight.archive_digest().clone(),
+            preflight.manifest().manifest_digest().clone(),
+        )
     }
 
     pub(crate) const fn restore_attempt_id(&self) -> RestoreAttemptId {
@@ -236,6 +256,65 @@ pub(crate) fn activate_verified_restore(
 pub(crate) enum ActivationRecovery {
     AlreadyComplete,
     CompletedAfterRename,
+}
+
+/// Resolve all restore filesystem state that is safe before SQLite opens.
+///
+/// Pre-rename staging is never opened as a database. The daemon fails closed
+/// until the offline restore owner rejects that attempt. A renamed verified
+/// directory is completed through its descriptor-rooted marker first.
+pub(crate) fn recover_activation_before_database_open(
+    data_root: &File,
+) -> Result<Option<ActivationRecovery>, RestoreActivationError> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = data_root;
+        return Ok(None);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(staging) = open_optional_directory(data_root, "restore")? {
+            let path = format!("/proc/self/fd/{}", staging.as_raw_fd());
+            if std::fs::read_dir(path)?.next().transpose()?.is_some() {
+                return Err(RestoreActivationError::IncompleteStaging);
+            }
+        }
+        let Some(current) = open_optional_directory(data_root, "current")? else {
+            return Ok(None);
+        };
+        let restore_files = [
+            "restore.received",
+            "restore.staging",
+            "restore.verified",
+            "restore.activating",
+            "restore.complete",
+            MARKER_FILE,
+        ];
+        let mut managed = false;
+        for name in restore_files {
+            match open_existing_file_beneath(&current, Path::new(name)) {
+                Ok(_) => managed = true,
+                Err(ArchiveError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if managed {
+            recover_current_activation(data_root).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+fn open_optional_directory(
+    parent: &File,
+    name: &str,
+) -> Result<Option<File>, RestoreActivationError> {
+    match open_private_directory(parent, name) {
+        Ok(directory) => Ok(Some(directory)),
+        Err(ArchiveError::Io(error)) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Finish the only recoverable crash state: verified directory renamed to

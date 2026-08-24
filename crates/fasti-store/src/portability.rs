@@ -52,7 +52,8 @@ pub fn map_offline_verify_open_error(
         | StoreOpenError::Sqlite(_)
         | StoreOpenError::JournalMode(_)
         | StoreOpenError::SynchronousLevel(_)
-        | StoreOpenError::SchemaVersion { .. } => Box::new(FastiProblem::integrity_failed(
+        | StoreOpenError::SchemaVersion { .. }
+        | StoreOpenError::RestoreActivation => Box::new(FastiProblem::integrity_failed(
             CapabilityKey::VerifyWorkspace,
             correlation_id,
         )),
@@ -681,6 +682,7 @@ mod tests {
                     actual: 8,
                 },
             ),
+            ("restore activation", StoreOpenError::RestoreActivation),
             (
                 "SQLite corrupt",
                 sqlite_open_error(rusqlite::ffi::SQLITE_CORRUPT),

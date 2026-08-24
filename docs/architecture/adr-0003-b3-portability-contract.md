@@ -155,12 +155,14 @@ staging directory by no-replace rename. It writes the create-new `complete`
 sentinel only after the data-root parent sync. A descriptor-rooted verifier can
 finish the single post-rename/pre-complete crash state and can bind a COMPLETE
 marker to one restore attempt and workspace without opening an unverified
-database. Strict import, pre-rename rejection cleanup, composition with the
-private recovery transactions, and runtime dispatch are still absent. There is
-deliberately no CLI, HTTP, SDK, or public capability activation. Ordinary
-initialization retains its existing closed result for a restored workspace
-until that complete composition supports a distinct recovery-required
-classification.
+database. The shared locked kernel open runs this recovery before SQLite: it
+refuses non-empty pre-rename restore staging, and it completes a valid
+post-rename marker before opening `fasti.sqlite3`. Strict import, pre-rename
+rejection cleanup, composition with the private recovery transactions, and
+runtime dispatch are still absent. There is deliberately no CLI, HTTP, SDK, or
+public capability activation. Ordinary initialization retains its existing
+closed result for a restored workspace until that complete composition supports
+a distinct recovery-required classification.
 
 The store predecessor for final archive assembly keeps the frozen entity SQL
 and row codec in one place. It can stream exactly one plain NDJSON entity from

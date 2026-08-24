@@ -47,6 +47,8 @@ pub enum StoreOpenError {
     SchemaVersion { expected: i64, actual: i64 },
     #[error("another daemon or offline operation holds the Fasti data-root lock")]
     DataRootLocked,
+    #[error("restore activation state is incomplete or invalid")]
+    RestoreActivation,
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +132,10 @@ impl SqliteKernel {
 
     /// Opens the local kernel without releasing an already-held data-root lock.
     pub fn open_locked(data_root: LockedDataRoot) -> Result<Self, StoreOpenError> {
+        if let Some(root) = data_root.anchored_directory() {
+            crate::restore_activation::recover_activation_before_database_open(root)
+                .map_err(|_| StoreOpenError::RestoreActivation)?;
+        }
         let current_root = data_root.path().join("current");
         let payload_root = current_root.join("payloads").join("sha256");
         let scratch_root = current_root.join("scratch").join("uploads");
@@ -677,6 +683,78 @@ mod tests {
             (after.dev(), after.ino()),
             (moved_metadata.dev(), moved_metadata.ino())
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn daemon_open_refuses_incomplete_restore_staging_before_creating_current() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        let anchored = guard.anchored_directory().expect("anchored data root");
+        let (_staging, attempt) =
+            crate::archive::create_staging_attempt(anchored, "restore", "attempt-one")
+                .expect("restore staging");
+        crate::restore_activation::write_restore_phase(
+            &attempt,
+            fasti_domain::RestoreStatus::Received,
+        )
+        .expect("received phase");
+        drop(attempt);
+
+        assert!(matches!(
+            SqliteKernel::open_locked(guard),
+            Err(StoreOpenError::RestoreActivation)
+        ));
+        assert!(!root.join("current").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn daemon_open_completes_a_verified_post_rename_restore_before_sqlite() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        let anchored = guard.anchored_directory().expect("anchored data root");
+        let (staging, attempt) =
+            crate::archive::create_staging_attempt(anchored, "restore", "attempt-two")
+                .expect("restore staging");
+        let database = root.join("restore/attempt-two/fasti.sqlite3");
+        let connection = Connection::open(&database).expect("staged database");
+        migrate(&connection).expect("staged schema");
+        drop(connection);
+        for status in [
+            fasti_domain::RestoreStatus::Received,
+            fasti_domain::RestoreStatus::Staging,
+            fasti_domain::RestoreStatus::Verified,
+        ] {
+            crate::restore_activation::write_restore_phase(&attempt, status).expect("phase");
+        }
+        let marker = crate::restore_activation::RestoreActivationMarker::new(
+            fasti_domain::RestoreAttemptId::new_v7(),
+            fasti_domain::WorkspaceId::new_v7(),
+            0,
+            fasti_domain::Sha256Digest::parse(format!("sha256:{}", "11".repeat(32)))
+                .expect("archive digest"),
+            fasti_domain::Sha256Digest::parse(format!("sha256:{}", "22".repeat(32)))
+                .expect("manifest digest"),
+        );
+        crate::restore_activation::activate_verified_restore(
+            anchored,
+            &staging,
+            &attempt,
+            "attempt-two",
+            &marker,
+        )
+        .expect("activate restore");
+        fs::remove_file(root.join("current/restore.complete"))
+            .expect("simulate crash before COMPLETE");
+        drop(attempt);
+        drop(staging);
+
+        let kernel = SqliteKernel::open_locked(guard).expect("recovered kernel");
+        assert!(root.join("current/restore.complete").is_file());
+        drop(kernel);
     }
 
     #[cfg(target_os = "linux")]
