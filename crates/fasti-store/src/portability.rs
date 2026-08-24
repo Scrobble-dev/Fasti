@@ -11,7 +11,9 @@ use fasti_application::{
     WorkspaceVerificationOutcome, WorkspaceVerificationPort, MAX_PORTABLE_JSON_INTEGER,
     WORKSPACE_EXPORT_FORMAT_VERSION,
 };
-use fasti_domain::{EvidenceId, RequestCorrelationId, Sha256Digest, WorkspaceId};
+use fasti_domain::{
+    EvidenceId, RequestCorrelationId, Sha256Digest, WorkspaceId, ARCHIVE_MAX_IO_CHUNK_BYTES,
+};
 use rusqlite::types::{Value, ValueRef};
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
@@ -608,6 +610,31 @@ mod tests {
         connection
     }
 
+    fn encode_single_value(value_sql: &str, max_bytes: u64) -> ApplicationResult<Vec<u8>> {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        let mut statement = connection.prepare(value_sql).expect("value query");
+        let column_names: Vec<String> = statement
+            .column_names()
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect();
+        let mut output_columns: Vec<usize> = (0..column_names.len()).collect();
+        output_columns
+            .sort_unstable_by(|left, right| column_names[*left].cmp(&column_names[*right]));
+        let mut rows = statement.query([]).expect("query value");
+        let row = rows.next().expect("read value row").expect("one value row");
+        let encoded = encode_row(
+            row,
+            &column_names,
+            &output_columns,
+            &[],
+            max_bytes,
+            CapabilityKey::ExportWorkspace,
+            RequestCorrelationId::new_v7(),
+        )?;
+        Ok(encoded.0)
+    }
+
     #[test]
     fn offline_verify_maps_shared_lock_contention_without_panicking() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -1029,6 +1056,57 @@ mod tests {
         assert_eq!(first_bytes, second_bytes);
         assert_eq!(first_descriptor.row_count(), 3);
         assert_eq!(first_descriptor.byte_length(), first_bytes.len() as u64);
+    }
+
+    #[test]
+    fn archive_entity_freezes_exact_ndjson_key_order_and_bytes() {
+        let node = TestNode::new();
+        let connection = open_read_only_database(&node);
+        let created_at: String = connection
+            .query_row(
+                "SELECT created_at FROM workspaces WHERE workspace_id = ?1",
+                [node.access.workspace_id().to_string()],
+                |row| row.get(0),
+            )
+            .expect("workspace creation time");
+        let mut bytes = Vec::new();
+        stream_archive_entity(
+            &connection,
+            node.access.workspace_id(),
+            WorkspaceExportEntity::Workspaces,
+            portability_limits(1, 4 * 1024),
+            &mut bytes,
+            &mut || Ok(()),
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("workspace stream");
+        let expected = format!(
+            "{{\"created_at\":{},\"workspace_id\":{}}}\n",
+            serde_json::to_string(&created_at).expect("creation JSON"),
+            serde_json::to_string(&node.access.workspace_id().to_string()).expect("workspace JSON")
+        );
+
+        assert_eq!(bytes, expected.as_bytes());
+    }
+
+    #[test]
+    fn archive_row_rejects_nonportable_integers() {
+        for value in ["-1", "9007199254740992"] {
+            let error = encode_single_value(&format!("SELECT {value} AS ordinal"), 4 * 1024)
+                .expect_err("nonportable integer must fail closed");
+            assert_eq!(error.code(), ProblemCode::IntegrityFailed);
+        }
+    }
+
+    #[test]
+    fn archive_row_rejects_escape_expansion_before_page_materialization() {
+        let error = encode_single_value(
+            "SELECT printf('%.*c', 1000000, char(1)) AS hostile_text",
+            4 * 1024,
+        )
+        .expect_err("escape-expanded row must remain bounded");
+
+        assert_eq!(error.code(), ProblemCode::CapacityExceeded);
     }
 
     #[test]
@@ -1536,14 +1614,14 @@ pub(crate) fn stream_archive_entity(
         limits.max_entry_bytes.get().min(MAX_PORTABLE_JSON_INTEGER),
         sink,
         correlation_id,
-        |cursor| {
+        |cursor, max_page_bytes| {
             monitor()?;
             read_section_page(
                 connection,
                 section,
                 &workspace,
                 cursor,
-                CapabilityKey::ExportWorkspace,
+                max_page_bytes,
                 correlation_id,
             )
         },
@@ -1761,7 +1839,7 @@ fn stream_entity_pages<F>(
     mut read_page: F,
 ) -> ApplicationResult<WorkspaceStreamDescriptor>
 where
-    F: FnMut(&[Value]) -> ApplicationResult<Vec<SectionRow>>,
+    F: FnMut(&[Value], u64) -> ApplicationResult<SectionPage>,
 {
     let capability = CapabilityKey::ExportWorkspace;
     let mut cursor: Vec<Value> = section
@@ -1773,11 +1851,11 @@ where
     let mut sink = EntityDigestSink::new(sink, max_bytes);
 
     loop {
-        let page = read_page(&cursor)?;
-        if page.is_empty() {
+        let page = read_page(&cursor, sink.remaining_bytes())?;
+        if page.rows.is_empty() {
             break;
         }
-        let page_len = page.len();
+        let page_len = page.rows.len();
         let next_written = written
             .checked_add(u64::try_from(page_len).map_err(|_| {
                 Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
@@ -1785,12 +1863,12 @@ where
             .filter(|count| *count <= max_rows)
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
 
-        for (row, next_cursor) in page {
-            sink.write_line(&row, capability, correlation_id)?;
+        for (line, next_cursor) in page.rows {
+            sink.write_line(&line, capability, correlation_id)?;
             cursor = next_cursor;
         }
         written = next_written;
-        if page_len < EXPORT_PAGE as usize {
+        if page.exhausted {
             break;
         }
     }
@@ -1815,13 +1893,16 @@ impl<'a> EntityDigestSink<'a> {
         }
     }
 
+    fn remaining_bytes(&self) -> u64 {
+        self.max_bytes - self.bytes
+    }
+
     fn write_line(
         &mut self,
-        value: &serde_json::Value,
+        line: &[u8],
         capability: CapabilityKey,
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<()> {
-        let line = serialized_line(value, capability, correlation_id)?;
         let next_bytes = self
             .bytes
             .checked_add(u64::try_from(line.len()).map_err(|_| {
@@ -1829,13 +1910,13 @@ impl<'a> EntityDigestSink<'a> {
             })?)
             .filter(|bytes| *bytes <= self.max_bytes)
             .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
-        self.inner.write_all(&line).map_err(|_| {
+        self.inner.write_all(line).map_err(|_| {
             Box::new(FastiProblem::storage_unavailable(
                 capability,
                 correlation_id,
             ))
         })?;
-        self.hasher.update(&line);
+        self.hasher.update(line);
         self.bytes = next_bytes;
         Ok(())
     }
@@ -2105,14 +2186,14 @@ fn write_section(
         u64::MAX,
         sink,
         correlation_id,
-        |cursor| {
+        |cursor, max_page_bytes| {
             read_authorized_section_page(
                 kernel,
                 access,
                 section,
                 &workspace,
                 cursor,
-                capability,
+                max_page_bytes,
                 correlation_id,
             )
         },
@@ -2120,7 +2201,12 @@ fn write_section(
     Ok(descriptor.row_count())
 }
 
-type SectionRow = (serde_json::Value, Vec<Value>);
+type SectionRow = (Vec<u8>, Vec<Value>);
+
+struct SectionPage {
+    rows: Vec<SectionRow>,
+    exhausted: bool,
+}
 
 fn read_authorized_section_page(
     kernel: &SqliteKernel,
@@ -2128,9 +2214,10 @@ fn read_authorized_section_page(
     section: &ExportSection,
     workspace: &str,
     cursor: &[Value],
-    capability: CapabilityKey,
+    max_page_bytes: u64,
     correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<Vec<SectionRow>> {
+) -> ApplicationResult<SectionPage> {
+    let capability = CapabilityKey::ExportWorkspace;
     let mut connection = kernel.lock_connection(capability, correlation_id)?;
     let transaction = map_sql(
         connection.transaction_with_behavior(TransactionBehavior::Deferred),
@@ -2146,7 +2233,7 @@ fn read_authorized_section_page(
         section,
         workspace,
         cursor,
-        capability,
+        max_page_bytes,
         correlation_id,
     )?;
     map_sql(transaction.commit(), capability, correlation_id)?;
@@ -2158,9 +2245,10 @@ fn read_section_page(
     section: &ExportSection,
     workspace: &str,
     cursor: &[Value],
-    capability: CapabilityKey,
+    max_page_bytes: u64,
     correlation_id: RequestCorrelationId,
-) -> ApplicationResult<Vec<SectionRow>> {
+) -> ApplicationResult<SectionPage> {
+    let capability = CapabilityKey::ExportWorkspace;
     let mut statement = map_sql(connection.prepare(section.sql), capability, correlation_id)?;
 
     let column_names: Vec<String> = statement
@@ -2168,6 +2256,8 @@ fn read_section_page(
         .into_iter()
         .map(str::to_owned)
         .collect();
+    let mut output_columns: Vec<usize> = (0..column_names.len()).collect();
+    output_columns.sort_unstable_by(|left, right| column_names[*left].cmp(&column_names[*right]));
 
     let mut bindings: Vec<Value> = Vec::with_capacity(cursor.len() + 2);
     bindings.push(Value::Text(workspace.to_owned()));
@@ -2180,45 +2270,173 @@ fn read_section_page(
         correlation_id,
     )?;
 
+    let page_byte_limit = max_page_bytes.min(ARCHIVE_MAX_IO_CHUNK_BYTES as u64);
     let mut page = Vec::new();
+    let mut page_bytes = 0_u64;
+    let mut query_rows = 0_usize;
+    let mut stopped_at_page_limit = false;
     while let Some(row) = map_sql(rows.next(), capability, correlation_id)? {
-        page.push(encode_row(
+        query_rows = query_rows
+            .checked_add(1)
+            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        let encoded = encode_row(
             row,
             &column_names,
+            &output_columns,
             section.cursor_columns,
+            page_byte_limit,
             capability,
             correlation_id,
-        )?);
+        )?;
+        let encoded_bytes = u64::try_from(encoded.0.len())
+            .map_err(|_| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        let Some(next_page_bytes) = page_bytes.checked_add(encoded_bytes) else {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        };
+        if next_page_bytes > page_byte_limit {
+            if page.is_empty() {
+                return Err(Box::new(FastiProblem::capacity_exceeded(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            stopped_at_page_limit = true;
+            break;
+        }
+        page_bytes = next_page_bytes;
+        page.push(encoded);
     }
     drop(rows);
     drop(statement);
-    Ok(page)
+    Ok(SectionPage {
+        exhausted: !stopped_at_page_limit && query_rows < EXPORT_PAGE as usize,
+        rows: page,
+    })
 }
 
-/// Encodes one row as a JSON object plus the cursor for the next page.
+struct BoundedRowEncoder {
+    bytes: Vec<u8>,
+    max_bytes: usize,
+    limit_hit: bool,
+}
+
+impl BoundedRowEncoder {
+    fn new(max_bytes: u64) -> Self {
+        let max_bytes = usize::try_from(max_bytes).unwrap_or(usize::MAX);
+        Self {
+            bytes: Vec::with_capacity(max_bytes.min(4 * 1024)),
+            max_bytes,
+            limit_hit: false,
+        }
+    }
+
+    fn write_bytes(
+        &mut self,
+        bytes: &[u8],
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<()> {
+        let result = self.write_all(bytes);
+        self.map_result(result, capability, correlation_id)
+    }
+
+    fn write_json_string(
+        &mut self,
+        value: &str,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<()> {
+        let result = serde_json::to_writer(&mut *self, value);
+        self.map_result(result, capability, correlation_id)
+    }
+
+    fn write_integer(
+        &mut self,
+        value: u64,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<()> {
+        let result = write!(self, "{value}");
+        self.map_result(result, capability, correlation_id)
+    }
+
+    fn map_result<T, E>(
+        &self,
+        result: Result<T, E>,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<T> {
+        result.map_err(|_| {
+            if self.limit_hit {
+                Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
+            } else {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            }
+        })
+    }
+
+    fn finish(self) -> Vec<u8> {
+        self.bytes
+    }
+}
+
+impl Write for BoundedRowEncoder {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let admitted = self
+            .bytes
+            .len()
+            .checked_add(bytes.len())
+            .is_some_and(|length| length <= self.max_bytes);
+        if !admitted {
+            self.limit_hit = true;
+            return Err(std::io::Error::other("export row byte limit exceeded"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Encodes one row as frozen NDJSON bytes plus the cursor for the next page.
 ///
-/// Keys come from the statement's column list, so the archive shape is fixed
-/// by the SQL rather than by any map iteration order.
+/// Archive-v1 keeps the existing lexicographic key order explicitly instead
+/// of inheriting `serde_json::Map` feature selection. The bounded writer
+/// rejects an oversized or escape-expanded row before it is materialized.
 fn encode_row(
     row: &rusqlite::Row<'_>,
     column_names: &[String],
+    output_columns: &[usize],
     cursor_columns: &[CursorColumn],
+    max_bytes: u64,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<SectionRow> {
-    let mut object = serde_json::Map::new();
-    let mut cursor = Vec::with_capacity(cursor_columns.len());
-
-    for (index, name) in column_names.iter().enumerate() {
-        let raw = map_sql(row.get_ref(index), capability, correlation_id)?;
-        let value = match raw {
-            ValueRef::Null => serde_json::Value::Null,
-            ValueRef::Integer(value) => serde_json::Value::from(value),
+    let mut encoded = BoundedRowEncoder::new(max_bytes);
+    encoded.write_bytes(b"{", capability, correlation_id)?;
+    for (position, index) in output_columns.iter().copied().enumerate() {
+        if position != 0 {
+            encoded.write_bytes(b",", capability, correlation_id)?;
+        }
+        encoded.write_json_string(&column_names[index], capability, correlation_id)?;
+        encoded.write_bytes(b":", capability, correlation_id)?;
+        match map_sql(row.get_ref(index), capability, correlation_id)? {
+            ValueRef::Null => encoded.write_bytes(b"null", capability, correlation_id)?,
+            ValueRef::Integer(value) => encoded.write_integer(
+                portable_integer(value, capability, correlation_id)?,
+                capability,
+                correlation_id,
+            )?,
             ValueRef::Text(bytes) => {
                 let text = std::str::from_utf8(bytes).map_err(|_| {
                     Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?;
-                serde_json::Value::from(text)
+                encoded.write_json_string(text, capability, correlation_id)?;
             }
             // The schema declares no REAL or BLOB column. Fail closed rather
             // than emit a value whose text form is not stable across hosts.
@@ -2228,36 +2446,44 @@ fn encode_row(
                     correlation_id,
                 )))
             }
-        };
+        }
+    }
+    encoded.write_bytes(b"}\n", capability, correlation_id)?;
 
-        if cursor_columns
-            .get(cursor.len())
-            .is_some_and(|column| column.index() == index)
-        {
-            cursor.push(match &value {
-                serde_json::Value::String(text) => Value::Text(text.clone()),
-                serde_json::Value::Number(number) => {
-                    Value::Integer(number.as_i64().ok_or_else(|| {
-                        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-                    })?)
+    let mut cursor = Vec::with_capacity(cursor_columns.len());
+    for column in cursor_columns {
+        cursor.push(
+            match map_sql(row.get_ref(column.index()), capability, correlation_id)? {
+                ValueRef::Text(bytes) => Value::Text(
+                    std::str::from_utf8(bytes)
+                        .map_err(|_| {
+                            Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                        })?
+                        .to_owned(),
+                ),
+                ValueRef::Integer(value) => {
+                    portable_integer(value, capability, correlation_id)?;
+                    Value::Integer(value)
                 }
                 // A NULL key column would make the keyset cursor unable to
                 // advance, silently truncating the section.
-                _ => {
-                    return Err(Box::new(FastiProblem::integrity_failed(
-                        capability,
-                        correlation_id,
-                    )))
+                ValueRef::Null | ValueRef::Real(_) | ValueRef::Blob(_) => {
+                    return integrity_failure(capability, correlation_id);
                 }
-            });
-        }
-
-        object.insert(name.clone(), value);
+            },
+        );
     }
 
-    if cursor.len() != cursor_columns.len() {
-        return integrity_failure(capability, correlation_id);
-    }
+    Ok((encoded.finish(), cursor))
+}
 
-    Ok((serde_json::Value::Object(object), cursor))
+fn portable_integer(
+    value: i64,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<u64> {
+    u64::try_from(value)
+        .ok()
+        .filter(|value| *value <= MAX_PORTABLE_JSON_INTEGER)
+        .ok_or_else(|| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
