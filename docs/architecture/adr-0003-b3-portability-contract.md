@@ -30,18 +30,43 @@ The application layer owns the use-case inputs and outcomes. It defines:
 - an owned export request and consuming destination completion or abort;
 - explicit non-zero ceilings for snapshots, WAL growth, archives, entries,
   paths, decompression, scratch space, cleanup reserve, and backup steps;
+- destination-owned filesystem-capacity preflight before snapshot or data-root
+  mutation, using a conservative uncompressed output bound;
+- one cloneable standard-library cancellation signal on export and restore
+  requests, polled at bounded work boundaries;
 - ordered stream descriptors and evidence-blob descriptors;
 - a numeric workspace-revision watermark, full-workspace manifest, and a
   separate manifest digest;
-- an owned restore request, archive reader, and terminal outcome.
+- an owned restore request, archive reader, and complete-only success outcome.
+
+Restore rejection is a typed portability failure. It is never an `Ok` outcome.
+This keeps `PortabilityResult` unambiguous: success means that clean activation
+completed.
 
 The manifest digest covers RFC 8785 canonical JSON bytes of the `manifest`
 body only. The digest is outside that body, so the checksum is not recursive.
 Rust `serde_json_canonicalizer` and JavaScript `canonicalize` 2.1.0 compute the
 same RFC 8785/JCS bytes. Mutation tests reject a stale digest. The checked-in
-JSON Schema and example are an internal draft for store implementation and
-compatibility tests. The stream inventory and final count remain unfrozen until
-namespace ownership is resolved; this draft invents no namespace stream.
+JSON Schema and example are an internal staged contract for store implementation
+and compatibility tests. Archive v1 freezes 16 streams. The `namespaces` stream
+comes after `records` and before `external_identifiers`, so definitions restore
+before identifier claims. This archive compatibility decision does not activate
+the public export or restore capabilities.
+
+`fasti-contracts` owns the application-manifest to DTO projection, the JCS body
+checksum, and the canonical complete `manifest.json` bytes. The store adapter
+does not rebuild the wire mapping. Its projection is also the only producer of
+the checked application manifest paired with those canonical bytes; the
+application layer verifies the supplied checksum before accepting that value.
+Archive-entry admission counts the mandatory final `manifest.json` as well as
+every stream and blob entry. The wire `migration_version` is bounded to the
+application `u32` maximum, `4294967295`.
+
+Restore receives one opened seekable archive. It completes the format, path,
+header, final-manifest, checksum, reference, and limit preflight before any
+destination mutation. It then rewinds the same opened source for the restore
+pass. It does not reopen a path after validation and does not spool the complete
+archive into memory.
 
 Operating-system paths, archive headers, lock handles, compression objects,
 temporary filenames, staging directories, synchronization calls, and atomic
@@ -53,24 +78,47 @@ The existing `capacity_exceeded`, `integrity_failed`, and
 `stopped_node_export_required`, and `unsupported_platform`. Resource or
 admission cancellation of online export can direct the caller to stopped-node
 export. Restore lock contention directs the caller to stop the daemon through
-`data_root_locked`. These problems are staged in the application capability
-policy. They do not enter the authored public registry until B3 activation.
+`data_root_locked`. Stopped-node verification maps the same shared-lock failure
+to `data_root_locked` for `VerifyWorkspace` without panicking. Recovery after
+activation uses `recovery_bootstrap_pending`, the safe state
+`restored_data_active_bootstrap_pending`, and the next action
+`retry_recovery_bootstrap`. These problems are staged in the application
+capability policy. They do not enter the authored public registry until B3
+activation.
+
+Caller cancellation is explicit request state. Export aborts and removes its
+partial destination before it returns `export_canceled`. Restore rejects or
+removes staging before it returns `operation_canceled`. Cancellation cannot
+return a partial success.
 
 Portability ports return a typed failure receipt outside the partial archive
-destination. Online export uses the request correlation ID. Clean restore also
-uses the restore-attempt ID. The adapter discards incomplete bytes before it
-returns this receipt.
+destination. Online and stopped-node export have distinct operation identities
+and use the request correlation ID. Clean restore and post-activation recovery
+bootstrap also have distinct operation identities and use both the correlation
+ID and restore-attempt ID. The adapter discards incomplete bytes before it
+returns an export or restore receipt.
+
+Stopped-node export is a distinct request mode. It carries the same
+`ExportWorkspaceQuery` and `RequestAccessContext` as online export, derives the
+workspace from that access context, and applies the same grant rules against
+the stopped database while holding the shared data-root lock. There is no
+second caller-supplied workspace identifier.
 
 After clean activation, recovery bootstrap must name the restored workspace and
-one existing profile explicitly. It creates a fresh node-local client and
-one-time proof for the normal fresh-credential exchange. It never chooses a
-profile implicitly or reuses imported credentials, grants, scopes, or node
-state.
+one existing profile explicitly. Non-secret imported client provenance remains
+available for audit and Chronicle references. Recovery creates a distinct fresh
+node-local client and one-time proof for the normal fresh-credential exchange.
+It never chooses a profile implicitly or reuses imported client authentication,
+credentials, grants, scopes, or node state.
 
 ## Consequences
 
 - Store orchestration can implement one bounded contract without importing
   filesystem mechanics into the domain.
+- Export cannot begin source mutation until its destination confirms space for
+  all stream bytes, referenced blob bytes, container and final-manifest
+  overhead, and the applicable reserve. Admission does not credit compression.
+- Restore can preflight and consume one opened inode without a TOCTOU reopen.
 - Callers cannot reuse a destination after completion or abort.
 - Restore cannot select an in-place or credential-preserving policy.
 - A multi-profile restore cannot select a recovery profile implicitly.
@@ -84,13 +132,17 @@ state.
 
 Domain tests fix the archive policy and restore state machine. Application
 tests fix manifest order, bounded metadata, request policies, terminal restore
-outcomes, and staged problem ownership. Contract tests deserialize the
-checked-in example, compare its important bounds with the generated Schemars
-surface, and reject unknown fields. The governed contract verifier must show
-that the public registry and generated public artifacts remain unchanged.
+outcomes, stopped-node authorization context, failure-operation identity, and
+staged problem ownership. Contract tests deserialize the checked-in example,
+compare its bounds with the generated Schemars surface, reject values outside
+the DTO type range, and prove the canonical outbound projection round-trips.
+The store regression holds the real data-root lock and proves offline verify
+returns `data_root_locked`. The governed contract verifier must show that the
+public registry and generated public artifacts remain unchanged.
 
 ## Related records
 
 - [Capability problem partitions](adr-0002-capability-problem-partitions.md)
+- [Namespace definition registration](adr-0004-namespace-definition-registration.md)
 - [B3 implementation target](../handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md#12-b3-implementation-target)
 - [Contract ownership guide](../../contracts/README.md)

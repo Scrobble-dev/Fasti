@@ -15,7 +15,7 @@ The authored registry at [`registry/v1/capabilities.yaml`](registry/v1/capabilit
 | `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                  |
 | `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                        |
 | `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                  |
-| `portability/v1/`                     | Internal draft B3 workspace-manifest schema and example; stream inventory remains unfrozen    |
+| `portability/v1/`                     | Internal staged B3 archive-v1 manifest schema and example; version-1 stream order is frozen    |
 | `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas    |
 | `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                       |
 | `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                     |
@@ -29,10 +29,16 @@ Run `cargo xtask contract generate` to regenerate checked-in projections. Run `c
 
 Provider seeds and manifest examples remain future adapter inputs, not working integrations. There is no supported install, release, persistence kernel, web interface, desktop package, or player.
 
-The [internal draft B3 workspace-manifest schema](portability/v1/workspace-manifest.schema.json)
-and [example](portability/v1/workspace-manifest.example.json) exercise the
-hostile restore boundary. They do not freeze the final stream count. Namespace
-ownership is unresolved, and no placeholder stream is included. These files do
-not add a public capability, route, CLI command, or generated registry entry.
+The [internal staged B3 archive-v1 manifest schema](portability/v1/workspace-manifest.schema.json)
+and [example](portability/v1/workspace-manifest.example.json) freeze the 16
+version-1 streams, including `namespaces` after `records` and before
+`external_identifiers`. The Rust contract owns both strict hostile-input
+conversion and the application-to-wire RFC 8785/JCS projection. Freezing the
+archive format does not add a public capability, registry entry, route, SDK
+method, or CLI operation. The projection owns the checked DTO, canonical
+`manifest.json` bytes, and checksum-verified application value as one unit;
+store adapters must not rebuild or independently pair them. Restore success is
+complete-only. Rejection and post-activation recovery-bootstrap pending states
+remain typed staged failures.
 
 See the [human capability guide](../docs/capability-ledger.md) for a concise interpretation of the registry.

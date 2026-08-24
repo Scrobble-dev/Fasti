@@ -1,7 +1,7 @@
-//! Internal draft B3 `.fasti` manifest representation.
+//! Internal staged B3 `.fasti` archive-v1 manifest representation.
 //!
-//! The stream inventory remains unfrozen until namespace ownership is decided.
-//! This module does not activate an HTTP, CLI, SDK, or runtime capability.
+//! The archive-v1 stream inventory is frozen. This module does not activate an
+//! HTTP, CLI, SDK, public registry, or runtime capability.
 
 use fasti_application::{
     ChecksummedWorkspaceManifest, PortabilityLimits, WorkspaceBlobDescriptor,
@@ -51,6 +51,8 @@ pub enum WorkspaceExportEntityDto {
     Profiles,
     Clients,
     Records,
+    #[serde(rename = "namespaces")]
+    NamespaceDefinitions,
     ExternalIdentifiers,
     Evidence,
     Observations,
@@ -103,11 +105,11 @@ pub struct WorkspaceManifestDto {
     pub workspace_revision: u64,
     #[schemars(length(min = 1, max = 64))]
     pub contract_version: String,
-    #[schemars(range(min = 0))]
+    #[schemars(range(min = 0, max = 4294967295_i64))]
     pub migration_version: u32,
     #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
     pub migration_digest: String,
-    #[schemars(length(equal = 15))]
+    #[schemars(length(equal = 16))]
     pub streams: Vec<WorkspaceStreamDescriptorDto>,
     pub blobs: Vec<WorkspaceBlobDescriptorDto>,
 }
@@ -160,6 +162,7 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
             WorkspaceExportEntityDto::Profiles => Self::Profiles,
             WorkspaceExportEntityDto::Clients => Self::Clients,
             WorkspaceExportEntityDto::Records => Self::Records,
+            WorkspaceExportEntityDto::NamespaceDefinitions => Self::NamespaceDefinitions,
             WorkspaceExportEntityDto::ExternalIdentifiers => Self::ExternalIdentifiers,
             WorkspaceExportEntityDto::Evidence => Self::Evidence,
             WorkspaceExportEntityDto::Observations => Self::Observations,
@@ -172,6 +175,130 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
             WorkspaceExportEntityDto::Receipts => Self::Receipts,
             WorkspaceExportEntityDto::Operations => Self::Operations,
         }
+    }
+}
+
+impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
+    fn from(value: WorkspaceExportEntity) -> Self {
+        match value {
+            WorkspaceExportEntity::Workspaces => Self::Workspaces,
+            WorkspaceExportEntity::Profiles => Self::Profiles,
+            WorkspaceExportEntity::Clients => Self::Clients,
+            WorkspaceExportEntity::Records => Self::Records,
+            WorkspaceExportEntity::NamespaceDefinitions => Self::NamespaceDefinitions,
+            WorkspaceExportEntity::ExternalIdentifiers => Self::ExternalIdentifiers,
+            WorkspaceExportEntity::Evidence => Self::Evidence,
+            WorkspaceExportEntity::Observations => Self::Observations,
+            WorkspaceExportEntity::ObservationClues => Self::ObservationClues,
+            WorkspaceExportEntity::Occurrences => Self::Occurrences,
+            WorkspaceExportEntity::Interpretations => Self::Interpretations,
+            WorkspaceExportEntity::ReviewItems => Self::ReviewItems,
+            WorkspaceExportEntity::ReviewCandidates => Self::ReviewCandidates,
+            WorkspaceExportEntity::Corrections => Self::Corrections,
+            WorkspaceExportEntity::Receipts => Self::Receipts,
+            WorkspaceExportEntity::Operations => Self::Operations,
+        }
+    }
+}
+
+/// One contract-owned outbound projection for archive production.
+///
+/// It keeps the DTO, final canonical `manifest.json` bytes, and the
+/// application value whose digest was verified against the same canonical body
+/// together. Store adapters do not rebuild or separately pair these values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalWorkspaceManifestProjection {
+    dto: ChecksummedWorkspaceManifestDto,
+    canonical_json_bytes: Vec<u8>,
+    application: ChecksummedWorkspaceManifest,
+}
+
+impl CanonicalWorkspaceManifestProjection {
+    /// Project the application manifest into the sole owned archive-v1 wire
+    /// model and compute its RFC 8785/JCS body checksum.
+    ///
+    /// Outer archive adapters use this constructor instead of rebuilding or
+    /// separately pairing JSON fields, canonical bytes, and application state.
+    pub fn try_from_application(
+        manifest: WorkspaceManifest,
+    ) -> Result<Self, WorkspaceManifestConversionError> {
+        let body = WorkspaceManifestDto {
+            format: WorkspaceManifestFormatDto::V1,
+            format_version: manifest.format_version(),
+            workspace_id: manifest.workspace_id().to_string(),
+            export_scope: ExportScopeDto::FullWorkspace,
+            archive_profile: ArchiveProfileDto::ZstdL3W22,
+            restore_policy: RestorePolicyDto::CleanOnly,
+            recovery_grant_policy: RecoveryGrantPolicyDto::RequireFreshBootstrap,
+            workspace_revision: manifest.workspace_revision(),
+            contract_version: manifest.contract_version().to_owned(),
+            migration_version: manifest.migration_version(),
+            migration_digest: manifest.migration_digest().as_str().to_owned(),
+            streams: manifest
+                .streams()
+                .iter()
+                .map(|stream| WorkspaceStreamDescriptorDto {
+                    entity: stream.entity().into(),
+                    row_count: stream.row_count(),
+                    byte_length: stream.byte_length(),
+                    digest: stream.digest().as_str().to_owned(),
+                })
+                .collect(),
+            blobs: manifest
+                .blobs()
+                .iter()
+                .map(|blob| WorkspaceBlobDescriptorDto {
+                    evidence_id: blob.evidence_id().to_string(),
+                    byte_length: blob.byte_length(),
+                    digest: blob.digest().as_str().to_owned(),
+                })
+                .collect(),
+        };
+        let canonical_body = serde_json_canonicalizer::to_vec(&body)
+            .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
+        let manifest_digest =
+            Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(&canonical_body)))
+                .expect("SHA-256 output is canonical lowercase hexadecimal");
+        let dto = ChecksummedWorkspaceManifestDto {
+            manifest: body,
+            manifest_digest: manifest_digest.as_str().to_owned(),
+        };
+        let canonical_json_bytes = serde_json_canonicalizer::to_vec(&dto)
+            .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
+        let application = ChecksummedWorkspaceManifest::try_from_contract_verified(
+            manifest,
+            &canonical_body,
+            manifest_digest,
+        )
+        .map_err(|_| WorkspaceManifestConversionError::ManifestDigestMismatch)?;
+        Ok(Self {
+            dto,
+            canonical_json_bytes,
+            application,
+        })
+    }
+
+    pub const fn dto(&self) -> &ChecksummedWorkspaceManifestDto {
+        &self.dto
+    }
+
+    /// RFC 8785/JCS bytes for the complete checksummed `manifest.json` object.
+    pub fn canonical_json_bytes(&self) -> &[u8] {
+        &self.canonical_json_bytes
+    }
+
+    pub const fn application_manifest(&self) -> &ChecksummedWorkspaceManifest {
+        &self.application
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        ChecksummedWorkspaceManifestDto,
+        Vec<u8>,
+        ChecksummedWorkspaceManifest,
+    ) {
+        (self.dto, self.canonical_json_bytes, self.application)
     }
 }
 
@@ -244,6 +371,7 @@ impl ChecksummedWorkspaceManifestDto {
             .streams
             .len()
             .checked_add(body.blobs.len())
+            .and_then(|count| count.checked_add(1))
             .and_then(|count| u64::try_from(count).ok())
             .is_none_or(|count| count > max_entries)
         {
@@ -291,17 +419,12 @@ impl ChecksummedWorkspaceManifestDto {
             .map_err(|_| WorkspaceManifestConversionError::InvalidManifestDigest)?;
         let canonical_body = serde_json_canonicalizer::to_vec(body)
             .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
-        let computed_manifest_digest =
-            Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(canonical_body)))
-                .expect("SHA-256 output is canonical lowercase hexadecimal");
-        if computed_manifest_digest != supplied_manifest_digest {
-            return Err(WorkspaceManifestConversionError::ManifestDigestMismatch);
-        }
-
-        Ok(ChecksummedWorkspaceManifest::new(
+        ChecksummedWorkspaceManifest::try_from_contract_verified(
             manifest,
+            &canonical_body,
             supplied_manifest_digest,
-        ))
+        )
+        .map_err(|_| WorkspaceManifestConversionError::ManifestDigestMismatch)
     }
 }
 
@@ -341,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_in_manifest_example_matches_the_internal_draft_dto() {
+    fn checked_in_manifest_example_matches_the_frozen_internal_archive_v1_dto() {
         let manifest = checked_example();
 
         assert_eq!(
@@ -360,6 +483,7 @@ mod tests {
                 WorkspaceExportEntityDto::Profiles,
                 WorkspaceExportEntityDto::Clients,
                 WorkspaceExportEntityDto::Records,
+                WorkspaceExportEntityDto::NamespaceDefinitions,
                 WorkspaceExportEntityDto::ExternalIdentifiers,
                 WorkspaceExportEntityDto::Evidence,
                 WorkspaceExportEntityDto::Observations,
@@ -389,7 +513,7 @@ mod tests {
         assert_eq!(converted.manifest().workspace_revision(), 1);
         assert_eq!(
             converted.digest().as_str(),
-            "sha256:7f4727996e9744db83135a838af26c49ad5e165a11d98a28d86b5f6236a3d255"
+            "sha256:caf6143ace824b10a83f4d4d9ad0a72f65479840f657e0094e6ef8b3415fbd72"
         );
     }
 
@@ -407,7 +531,7 @@ mod tests {
             checked
                 .get("x-fasti-contract-state")
                 .and_then(serde_json::Value::as_str),
-            Some("internal_draft_unfrozen")
+            Some("internal_staged_archive_v1")
         );
         let current_stream_count = serde_json::json!(WorkspaceExportEntity::ALL.len());
         assert_eq!(
@@ -432,6 +556,18 @@ mod tests {
             Some(&serde_json::json!("workspaces"))
         );
         assert_eq!(
+            checked.pointer(
+                "/$defs/WorkspaceManifest/properties/streams/prefixItems/4/allOf/1/properties/entity/const"
+            ),
+            Some(&serde_json::json!("namespaces"))
+        );
+        assert_eq!(
+            checked.pointer(
+                "/$defs/WorkspaceManifest/properties/streams/prefixItems/5/allOf/1/properties/entity/const"
+            ),
+            Some(&serde_json::json!("external_identifiers"))
+        );
+        assert_eq!(
             checked.pointer(&format!(
                 "/$defs/WorkspaceManifest/properties/streams/prefixItems/{}/allOf/1/properties/entity/const",
                 WorkspaceExportEntity::ALL.len() - 1
@@ -450,11 +586,23 @@ mod tests {
             checked.pointer("/$defs/WorkspaceManifest/properties/contract_version/maxLength"),
             Some(&serde_json::json!(64))
         );
+        assert_eq!(
+            checked.pointer("/$defs/WorkspaceManifest/properties/migration_version/maximum"),
+            Some(&serde_json::json!(u32::MAX))
+        );
 
         let generated = SchemaSettings::draft2020_12()
             .into_generator()
             .into_root_schema_for::<ChecksummedWorkspaceManifestDto>();
         let generated = serde_json::to_value(generated).expect("generated manifest schema");
+        assert_eq!(
+            generated.pointer("/$defs/WorkspaceExportEntityDto/enum/4"),
+            Some(&serde_json::json!("namespaces"))
+        );
+        assert_eq!(
+            generated.pointer("/$defs/WorkspaceExportEntityDto/enum/5"),
+            Some(&serde_json::json!("external_identifiers"))
+        );
         assert_eq!(
             generated.pointer("/$defs/WorkspaceManifestDto/properties/streams/minItems"),
             Some(&current_stream_count)
@@ -475,6 +623,44 @@ mod tests {
             generated.pointer("/$defs/WorkspaceManifestDto/properties/contract_version/maxLength"),
             Some(&serde_json::json!(64))
         );
+        assert_eq!(
+            generated.pointer("/$defs/WorkspaceManifestDto/properties/migration_version/maximum"),
+            Some(&serde_json::json!(u32::MAX))
+        );
+    }
+
+    #[test]
+    fn application_manifest_has_one_checksummed_canonical_wire_projection() {
+        let expected = checked_example();
+        let application = expected
+            .clone()
+            .try_into_application(limits())
+            .expect("checked example converts to the application manifest");
+
+        let projected = CanonicalWorkspaceManifestProjection::try_from_application(
+            application.manifest().clone(),
+        )
+        .expect("application manifest projects to archive v1");
+        assert_eq!(projected.dto(), &expected);
+        assert_eq!(projected.application_manifest(), &application);
+
+        let decoded: ChecksummedWorkspaceManifestDto =
+            serde_json::from_slice(projected.canonical_json_bytes())
+                .expect("canonical bytes decode");
+        assert_eq!(&decoded, projected.dto());
+        assert_eq!(
+            decoded.clone().try_into_application(limits()),
+            Ok(application),
+            "the owned wire projection must round-trip through the hostile boundary"
+        );
+
+        let mut mutated = decoded;
+        mutated.manifest.workspace_revision += 1;
+        assert_eq!(
+            mutated.try_into_application(limits()),
+            Err(WorkspaceManifestConversionError::ManifestDigestMismatch),
+            "outbound wire mutations cannot retain the canonical projection digest"
+        );
     }
 
     #[test]
@@ -484,6 +670,16 @@ mod tests {
         ))
         .expect("checked-in portability example");
         value["manifest"]["credentials"] = serde_json::json!([]);
+        assert!(serde_json::from_value::<ChecksummedWorkspaceManifestDto>(value).is_err());
+    }
+
+    #[test]
+    fn manifest_dto_rejects_migration_versions_above_u32() {
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../contracts/portability/v1/workspace-manifest.example.json"
+        ))
+        .expect("checked-in portability example");
+        value["manifest"]["migration_version"] = serde_json::json!(4_294_967_296_u64);
         assert!(serde_json::from_value::<ChecksummedWorkspaceManifestDto>(value).is_err());
     }
 
@@ -522,6 +718,19 @@ mod tests {
         assert_eq!(
             value.try_into_application(limits()),
             Err(WorkspaceManifestConversionError::StreamRowCountExceeded)
+        );
+
+        let value = checked_example();
+        let mut descriptor_only_limit = limits();
+        descriptor_only_limit.max_entries = NonZeroU64::new(
+            u64::try_from(value.manifest.streams.len() + value.manifest.blobs.len())
+                .expect("test descriptor count fits u64"),
+        )
+        .expect("example contains descriptors");
+        assert_eq!(
+            value.try_into_application(descriptor_only_limit),
+            Err(WorkspaceManifestConversionError::DescriptorCountExceeded),
+            "the mandatory final manifest.json must consume one archive entry"
         );
 
         let mut value = checked_example();

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://fasti.scrobble.dev/schemas/internal-draft/portability/workspace-manifest.json",
-  "title": "InternalDraftChecksummedWorkspaceManifest",
-  "$comment": "Internal B3 draft. The stream inventory and final count remain unfrozen pending namespace ownership.",
-  "x-fasti-contract-state": "internal_draft_unfrozen",
+  "$id": "https://fasti.scrobble.dev/schemas/internal-staged/portability/v1/workspace-manifest.json",
+  "title": "InternalStagedChecksummedWorkspaceManifestV1",
+  "$comment": "Internal staged B3 archive v1. Its stream inventory is frozen for format version 1; this does not activate a public capability, registry entry, route, SDK, or CLI operation.",
+  "x-fasti-contract-state": "internal_staged_archive_v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["manifest", "manifest_digest"],
@@ -33,6 +33,7 @@
             "profiles",
             "clients",
             "records",
+            "namespaces",
             "external_identifiers",
             "evidence",
             "observations",
@@ -121,13 +122,17 @@
           "minLength": 1,
           "maxLength": 64
         },
-        "migration_version": { "type": "integer", "minimum": 0 },
+        "migration_version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
         "migration_digest": { "$ref": "#/$defs/Sha256Digest" },
         "streams": {
           "type": "array",
-          "$comment": "Current executable draft inventory only; not the final B3 stream count.",
-          "minItems": 15,
-          "maxItems": 15,
+          "$comment": "Frozen archive-v1 stream inventory. Public capability activation remains separate.",
+          "minItems": 16,
+          "maxItems": 16,
           "prefixItems": [
             {
               "allOf": [
@@ -162,6 +167,15 @@
                 {
                   "type": "object",
                   "properties": { "entity": { "const": "records" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "namespaces" } }
                 }
               ]
             },

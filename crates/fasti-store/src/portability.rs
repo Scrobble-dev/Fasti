@@ -1,6 +1,8 @@
 use crate::crypto::{encode_hex, sha256_reader};
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
-use crate::kernel::{authorize_transaction, map_sql, reject_unsafe_existing_file, SqliteKernel};
+use crate::kernel::{
+    authorize_transaction, map_sql, reject_unsafe_existing_file, SqliteKernel, StoreOpenError,
+};
 use crate::schema::workspace_revision;
 use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceQuery, FastiProblem, ProblemCode,
@@ -17,6 +19,27 @@ use std::io::Write;
 const EVIDENCE_VERIFY_PAGE: i64 = 128;
 type EvidenceRow = (i64, String, i64, String);
 type Snapshot = (u64, u64, i64);
+
+/// Map a stopped-node verify open failure without exposing adapter detail.
+///
+/// The shared lock has a specific recovery action. Other open failures retain
+/// the existing bounded storage-unavailable meaning until their own verified
+/// offline recovery paths exist.
+pub fn map_offline_verify_open_error(
+    error: StoreOpenError,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> Box<FastiProblem> {
+    match error {
+        StoreOpenError::DataRootLocked => Box::new(FastiProblem::data_root_locked(
+            CapabilityKey::VerifyWorkspace,
+            correlation_id,
+        )),
+        _ => Box::new(FastiProblem::storage_unavailable(
+            CapabilityKey::VerifyWorkspace,
+            correlation_id,
+        )),
+    }
+}
 
 impl WorkspaceVerificationPort for SqliteKernel {
     fn verify_workspace(
@@ -493,6 +516,23 @@ mod tests {
 
     fn grant_verify_scope(node: &TestNode) {
         grant_scope(node, ScopeKey::WorkspaceVerify);
+    }
+
+    #[test]
+    fn offline_verify_maps_shared_lock_contention_without_panicking() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let _held = crate::LockedDataRoot::acquire(&root).expect("held data-root lock");
+        let open_error = SqliteKernel::open(&root).expect_err("second lock must fail");
+        let correlation_id = RequestCorrelationId::new_v7();
+
+        let problem = map_offline_verify_open_error(open_error, correlation_id);
+        assert_eq!(problem.code(), ProblemCode::DataRootLocked);
+        assert_eq!(problem.capability(), CapabilityKey::VerifyWorkspace);
+        assert_eq!(problem.correlation_id(), correlation_id);
+        assert!(CapabilityKey::VerifyWorkspace
+            .allowed_problem_codes()
+            .contains(&ProblemCode::DataRootLocked));
     }
 
     #[test]

@@ -78,6 +78,10 @@ for (const [label, mutate] of [
   ["format version", (manifest) => (manifest.format_version = 2)],
   ["workspace ID", (manifest) => (manifest.workspace_id = "wsp_invalid")],
   [
+    "migration-version bound",
+    (manifest) => (manifest.migration_version = 4_294_967_296),
+  ],
+  [
     "stream digest",
     (manifest) => (manifest.streams[0].digest = `sha256:${"AB".repeat(32)}`),
   ],

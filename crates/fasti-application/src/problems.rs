@@ -21,6 +21,7 @@ macro_rules! define_string_enum {
 define_string_enum!(SafeState {
     NoMutation => "no_mutation",
     PriorStateRetained => "prior_state_retained",
+    RestoredDataActiveBootstrapPending => "restored_data_active_bootstrap_pending",
     UnresolvedEvidenceRetained => "unresolved_evidence_retained",
 });
 
@@ -365,6 +366,14 @@ define_problem_catalog!(
         default_next_action: ("verify_record_id", "Verify the Record ID or create a new Record"),
         param_policy: ProblemParamPolicy::Fixed("/record_id")
     },
+    RecoveryBootstrapPending => "recovery_bootstrap_pending" {
+        title: "Recovery bootstrap pending", status: 409,
+        detail: ProblemDetail::Static("the restored workspace is active, but fresh node-local client bootstrap has not completed"),
+        documentation_path: "v1/problems/recovery-bootstrap-pending", safe_state: RestoredDataActiveBootstrapPending,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("retry_recovery_bootstrap", "Retry recovery bootstrap for the selected existing profile"),
+        param_policy: ProblemParamPolicy::None
+    },
     ReviewNotFound => "review_not_found" {
         title: "Review item not found", status: 404,
         detail: ProblemDetail::Static("no authorized review item is available for the requested identifier"),
@@ -440,6 +449,7 @@ impl ProblemCode {
             Self::DataRootLocked
             | Self::ExportCanceled
             | Self::OperationCanceled
+            | Self::RecoveryBootstrapPending
             | Self::StoppedNodeExportRequired
             | Self::UnsupportedPlatform => CapabilityBody::B3,
             _ => CapabilityBody::B1,
@@ -719,6 +729,13 @@ impl FastiProblem {
             correlation_id,
         )
     }
+    pub fn recovery_bootstrap_pending(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::RecoveryBootstrapPending,
+            CapabilityKey::RestoreWorkspace,
+            correlation_id,
+        )
+    }
     pub fn unsupported_listener(correlation_id: RequestCorrelationId) -> Self {
         Self::new(
             ProblemCode::UnsupportedListener,
@@ -926,6 +943,7 @@ mod tests {
             ProblemCode::DataRootLocked,
             ProblemCode::ExportCanceled,
             ProblemCode::OperationCanceled,
+            ProblemCode::RecoveryBootstrapPending,
             ProblemCode::StoppedNodeExportRequired,
             ProblemCode::UnsupportedPlatform,
         ] {
@@ -956,6 +974,13 @@ mod tests {
             canceled.next_actions()[0].id(),
             "review_restore_cancellation"
         );
+
+        let bootstrap = FastiProblem::recovery_bootstrap_pending(correlation_id);
+        assert_eq!(
+            bootstrap.safe_state(),
+            SafeState::RestoredDataActiveBootstrapPending
+        );
+        assert_eq!(bootstrap.next_actions()[0].id(), "retry_recovery_bootstrap");
 
         let stopped = FastiProblem::stopped_node_export_required(correlation_id);
         assert_eq!(stopped.capability(), CapabilityKey::ExportWorkspace);

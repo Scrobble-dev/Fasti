@@ -14,16 +14,21 @@ use fasti_domain::{
     RequestCorrelationId, RestoreAttemptId, RestorePolicy, RestoreStatus, Sha256Digest,
     WorkspaceId,
 };
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::num::NonZeroU64;
+use std::sync::{
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    Arc,
+};
 
-/// Internal draft archive format version written by the export adapter.
+/// Internal staged archive format version written by the export adapter.
 ///
 /// A restore implementation must reject any version it does not understand
-/// rather than guessing at the framing. This is not a public format activation,
-/// and its stream inventory remains unfrozen pending namespace ownership.
+/// rather than guessing at the framing. The archive-v1 stream inventory is
+/// frozen, but this does not activate a public format, capability, or route.
 pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 1;
 
 /// Largest integer with one interoperable RFC 8785/I-JSON representation.
@@ -34,6 +39,31 @@ pub const MAX_PORTABLE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 /// The stream is one component of the archive profile. It is not a complete
 /// `.fasti` archive by itself.
 pub const WORKSPACE_EXPORT_FORMAT_VERSION: u32 = WORKSPACE_ARCHIVE_FORMAT_VERSION;
+
+/// Cloneable, monotonic cancellation shared by a caller and portability work.
+///
+/// Adapters poll this signal at bounded work boundaries. Cancellation never
+/// authorizes a partial success: export aborts its destination before returning
+/// `export_canceled`, and restore rejects or removes staging before returning
+/// `operation_canceled`.
+#[derive(Debug, Clone, Default)]
+pub struct CancellationSignal {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationSignal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, AtomicOrdering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(AtomicOrdering::SeqCst)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerifyWorkspaceQuery {
@@ -426,9 +456,28 @@ pub struct ChecksummedWorkspaceManifest {
     digest: Sha256Digest,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractManifestDigestError {
+    DigestMismatch,
+}
+
 impl ChecksummedWorkspaceManifest {
-    pub const fn new(manifest: WorkspaceManifest, digest: Sha256Digest) -> Self {
-        Self { manifest, digest }
+    /// Construct only after the outer contract layer supplies canonical JCS
+    /// bytes for this manifest and a matching digest.
+    ///
+    /// The application layer verifies the byte-to-digest relation. The outer
+    /// contract remains responsible for projecting the application manifest to
+    /// those canonical wire bytes; serialization does not move inward.
+    pub fn try_from_contract_verified(
+        manifest: WorkspaceManifest,
+        canonical_manifest_body: &[u8],
+        digest: Sha256Digest,
+    ) -> Result<Self, ContractManifestDigestError> {
+        let computed = format!("sha256:{:x}", Sha256::digest(canonical_manifest_body));
+        if computed != digest.as_str() {
+            return Err(ContractManifestDigestError::DigestMismatch);
+        }
+        Ok(Self { manifest, digest })
     }
 
     pub const fn manifest(&self) -> &WorkspaceManifest {
@@ -463,10 +512,72 @@ impl ExportWorkspaceQuery {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ExportWorkspaceRequest {
     query: ExportWorkspaceQuery,
     limits: PortabilityLimits,
+    cancellation: CancellationSignal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceExportMode {
+    Online,
+    StoppedNode,
+}
+
+/// Explicit offline export after the caller stops the daemon.
+///
+/// The stopped-node adapter owns the shared data-root lock, opens the stopped
+/// database, and applies the same grant rules from [`ExportWorkspaceQuery`].
+/// Workspace identity is derived from that access context; callers cannot
+/// supply a second workspace value.
+#[derive(Debug, Clone)]
+pub struct StoppedNodeExportRequest {
+    query: ExportWorkspaceQuery,
+    limits: PortabilityLimits,
+    cancellation: CancellationSignal,
+}
+
+impl StoppedNodeExportRequest {
+    pub fn new(
+        query: ExportWorkspaceQuery,
+        limits: PortabilityLimits,
+        cancellation: CancellationSignal,
+    ) -> Self {
+        Self {
+            query,
+            limits,
+            cancellation,
+        }
+    }
+
+    pub const fn query(&self) -> &ExportWorkspaceQuery {
+        &self.query
+    }
+
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.query.access().workspace_id()
+    }
+
+    pub const fn mode(&self) -> WorkspaceExportMode {
+        WorkspaceExportMode::StoppedNode
+    }
+
+    pub const fn scope(&self) -> ExportScope {
+        ExportScope::FullWorkspace
+    }
+
+    pub const fn archive_profile(&self) -> ArchiveProfile {
+        ArchiveProfile::ZstdL3W22
+    }
+
+    pub const fn limits(&self) -> PortabilityLimits {
+        self.limits
+    }
+
+    pub const fn cancellation(&self) -> &CancellationSignal {
+        &self.cancellation
+    }
 }
 
 /// Operation identity retained when a portability failure is reported.
@@ -475,7 +586,14 @@ pub enum PortabilityFailureOperation {
     OnlineExport {
         correlation_id: RequestCorrelationId,
     },
+    StoppedNodeExport {
+        correlation_id: RequestCorrelationId,
+    },
     CleanRestore {
+        restore_attempt_id: RestoreAttemptId,
+        correlation_id: RequestCorrelationId,
+    },
+    RecoveryBootstrap {
         restore_attempt_id: RestoreAttemptId,
         correlation_id: RequestCorrelationId,
     },
@@ -484,18 +602,30 @@ pub enum PortabilityFailureOperation {
 impl PortabilityFailureOperation {
     pub const fn correlation_id(self) -> RequestCorrelationId {
         match self {
-            Self::OnlineExport { correlation_id } | Self::CleanRestore { correlation_id, .. } => {
-                correlation_id
-            }
+            Self::OnlineExport { correlation_id }
+            | Self::StoppedNodeExport { correlation_id }
+            | Self::CleanRestore { correlation_id, .. }
+            | Self::RecoveryBootstrap { correlation_id, .. } => correlation_id,
         }
     }
 
     pub const fn restore_attempt_id(self) -> Option<RestoreAttemptId> {
         match self {
-            Self::OnlineExport { .. } => None,
+            Self::OnlineExport { .. } | Self::StoppedNodeExport { .. } => None,
             Self::CleanRestore {
                 restore_attempt_id, ..
+            }
+            | Self::RecoveryBootstrap {
+                restore_attempt_id, ..
             } => Some(restore_attempt_id),
+        }
+    }
+
+    pub const fn export_mode(self) -> Option<WorkspaceExportMode> {
+        match self {
+            Self::OnlineExport { .. } => Some(WorkspaceExportMode::Online),
+            Self::StoppedNodeExport { .. } => Some(WorkspaceExportMode::StoppedNode),
+            Self::CleanRestore { .. } | Self::RecoveryBootstrap { .. } => None,
         }
     }
 }
@@ -503,6 +633,7 @@ impl PortabilityFailureOperation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortabilityFailureReceiptError {
     CapabilityMismatch,
+    OperationProblemMismatch,
 }
 
 /// Typed failure returned outside a partial archive destination.
@@ -535,7 +666,42 @@ impl PortabilityFailureReceipt {
         if problem.capability() != CapabilityKey::RestoreWorkspace {
             return Err(PortabilityFailureReceiptError::CapabilityMismatch);
         }
+        if problem.code() == crate::ProblemCode::RecoveryBootstrapPending {
+            return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
+        }
         let operation = PortabilityFailureOperation::CleanRestore {
+            restore_attempt_id,
+            correlation_id: problem.correlation_id(),
+        };
+        Ok(Self { operation, problem })
+    }
+
+    pub fn try_stopped_node_export(
+        problem: Box<FastiProblem>,
+    ) -> Result<Self, PortabilityFailureReceiptError> {
+        if problem.capability() != CapabilityKey::ExportWorkspace {
+            return Err(PortabilityFailureReceiptError::CapabilityMismatch);
+        }
+        if problem.code() == crate::ProblemCode::StoppedNodeExportRequired {
+            return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
+        }
+        let operation = PortabilityFailureOperation::StoppedNodeExport {
+            correlation_id: problem.correlation_id(),
+        };
+        Ok(Self { operation, problem })
+    }
+
+    pub fn try_recovery_bootstrap(
+        restore_attempt_id: RestoreAttemptId,
+        problem: Box<FastiProblem>,
+    ) -> Result<Self, PortabilityFailureReceiptError> {
+        if problem.capability() != CapabilityKey::RestoreWorkspace {
+            return Err(PortabilityFailureReceiptError::CapabilityMismatch);
+        }
+        if problem.code() != crate::ProblemCode::RecoveryBootstrapPending {
+            return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
+        }
+        let operation = PortabilityFailureOperation::RecoveryBootstrap {
             restore_attempt_id,
             correlation_id: problem.correlation_id(),
         };
@@ -554,12 +720,24 @@ impl PortabilityFailureReceipt {
 pub type PortabilityResult<T> = Result<T, PortabilityFailureReceipt>;
 
 impl ExportWorkspaceRequest {
-    pub const fn new(query: ExportWorkspaceQuery, limits: PortabilityLimits) -> Self {
-        Self { query, limits }
+    pub fn new(
+        query: ExportWorkspaceQuery,
+        limits: PortabilityLimits,
+        cancellation: CancellationSignal,
+    ) -> Self {
+        Self {
+            query,
+            limits,
+            cancellation,
+        }
     }
 
     pub const fn query(&self) -> &ExportWorkspaceQuery {
         &self.query
+    }
+
+    pub const fn mode(&self) -> WorkspaceExportMode {
+        WorkspaceExportMode::Online
     }
 
     pub const fn scope(&self) -> ExportScope {
@@ -573,6 +751,10 @@ impl ExportWorkspaceRequest {
     pub const fn limits(&self) -> PortabilityLimits {
         self.limits
     }
+
+    pub const fn cancellation(&self) -> &CancellationSignal {
+        &self.cancellation
+    }
 }
 
 /// Owned partial-archive lifecycle.
@@ -581,6 +763,16 @@ impl ExportWorkspaceRequest {
 /// published or discarded destination. Implementations own synchronization,
 /// no-replace publication, and partial-file removal.
 pub trait WorkspaceArchiveDestination: Write + Send {
+    /// Check capacity on the destination filesystem before any source or
+    /// snapshot mutation.
+    ///
+    /// The caller supplies a conservative no-compression output bound: stream
+    /// bytes, referenced blob bytes, container and final-manifest overhead, and
+    /// the applicable reserve. It must not credit expected compression. The
+    /// destination owns this check because it alone knows which filesystem
+    /// will hold partial and completed archive bytes.
+    fn preflight(&self, required_bytes: u64) -> std::io::Result<()>;
+
     fn complete(
         self: Box<Self>,
         archive_digest: &Sha256Digest,
@@ -628,6 +820,12 @@ pub trait WorkspaceArchiveExportPort: Send + Sync {
     fn export_workspace_archive(
         &self,
         request: ExportWorkspaceRequest,
+        destination: Box<dyn WorkspaceArchiveDestination>,
+    ) -> PortabilityResult<WorkspaceArchiveExportOutcome>;
+
+    fn export_stopped_node_workspace_archive(
+        &self,
+        request: StoppedNodeExportRequest,
         destination: Box<dyn WorkspaceArchiveDestination>,
     ) -> PortabilityResult<WorkspaceArchiveExportOutcome>;
 }
@@ -716,23 +914,26 @@ pub trait WorkspaceExportPort: Send + Sync {
     ) -> ApplicationResult<WorkspaceExportOutcome>;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct RestoreWorkspaceRequest {
     restore_attempt_id: RestoreAttemptId,
     correlation_id: RequestCorrelationId,
     limits: PortabilityLimits,
+    cancellation: CancellationSignal,
 }
 
 impl RestoreWorkspaceRequest {
-    pub const fn new(
+    pub fn new(
         restore_attempt_id: RestoreAttemptId,
         correlation_id: RequestCorrelationId,
         limits: PortabilityLimits,
+        cancellation: CancellationSignal,
     ) -> Self {
         Self {
             restore_attempt_id,
             correlation_id,
             limits,
+            cancellation,
         }
     }
 
@@ -759,14 +960,17 @@ impl RestoreWorkspaceRequest {
     pub const fn limits(&self) -> PortabilityLimits {
         self.limits
     }
+
+    pub const fn cancellation(&self) -> &CancellationSignal {
+        &self.cancellation
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RestoreWorkspaceOutcome {
     restore_attempt_id: RestoreAttemptId,
-    status: RestoreStatus,
-    workspace_id: Option<WorkspaceId>,
-    manifest_digest: Option<Sha256Digest>,
+    workspace_id: WorkspaceId,
+    manifest_digest: Sha256Digest,
 }
 
 impl RestoreWorkspaceOutcome {
@@ -777,18 +981,8 @@ impl RestoreWorkspaceOutcome {
     ) -> Self {
         Self {
             restore_attempt_id,
-            status: RestoreStatus::Complete,
-            workspace_id: Some(workspace_id),
-            manifest_digest: Some(manifest_digest),
-        }
-    }
-
-    pub const fn rejected(restore_attempt_id: RestoreAttemptId) -> Self {
-        Self {
-            restore_attempt_id,
-            status: RestoreStatus::Rejected,
-            workspace_id: None,
-            manifest_digest: None,
+            workspace_id,
+            manifest_digest,
         }
     }
 
@@ -797,15 +991,15 @@ impl RestoreWorkspaceOutcome {
     }
 
     pub const fn status(&self) -> RestoreStatus {
-        self.status
+        RestoreStatus::Complete
     }
 
-    pub const fn workspace_id(&self) -> Option<WorkspaceId> {
+    pub const fn workspace_id(&self) -> WorkspaceId {
         self.workspace_id
     }
 
-    pub const fn manifest_digest(&self) -> Option<&Sha256Digest> {
-        self.manifest_digest.as_ref()
+    pub const fn manifest_digest(&self) -> &Sha256Digest {
+        &self.manifest_digest
     }
 
     pub const fn recovery_grant_policy(&self) -> RecoveryGrantPolicy {
@@ -813,11 +1007,22 @@ impl RestoreWorkspaceOutcome {
     }
 }
 
+/// One opened archive source that supports preflight and restore passes.
+///
+/// Restore adapters must preflight format, paths, headers, the final manifest,
+/// checksums, references, and bounds before destination mutation. They then
+/// rewind this same opened source for the restore pass. Reopening by path would
+/// create a time-of-check/time-of-use race; buffering the whole archive would
+/// violate the bounded-memory contract.
+pub trait ReadSeek: Read + Seek {}
+
+impl<T: Read + Seek + ?Sized> ReadSeek for T {}
+
 pub trait WorkspaceRestorePort: Send + Sync {
     fn restore_workspace(
         &self,
         request: RestoreWorkspaceRequest,
-        archive: Box<dyn Read + Send>,
+        archive: Box<dyn ReadSeek + Send>,
     ) -> PortabilityResult<RestoreWorkspaceOutcome>;
 }
 
@@ -871,10 +1076,12 @@ impl PrepareRecoveryBootstrapRequest {
 
 /// Fresh provisional node-local identity for the existing restored profile.
 ///
-/// A successful adapter creates this client and one-time proof after proving
-/// the workspace/profile relation. The normal enrollment exchange replaces
-/// the proof with a fresh credential and fresh grants. Imported credentials,
-/// clients, grants, scopes, and node state are never reused.
+/// Non-secret imported client provenance remains required for audit and
+/// Chronicle references. A successful adapter creates a distinct node-local
+/// recovery client and one-time proof after proving the workspace/profile
+/// relation. The normal enrollment exchange replaces the proof with a fresh
+/// credential and fresh grants. Imported client authentication, credentials,
+/// grants, scopes, and node state are never reused.
 pub struct PrepareRecoveryBootstrapOutcome {
     restore_attempt_id: RestoreAttemptId,
     workspace_id: WorkspaceId,
@@ -933,6 +1140,44 @@ pub trait RecoveryBootstrapPort: Send + Sync {
 mod tests {
     use super::*;
     use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId};
+    use std::io::{Cursor, SeekFrom};
+
+    struct BoundedTestDestination {
+        capacity_bytes: u64,
+    }
+
+    impl Write for BoundedTestDestination {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl WorkspaceArchiveDestination for BoundedTestDestination {
+        fn preflight(&self, required_bytes: u64) -> std::io::Result<()> {
+            if required_bytes > self.capacity_bytes {
+                return Err(std::io::Error::other(
+                    "archive destination capacity is insufficient",
+                ));
+            }
+            Ok(())
+        }
+
+        fn complete(
+            self: Box<Self>,
+            _archive_digest: &Sha256Digest,
+            _manifest_digest: &Sha256Digest,
+        ) -> std::io::Result<()> {
+            Ok(())
+        }
+
+        fn abort(self: Box<Self>) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn digest(byte: u8) -> Sha256Digest {
         Sha256Digest::parse(format!("sha256:{}", format!("{byte:02x}").repeat(32)))
@@ -1087,6 +1332,29 @@ mod tests {
     }
 
     #[test]
+    fn checksummed_manifest_rejects_a_digest_unrelated_to_contract_bytes() {
+        let manifest = WorkspaceManifest::try_new(
+            WorkspaceId::new_v7(),
+            42,
+            "1.0.0".to_owned(),
+            2,
+            digest(2),
+            streams(),
+            Vec::new(),
+        )
+        .expect("valid manifest");
+        let canonical_contract_bytes = b"{\"contract\":\"verified\"}";
+        assert_eq!(
+            ChecksummedWorkspaceManifest::try_from_contract_verified(
+                manifest,
+                canonical_contract_bytes,
+                digest(9),
+            ),
+            Err(ContractManifestDigestError::DigestMismatch)
+        );
+    }
+
+    #[test]
     fn manifest_rejects_unbounded_contract_metadata() {
         assert_eq!(
             WorkspaceManifest::try_new(
@@ -1210,32 +1478,87 @@ mod tests {
             ProfileGrantId::new_v7(),
             1,
         );
+        let export_cancellation = CancellationSignal::new();
         let export = ExportWorkspaceRequest::new(
             ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), access),
             limits(),
+            export_cancellation.clone(),
         );
         assert_eq!(export.scope(), ExportScope::FullWorkspace);
         assert_eq!(export.archive_profile(), ArchiveProfile::ZstdL3W22);
+        assert_eq!(export.mode(), WorkspaceExportMode::Online);
+        assert!(!export.cancellation().is_cancelled());
+        export_cancellation.cancel();
+        assert!(export.cancellation().is_cancelled());
+
+        let stopped_cancellation = CancellationSignal::new();
+        let stopped = StoppedNodeExportRequest::new(
+            ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), access),
+            limits(),
+            stopped_cancellation.clone(),
+        );
+        assert_eq!(stopped.workspace_id(), workspace_id);
+        assert_eq!(
+            stopped.workspace_id(),
+            stopped.query().access().workspace_id()
+        );
+        assert_eq!(stopped.mode(), WorkspaceExportMode::StoppedNode);
+        assert_eq!(stopped.scope(), ExportScope::FullWorkspace);
+        assert_eq!(stopped.archive_profile(), ArchiveProfile::ZstdL3W22);
+        stopped_cancellation.cancel();
+        assert!(stopped.cancellation().is_cancelled());
 
         let attempt_id = RestoreAttemptId::new_v7();
-        let restore =
-            RestoreWorkspaceRequest::new(attempt_id, RequestCorrelationId::new_v7(), limits());
+        let restore_cancellation = CancellationSignal::new();
+        let restore = RestoreWorkspaceRequest::new(
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            restore_cancellation.clone(),
+        );
         assert_eq!(restore.policy(), RestorePolicy::CleanOnly);
         assert_eq!(restore.archive_profile(), ArchiveProfile::ZstdL3W22);
         assert_eq!(
             restore.recovery_grant_policy(),
             RecoveryGrantPolicy::RequireFreshBootstrap
         );
+        assert!(!restore.cancellation().is_cancelled());
+        restore_cancellation.cancel();
+        assert!(restore.cancellation().is_cancelled());
 
         let complete = RestoreWorkspaceOutcome::complete(attempt_id, workspace_id, digest(3));
         assert_eq!(complete.status(), RestoreStatus::Complete);
-        assert_eq!(complete.workspace_id(), Some(workspace_id));
-        assert!(complete.manifest_digest().is_some());
+        assert_eq!(complete.workspace_id(), workspace_id);
+        assert_eq!(complete.manifest_digest(), &digest(3));
+    }
 
-        let rejected = RestoreWorkspaceOutcome::rejected(attempt_id);
-        assert_eq!(rejected.status(), RestoreStatus::Rejected);
-        assert_eq!(rejected.workspace_id(), None);
-        assert_eq!(rejected.manifest_digest(), None);
+    #[test]
+    fn archive_destination_owns_capacity_preflight() {
+        let destination = BoundedTestDestination {
+            capacity_bytes: 1024,
+        };
+
+        assert!(destination.preflight(1024).is_ok());
+        assert!(destination.preflight(1025).is_err());
+    }
+
+    #[test]
+    fn restore_source_supports_two_pass_preflight_without_reopening() {
+        let mut archive: Box<dyn ReadSeek + Send> =
+            Box::new(Cursor::new(b"header-payload-manifest".to_vec()));
+        let mut preflight = Vec::new();
+        archive
+            .read_to_end(&mut preflight)
+            .expect("preflight reads the complete opened archive");
+        archive
+            .seek(SeekFrom::Start(0))
+            .expect("same archive rewinds after preflight");
+        let mut restore = Vec::new();
+        archive
+            .read_to_end(&mut restore)
+            .expect("restore rereads the same opened archive");
+
+        assert_eq!(preflight, restore);
     }
 
     #[test]
@@ -1247,6 +1570,10 @@ mod tests {
         .expect("export failure receipt");
         assert_eq!(export.operation().correlation_id(), export_correlation);
         assert_eq!(export.operation().restore_attempt_id(), None);
+        assert_eq!(
+            export.operation().export_mode(),
+            Some(WorkspaceExportMode::Online)
+        );
         assert_eq!(export.problem().code(), crate::ProblemCode::ExportCanceled);
 
         let stopped_node = PortabilityFailureReceipt::try_online_export(Box::new(
@@ -1256,6 +1583,23 @@ mod tests {
         assert_eq!(
             stopped_node.problem().code(),
             crate::ProblemCode::StoppedNodeExportRequired
+        );
+        assert_eq!(
+            stopped_node.operation().export_mode(),
+            Some(WorkspaceExportMode::Online),
+            "the online operation reports the stopped-node next action"
+        );
+
+        let stopped_failure = PortabilityFailureReceipt::try_stopped_node_export(Box::new(
+            FastiProblem::data_root_locked(
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            ),
+        ))
+        .expect("stopped-node failure receipt");
+        assert_eq!(
+            stopped_failure.operation().export_mode(),
+            Some(WorkspaceExportMode::StoppedNode)
         );
 
         let restore_correlation = RequestCorrelationId::new_v7();
@@ -1267,6 +1611,37 @@ mod tests {
         .expect("restore failure receipt");
         assert_eq!(restore.operation().correlation_id(), restore_correlation);
         assert_eq!(restore.operation().restore_attempt_id(), Some(attempt_id));
+
+        let bootstrap = PortabilityFailureReceipt::try_recovery_bootstrap(
+            attempt_id,
+            Box::new(FastiProblem::recovery_bootstrap_pending(
+                RequestCorrelationId::new_v7(),
+            )),
+        )
+        .expect("recovery-bootstrap failure receipt");
+        assert!(matches!(
+            bootstrap.operation(),
+            PortabilityFailureOperation::RecoveryBootstrap { .. }
+        ));
+        assert_eq!(bootstrap.operation().restore_attempt_id(), Some(attempt_id));
+        assert_eq!(
+            bootstrap.problem().safe_state(),
+            crate::SafeState::RestoredDataActiveBootstrapPending
+        );
+        assert_eq!(
+            bootstrap.problem().next_actions()[0].id(),
+            "retry_recovery_bootstrap"
+        );
+        assert_eq!(
+            PortabilityFailureReceipt::try_recovery_bootstrap(
+                attempt_id,
+                Box::new(FastiProblem::restore_canceled(
+                    RequestCorrelationId::new_v7()
+                ))
+            ),
+            Err(PortabilityFailureReceiptError::OperationProblemMismatch),
+            "a pre-activation cancellation cannot be mislabeled as recovery bootstrap"
+        );
 
         assert_eq!(
             PortabilityFailureReceipt::try_online_export(Box::new(FastiProblem::restore_canceled(

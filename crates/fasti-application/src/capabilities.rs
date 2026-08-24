@@ -411,6 +411,7 @@ define_capabilities!(
             DataRootLocked,
             IntegrityFailed,
             OperationCanceled,
+            RecoveryBootstrapPending,
             StorageUnavailable,
             UnsupportedPlatform
         ]
@@ -424,7 +425,7 @@ define_capabilities!(
         Scoped,
         [WorkspaceVerify],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, StorageUnavailable]
+        [DataRootLocked, IntegrityFailed, StorageUnavailable]
     ),
 );
 
@@ -513,11 +514,18 @@ mod tests {
         let restore = CapabilityKey::RestoreWorkspace.allowed_problem_codes();
         for code in [
             ProblemCode::OperationCanceled,
+            ProblemCode::RecoveryBootstrapPending,
             ProblemCode::UnsupportedPlatform,
         ] {
             assert!(restore.contains(&code));
             assert!(!restore.iter().any(|published| *published == code));
         }
+
+        let verify = CapabilityKey::VerifyWorkspace.allowed_problem_codes();
+        assert!(verify.contains(&ProblemCode::DataRootLocked));
+        assert!(!verify
+            .iter()
+            .any(|published| *published == ProblemCode::DataRootLocked));
     }
 
     #[test]
