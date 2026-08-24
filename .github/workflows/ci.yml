@@ -105,6 +105,12 @@ jobs:
         run: docker build --tag fasti:b0 .
       - name: Verify non-root, health, false-success, and idle-memory gates
         run: bash scripts/smoke-oci.sh fasti:b0
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Build native binaries
+        run: cargo build --locked --release --bin fastid --bin fasti
+      - name: Verify the native path works with the network denied
+        run: bash scripts/smoke-native.sh target/release
 
   review-source-snapshot:
     name: Exact tracked source snapshot
