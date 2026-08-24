@@ -68,7 +68,10 @@ impl AccessAdministrationPort for SqliteKernel {
         )?;
         let exists: bool = map_sql(
             transaction.query_row(
-                "SELECT EXISTS(SELECT 1 FROM node_state WHERE singleton = 1)",
+                r#"
+                SELECT EXISTS(SELECT 1 FROM node_state WHERE singleton = 1)
+                    OR EXISTS(SELECT 1 FROM workspaces)
+                "#,
                 [],
                 |row| row.get(0),
             ),
@@ -892,6 +895,40 @@ mod tests {
                 .iter()
                 .any(|scope| scope == scope_storage_key(*required_scope)));
         }
+    }
+
+    #[test]
+    fn initialization_rejects_a_restored_workspace_without_node_state() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let restored_workspace = WorkspaceId::new_v7();
+        {
+            let connection = kernel.inner.connection.lock().expect("SQLite connection");
+            connection
+                .execute(
+                    "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                    params![restored_workspace.to_string(), timestamp(now())],
+                )
+                .expect("insert restored workspace");
+        }
+
+        let error = match kernel
+            .initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
+        {
+            Ok(_) => panic!("restored workspace must keep bootstrap closed"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code(), ProblemCode::AlreadyInitialized);
+
+        let connection = kernel.inner.connection.lock().expect("SQLite connection");
+        let workspace_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))
+            .expect("workspace count");
+        let node_state_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM node_state", [], |row| row.get(0))
+            .expect("node-state count");
+        assert_eq!(workspace_count, 1);
+        assert_eq!(node_state_count, 0);
     }
 
     #[test]

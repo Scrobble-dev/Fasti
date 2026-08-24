@@ -118,14 +118,18 @@ impl SqliteKernel {
             let started = Instant::now();
             let source = Connection::open_with_flags(
                 &source_path,
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
             source.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
             source.pragma_update(None, "query_only", "ON")?;
 
             let mut target = Connection::open_with_flags(
                 destination,
-                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+                OpenFlags::SQLITE_OPEN_READ_WRITE
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                    | OpenFlags::SQLITE_OPEN_NOFOLLOW,
             )?;
             target.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
 
