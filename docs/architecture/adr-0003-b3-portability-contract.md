@@ -111,6 +111,23 @@ node-local client and one-time proof for the normal fresh-credential exchange.
 It never chooses a profile implicitly or reuses imported client authentication,
 credentials, grants, scopes, or node state.
 
+The store predecessor for final archive assembly keeps the frozen entity SQL
+and row codec in one place. It can stream exactly one plain NDJSON entity from
+a caller-owned, read-only snapshot connection in 256-row keyset pages. The
+caller supplies the cancellation and authorization monitor, and the helper
+checks the configured per-stream row and byte ceilings before it returns the
+row count, byte length, and SHA-256 descriptor. The same pager and codec remain
+behind the transitional staged exporter.
+
+The snapshot schema fingerprint uses the numeric `user_version` and the
+ordered, non-SQLite-owned `sqlite_schema` definitions from the actual opened
+database. It does not hash Rust migration source or physical root-page
+allocation. Evidence inventory reads the same snapshot, orders entries by
+`EvidenceId`, and rejects non-canonical IDs, digests, sizes, paths, or duplicate
+blob digests before later archive code copies any bytes. These primitives do
+not create the tar stream, publish a destination, or activate a public export
+surface.
+
 ## Consequences
 
 - Store orchestration can implement one bounded contract without importing

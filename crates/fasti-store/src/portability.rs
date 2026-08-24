@@ -5,16 +5,20 @@ use crate::kernel::{
 };
 use crate::schema::workspace_revision;
 use fasti_application::{
-    ApplicationResult, CapabilityKey, ExportWorkspaceQuery, FastiProblem, ProblemCode,
-    RequestAccessContext, VerifyWorkspaceQuery, WorkspaceExportEntity, WorkspaceExportOutcome,
-    WorkspaceExportPort, WorkspaceVerificationOutcome, WorkspaceVerificationPort,
+    ApplicationResult, CapabilityKey, ExportWorkspaceQuery, FastiProblem, PortabilityLimits,
+    ProblemCode, RequestAccessContext, VerifyWorkspaceQuery, WorkspaceBlobDescriptor,
+    WorkspaceExportEntity, WorkspaceExportOutcome, WorkspaceExportPort, WorkspaceStreamDescriptor,
+    WorkspaceVerificationOutcome, WorkspaceVerificationPort, MAX_PORTABLE_JSON_INTEGER,
     WORKSPACE_EXPORT_FORMAT_VERSION,
 };
+use fasti_domain::{EvidenceId, RequestCorrelationId, Sha256Digest, WorkspaceId};
 use rusqlite::types::{Value, ValueRef};
-use rusqlite::{params, Transaction, TransactionBehavior};
+use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 const EVIDENCE_VERIFY_PAGE: i64 = 128;
 type EvidenceRow = (i64, String, i64, String);
@@ -461,10 +465,11 @@ mod tests {
     };
     use fasti_domain::{
         Grain, InterpretationId, NamespaceDefinition, NamespaceLicencePosture, ObservationId,
-        OccurrenceId, OperationId, ReceiptId, RequestCorrelationId,
+        OccurrenceId, OperationId, ReceiptId, RecordId, RequestCorrelationId,
     };
     use std::fs;
     use std::io;
+    use std::num::NonZeroU64;
 
     struct MutatingSink {
         bytes: Vec<u8>,
@@ -516,6 +521,59 @@ mod tests {
 
     fn grant_verify_scope(node: &TestNode) {
         grant_scope(node, ScopeKey::WorkspaceVerify);
+    }
+
+    fn portability_limits(max_rows: u64, max_entry_bytes: u64) -> PortabilityLimits {
+        let general = NonZeroU64::new(16 * 1024 * 1024).expect("non-zero general limit");
+        let entries = NonZeroU64::new(1_024).expect("non-zero entry count");
+        let one = NonZeroU64::new(1).expect("non-zero unit limit");
+        PortabilityLimits {
+            max_snapshot_bytes: general,
+            max_wal_growth_bytes: general,
+            max_archive_bytes: general,
+            max_uncompressed_bytes: general,
+            max_entry_bytes: NonZeroU64::new(max_entry_bytes).expect("non-zero entry bytes"),
+            max_entries: entries,
+            max_rows_per_stream: NonZeroU64::new(max_rows).expect("non-zero row limit"),
+            max_path_bytes: general,
+            max_path_depth: entries,
+            max_decompression_ratio: entries,
+            scratch_ceiling_bytes: general,
+            cleanup_reserve_bytes: general,
+            backup_step_pages: one,
+            backup_step_millis: one,
+        }
+    }
+
+    fn insert_records(node: &TestNode, count: usize) {
+        let mut connection = node
+            .kernel
+            .inner
+            .connection
+            .lock()
+            .expect("SQLite connection");
+        let transaction = connection.transaction().expect("record transaction");
+        for _ in 0..count {
+            transaction
+                .execute(
+                    "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, 'film', 'active', '2026-08-24T00:00:00.000000Z')",
+                    params![RecordId::new_v7().to_string(), node.access.workspace_id().to_string()],
+                )
+                .expect("insert record");
+        }
+        transaction.commit().expect("commit records");
+    }
+
+    fn open_read_only_database(node: &TestNode) -> Connection {
+        let connection = Connection::open_with_flags(
+            node.kernel.database_path(),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open read-only snapshot connection");
+        connection
+            .pragma_update(None, "query_only", "ON")
+            .expect("set query-only mode");
+        connection
     }
 
     #[test]
@@ -811,6 +869,258 @@ mod tests {
         assert!(sink.mutated);
         assert_eq!(error.code(), ProblemCode::StorageUnavailable);
     }
+
+    #[test]
+    fn archive_entity_descriptor_is_deterministic_across_read_only_reopen() {
+        let node = TestNode::new();
+        insert_records(&node, 3);
+        let correlation_id = RequestCorrelationId::new_v7();
+        let limits = portability_limits(16, 64 * 1024);
+
+        let (first_descriptor, first_bytes) = {
+            let connection = open_read_only_database(&node);
+            let mut bytes = Vec::new();
+            let descriptor = stream_archive_entity(
+                &connection,
+                node.access.workspace_id(),
+                WorkspaceExportEntity::Records,
+                limits,
+                &mut bytes,
+                &mut || Ok(()),
+                correlation_id,
+            )
+            .expect("first entity stream");
+            (descriptor, bytes)
+        };
+        let (second_descriptor, second_bytes) = {
+            let connection = open_read_only_database(&node);
+            let mut bytes = Vec::new();
+            let descriptor = stream_archive_entity(
+                &connection,
+                node.access.workspace_id(),
+                WorkspaceExportEntity::Records,
+                limits,
+                &mut bytes,
+                &mut || Ok(()),
+                correlation_id,
+            )
+            .expect("reopened entity stream");
+            (descriptor, bytes)
+        };
+
+        assert_eq!(first_descriptor, second_descriptor);
+        assert_eq!(first_bytes, second_bytes);
+        assert_eq!(first_descriptor.row_count(), 3);
+        assert_eq!(first_descriptor.byte_length(), first_bytes.len() as u64);
+    }
+
+    #[test]
+    fn archive_namespace_entity_uses_frozen_key_order_without_section_markers() {
+        let node = TestNode::new();
+        assert!(
+            EXPORT_SECTIONS
+                .iter()
+                .map(|section| section.entity)
+                .eq(WorkspaceExportEntity::ALL),
+            "store section order must match frozen archive-v1 order"
+        );
+        for (key, label) in [("zeta", "Zeta"), ("alpha", "Alpha")] {
+            node.kernel
+                .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    NamespaceDefinition::try_new(
+                        key,
+                        label,
+                        [Grain::Film],
+                        "^[a-z]+$",
+                        "identity",
+                        NamespaceLicencePosture::Unknown,
+                    )
+                    .expect("valid namespace"),
+                ))
+                .expect("register namespace");
+        }
+        let connection = open_read_only_database(&node);
+        let mut bytes = Vec::new();
+        let descriptor = stream_archive_entity(
+            &connection,
+            node.access.workspace_id(),
+            WorkspaceExportEntity::NamespaceDefinitions,
+            portability_limits(16, 64 * 1024),
+            &mut bytes,
+            &mut || Ok(()),
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("namespace entity stream");
+        let rows: Vec<serde_json::Value> = std::str::from_utf8(&bytes)
+            .expect("UTF-8 NDJSON")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("namespace JSON row"))
+            .collect();
+
+        assert_eq!(descriptor.row_count(), 2);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["namespace"], "alpha");
+        assert_eq!(rows[1]["namespace"], "zeta");
+        assert!(rows.iter().all(|row| row.get("section").is_none()));
+    }
+
+    #[test]
+    fn archive_entity_rejects_row_and_byte_ceiling_breaches() {
+        let node = TestNode::new();
+        insert_records(&node, 2);
+        let connection = open_read_only_database(&node);
+        let correlation_id = RequestCorrelationId::new_v7();
+
+        let mut row_limited = Vec::new();
+        let row_error = stream_archive_entity(
+            &connection,
+            node.access.workspace_id(),
+            WorkspaceExportEntity::Records,
+            portability_limits(1, 64 * 1024),
+            &mut row_limited,
+            &mut || Ok(()),
+            correlation_id,
+        )
+        .expect_err("row ceiling must reject the entity");
+        assert_eq!(row_error.code(), ProblemCode::CapacityExceeded);
+        assert!(row_limited.is_empty());
+
+        let mut byte_limited = Vec::new();
+        let byte_error = stream_archive_entity(
+            &connection,
+            node.access.workspace_id(),
+            WorkspaceExportEntity::Records,
+            portability_limits(16, 1),
+            &mut byte_limited,
+            &mut || Ok(()),
+            correlation_id,
+        )
+        .expect_err("byte ceiling must reject the entity");
+        assert_eq!(byte_error.code(), ProblemCode::CapacityExceeded);
+        assert!(byte_limited.is_empty());
+    }
+
+    #[test]
+    fn archive_entity_monitor_can_cancel_before_each_page() {
+        let node = TestNode::new();
+        insert_records(&node, EXPORT_PAGE as usize + 1);
+        let connection = open_read_only_database(&node);
+        let correlation_id = RequestCorrelationId::new_v7();
+        let mut calls = 0_u64;
+        let mut bytes = Vec::new();
+
+        let error = stream_archive_entity(
+            &connection,
+            node.access.workspace_id(),
+            WorkspaceExportEntity::Records,
+            portability_limits(1_024, 1024 * 1024),
+            &mut bytes,
+            &mut || {
+                calls += 1;
+                if calls == 2 {
+                    Err(Box::new(FastiProblem::export_canceled(correlation_id)))
+                } else {
+                    Ok(())
+                }
+            },
+            correlation_id,
+        )
+        .expect_err("second-page monitor cancellation must stop streaming");
+
+        assert_eq!(error.code(), ProblemCode::ExportCanceled);
+        assert_eq!(calls, 2);
+        assert_eq!(bytes.iter().filter(|byte| **byte == b'\n').count(), 256);
+    }
+
+    #[test]
+    fn schema_fingerprint_changes_with_actual_schema_mutation() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .execute_batch(
+                "CREATE TABLE records(record_id TEXT PRIMARY KEY) STRICT; PRAGMA user_version = 4;",
+            )
+            .expect("initial schema");
+        let correlation_id = RequestCorrelationId::new_v7();
+        let before = schema_fingerprint(&connection, correlation_id).expect("schema fingerprint");
+
+        connection
+            .execute_batch("CREATE INDEX records_order_idx ON records(record_id);")
+            .expect("schema mutation");
+        let after = schema_fingerprint(&connection, correlation_id).expect("mutated fingerprint");
+
+        assert_eq!(before.migration_version(), 4);
+        assert_eq!(after.migration_version(), 4);
+        assert_ne!(before.digest(), after.digest());
+    }
+
+    #[test]
+    fn snapshot_blob_inventory_is_sorted_unique_and_path_checked() {
+        let node = TestNode::new();
+        let first = node.upload(b"first inventory blob");
+        let second = node.upload(b"second inventory blob");
+        let correlation_id = RequestCorrelationId::new_v7();
+        let connection = open_read_only_database(&node);
+        let inventory = snapshot_evidence_blobs(
+            &connection,
+            node.access.workspace_id(),
+            portability_limits(16, 64 * 1024),
+            correlation_id,
+        )
+        .expect("snapshot blob inventory");
+
+        assert_eq!(inventory.len(), 2);
+        assert!(inventory.windows(2).all(|pair| {
+            pair[0].descriptor().evidence_id().uuid() < pair[1].descriptor().evidence_id().uuid()
+        }));
+        let ids: HashSet<_> = inventory
+            .iter()
+            .map(|blob| blob.descriptor().evidence_id())
+            .collect();
+        let digests: HashSet<_> = inventory
+            .iter()
+            .map(|blob| blob.descriptor().digest().clone())
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(digests.len(), 2);
+        assert!(ids.contains(&first.evidence_id()));
+        assert!(ids.contains(&second.evidence_id()));
+        for blob in &inventory {
+            let digest_hex = canonical_digest_hex(blob.descriptor().digest().as_str())
+                .expect("canonical descriptor digest");
+            assert_eq!(blob.relative_path(), relative_evidence_path(digest_hex));
+        }
+    }
+
+    #[test]
+    fn snapshot_blob_inventory_rejects_noncanonical_stored_metadata() {
+        let node = TestNode::new();
+        let evidence = node.upload(b"path validation blob");
+        {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            connection
+                .execute(
+                    "UPDATE evidence SET relative_path = '../payload' WHERE evidence_id = ?1",
+                    [evidence.evidence_id().to_string()],
+                )
+                .expect("corrupt stored path");
+        }
+        let connection = open_read_only_database(&node);
+        let error = snapshot_evidence_blobs(
+            &connection,
+            node.access.workspace_id(),
+            portability_limits(16, 64 * 1024),
+            RequestCorrelationId::new_v7(),
+        )
+        .expect_err("noncanonical evidence path must fail inventory");
+        assert_eq!(error.code(), ProblemCode::IntegrityFailed);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1039,6 +1349,388 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
     },
 ];
 
+/// The migration version and a digest of the actual SQLite schema in a frozen
+/// snapshot. Physical root-page allocation is excluded because it is not
+/// schema meaning and can change after a byte-equivalent restore or VACUUM.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+pub(crate) struct SchemaFingerprint {
+    migration_version: u32,
+    digest: Sha256Digest,
+}
+
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+impl SchemaFingerprint {
+    pub(crate) const fn migration_version(&self) -> u32 {
+        self.migration_version
+    }
+
+    pub(crate) const fn digest(&self) -> &Sha256Digest {
+        &self.digest
+    }
+}
+
+/// One validated evidence entry discovered in the frozen snapshot database.
+///
+/// The relative path is retained for the later archive copier. This helper
+/// does not open or copy the immutable blob bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+pub(crate) struct SnapshotEvidenceBlob {
+    descriptor: WorkspaceBlobDescriptor,
+    relative_path: PathBuf,
+}
+
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+impl SnapshotEvidenceBlob {
+    pub(crate) const fn descriptor(&self) -> &WorkspaceBlobDescriptor {
+        &self.descriptor
+    }
+
+    pub(crate) fn relative_path(&self) -> &Path {
+        &self.relative_path
+    }
+}
+
+/// Streams one frozen archive-v1 entity as plain NDJSON.
+///
+/// `connection` must be the caller-owned, read-only connection to the frozen
+/// snapshot database. The monitor runs before every bounded page query. It is
+/// responsible for cancellation and any live authorization/resource fence the
+/// caller must retain while disclosing snapshot bytes.
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+pub(crate) fn stream_archive_entity(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    entity: WorkspaceExportEntity,
+    limits: PortabilityLimits,
+    sink: &mut dyn Write,
+    monitor: &mut dyn FnMut() -> ApplicationResult<()>,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<WorkspaceStreamDescriptor> {
+    let section = section_for_entity(entity, correlation_id)?;
+    let workspace = workspace_id.to_string();
+    stream_entity_pages(
+        section,
+        limits
+            .max_rows_per_stream
+            .get()
+            .min(MAX_PORTABLE_JSON_INTEGER),
+        limits.max_entry_bytes.get().min(MAX_PORTABLE_JSON_INTEGER),
+        sink,
+        correlation_id,
+        |cursor| {
+            monitor()?;
+            read_section_page(
+                connection,
+                section,
+                &workspace,
+                cursor,
+                CapabilityKey::ExportWorkspace,
+                correlation_id,
+            )
+        },
+    )
+}
+
+/// Fingerprints the migration version plus every semantically relevant,
+/// non-SQLite-owned row in `sqlite_schema`, in a fixed binary collation order.
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+pub(crate) fn schema_fingerprint(
+    connection: &Connection,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<SchemaFingerprint> {
+    let capability = CapabilityKey::ExportWorkspace;
+    let version = map_sql(
+        connection.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0)),
+        capability,
+        correlation_id,
+    )?;
+    let migration_version = u32::try_from(version)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+
+    let mut statement = map_sql(
+        connection.prepare(
+            r#"
+            SELECT type, name, tbl_name, sql
+            FROM sqlite_schema
+            WHERE name NOT LIKE 'sqlite_%'
+            ORDER BY
+                type COLLATE BINARY,
+                name COLLATE BINARY,
+                tbl_name COLLATE BINARY,
+                sql COLLATE BINARY
+            "#,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        }),
+        capability,
+        correlation_id,
+    )?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"fasti.sqlite-schema.v1\0");
+    hasher.update(migration_version.to_be_bytes());
+    for row in rows {
+        let (kind, name, table, sql) = map_sql(row, capability, correlation_id)?;
+        hash_schema_field(&mut hasher, Some(&kind), capability, correlation_id)?;
+        hash_schema_field(&mut hasher, Some(&name), capability, correlation_id)?;
+        hash_schema_field(&mut hasher, Some(&table), capability, correlation_id)?;
+        hash_schema_field(&mut hasher, sql.as_deref(), capability, correlation_id)?;
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    Ok(SchemaFingerprint {
+        migration_version,
+        digest: Sha256Digest::parse(format!("sha256:{}", encode_hex(&digest)))
+            .expect("SHA-256 output is canonical lowercase hexadecimal"),
+    })
+}
+
+#[allow(dead_code)] // consumed by `schema_fingerprint` in the next B3 store slice
+fn hash_schema_field(
+    hasher: &mut Sha256,
+    value: Option<&str>,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    match value {
+        None => hasher.update([0]),
+        Some(value) => {
+            hasher.update([1]);
+            let length = u64::try_from(value.len()).map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            hasher.update(length.to_be_bytes());
+            hasher.update(value.as_bytes());
+        }
+    }
+    Ok(())
+}
+
+/// Inventories snapshot evidence without opening or copying blob files.
+///
+/// Every descriptor is strictly ordered by parsed `EvidenceId`; both IDs and
+/// digests are unique. Stored digest, size, and path columns must be canonical
+/// before an archive copier is allowed to consume the inventory.
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+pub(crate) fn snapshot_evidence_blobs(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    limits: PortabilityLimits,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<Vec<SnapshotEvidenceBlob>> {
+    let capability = CapabilityKey::ExportWorkspace;
+    let mut statement = map_sql(
+        connection.prepare(
+            r#"
+            SELECT evidence_id, digest, size_bytes, relative_path
+            FROM evidence
+            WHERE workspace_id = ?1
+            ORDER BY evidence_id COLLATE BINARY
+            "#,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map([workspace_id.to_string()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        }),
+        capability,
+        correlation_id,
+    )?;
+
+    let mut inventory = Vec::new();
+    let mut previous_id = None;
+    let mut digests = HashSet::new();
+    let mut blob_bytes = 0_u64;
+    for row in rows {
+        let (evidence_id, digest, size_bytes, stored_path) =
+            map_sql(row, capability, correlation_id)?;
+        let evidence_id = evidence_id
+            .parse::<EvidenceId>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        if previous_id.is_some_and(|previous: EvidenceId| previous.uuid() >= evidence_id.uuid()) {
+            return integrity_failure(capability, correlation_id);
+        }
+        previous_id = Some(evidence_id);
+
+        let digest = Sha256Digest::parse(&digest)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        if !digests.insert(digest.clone()) {
+            return integrity_failure(capability, correlation_id);
+        }
+        let byte_length = u64::try_from(size_bytes)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        if byte_length > limits.max_entry_bytes.get() || byte_length > MAX_PORTABLE_JSON_INTEGER {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        }
+        blob_bytes = blob_bytes
+            .checked_add(byte_length)
+            .filter(|bytes| *bytes <= limits.max_uncompressed_bytes.get())
+            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        let digest_hex = canonical_digest_hex(digest.as_str())
+            .ok_or_else(|| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let relative_path = relative_evidence_path(digest_hex);
+        let path_depth = u64::try_from(relative_path.components().count())
+            .map_err(|_| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        let path_bytes = u64::try_from(stored_path.len())
+            .map_err(|_| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        if path_bytes > limits.max_path_bytes.get() || path_depth > limits.max_path_depth.get() {
+            return Err(Box::new(FastiProblem::capacity_exceeded(
+                capability,
+                correlation_id,
+            )));
+        }
+        if path_to_storage_value(&relative_path) != stored_path {
+            return integrity_failure(capability, correlation_id);
+        }
+
+        inventory
+            .len()
+            .checked_add(1)
+            .and_then(|count| u64::try_from(count).ok())
+            .filter(|count| *count <= limits.max_entries.get())
+            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+
+        inventory.push(SnapshotEvidenceBlob {
+            descriptor: WorkspaceBlobDescriptor::new(evidence_id, byte_length, digest),
+            relative_path,
+        });
+    }
+    Ok(inventory)
+}
+
+#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
+fn section_for_entity(
+    entity: WorkspaceExportEntity,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<&'static ExportSection> {
+    EXPORT_SECTIONS
+        .get(entity.index())
+        .filter(|section| section.entity == entity)
+        .ok_or_else(|| {
+            Box::new(FastiProblem::integrity_failed(
+                CapabilityKey::ExportWorkspace,
+                correlation_id,
+            ))
+        })
+}
+
+fn stream_entity_pages<F>(
+    section: &ExportSection,
+    max_rows: u64,
+    max_bytes: u64,
+    sink: &mut dyn Write,
+    correlation_id: RequestCorrelationId,
+    mut read_page: F,
+) -> ApplicationResult<WorkspaceStreamDescriptor>
+where
+    F: FnMut(&[Value]) -> ApplicationResult<Vec<SectionRow>>,
+{
+    let capability = CapabilityKey::ExportWorkspace;
+    let mut cursor: Vec<Value> = section
+        .cursor_columns
+        .iter()
+        .map(|column| column.value())
+        .collect();
+    let mut written = 0_u64;
+    let mut sink = EntityDigestSink::new(sink, max_bytes);
+
+    loop {
+        let page = read_page(&cursor)?;
+        if page.is_empty() {
+            break;
+        }
+        let page_len = page.len();
+        let next_written = written
+            .checked_add(u64::try_from(page_len).map_err(|_| {
+                Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
+            })?)
+            .filter(|count| *count <= max_rows)
+            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+
+        for (row, next_cursor) in page {
+            sink.write_line(&row, capability, correlation_id)?;
+            cursor = next_cursor;
+        }
+        written = next_written;
+        if page_len < EXPORT_PAGE as usize {
+            break;
+        }
+    }
+
+    Ok(sink.finish(section.entity, written))
+}
+
+struct EntityDigestSink<'a> {
+    inner: &'a mut dyn Write,
+    hasher: Sha256,
+    bytes: u64,
+    max_bytes: u64,
+}
+
+impl<'a> EntityDigestSink<'a> {
+    fn new(inner: &'a mut dyn Write, max_bytes: u64) -> Self {
+        Self {
+            inner,
+            hasher: Sha256::new(),
+            bytes: 0,
+            max_bytes,
+        }
+    }
+
+    fn write_line(
+        &mut self,
+        value: &serde_json::Value,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<()> {
+        let line = serialized_line(value, capability, correlation_id)?;
+        let next_bytes = self
+            .bytes
+            .checked_add(u64::try_from(line.len()).map_err(|_| {
+                Box::new(FastiProblem::capacity_exceeded(capability, correlation_id))
+            })?)
+            .filter(|bytes| *bytes <= self.max_bytes)
+            .ok_or_else(|| Box::new(FastiProblem::capacity_exceeded(capability, correlation_id)))?;
+        self.inner.write_all(&line).map_err(|_| {
+            Box::new(FastiProblem::storage_unavailable(
+                capability,
+                correlation_id,
+            ))
+        })?;
+        self.hasher.update(&line);
+        self.bytes = next_bytes;
+        Ok(())
+    }
+
+    fn finish(self, entity: WorkspaceExportEntity, row_count: u64) -> WorkspaceStreamDescriptor {
+        let digest: [u8; 32] = self.hasher.finalize().into();
+        let digest = Sha256Digest::parse(format!("sha256:{}", encode_hex(&digest)))
+            .expect("SHA-256 output is canonical lowercase hexadecimal");
+        WorkspaceStreamDescriptor::new(entity, row_count, self.bytes, digest)
+    }
+}
+
 /// Hashes and counts every byte handed to the caller's sink.
 ///
 /// The archive digest covers the whole stream, so it cannot be embedded in the
@@ -1058,23 +1750,6 @@ impl<'a> DigestSink<'a> {
         }
     }
 
-    fn write(
-        &mut self,
-        buf: &[u8],
-        capability: CapabilityKey,
-        correlation_id: fasti_domain::RequestCorrelationId,
-    ) -> ApplicationResult<()> {
-        self.inner.write_all(buf).map_err(|_| {
-            Box::new(FastiProblem::storage_unavailable(
-                capability,
-                correlation_id,
-            ))
-        })?;
-        self.hasher.update(buf);
-        self.bytes = self.bytes.saturating_add(buf.len() as u64);
-        Ok(())
-    }
-
     fn finish(
         self,
         capability: CapabilityKey,
@@ -1089,6 +1764,22 @@ impl<'a> DigestSink<'a> {
         })?;
         let digest: [u8; 32] = self.hasher.finalize().into();
         Ok((format!("sha256:{}", encode_hex(&digest)), self.bytes))
+    }
+}
+
+impl Write for DigestSink<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.update(&buf[..written]);
+        self.bytes = self
+            .bytes
+            .checked_add(written as u64)
+            .ok_or_else(|| std::io::Error::other("export byte count overflow"))?;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -1251,15 +1942,29 @@ fn write_trailer(
 }
 
 fn write_line(
-    sink: &mut DigestSink<'_>,
+    sink: &mut dyn Write,
     value: &serde_json::Value,
     capability: CapabilityKey,
-    correlation_id: fasti_domain::RequestCorrelationId,
+    correlation_id: RequestCorrelationId,
 ) -> ApplicationResult<()> {
+    let line = serialized_line(value, capability, correlation_id)?;
+    sink.write_all(&line).map_err(|_| {
+        Box::new(FastiProblem::storage_unavailable(
+            capability,
+            correlation_id,
+        ))
+    })
+}
+
+fn serialized_line(
+    value: &serde_json::Value,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<Vec<u8>> {
     let mut line = serde_json::to_vec(value)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     line.push(b'\n');
-    sink.write(&line, capability, correlation_id)
+    Ok(line)
 }
 
 /// Streams one section in bounded pages, re-authorizing on every page.
@@ -1277,43 +1982,30 @@ fn write_section(
     write_line(sink, &marker, capability, correlation_id)?;
 
     let workspace = access.workspace_id().to_string();
-    let mut cursor: Vec<Value> = section
-        .cursor_columns
-        .iter()
-        .map(|column| column.value())
-        .collect();
-    let mut written = 0_u64;
-
-    loop {
-        let page = read_section_page(
-            kernel,
-            access,
-            section,
-            &workspace,
-            &cursor,
-            capability,
-            correlation_id,
-        )?;
-        if page.is_empty() {
-            break;
-        }
-        let page_len = page.len();
-        for (row, next_cursor) in page {
-            write_line(sink, &row, capability, correlation_id)?;
-            cursor = next_cursor;
-            written = written.saturating_add(1);
-        }
-        if i64::try_from(page_len).unwrap_or(i64::MAX) < EXPORT_PAGE {
-            break;
-        }
-    }
-
-    Ok(written)
+    let descriptor = stream_entity_pages(
+        section,
+        u64::MAX,
+        u64::MAX,
+        sink,
+        correlation_id,
+        |cursor| {
+            read_authorized_section_page(
+                kernel,
+                access,
+                section,
+                &workspace,
+                cursor,
+                capability,
+                correlation_id,
+            )
+        },
+    )?;
+    Ok(descriptor.row_count())
 }
 
 type SectionRow = (serde_json::Value, Vec<Value>);
 
-fn read_section_page(
+fn read_authorized_section_page(
     kernel: &SqliteKernel,
     access: &RequestAccessContext,
     section: &ExportSection,
@@ -1332,7 +2024,28 @@ fn read_section_page(
     // so every page re-authorizes against current durable state.
     authorize_transaction(&transaction, capability, access, correlation_id)?;
 
-    let mut statement = map_sql(transaction.prepare(section.sql), capability, correlation_id)?;
+    let page = read_section_page(
+        &transaction,
+        section,
+        workspace,
+        cursor,
+        capability,
+        correlation_id,
+    )?;
+    map_sql(transaction.commit(), capability, correlation_id)?;
+    Ok(page)
+}
+
+fn read_section_page(
+    connection: &Connection,
+    section: &ExportSection,
+    workspace: &str,
+    cursor: &[Value],
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<Vec<SectionRow>> {
+    let mut statement = map_sql(connection.prepare(section.sql), capability, correlation_id)?;
+
     let column_names: Vec<String> = statement
         .column_names()
         .into_iter()
@@ -1362,7 +2075,6 @@ fn read_section_page(
     }
     drop(rows);
     drop(statement);
-    map_sql(transaction.commit(), capability, correlation_id)?;
     Ok(page)
 }
 
