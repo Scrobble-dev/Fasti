@@ -40,6 +40,14 @@ The application layer owns the use-case inputs and outcomes. It defines:
   revision plus manifest/archive digests and archive bytes;
 - an owned restore request, archive reader, and complete-only success outcome.
 
+`RestoreWorkspace` has the distinct non-delegable `local_operator`
+authorization disposition and no credential scope. Before dispatch, an adapter
+must prove owner-only authority over the local data root and hold its exclusive
+lock. The ordinary request-credential `AccessSnapshot` evaluator always denies
+this disposition; credentials, grants, and scopes cannot bypass the local
+proof. Recovery bootstrap prepare and complete are phases of this same restore
+capability, not separately delegable capabilities.
+
 Restore rejection is a typed portability failure. It is never an `Ok` outcome.
 This keeps `PortabilityResult` unambiguous: success means that clean activation
 completed.
@@ -92,6 +100,11 @@ retry-safe `storage_unavailable`. Recovery after activation uses
 `retry_recovery_bootstrap`. These problems are staged in the application
 capability policy. They do not enter the authored public registry until B3
 activation.
+
+Both online and stopped-node export require the Linux anchored `openat2`
+evidence-read contract. An adapter on another platform must fail before reading
+or disclosing evidence with `unsupported_platform`; it must not weaken the
+time-of-check/time-of-use boundary.
 
 Caller cancellation is explicit request state. Either export mode aborts and
 removes its partial destination before it returns mode-neutral

@@ -41,6 +41,10 @@ unit; it has no consuming parts API. Hostile inbound conversion returns a
 contract-owned verified manifest whose construction is private. Store adapters
 must not rebuild or independently pair wire values. Restore success is
 complete-only. Rejection and post-activation recovery-bootstrap pending states
-remain typed staged failures.
+remain typed staged failures. Restore uses the non-delegable `local_operator`
+authorization disposition with no credential scope. Recovery bootstrap prepare
+and complete remain phases of that restore capability; they do not create a
+second capability. This metadata does not add a route, SDK method, or CLI
+operation.
 
 See the [human capability guide](../docs/capability-ledger.md) for a concise interpretation of the registry.

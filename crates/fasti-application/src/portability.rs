@@ -661,6 +661,7 @@ impl PortabilityFailureReceipt {
                     | crate::ProblemCode::IntegrityFailed
                     | crate::ProblemCode::StoppedNodeExportRequired
                     | crate::ProblemCode::StorageUnavailable
+                    | crate::ProblemCode::UnsupportedPlatform
             ),
         )?;
         let operation = PortabilityFailureOperation::OnlineExport {
@@ -715,6 +716,7 @@ impl PortabilityFailureReceipt {
                     | crate::ProblemCode::ExportCanceled
                     | crate::ProblemCode::IntegrityFailed
                     | crate::ProblemCode::StorageUnavailable
+                    | crate::ProblemCode::UnsupportedPlatform
             ),
         )?;
         let operation = PortabilityFailureOperation::StoppedNodeExport {
@@ -1628,6 +1630,19 @@ mod tests {
         );
         assert_eq!(export.problem().code(), crate::ProblemCode::ExportCanceled);
 
+        let online_unsupported = PortabilityFailureReceipt::try_online_export(
+            &export_request,
+            Box::new(FastiProblem::unsupported_platform(
+                CapabilityKey::ExportWorkspace,
+                export_correlation,
+            )),
+        )
+        .expect("online export can fail closed on an unsupported platform");
+        assert_eq!(
+            online_unsupported.problem().code(),
+            crate::ProblemCode::UnsupportedPlatform
+        );
+
         let stopped_node = PortabilityFailureReceipt::try_online_export(
             &export_request,
             Box::new(FastiProblem::stopped_node_export_required(
@@ -1666,6 +1681,18 @@ mod tests {
         assert_eq!(
             stopped_failure.operation().workspace_id(),
             Some(workspace_id)
+        );
+        let stopped_unsupported = PortabilityFailureReceipt::try_stopped_node_export(
+            &stopped_request,
+            Box::new(FastiProblem::unsupported_platform(
+                CapabilityKey::ExportWorkspace,
+                stopped_correlation,
+            )),
+        )
+        .expect("stopped-node export can fail closed on an unsupported platform");
+        assert_eq!(
+            stopped_unsupported.problem().code(),
+            crate::ProblemCode::UnsupportedPlatform
         );
         let stopped_canceled = PortabilityFailureReceipt::try_stopped_node_export(
             &stopped_request,

@@ -63,6 +63,7 @@
           "authorization": {
             "enum": [
               "bootstrap_only",
+              "local_operator",
               "scoped",
               "unauthenticated"
             ],
@@ -180,7 +181,6 @@
                 "review_read",
                 "review_write",
                 "workspace_export",
-                "workspace_restore",
                 "workspace_verify"
               ],
               "type": "string"
@@ -1283,7 +1283,7 @@
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "local_operator",
                           "bounded_context": "portability.workspace",
                           "contract_body": "b3",
                           "examples": [],
@@ -1299,9 +1299,7 @@
                             "validation_failed"
                           ],
                           "runtime_body": "b3",
-                          "scopes": [
-                            "workspace_restore"
-                          ],
+                          "scopes": [],
                           "surface_profile": "later_b3",
                           "uat": []
                         },

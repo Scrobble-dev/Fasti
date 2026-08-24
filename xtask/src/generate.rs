@@ -2651,6 +2651,76 @@ mod tests {
     }
 
     #[test]
+    fn local_operator_restore_metadata_does_not_activate_a_transport() {
+        let artifacts = build(workspace_root()).expect("contract generation succeeds");
+        let registry: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CAPABILITY_REGISTRY_PATH))
+                .expect("public registry generated"),
+        )
+        .expect("registry JSON");
+        let restore = array_at(&registry, "/capabilities")
+            .expect("capabilities")
+            .iter()
+            .find(|capability| {
+                string_at(capability, "/id").expect("capability ID")
+                    == "portability.workspace.restore"
+            })
+            .expect("restore capability");
+        assert_eq!(
+            string_at(restore, "/authorization").expect("restore authorization"),
+            "local_operator"
+        );
+        assert!(array_at(restore, "/scopes")
+            .expect("restore scopes")
+            .is_empty());
+        assert_eq!(
+            string_at(restore, "/lifecycle/contract_state").expect("restore contract state"),
+            "reserved"
+        );
+        assert_eq!(
+            string_at(restore, "/lifecycle/runtime_availability").expect("restore availability"),
+            "guarded"
+        );
+
+        let openapi: Value = serde_json::from_slice(
+            artifacts
+                .get(Path::new(CONFORMANCE_OPENAPI_PATH))
+                .expect("conformance OpenAPI generated"),
+        )
+        .expect("conformance OpenAPI JSON");
+        for path_item in object_at(&openapi, "/paths")
+            .expect("OpenAPI paths")
+            .values()
+        {
+            for operation in path_item.as_object().expect("OpenAPI path item").values() {
+                assert_ne!(
+                    operation
+                        .get("x-fasti-capability-id")
+                        .and_then(Value::as_str),
+                    Some("portability.workspace.restore")
+                );
+            }
+        }
+
+        let sdk = std::str::from_utf8(
+            artifacts
+                .get(Path::new(SDK_GENERATED_PATH))
+                .expect("SDK generated"),
+        )
+        .expect("SDK is UTF-8");
+        let operations = sdk
+            .split_once("export const B1_CONFORMANCE_OPERATIONS = {")
+            .expect("SDK operations start")
+            .1
+            .split_once("} as const;")
+            .expect("SDK operations end")
+            .0;
+        assert!(!operations.contains("portability.workspace.restore"));
+        assert!(!sdk.contains("restoreWorkspace("));
+    }
+
+    #[test]
     fn every_conformance_operation_carries_registry_parity_annotations() {
         let artifacts = build(workspace_root()).expect("contract generation succeeds");
         let openapi: Value = serde_json::from_slice(

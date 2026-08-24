@@ -42,6 +42,7 @@ pub enum RuntimeAvailability {
 pub enum AuthorizationKind {
     Unauthenticated,
     BootstrapOnly,
+    LocalOperator,
     Scoped,
 }
 
@@ -394,7 +395,8 @@ define_capabilities!(
             ExportCanceled,
             IntegrityFailed,
             StoppedNodeExportRequired,
-            StorageUnavailable
+            StorageUnavailable,
+            UnsupportedPlatform
         ]
     ),
     (
@@ -403,8 +405,8 @@ define_capabilities!(
         B3,
         Reserved,
         Guarded,
-        Scoped,
-        [WorkspaceRestore],
+        LocalOperator,
+        [],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
         [
             CapacityExceeded,
@@ -476,6 +478,43 @@ mod tests {
             CapabilityKey::ExportWorkspace.runtime_availability(),
             RuntimeAvailability::Guarded
         );
+        assert_eq!(
+            CapabilityKey::RestoreWorkspace.runtime_availability(),
+            RuntimeAvailability::Guarded
+        );
+        assert_eq!(
+            CapabilityKey::RestoreWorkspace.authorization_kind(),
+            AuthorizationKind::LocalOperator
+        );
+        assert!(CapabilityKey::RestoreWorkspace.required_scopes().is_empty());
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.authorization_kind(),
+            AuthorizationKind::Scoped
+        );
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.required_scopes(),
+            &[ScopeKey::WorkspaceExport]
+        );
+        assert_eq!(
+            CapabilityKey::VerifyWorkspace.authorization_kind(),
+            AuthorizationKind::Scoped
+        );
+        assert_eq!(
+            CapabilityKey::VerifyWorkspace.required_scopes(),
+            &[ScopeKey::WorkspaceVerify]
+        );
+
+        let local_operator_capabilities: Vec<_> = CapabilityKey::ALL
+            .iter()
+            .copied()
+            .filter(|capability| {
+                capability.authorization_kind() == AuthorizationKind::LocalOperator
+            })
+            .collect();
+        assert_eq!(
+            local_operator_capabilities,
+            [CapabilityKey::RestoreWorkspace]
+        );
     }
 
     #[test]
@@ -506,6 +545,7 @@ mod tests {
             ProblemCode::IntegrityFailed,
             ProblemCode::StoppedNodeExportRequired,
             ProblemCode::StorageUnavailable,
+            ProblemCode::UnsupportedPlatform,
         ] {
             assert!(export.contains(&code));
             assert!(!export.iter().any(|published| *published == code));
