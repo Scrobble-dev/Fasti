@@ -597,6 +597,9 @@ fn import_stream(
         if line.last() != Some(&b'\n') {
             return Err(RestoreImportError::InvalidRow { path: path.clone() });
         }
+        if row_count >= expected.row_count() {
+            return Err(RestoreImportError::StreamDescriptor { path: path.clone() });
+        }
         let key = import_row(transaction, entity, &line, workspace_id, &path)?;
         if prior_key.as_ref().is_some_and(|prior| prior >= &key) {
             return Err(RestoreImportError::RowOrder { path: path.clone() });
