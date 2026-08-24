@@ -1033,12 +1033,11 @@ impl AccessAdministrationPort for SqliteKernel {
 impl SqliteKernel {
     /// Private transaction core for recovery bootstrap preparation.
     ///
-    /// A future stopped-node adapter must prove that the filesystem restore
-    /// marker is COMPLETE for this exact restore request before calling this
-    /// method. Until that verifier exists, this core is deliberately private
-    /// and no [`fasti_application::RecoveryBootstrapPort`] implementation is
-    /// exposed.
-    fn prepare_recovery_bootstrap_after_verified_activation(
+    /// The private recovery coordinator proves the exact COMPLETE marker
+    /// before and after opening this kernel. No raw public
+    /// [`fasti_application::RecoveryBootstrapPort`] implementation exposes
+    /// this transaction core.
+    pub(crate) fn prepare_recovery_bootstrap_after_verified_activation(
         &self,
         request: PrepareRecoveryBootstrapRequest,
     ) -> PortabilityResult<PrepareRecoveryBootstrapOutcome> {
@@ -1167,7 +1166,7 @@ impl SqliteKernel {
 
     /// Private completion core paired with
     /// [`Self::prepare_recovery_bootstrap_after_verified_activation`].
-    fn complete_recovery_bootstrap_transaction(
+    pub(crate) fn complete_recovery_bootstrap_transaction(
         &self,
         request: CompleteRecoveryBootstrapRequest,
     ) -> PortabilityResult<CompleteRecoveryBootstrapOutcome> {

@@ -165,23 +165,28 @@ different pair fails with `bootstrap_closed`; no failure-attempt counter or
 post-commit secret generation exists.
 
 The store migration adds only nullable `node_state.recovery_restore_attempt_id`.
-The private prepare transaction core requires absent `node_state`, empty
-authorization tables, and an exact existing workspace/profile relation. It is
-not wired to `RecoveryBootstrapPort`. The private Linux activation foundation
-now writes create-new `received`, `staging`, `verified`, and `activating`
-sentinels, then moves one canonical digest-bound marker with the verified
-staging directory by no-replace rename. It writes the create-new `complete`
-sentinel only after the data-root parent sync. A descriptor-rooted verifier can
-finish the single post-rename/pre-complete crash state and can bind a COMPLETE
-marker to one restore attempt and workspace without opening an unverified
-database. The shared locked kernel open runs this recovery before SQLite: it
-refuses non-empty pre-rename restore staging, and it completes a valid
-post-rename marker before opening `fasti.sqlite3`. Strict import, pre-rename
-rejection cleanup, composition with the private recovery transactions, and
-runtime dispatch are still absent. There is deliberately no CLI, HTTP, SDK, or
-public capability activation. Ordinary initialization retains its existing
-closed result for a restored workspace until that complete composition supports
-a distinct recovery-required classification.
+Strict pass-two import uses the same opened archive as pass one, admits disk
+capacity before staging, imports all 16 typed streams and checked blobs, and
+re-exports the staged database to prove exact descriptor equality. It leaves
+`node_state` and authorization tables empty. Cancellation and every pre-rename
+failure remove the phased staging attempt and synchronize its parent.
+
+The private Linux activation composition writes create-new `received`,
+`staging`, `verified`, and `activating` sentinels, then moves one canonical
+digest-bound marker with the verified staging directory by no-replace rename.
+It writes `complete` only after the data-root parent sync. The staged owner is
+consumed and disarmed at activation, so its cleanup cannot remove the renamed
+`current`. Startup refuses non-empty pre-rename `staging`, completes the one
+valid post-rename/pre-complete crash state, and opens SQLite through the retained
+data-root descriptor rather than the replaceable configured path.
+
+Private recovery composition verifies the full COMPLETE marker before and
+after opening the activated database, then calls the prepare or completion
+transaction. These seams are not wired to `WorkspaceRestorePort` or
+`RecoveryBootstrapPort`. There is deliberately no CLI, HTTP, SDK, or public
+capability activation. Ordinary initialization retains its existing closed
+result for a restored workspace until runtime dispatch supports a distinct
+recovery-required classification.
 
 The store predecessor for final archive assembly keeps the frozen entity SQL
 and row codec in one place. It can stream exactly one plain NDJSON entity from

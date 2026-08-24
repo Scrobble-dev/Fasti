@@ -7,7 +7,8 @@
 
 use crate::archive::{
     create_staging_attempt, open_new_file_beneath, open_or_create_private_directory,
-    sync_open_handle, visit_archive_entries, ArchiveEntryReader, ArchiveError, ArchiveLimits,
+    open_private_directory, sync_open_handle, visit_archive_entries, ArchiveEntryReader,
+    ArchiveError, ArchiveLimits,
 };
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
 use crate::kernel::{timestamp, LockedDataRoot};
@@ -18,25 +19,31 @@ use crate::restore::{
     preflight_workspace_archive, read_manifest, DigestingReader, RestorePreflightError,
     VerifiedArchivePreflight,
 };
+use crate::restore_activation::{
+    activate_verified_restore, recover_current_activation, verify_complete_restore,
+    write_restore_phase, RestoreActivationError, RestoreActivationMarker,
+    RESTORE_STAGING_DIRECTORY, RESTORE_STATE_FILES,
+};
 use crate::schema::{migrate, workspace_revision, SCHEMA_VERSION};
 use chrono::{DateTime, Utc};
 use fasti_application::{
-    CapabilityKey, PortabilityLimits, ReadSeek, WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES,
+    CancellationSignal, CapabilityKey, FastiProblem, PortabilityLimits, ReadSeek,
+    WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES,
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
     ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, Grain,
     InterpretationId, InterpretationState, NamespaceDefinition, NamespaceLicencePosture,
     ObservationId, ObservedAt, OccurredAt, OccurrenceId, OperationId, ProfileId, ReceiptId,
-    RecordId, RecordStatus, RequestCorrelationId, RestoreAttemptId, ReviewItemId, ReviewStatus,
-    Sha256Digest, WorkspaceId,
+    RecordId, RecordStatus, RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId,
+    ReviewStatus, Sha256Digest, WorkspaceId,
 };
 use rusqlite::{params, Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 #[cfg(target_os = "linux")]
@@ -44,8 +51,74 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-const STAGING_DIRECTORY: &str = "staging";
 const DATABASE_NAME: &str = "fasti.sqlite3";
+
+struct CancellableSource<'a> {
+    source: &'a mut dyn ReadSeek,
+    cancellation: &'a CancellationSignal,
+}
+
+impl Read for CancellableSource<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if self.cancellation.is_cancelled() {
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        self.source.read(bytes)
+    }
+}
+
+impl Seek for CancellableSource<'_> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        self.source.seek(position)
+    }
+}
+
+fn check_cancellation(cancellation: &CancellationSignal) -> Result<(), RestoreImportError> {
+    if cancellation.is_cancelled() {
+        Err(RestoreImportError::Canceled)
+    } else {
+        Ok(())
+    }
+}
+
+fn admit_restore_capacity(
+    root: &File,
+    preflight: &VerifiedArchivePreflight,
+    limits: PortabilityLimits,
+) -> Result<(), RestoreImportError> {
+    let blob_bytes = preflight
+        .manifest()
+        .manifest()
+        .blobs()
+        .iter()
+        .try_fold(0_u64, |total, blob| total.checked_add(blob.byte_length()))
+        .ok_or(RestoreImportError::CapacityExceeded)?;
+    let required = limits
+        .max_snapshot_bytes
+        .get()
+        .checked_add(blob_bytes)
+        .and_then(|bytes| bytes.checked_add(limits.cleanup_reserve_bytes.get()))
+        .filter(|bytes| *bytes <= limits.scratch_ceiling_bytes.get())
+        .ok_or(RestoreImportError::CapacityExceeded)?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (root, required);
+        return Err(RestoreImportError::UnsupportedPlatform);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let stats = rustix::fs::fstatvfs(root)
+            .map_err(|error| RestoreImportError::Archive(ArchiveError::Io(error.into())))?;
+        let available = stats
+            .f_bavail
+            .checked_mul(stats.f_frsize)
+            .ok_or(RestoreImportError::CapacityExceeded)?;
+        if available < required {
+            return Err(RestoreImportError::CapacityExceeded);
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Error)]
 pub(crate) enum RestoreImportError {
@@ -95,6 +168,12 @@ pub(crate) enum RestoreImportError {
     NodeLocalStatePresent,
     #[error("pass-two staging is unavailable on this platform")]
     UnsupportedPlatform,
+    #[error("restore was canceled")]
+    Canceled,
+    #[error("restore staging capacity is insufficient")]
+    CapacityExceeded,
+    #[error(transparent)]
+    Activation(#[from] RestoreActivationError),
     #[error("staged files could not be synchronized")]
     Sync(#[source] ArchiveError),
     #[error("restore failed and its staging attempt could not be removed")]
@@ -109,7 +188,7 @@ pub(crate) enum RestoreImportError {
 /// The open handles keep the staging and attempt directories anchored. A
 /// future activation slice must consume this value while it still holds those
 /// handles. Dropping it removes the private attempt on a best-effort basis.
-#[allow(dead_code)] // consumed by the later marker-and-activation slice
+#[allow(dead_code)] // inspection accessors remain private until store-adapter activation
 pub(crate) struct StagedWorkspaceImport {
     staging: File,
     attempt: File,
@@ -118,10 +197,11 @@ pub(crate) struct StagedWorkspaceImport {
     blob_prefixes: BTreeSet<String>,
     workspace_id: WorkspaceId,
     workspace_revision: u64,
+    marker: RestoreActivationMarker,
     cleaned: bool,
 }
 
-#[allow(dead_code)] // consumed by the later marker-and-activation slice
+#[allow(dead_code)] // inspection accessors remain private until store-adapter activation
 impl StagedWorkspaceImport {
     pub(crate) const fn workspace_id(&self) -> WorkspaceId {
         self.workspace_id
@@ -134,6 +214,55 @@ impl StagedWorkspaceImport {
     #[cfg(target_os = "linux")]
     pub(crate) fn database_path(&self) -> PathBuf {
         descriptor_child_path(&self.attempt, DATABASE_NAME)
+    }
+
+    pub(crate) const fn marker(&self) -> &RestoreActivationMarker {
+        &self.marker
+    }
+
+    pub(crate) fn activate(
+        mut self,
+        data_root: &File,
+    ) -> Result<RestoreActivationMarker, RestoreImportError> {
+        let marker = self.marker.clone();
+        match activate_verified_restore(
+            data_root,
+            &self.staging,
+            &self.attempt,
+            &self.attempt_name,
+            &marker,
+        ) {
+            Ok(()) => self.cleaned = true,
+            Err(activation) => match open_private_directory(&self.staging, &self.attempt_name) {
+                Ok(_) => {
+                    let failure = RestoreImportError::Activation(activation);
+                    return match self.cleanup_internal() {
+                        Ok(()) => Err(failure),
+                        Err(cleanup) => Err(RestoreImportError::Cleanup {
+                            failure: Box::new(failure),
+                            cleanup: Box::new(cleanup),
+                        }),
+                    };
+                }
+                Err(ArchiveError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {
+                    self.cleaned = true;
+                    recover_current_activation(data_root)?;
+                }
+                Err(error) => {
+                    self.cleaned = true;
+                    return Err(RestoreImportError::Archive(error));
+                }
+            },
+        }
+        let verified = verify_complete_restore(
+            data_root,
+            marker.restore_attempt_id(),
+            marker.workspace_id(),
+        )?;
+        if verified != marker {
+            return Err(RestoreActivationError::MarkerMismatch.into());
+        }
+        Ok(marker)
     }
 
     pub(crate) fn cleanup(mut self) -> Result<(), RestoreImportError> {
@@ -167,20 +296,32 @@ impl Drop for StagedWorkspaceImport {
 /// This is deliberately private and has no `RestoreWorkspacePort`
 /// implementation. The returned attempt contains no COMPLETE marker and is
 /// never renamed into `current` by this slice.
-#[allow(dead_code)] // activated only by the later local-operator restore adapter
 pub(crate) fn stage_workspace_archive_pass_two(
     data_root: &LockedDataRoot,
     source: &mut dyn ReadSeek,
     restore_attempt_id: RestoreAttemptId,
     correlation_id: RequestCorrelationId,
     limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
 ) -> Result<StagedWorkspaceImport, RestoreImportError> {
-    let preflight = preflight_workspace_archive(source, limits)?;
+    check_cancellation(cancellation)?;
+    let mut guarded_source = CancellableSource {
+        source,
+        cancellation,
+    };
+    let preflight = match preflight_workspace_archive(&mut guarded_source, limits) {
+        Ok(preflight) => preflight,
+        Err(_) if cancellation.is_cancelled() => return Err(RestoreImportError::Canceled),
+        Err(error) => return Err(error.into()),
+    };
+    check_cancellation(cancellation)?;
     let root = data_root
         .anchored_directory()
         .ok_or(RestoreImportError::UnsupportedPlatform)?;
+    admit_restore_capacity(root, &preflight, limits)?;
     let attempt_name = restore_attempt_id.to_string();
-    let (staging, attempt) = create_staging_attempt(root, STAGING_DIRECTORY, &attempt_name)?;
+    let (staging, attempt) =
+        create_staging_attempt(root, RESTORE_STAGING_DIRECTORY, &attempt_name)?;
     let blob_digests = preflight
         .manifest()
         .manifest()
@@ -211,10 +352,32 @@ pub(crate) fn stage_workspace_archive_pass_two(
         blob_prefixes,
         workspace_id: preflight.manifest().manifest().workspace_id(),
         workspace_revision: preflight.manifest().manifest().workspace_revision(),
+        marker: RestoreActivationMarker::from_preflight(restore_attempt_id, &preflight),
         cleaned: false,
     };
 
-    let imported = import_verified_pass_two(source, &staged, &preflight, correlation_id, limits);
+    let imported = (|| {
+        write_restore_phase(&staged.attempt, RestoreStatus::Received)?;
+        write_restore_phase(&staged.attempt, RestoreStatus::Staging)?;
+        check_cancellation(cancellation)?;
+        import_verified_pass_two(
+            &mut guarded_source,
+            &staged,
+            &preflight,
+            correlation_id,
+            limits,
+            cancellation,
+        )?;
+        check_cancellation(cancellation)?;
+        write_restore_phase(&staged.attempt, RestoreStatus::Verified)?;
+        Ok(())
+    })();
+    let imported = if cancellation.is_cancelled() {
+        Err(RestoreImportError::Canceled)
+    } else {
+        imported
+    };
+    let source = guarded_source.source;
     let rewind = source
         .seek(SeekFrom::Start(0))
         .map(|_| ())
@@ -238,6 +401,7 @@ fn import_verified_pass_two(
     preflight: &VerifiedArchivePreflight,
     correlation_id: RequestCorrelationId,
     limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
 ) -> Result<(), RestoreImportError> {
     let payloads = open_or_create_private_directory(&staged.attempt, "payloads")?;
     let sha256 = open_or_create_private_directory(&payloads, "sha256")?;
@@ -275,6 +439,7 @@ fn import_verified_pass_two(
         preflight,
         &mut imported_counts,
         limits,
+        cancellation,
     );
     pass_two?;
 
@@ -284,11 +449,21 @@ fn import_verified_pass_two(
         correlation_id,
         &imported_counts,
         limits,
+        cancellation,
     )?;
     transaction.commit().map_err(RestoreImportError::Sqlite)?;
     connection
         .close()
         .map_err(|(_, error)| RestoreImportError::Sqlite(error))?;
+
+    if database_file
+        .metadata()
+        .map_err(|source| RestoreImportError::Archive(ArchiveError::Io(source)))?
+        .len()
+        > limits.max_snapshot_bytes.get()
+    {
+        return Err(RestoreImportError::CapacityExceeded);
+    }
 
     sync_open_handle(&database_file).map_err(RestoreImportError::Sync)?;
     sync_open_handle(&sha256).map_err(RestoreImportError::Sync)?;
@@ -305,6 +480,7 @@ fn visit_import_entries(
     preflight: &VerifiedArchivePreflight,
     imported_counts: &mut [u64; WorkspaceExportEntity::ALL.len()],
     limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
 ) -> Result<(), RestoreImportError> {
     let expanded_ceiling = limits
         .archive_expanded_ceiling()
@@ -321,6 +497,7 @@ fn visit_import_entries(
     let mut blob_index = 0_usize;
     let mut manifest_seen = false;
     let summary = visit_archive_entries(&mut digesting, archive_limits, |path, size, reader| {
+        check_cancellation(cancellation)?;
         if stream_index < WorkspaceExportEntity::ALL.len() {
             let entity = WorkspaceExportEntity::ALL[stream_index];
             let expected_path = format!("{}.ndjson", entity.as_str());
@@ -338,6 +515,7 @@ fn visit_import_entries(
                 manifest.workspace_id(),
                 &manifest.streams()[stream_index],
                 limits.max_entry_bytes.get(),
+                cancellation,
             )?;
             imported_counts[stream_index] = count;
             stream_index += 1;
@@ -364,7 +542,7 @@ fn visit_import_entries(
                     expected: "manifest.json".to_owned(),
                     actual: path.to_owned(),
                 })?;
-        copy_blob(sha256_root, path, size, reader, expected)?;
+        copy_blob(sha256_root, path, size, reader, expected, cancellation)?;
         blob_index += 1;
         Ok(())
     })?;
@@ -384,6 +562,7 @@ fn visit_import_entries(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn import_stream(
     transaction: &Transaction<'_>,
     entity: WorkspaceExportEntity,
@@ -392,6 +571,7 @@ fn import_stream(
     workspace_id: WorkspaceId,
     expected: &fasti_application::WorkspaceStreamDescriptor,
     max_row_bytes: u64,
+    cancellation: &CancellationSignal,
 ) -> Result<u64, RestoreImportError> {
     let path = format!("{}.ndjson", entity.as_str());
     let mut reader = BufReader::new(DigestingReader::new(reader));
@@ -409,6 +589,7 @@ fn import_stream(
     let mut row_count = 0_u64;
     let mut prior_key = None;
     loop {
+        check_cancellation(cancellation)?;
         let read = read_bounded_line(&mut reader, &mut line, max_row_bytes, &path)?;
         if read == 0 {
             break;
@@ -493,6 +674,7 @@ fn copy_blob(
     declared_size: u64,
     reader: &mut ArchiveEntryReader<'_>,
     expected: &fasti_application::WorkspaceBlobDescriptor,
+    cancellation: &CancellationSignal,
 ) -> Result<(), RestoreImportError> {
     let digest_hex = canonical_digest_hex(expected.digest().as_str())
         .expect("verified manifest digest is canonical");
@@ -509,6 +691,7 @@ fn copy_blob(
     let mut bytes = 0_u64;
     let mut buffer = [0_u8; crate::archive::MAX_IO_CHUNK_BYTES];
     loop {
+        check_cancellation(cancellation)?;
         let read = reader
             .read(&mut buffer)
             .map_err(|_| RestoreImportError::BlobDescriptor {
@@ -565,7 +748,9 @@ fn verify_imported_database(
     correlation_id: RequestCorrelationId,
     imported_counts: &[u64; WorkspaceExportEntity::ALL.len()],
     limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
 ) -> Result<(), RestoreImportError> {
+    check_cancellation(cancellation)?;
     let manifest = verified.manifest();
     for (index, descriptor) in manifest.streams().iter().enumerate() {
         if imported_counts[index] != descriptor.row_count() {
@@ -594,10 +779,22 @@ fn verify_imported_database(
             expected.entity(),
             limits,
             &mut sink,
-            &mut || Ok(()),
+            &mut || {
+                if cancellation.is_cancelled() {
+                    Err(Box::new(FastiProblem::restore_canceled(correlation_id)))
+                } else {
+                    Ok(())
+                }
+            },
             correlation_id,
         )
-        .map_err(|_| RestoreImportError::DomainInvariant)?;
+        .map_err(|_| {
+            if cancellation.is_cancelled() {
+                RestoreImportError::Canceled
+            } else {
+                RestoreImportError::DomainInvariant
+            }
+        })?;
         if actual != *expected {
             return Err(RestoreImportError::StreamDescriptor {
                 path: format!("{}.ndjson", expected.entity().as_str()),
@@ -1692,7 +1889,13 @@ fn cleanup_attempt(
     ] {
         remove_child(attempt, name, directory, &mut first_error);
     }
+    for name in RESTORE_STATE_FILES {
+        remove_child(attempt, name, false, &mut first_error);
+    }
     remove_child(staging, attempt_name, true, &mut first_error);
+    if let Err(error) = sync_open_handle(staging) {
+        first_error.get_or_insert(RestoreImportError::Sync(error));
+    }
     first_error.map_or(Ok(()), Err)
 }
 
@@ -1756,11 +1959,12 @@ mod tests {
     use crate::online_archive::export_online_workspace_archive;
     use crate::test_support::TestNode;
     use fasti_application::{
-        AppendCorrectionCommand, CancellationSignal, CorrectionPort, CorrectionTarget,
-        CreateRecordCommand, ExportWorkspaceQuery, ExportWorkspaceRequest, IdentityPort,
-        ObservationAcceptancePort, RegisterNamespaceDefinitionCommand, ResolveReviewCommand,
-        ReviewPort, ReviewResolutionTarget, ScopeKey, WorkspaceArchiveDestination,
-        WorkspaceManifest, WorkspaceStreamDescriptor,
+        AppendCorrectionCommand, CancellationSignal, CompleteRecoveryBootstrapRequest,
+        CorrectionPort, CorrectionTarget, CreateRecordCommand, ExportWorkspaceQuery,
+        ExportWorkspaceRequest, IdentityPort, ObservationAcceptancePort,
+        PrepareRecoveryBootstrapRequest, RegisterNamespaceDefinitionCommand, ResolveReviewCommand,
+        RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial,
+        WorkspaceArchiveDestination, WorkspaceManifest, WorkspaceStreamDescriptor,
     };
     use fasti_contracts::CanonicalWorkspaceManifestProjection;
     use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
@@ -2057,7 +2261,7 @@ mod tests {
     fn assert_attempt_removed(root: &Path, attempt_id: RestoreAttemptId) {
         assert!(
             !root
-                .join(STAGING_DIRECTORY)
+                .join(RESTORE_STAGING_DIRECTORY)
                 .join(attempt_id.to_string())
                 .exists(),
             "failed import must remove its staging attempt"
@@ -2078,6 +2282,7 @@ mod tests {
             attempt_id,
             RequestCorrelationId::new_v7(),
             limits(),
+            &CancellationSignal::new(),
         )
         .expect("stage verified fixture");
         assert_eq!(staged.workspace_id(), fixture.node.access.workspace_id());
@@ -2165,6 +2370,7 @@ mod tests {
             attempt_id,
             RequestCorrelationId::new_v7(),
             limits(),
+            &CancellationSignal::new(),
         )
         .err()
         .expect("cross-workspace row must fail");
@@ -2202,6 +2408,7 @@ mod tests {
             attempt_id,
             RequestCorrelationId::new_v7(),
             limits(),
+            &CancellationSignal::new(),
         )
         .err()
         .expect("out-of-order stream rows must fail");
@@ -2254,6 +2461,7 @@ mod tests {
             attempt_id,
             RequestCorrelationId::new_v7(),
             limits(),
+            &CancellationSignal::new(),
         )
         .err()
         .expect("missing record reference must fail");
@@ -2294,6 +2502,7 @@ mod tests {
             attempt_id,
             RequestCorrelationId::new_v7(),
             limits(),
+            &CancellationSignal::new(),
         )
         .err()
         .expect("typed row mismatch must fail");
@@ -2302,6 +2511,168 @@ mod tests {
             "unexpected error: {error:?}"
         );
         assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn canceled_restore_and_failed_capacity_admission_do_not_create_staging() {
+        let fixture = full_fixture();
+        let canceled_root = tempfile::tempdir().expect("canceled restore root");
+        let canceled_lock =
+            LockedDataRoot::acquire(canceled_root.path()).expect("exclusive canceled root");
+        let cancellation = CancellationSignal::new();
+        cancellation.cancel();
+        let canceled = stage_workspace_archive_pass_two(
+            &canceled_lock,
+            &mut Cursor::new(fixture.archive.clone()),
+            RestoreAttemptId::new_v7(),
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &cancellation,
+        )
+        .err()
+        .expect("canceled restore");
+        assert!(matches!(canceled, RestoreImportError::Canceled));
+        assert!(!canceled_root.path().join("staging").exists());
+        assert!(!canceled_root.path().join("current").exists());
+
+        let capacity_root = tempfile::tempdir().expect("capacity restore root");
+        let capacity_lock =
+            LockedDataRoot::acquire(capacity_root.path()).expect("exclusive capacity root");
+        let mut configured = limits();
+        configured.scratch_ceiling_bytes = nonzero(
+            configured.max_snapshot_bytes.get() + configured.cleanup_reserve_bytes.get() - 1,
+        );
+        let capacity = stage_workspace_archive_pass_two(
+            &capacity_lock,
+            &mut Cursor::new(fixture.archive),
+            RestoreAttemptId::new_v7(),
+            RequestCorrelationId::new_v7(),
+            configured,
+            &CancellationSignal::new(),
+        )
+        .err()
+        .expect("capacity admission");
+        assert!(matches!(capacity, RestoreImportError::CapacityExceeded));
+        assert!(!capacity_root.path().join("staging").exists());
+        assert!(!capacity_root.path().join("current").exists());
+    }
+
+    #[test]
+    fn clean_restore_coordinator_returns_typed_outcome_and_refuses_replacement() {
+        let fixture = full_fixture();
+        let workspace_id = fixture.node.access.workspace_id();
+        let archive = fixture.archive;
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let outcome = crate::restore_coordinator::restore_clean_workspace(
+            restore_root.path(),
+            RestoreWorkspaceRequest::new(
+                attempt_id,
+                RequestCorrelationId::new_v7(),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(Cursor::new(archive.clone())),
+        )
+        .expect("clean restore");
+        assert_eq!(outcome.restore_attempt_id(), attempt_id);
+        assert_eq!(outcome.workspace_id(), workspace_id);
+
+        let refused = crate::restore_coordinator::restore_clean_workspace(
+            restore_root.path(),
+            RestoreWorkspaceRequest::new(
+                RestoreAttemptId::new_v7(),
+                RequestCorrelationId::new_v7(),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(Cursor::new(archive)),
+        )
+        .expect_err("clean restore cannot replace current");
+        assert_eq!(
+            refused.problem().code(),
+            fasti_application::ProblemCode::ValidationFailed
+        );
+    }
+
+    #[test]
+    fn full_import_activation_survives_owner_drop_and_opens_exact_database() {
+        let fixture = full_fixture();
+        let workspace_id = fixture.node.access.workspace_id();
+        let profile_id = fixture.node.access.profile_id();
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let mut source = Cursor::new(fixture.archive);
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut source,
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage verified fixture");
+        let expected_marker = staged.marker().clone();
+        let root = lock.anchored_directory().expect("anchored restore root");
+        let marker = staged.activate(root).expect("activate verified restore");
+        assert_eq!(marker, expected_marker);
+        assert!(restore_root.path().join("current/fasti.sqlite3").is_file());
+        assert!(!restore_root
+            .path()
+            .join("staging")
+            .join(attempt_id.to_string())
+            .exists());
+
+        let kernel = crate::SqliteKernel::open_locked(lock).expect("open activated kernel");
+        let connection = kernel.inner.connection.lock().expect("restored database");
+        let workspace_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM workspaces WHERE workspace_id = ?1",
+                [workspace_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("restored workspace");
+        let local_rows: i64 = connection
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM node_state) + (SELECT COUNT(*) FROM credentials) + (SELECT COUNT(*) FROM profile_grants) + (SELECT COUNT(*) FROM grant_scopes)",
+                [],
+                |row| row.get(0),
+            )
+            .expect("node-local state");
+        assert_eq!(workspace_rows, 1);
+        assert_eq!(local_rows, 0);
+        drop(connection);
+        drop(kernel);
+
+        let prepared = crate::recovery_coordinator::prepare_recovery_bootstrap(
+            restore_root.path(),
+            PrepareRecoveryBootstrapRequest::new(
+                attempt_id,
+                RequestCorrelationId::new_v7(),
+                workspace_id,
+                profile_id,
+                false,
+            ),
+        )
+        .expect("prepare recovery bootstrap after COMPLETE proof");
+        let proof = SecretMaterial::from_bytes(*prepared.initialization_proof().expose_bytes());
+        let completed = crate::recovery_coordinator::complete_recovery_bootstrap(
+            restore_root.path(),
+            CompleteRecoveryBootstrapRequest::new(
+                attempt_id,
+                RequestCorrelationId::new_v7(),
+                workspace_id,
+                profile_id,
+                prepared.client_id(),
+                proof,
+                SecretMaterial::from_bytes([7_u8; 32]),
+            ),
+        )
+        .expect("complete recovery bootstrap after COMPLETE proof");
+        assert_eq!(completed.restore_attempt_id(), attempt_id);
+        assert_eq!(completed.access().workspace_id(), workspace_id);
+        assert_eq!(completed.access().profile_id(), profile_id);
     }
 
     #[test]

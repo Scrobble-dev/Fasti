@@ -111,12 +111,10 @@ impl SqliteKernel {
     {
         let source_path = self.database_path();
         reject_unsafe_existing_file(&source_path)?;
-        let source = Connection::open_with_flags(
-            &source_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )?;
+        let source_flags = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        #[cfg(not(target_os = "linux"))]
+        let source_flags = source_flags | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        let source = Connection::open_with_flags(&source_path, source_flags)?;
         source.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
         source.pragma_update(None, "query_only", "ON")?;
         snapshot_database_from_connection(

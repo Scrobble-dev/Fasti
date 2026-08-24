@@ -6,7 +6,7 @@
 //! directory inode; `restore.complete` is created only after the no-replace
 //! activation and data-root sync are durable.
 
-#![allow(dead_code)] // activated only after strict pass-two restore composes
+#![allow(dead_code)] // some marker inspection accessors await store-adapter activation
 
 use crate::archive::{
     activate_no_replace, open_existing_file_beneath, open_new_file_beneath, open_private_directory,
@@ -25,7 +25,17 @@ use std::path::Path;
 use thiserror::Error;
 
 const MARKER_FORMAT_VERSION: u32 = 1;
-const MARKER_FILE: &str = "restore.marker.json";
+pub(crate) const RESTORE_STAGING_DIRECTORY: &str = "staging";
+pub(crate) const MARKER_FILE: &str = "restore.marker.json";
+pub(crate) const RESTORE_STATE_FILES: [&str; 7] = [
+    "restore.received",
+    "restore.staging",
+    "restore.verified",
+    "restore.activating",
+    "restore.complete",
+    "restore.rejected",
+    MARKER_FILE,
+];
 const MAX_MARKER_BYTES: u64 = 1024;
 
 #[derive(Debug, Error)]
@@ -42,6 +52,8 @@ pub(crate) enum RestoreActivationError {
     InvalidPhase,
     #[error("an incomplete restore staging attempt requires offline cleanup")]
     IncompleteStaging,
+    #[error("clean restore cannot replace an existing current workspace")]
+    CurrentExists,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,7 +285,7 @@ pub(crate) fn recover_activation_before_database_open(
     }
     #[cfg(target_os = "linux")]
     {
-        if let Some(staging) = open_optional_directory(data_root, "restore")? {
+        if let Some(staging) = open_optional_directory(data_root, RESTORE_STAGING_DIRECTORY)? {
             let path = format!("/proc/self/fd/{}", staging.as_raw_fd());
             if std::fs::read_dir(path)?.next().transpose()?.is_some() {
                 return Err(RestoreActivationError::IncompleteStaging);
@@ -282,16 +294,8 @@ pub(crate) fn recover_activation_before_database_open(
         let Some(current) = open_optional_directory(data_root, "current")? else {
             return Ok(None);
         };
-        let restore_files = [
-            "restore.received",
-            "restore.staging",
-            "restore.verified",
-            "restore.activating",
-            "restore.complete",
-            MARKER_FILE,
-        ];
         let mut managed = false;
-        for name in restore_files {
+        for name in RESTORE_STATE_FILES {
             match open_existing_file_beneath(&current, Path::new(name)) {
                 Ok(_) => managed = true,
                 Err(ArchiveError::Io(error)) if error.kind() == io::ErrorKind::NotFound => {}
@@ -315,6 +319,22 @@ fn open_optional_directory(
         Err(ArchiveError::Io(error)) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
     }
+}
+
+pub(crate) fn require_clean_restore_target(data_root: &File) -> Result<(), RestoreActivationError> {
+    if open_optional_directory(data_root, "current")?.is_some() {
+        return Err(RestoreActivationError::CurrentExists);
+    }
+    if let Some(staging) = open_optional_directory(data_root, RESTORE_STAGING_DIRECTORY)? {
+        #[cfg(target_os = "linux")]
+        {
+            let path = format!("/proc/self/fd/{}", staging.as_raw_fd());
+            if std::fs::read_dir(path)?.next().transpose()?.is_some() {
+                return Err(RestoreActivationError::IncompleteStaging);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Finish the only recoverable crash state: verified directory renamed to
@@ -389,7 +409,8 @@ mod tests {
     fn verified_attempt_moves_with_its_marker_and_completes_after_parent_sync() {
         let (temporary, root) = root();
         let (staging, attempt) =
-            create_staging_attempt(&root, "restore", "attempt-one").expect("staging attempt");
+            create_staging_attempt(&root, RESTORE_STAGING_DIRECTORY, "attempt-one")
+                .expect("staging attempt");
         for status in [
             RestoreStatus::Received,
             RestoreStatus::Staging,
@@ -413,7 +434,8 @@ mod tests {
     fn recovery_only_completes_a_digest_proven_post_rename_attempt() {
         let (_temporary, root) = root();
         let (staging, attempt) =
-            create_staging_attempt(&root, "restore", "attempt-two").expect("staging attempt");
+            create_staging_attempt(&root, RESTORE_STAGING_DIRECTORY, "attempt-two")
+                .expect("staging attempt");
         for status in [
             RestoreStatus::Received,
             RestoreStatus::Staging,
@@ -448,7 +470,8 @@ mod tests {
 
         let (temporary, root) = root();
         let (staging, attempt) =
-            create_staging_attempt(&root, "restore", "attempt-three").expect("staging attempt");
+            create_staging_attempt(&root, RESTORE_STAGING_DIRECTORY, "attempt-three")
+                .expect("staging attempt");
         for status in [
             RestoreStatus::Received,
             RestoreStatus::Staging,

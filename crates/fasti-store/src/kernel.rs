@@ -18,6 +18,9 @@ use thiserror::Error;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+
 #[cfg(not(target_os = "linux"))]
 use std::fs::OpenOptions;
 
@@ -106,6 +109,20 @@ impl LockedDataRoot {
             None
         }
     }
+
+    fn current_path(&self) -> PathBuf {
+        #[cfg(target_os = "linux")]
+        {
+            PathBuf::from(format!(
+                "/proc/self/fd/{}/current",
+                self.root_directory.as_raw_fd()
+            ))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.path.join("current")
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -136,7 +153,7 @@ impl SqliteKernel {
             crate::restore_activation::recover_activation_before_database_open(root)
                 .map_err(|_| StoreOpenError::RestoreActivation)?;
         }
-        let current_root = data_root.path().join("current");
+        let current_root = data_root.current_path();
         let payload_root = current_root.join("payloads").join("sha256");
         let scratch_root = current_root.join("scratch").join("uploads");
 
@@ -146,10 +163,13 @@ impl SqliteKernel {
 
         let database_path = current_root.join("fasti.sqlite3");
         reject_unsafe_existing_file(&database_path)?;
-        let connection = Connection::open_with_flags(
-            &database_path,
-            OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-        )?;
+        let flags = OpenFlags::default();
+        #[cfg(not(target_os = "linux"))]
+        let flags = flags | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        // Linux is already rooted through a retained directory descriptor.
+        // SQLite rejects NOFOLLOW when `/proc/self/fd` appears in the path,
+        // while its final file open still uses the bundled no-follow guard.
+        let connection = Connection::open_with_flags(&database_path, flags)?;
         harden_private_regular_file(&database_path)?;
         connection.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -692,9 +712,12 @@ mod tests {
         let root = temporary.path().join("fasti-data");
         let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
         let anchored = guard.anchored_directory().expect("anchored data root");
-        let (_staging, attempt) =
-            crate::archive::create_staging_attempt(anchored, "restore", "attempt-one")
-                .expect("restore staging");
+        let (_staging, attempt) = crate::archive::create_staging_attempt(
+            anchored,
+            crate::restore_activation::RESTORE_STAGING_DIRECTORY,
+            "attempt-one",
+        )
+        .expect("restore staging");
         crate::restore_activation::write_restore_phase(
             &attempt,
             fasti_domain::RestoreStatus::Received,
@@ -716,10 +739,13 @@ mod tests {
         let root = temporary.path().join("fasti-data");
         let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
         let anchored = guard.anchored_directory().expect("anchored data root");
-        let (staging, attempt) =
-            crate::archive::create_staging_attempt(anchored, "restore", "attempt-two")
-                .expect("restore staging");
-        let database = root.join("restore/attempt-two/fasti.sqlite3");
+        let (staging, attempt) = crate::archive::create_staging_attempt(
+            anchored,
+            crate::restore_activation::RESTORE_STAGING_DIRECTORY,
+            "attempt-two",
+        )
+        .expect("restore staging");
+        let database = root.join("staging/attempt-two/fasti.sqlite3");
         let connection = Connection::open(&database).expect("staged database");
         migrate(&connection).expect("staged schema");
         drop(connection);
@@ -752,8 +778,18 @@ mod tests {
         drop(attempt);
         drop(staging);
 
+        let moved = temporary.path().join("moved-fasti-data");
+        fs::rename(&root, &moved).expect("rename locked data root");
+        fs::create_dir(&root).expect("replacement data root");
+        fs::write(root.join("replacement-marker"), b"unchanged").expect("replacement marker");
+
         let kernel = SqliteKernel::open_locked(guard).expect("recovered kernel");
-        assert!(root.join("current/restore.complete").is_file());
+        assert!(moved.join("current/restore.complete").is_file());
+        assert!(!root.join("current").exists());
+        assert_eq!(
+            fs::read(root.join("replacement-marker")).expect("replacement marker"),
+            b"unchanged"
+        );
         drop(kernel);
     }
 
