@@ -388,7 +388,7 @@ define_capabilities!(
         Scoped,
         [WorkspaceExport],
         [CapabilityUnavailable, Forbidden],
-        []
+        [IntegrityFailed, StorageUnavailable]
     ),
     (
         RestoreWorkspace,
