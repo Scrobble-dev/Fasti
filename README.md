@@ -38,7 +38,7 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. Pull request [#14](https://github.com/Scrobble-dev/Fasti/pull/14) also contains a B2 local-kernel implementation for review. The B2 kernel is not mounted by the production daemon, its public B2 surfaces remain reserved, and no B2 milestone or release claim is made. The B1 milestone also remains open on physical Raspberry Pi 5 and J4125 evidence.
+This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. Pull request [#20](https://github.com/Scrobble-dev/Fasti/pull/20) also contains a B2 local-kernel implementation for review. The B2 kernel is not mounted by the production daemon, its public B2 surfaces remain reserved, and no B2 milestone or release claim is made. The B1 milestone also remains open on physical Raspberry Pi 5 and J4125 evidence.
 
 The production daemon deliberately exposes only behavior it can prove:
 
@@ -207,7 +207,7 @@ The product interface arrives after the headless contract and local kernel. Its 
 
 - **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
 - **B1: Executable contract spine** — software surfaces are executable and drift-proof, and the headless QA/developer-experience reviews pass; closure still requires physical Pi 5/J4125 RAM evidence.
-- **B2: Local kernel** — implementation is present on draft PR #14 for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
+- **B2: Local kernel** — implementation is present on draft PR #20 for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
 - **B3: Corrections and portability** — append-only interpretation revision plus complete export, clean restore, and equality proof.
 - **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
 

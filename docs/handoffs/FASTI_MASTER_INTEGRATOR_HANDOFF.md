@@ -3,8 +3,8 @@
 **Status:** Current onboarding entry point for a new implementation harness  
 **Date:** 2026-08-24  
 **Repository:** `Scrobble-dev/Fasti`  
-**Primary active implementation PR:** [#14](https://github.com/Scrobble-dev/Fasti/pull/14)  
-**PR branch:** `security/b1-evidence-hardening-20260822`  
+**Primary active implementation PR:** [#20](https://github.com/Scrobble-dev/Fasti/pull/20)  
+**PR branch:** `dev`  
 **Target branch:** `release`
 
 ---
@@ -119,11 +119,11 @@ Do not call B1 or B2 complete merely because code exists. A body is complete onl
 
 ### Active PR
 
-- PR: [Scrobble-dev/Fasti#14](https://github.com/Scrobble-dev/Fasti/pull/14)
+- PR: [Scrobble-dev/Fasti#20](https://github.com/Scrobble-dev/Fasti/pull/20)
 - Title: `B0-B2: harden the contract foundation and review the local kernel`
 - State: Draft
 - Base: `release`
-- Head: `security/b1-evidence-hardening-20260822`
+- Head: `dev`
 
 The PR intentionally keeps production behavior narrow while B2 is reviewed. Do not expose staged B2 behavior through public contracts one surface at a time.
 
@@ -733,7 +733,7 @@ A missing, skipped, stale, or unavailable required gate does not count as a pass
 ### First hour
 
 1. Read this document.
-2. Read PR #14 completely.
+2. Read PR #20 completely. Its predecessor #14 holds the earlier review history.
 3. Read `AGENTS.md`, `SECURITY.md`, `CONTRIBUTING.md`, and the active branch's constitution and definition of done.
 4. Fetch the active branch and `release`.
 5. Record exact SHAs.
@@ -799,7 +799,7 @@ Do not write `PASS` without an artifact, command result, CI result, or physical 
 
 Continue in this order:
 
-1. Refresh PR #14 against current `release` without losing either side.
+1. Keep `dev` current against `release` without losing either side.
 2. Close remaining B2 correctness and evidence gaps.
 3. Activate B2 public contracts only as one coordinated change.
 4. Complete B3 correction, export, restore, and equality proof.
