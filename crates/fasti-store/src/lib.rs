@@ -12,7 +12,9 @@ mod portability;
 mod review;
 mod schema;
 mod seed;
+mod snapshot;
 #[cfg(test)]
 mod test_support;
 
 pub use kernel::{LockedDataRoot, SqliteKernel, StoreOpenError};
+pub use snapshot::{SnapshotError, SnapshotLimits, SnapshotMetadata, SnapshotProgress};

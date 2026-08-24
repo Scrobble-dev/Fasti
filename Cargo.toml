@@ -44,7 +44,7 @@ axum = { version = "0.8", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
 
 # SQLite & Persistence
-rusqlite = { version = "0.32", features = ["bundled", "chrono", "uuid"] }
+rusqlite = { version = "0.32", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
 
 # CLI & Utilities
 clap = { version = "4.5", features = ["derive", "env"] }
