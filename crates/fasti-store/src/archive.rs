@@ -235,6 +235,40 @@ impl<R: Read> Read for BoundedReader<R> {
     }
 }
 
+/// A scoped, bounded view of one validated archive entry.
+///
+/// The parser retains ownership of the underlying tar entry. After a visitor
+/// returns successfully, the parser drains this same reader to the declared
+/// entry size before it advances to the next header.
+pub(crate) struct ArchiveEntryReader<'entry> {
+    inner: BoundedReader<&'entry mut dyn Read>,
+    bytes_read: u64,
+}
+
+impl<'entry> ArchiveEntryReader<'entry> {
+    fn new(inner: &'entry mut dyn Read) -> Self {
+        Self {
+            inner: BoundedReader::new(inner),
+            bytes_read: 0,
+        }
+    }
+
+    fn bytes_read(&self) -> u64 {
+        self.bytes_read
+    }
+}
+
+impl Read for ArchiveEntryReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        self.bytes_read = self
+            .bytes_read
+            .checked_add(read as u64)
+            .ok_or_else(|| io::Error::other("archive entry byte count overflow"))?;
+        Ok(read)
+    }
+}
+
 /// Caps each call into the wrapped writer at 256 KiB.
 pub struct BoundedWriter<W> {
     inner: W,
@@ -445,11 +479,20 @@ impl<W: Write> ArchiveWriter<W> {
     }
 }
 
-/// Parses and drains an archive without extracting any entry.
-pub fn validate_archive<R: Read>(
+/// Streams validated archive entries through one scoped visitor.
+///
+/// This is the sole strict parser for `.fasti` archives. The visitor cannot
+/// retain the entry reader or access the underlying tar entry. A successful
+/// partial read is drained and counted here before parsing continues.
+pub(crate) fn visit_archive_entries<R, F>(
     source: R,
     limits: ArchiveLimits,
-) -> Result<ArchiveSummary, ArchiveError> {
+    mut visitor: F,
+) -> Result<ArchiveSummary, ArchiveError>
+where
+    R: Read,
+    F: for<'entry> FnMut(&str, u64, &mut ArchiveEntryReader<'entry>) -> Result<(), ArchiveError>,
+{
     let (source, limit_hit) = LimitedReader::new(source, limits.max_compressed_bytes);
     let source = BoundedReader::new(source);
     let map_io = |error| map_validation_io(error, &limit_hit, limits.max_compressed_bytes);
@@ -471,8 +514,21 @@ pub fn validate_archive<R: Read>(
             let path = validate_entry(path_bytes.as_ref(), entry.header().entry_type())?.to_owned();
             let size = entry.header().size().map_err(&map_io)?;
             budget.admit(&path, size)?;
-            let copied = io::copy(&mut entry, &mut io::sink()).map_err(&map_io)?;
-            if copied != size {
+            let mut reader = ArchiveEntryReader::new(&mut entry);
+            let visit_result = visitor(&path, size, &mut reader);
+            if limit_hit.get() {
+                return Err(ArchiveError::CompressedSizeExceeded {
+                    limit: limits.max_compressed_bytes,
+                });
+            }
+            visit_result?;
+            io::copy(&mut reader, &mut io::sink()).map_err(&map_io)?;
+            if limit_hit.get() {
+                return Err(ArchiveError::CompressedSizeExceeded {
+                    limit: limits.max_compressed_bytes,
+                });
+            }
+            if reader.bytes_read() != size {
                 return Err(ArchiveError::TruncatedEntry { path });
             }
             manifest_seen = path == "manifest.json";
@@ -503,6 +559,14 @@ pub fn validate_archive<R: Read>(
         }
     }
     Ok(budget.summary())
+}
+
+/// Parses and drains an archive without extracting any entry.
+pub fn validate_archive<R: Read>(
+    source: R,
+    limits: ArchiveLimits,
+) -> Result<ArchiveSummary, ArchiveError> {
+    visit_archive_entries(source, limits, |_path, _size, _reader| Ok(()))
 }
 
 #[cfg(target_os = "linux")]
@@ -788,6 +852,89 @@ mod tests {
             validate_archive(Cursor::new(first), too_small),
             Err(ArchiveError::CompressedSizeExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn entry_visitor_sees_exact_ordered_bytes_including_final_manifest() {
+        let entries = [
+            ("observations.ndjson", b"one\ntwo\n".as_slice()),
+            ("receipts.ndjson", b"three\n".as_slice()),
+            ("manifest.json", b"{\"format_version\":1}\n".as_slice()),
+        ];
+        let encoded = archive(&entries);
+        let mut visited = Vec::new();
+
+        let summary =
+            visit_archive_entries(Cursor::new(encoded), limits(), |path, size, reader| {
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes)?;
+                visited.push((path.to_owned(), size, bytes));
+                Ok(())
+            })
+            .expect("visit canonical archive");
+
+        assert_eq!(summary.entries, entries.len() as u64);
+        assert_eq!(
+            visited,
+            entries
+                .iter()
+                .map(|(path, bytes)| (path.to_string(), bytes.len() as u64, bytes.to_vec()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            visited.last().map(|entry| entry.0.as_str()),
+            Some("manifest.json")
+        );
+    }
+
+    #[test]
+    fn partial_visitor_reads_are_drained_and_cannot_hide_trailing_data() {
+        let entries = [
+            ("observations.ndjson", b"abcdef".as_slice()),
+            ("manifest.json", b"{}".as_slice()),
+        ];
+        let encoded = archive(&entries);
+        let mut prefixes = Vec::new();
+        let summary =
+            visit_archive_entries(Cursor::new(&encoded), limits(), |path, size, reader| {
+                let mut prefix = [0_u8; 1];
+                reader.read_exact(&mut prefix)?;
+                prefixes.push((path.to_owned(), size, prefix[0]));
+                Ok(())
+            })
+            .expect("parser drains unread entry bytes");
+        assert_eq!(summary.entries, 2);
+        assert_eq!(
+            prefixes,
+            vec![
+                ("observations.ndjson".to_owned(), 6, b'a'),
+                ("manifest.json".to_owned(), 2, b'{'),
+            ]
+        );
+
+        let mut tar_bytes = zstd::stream::decode_all(Cursor::new(encoded)).expect("decode tar");
+        tar_bytes.extend_from_slice(&[0; 512]);
+        let with_trailing_data =
+            zstd::stream::encode_all(Cursor::new(tar_bytes), ZSTD_COMPRESSION_LEVEL)
+                .expect("compress archive with trailing data");
+        let mut visited_paths = Vec::new();
+        let result = visit_archive_entries(
+            Cursor::new(with_trailing_data),
+            limits(),
+            |path, size, reader| {
+                let mut prefix = [0_u8; 1];
+                if size != 0 {
+                    reader.read_exact(&mut prefix)?;
+                }
+                visited_paths.push(path.to_owned());
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(ArchiveError::TrailingData)));
+        assert_eq!(
+            visited_paths,
+            vec!["observations.ndjson".to_owned(), "manifest.json".to_owned()]
+        );
     }
 
     #[test]
