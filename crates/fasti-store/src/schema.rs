@@ -1,6 +1,7 @@
 use rusqlite::{Connection, Result};
+use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 2;
+pub(crate) const SCHEMA_VERSION: i64 = 3;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -11,6 +12,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 1 {
         migrate_v2(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 2 {
+        migrate_v3(connection)?;
     }
     Ok(())
 }
@@ -257,17 +263,279 @@ fn migrate_v2(connection: &Connection) -> Result<()> {
     Ok(())
 }
 
+struct RevisionSource {
+    table: &'static str,
+    new_workspace: &'static str,
+    old_workspace: &'static str,
+}
+
+const REVISION_SOURCES: &[RevisionSource] = &[
+    RevisionSource {
+        table: "workspaces",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "profiles",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "clients",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "records",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "external_identifiers",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "evidence",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "observations",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "observation_clues",
+        new_workspace:
+            "(SELECT workspace_id FROM observations WHERE observation_id = NEW.observation_id)",
+        old_workspace:
+            "(SELECT workspace_id FROM observations WHERE observation_id = OLD.observation_id)",
+    },
+    RevisionSource {
+        table: "occurrences",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "interpretations",
+        new_workspace:
+            "(SELECT workspace_id FROM observations WHERE observation_id = NEW.observation_id)",
+        old_workspace:
+            "(SELECT workspace_id FROM observations WHERE observation_id = OLD.observation_id)",
+    },
+    RevisionSource {
+        table: "review_items",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "review_candidates",
+        new_workspace:
+            "(SELECT workspace_id FROM review_items WHERE review_item_id = NEW.review_item_id)",
+        old_workspace:
+            "(SELECT workspace_id FROM review_items WHERE review_item_id = OLD.review_item_id)",
+    },
+    RevisionSource {
+        table: "corrections",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "receipts",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+    RevisionSource {
+        table: "operations",
+        new_workspace: "NEW.workspace_id",
+        old_workspace: "OLD.workspace_id",
+    },
+];
+
+fn migrate_v3(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        -- This table intentionally has no workspace foreign key. A workspace
+        -- deletion must advance, not erase, its last durable revision.
+        CREATE TABLE workspace_revisions (
+            workspace_id TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL
+                CHECK (revision >= 0 AND typeof(revision) = 'integer')
+        ) STRICT;
+
+        INSERT INTO workspace_revisions(workspace_id, revision)
+        SELECT workspace_id, 0 FROM workspaces;
+        "#,
+    );
+
+    for source in REVISION_SOURCES {
+        write!(
+            sql,
+            r#"
+            CREATE TRIGGER workspace_revision_{table}_insert
+            AFTER INSERT ON {table}
+            BEGIN
+                INSERT INTO workspace_revisions(workspace_id, revision)
+                VALUES ({new_workspace}, 1)
+                ON CONFLICT(workspace_id) DO UPDATE
+                    SET revision = workspace_revisions.revision + 1;
+            END;
+
+            CREATE TRIGGER workspace_revision_{table}_update
+            AFTER UPDATE ON {table}
+            BEGIN
+                INSERT INTO workspace_revisions(workspace_id, revision)
+                VALUES ({old_workspace}, 1)
+                ON CONFLICT(workspace_id) DO UPDATE
+                    SET revision = workspace_revisions.revision + 1;
+
+                INSERT INTO workspace_revisions(workspace_id, revision)
+                SELECT {new_workspace}, 1
+                WHERE {new_workspace} IS NOT {old_workspace}
+                ON CONFLICT(workspace_id) DO UPDATE
+                    SET revision = workspace_revisions.revision + 1;
+            END;
+
+            CREATE TRIGGER workspace_revision_{table}_delete
+            AFTER DELETE ON {table}
+            BEGIN
+                INSERT INTO workspace_revisions(workspace_id, revision)
+                SELECT {old_workspace}, 1
+                WHERE {old_workspace} IS NOT NULL
+                ON CONFLICT(workspace_id) DO UPDATE
+                    SET revision = workspace_revisions.revision + 1;
+            END;
+            "#,
+            table = source.table,
+            new_workspace = source.new_workspace,
+            old_workspace = source.old_workspace,
+        )
+        .expect("writing migration SQL to a String cannot fail");
+    }
+
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 3;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
+pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
+    connection.query_row(
+        "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
+        [workspace_id],
+        |row| row.get(0),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
+    use std::fs;
 
-    #[test]
-    fn fresh_database_reaches_current_schema() {
+    const WORKSPACE: &str = "wsp_revision_test";
+    const CREATED_AT: &str = "2026-08-24T00:00:00.000000Z";
+
+    fn migrated_connection() -> Connection {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .expect("enable foreign keys");
-        migrate(&connection).expect("migrate fresh database");
+        migrate(&connection).expect("migrate database");
+        connection
+    }
+
+    fn seed_review_graph(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("workspace");
+        connection
+            .execute(
+                "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES ('prf_revision_test', ?1, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("profile");
+        connection
+            .execute(
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES ('cli_revision_test', ?1, 'active', 1, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("client");
+        connection
+            .execute(
+                "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES ('rec_revision_test', ?1, 'movie', 'active', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("record");
+        connection
+            .execute(
+                "INSERT INTO evidence(evidence_id, workspace_id, digest, size_bytes, relative_path, created_at) VALUES ('evd_revision_test', ?1, ?2, 0, ?3, ?4)",
+                params![
+                    WORKSPACE,
+                    format!("sha256:{}", "0".repeat(64)),
+                    format!("payloads/sha256/00/{}", "0".repeat(64)),
+                    CREATED_AT
+                ],
+            )
+            .expect("evidence");
+        connection
+            .execute(
+                r#"
+                INSERT INTO observations(
+                    observation_id, workspace_id, profile_id, source_client_id,
+                    evidence_id, observed_at_json, received_at, created_at
+                ) VALUES (
+                    'obs_revision_test', ?1, 'prf_revision_test', 'cli_revision_test',
+                    'evd_revision_test', '{}', ?2, ?2
+                )
+                "#,
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("observation");
+        connection
+            .execute(
+                "INSERT INTO observation_clues(observation_id, ordinal, namespace, grain, value) VALUES ('obs_revision_test', 0, 'imdb', 'movie', 'tt0000001')",
+                [],
+            )
+            .expect("observation clue");
+        connection
+            .execute(
+                "INSERT INTO occurrences(occurrence_id, workspace_id, profile_id, observation_id, created_at) VALUES ('occ_revision_test', ?1, 'prf_revision_test', 'obs_revision_test', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("occurrence");
+        connection
+            .execute(
+                "INSERT INTO interpretations(interpretation_id, observation_id, occurrence_id, state, created_at) VALUES ('int_revision_test', 'obs_revision_test', 'occ_revision_test', 'unresolved', ?1)",
+                [CREATED_AT],
+            )
+            .expect("interpretation");
+        connection
+            .execute(
+                "INSERT INTO review_items(review_item_id, workspace_id, profile_id, observation_id, current_interpretation_id, status, created_at, updated_at) VALUES ('rev_revision_test', ?1, 'prf_revision_test', 'obs_revision_test', 'int_revision_test', 'open', ?2, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("review item");
+        connection
+            .execute(
+                "INSERT INTO review_candidates(review_item_id, record_id) VALUES ('rev_revision_test', 'rec_revision_test')",
+                [],
+            )
+            .expect("review candidate");
+    }
+
+    #[test]
+    fn fresh_database_reaches_current_schema() {
+        let connection = migrated_connection();
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read user version");
@@ -280,6 +548,14 @@ mod tests {
             )
             .expect("find corrections table");
         assert_eq!(corrections, 1);
+        let trigger_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'workspace_revision_%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count revision triggers");
+        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3) as i64);
     }
 
     #[test]
@@ -297,7 +573,7 @@ mod tests {
         migrate(&connection).expect("upgrade version one database");
         let after: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
-            .expect("read version two");
+            .expect("read current version");
         assert_eq!(after, SCHEMA_VERSION);
     }
 
@@ -440,6 +716,191 @@ mod tests {
         assert_eq!(
             workspaces, 1,
             "a newer database lost rows to an older binary"
+        );
+    }
+
+    #[test]
+    fn revision_tracks_identity_review_nested_and_equal_count_changes() {
+        let connection = migrated_connection();
+        seed_review_graph(&connection);
+        let seeded = workspace_revision(&connection, WORKSPACE).expect("seed revision");
+
+        connection
+            .execute(
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_revision_test', ?1, 'rec_revision_test', 'imdb', 'movie', 'tt0000001', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("identity insert");
+        assert_eq!(
+            workspace_revision(&connection, WORKSPACE).expect("identity revision"),
+            seeded + 1
+        );
+
+        connection
+            .execute(
+                "UPDATE review_items SET status = 'deferred', updated_at = ?1 WHERE review_item_id = 'rev_revision_test'",
+                [CREATED_AT],
+            )
+            .expect("review update");
+        connection
+            .execute(
+                "UPDATE review_candidates SET record_id = record_id WHERE review_item_id = 'rev_revision_test'",
+                [],
+            )
+            .expect("nested review-candidate update");
+        assert_eq!(
+            workspace_revision(&connection, WORKSPACE).expect("review revision"),
+            seeded + 3
+        );
+
+        let before_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM external_identifiers", [], |row| {
+                row.get(0)
+            })
+            .expect("identity count");
+        connection
+            .execute(
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_revision_replacement', ?1, 'rec_revision_test', 'tmdb', 'movie', '1', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("replacement identity insert");
+        connection
+            .execute(
+                "DELETE FROM external_identifiers WHERE external_identifier_id = 'xid_revision_test'",
+                [],
+            )
+            .expect("original identity delete");
+        let after_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM external_identifiers", [], |row| {
+                row.get(0)
+            })
+            .expect("replacement identity count");
+        assert_eq!(after_count, before_count);
+        assert_eq!(
+            workspace_revision(&connection, WORKSPACE).expect("replacement revision"),
+            seeded + 5
+        );
+    }
+
+    #[test]
+    fn direct_nested_delete_tracks_the_parent_workspace() {
+        let connection = migrated_connection();
+        seed_review_graph(&connection);
+        let before = workspace_revision(&connection, WORKSPACE).expect("revision before delete");
+
+        connection
+            .execute(
+                "DELETE FROM review_candidates WHERE review_item_id = 'rev_revision_test'",
+                [],
+            )
+            .expect("direct review candidate delete");
+
+        assert_eq!(
+            workspace_revision(&connection, WORKSPACE).expect("revision after delete"),
+            before + 1
+        );
+    }
+
+    #[test]
+    fn deleting_review_item_cascades_candidates_and_advances_revision() {
+        let connection = migrated_connection();
+        seed_review_graph(&connection);
+        let before = workspace_revision(&connection, WORKSPACE).expect("revision before cascade");
+
+        connection
+            .execute(
+                "DELETE FROM review_items WHERE review_item_id = 'rev_revision_test'",
+                [],
+            )
+            .expect("review item delete");
+
+        let candidates: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM review_candidates WHERE review_item_id = 'rev_revision_test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count review candidates");
+        assert_eq!(candidates, 0);
+        assert_eq!(
+            workspace_revision(&connection, WORKSPACE).expect("revision after cascade"),
+            before + 1
+        );
+    }
+
+    #[test]
+    fn deleting_observation_cascades_clues_and_advances_revision() {
+        let connection = migrated_connection();
+        seed_review_graph(&connection);
+        connection
+            .execute(
+                "DELETE FROM review_items WHERE review_item_id = 'rev_revision_test'",
+                [],
+            )
+            .expect("review item delete");
+        connection
+            .execute(
+                "DELETE FROM interpretations WHERE interpretation_id = 'int_revision_test'",
+                [],
+            )
+            .expect("interpretation delete");
+        connection
+            .execute(
+                "DELETE FROM occurrences WHERE occurrence_id = 'occ_revision_test'",
+                [],
+            )
+            .expect("occurrence delete");
+        let before = workspace_revision(&connection, WORKSPACE).expect("revision before cascade");
+
+        connection
+            .execute(
+                "DELETE FROM observations WHERE observation_id = 'obs_revision_test'",
+                [],
+            )
+            .expect("observation delete");
+
+        let clues: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM observation_clues WHERE observation_id = 'obs_revision_test'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count observation clues");
+        assert_eq!(clues, 0);
+        assert_eq!(
+            workspace_revision(&connection, WORKSPACE).expect("revision after cascade"),
+            before + 1
+        );
+    }
+
+    #[test]
+    fn revision_is_durable_in_a_frozen_database_copy() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let source_path = root.path().join("source.sqlite3");
+        let snapshot_path = root.path().join("snapshot.sqlite3");
+        {
+            let connection = Connection::open(&source_path).expect("source database");
+            connection
+                .pragma_update(None, "foreign_keys", "ON")
+                .expect("enable foreign keys");
+            migrate(&connection).expect("migrate source");
+            connection
+                .execute(
+                    "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                    params![WORKSPACE, CREATED_AT],
+                )
+                .expect("workspace");
+            assert_eq!(
+                workspace_revision(&connection, WORKSPACE).expect("source revision"),
+                1
+            );
+        }
+
+        fs::copy(&source_path, &snapshot_path).expect("copy closed database snapshot");
+        let snapshot = Connection::open(&snapshot_path).expect("snapshot database");
+        assert_eq!(
+            workspace_revision(&snapshot, WORKSPACE).expect("snapshot revision"),
+            1
         );
     }
 }

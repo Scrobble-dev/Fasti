@@ -1,6 +1,7 @@
 use crate::crypto::{encode_hex, sha256_reader};
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
 use crate::kernel::{authorize_transaction, map_sql, reject_unsafe_existing_file, SqliteKernel};
+use crate::schema::workspace_revision;
 use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceQuery, FastiProblem, ProblemCode,
     RequestAccessContext, VerifyWorkspaceQuery, WorkspaceExportEntity, WorkspaceExportOutcome,
@@ -399,10 +400,46 @@ mod tests {
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{EvidenceUploadPort, EvidenceUploadRequest, ScopeKey};
-    use fasti_domain::RequestCorrelationId;
+    use fasti_domain::{
+        InterpretationId, ObservationId, OccurrenceId, OperationId, ReceiptId, RequestCorrelationId,
+    };
     use std::fs;
+    use std::io;
 
-    fn grant_verify_scope(node: &TestNode) {
+    struct MutatingSink {
+        bytes: Vec<u8>,
+        kernel: SqliteKernel,
+        workspace_id: String,
+        mutated: bool,
+    }
+
+    impl Write for MutatingSink {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            if !self.mutated {
+                let connection = self
+                    .kernel
+                    .inner
+                    .connection
+                    .lock()
+                    .expect("SQLite connection");
+                connection
+                    .execute(
+                        "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES ('rec_concurrent_export', ?1, 'movie', 'active', '2026-08-24T00:00:00.000000Z')",
+                        [&self.workspace_id],
+                    )
+                    .expect("concurrent record insert");
+                self.mutated = true;
+            }
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn grant_scope(node: &TestNode, scope: ScopeKey) {
         let connection = node
             .kernel
             .inner
@@ -412,12 +449,13 @@ mod tests {
         connection
             .execute(
                 "INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key) VALUES (?1, ?2)",
-                params![
-                    node.access.grant_id().to_string(),
-                    ScopeKey::WorkspaceVerify.as_str()
-                ],
+                params![node.access.grant_id().to_string(), scope.as_str()],
             )
-            .expect("grant staged verification scope");
+            .expect("grant staged scope");
+    }
+
+    fn grant_verify_scope(node: &TestNode) {
+        grant_scope(node, ScopeKey::WorkspaceVerify);
     }
 
     #[test]
@@ -471,6 +509,187 @@ mod tests {
             .expect_err("tampered evidence must fail verification");
         assert_eq!(error.code(), ProblemCode::IntegrityFailed);
     }
+
+    #[test]
+    fn export_writes_every_operation_across_keyset_pages() {
+        let node = TestNode::new();
+        grant_scope(&node, ScopeKey::WorkspaceExport);
+        let evidence = node.upload(b"operation export evidence");
+        let observation_id = ObservationId::new_v7();
+        let occurrence_id = OccurrenceId::new_v7();
+        let interpretation_id = InterpretationId::new_v7();
+        let created_at = "2026-08-24T00:00:00.000000Z";
+        let operation_count = usize::try_from(EXPORT_PAGE).expect("positive page size") + 1;
+
+        {
+            let mut connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            let transaction = connection
+                .transaction()
+                .expect("operation fixture transaction");
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO observations(
+                        observation_id, workspace_id, profile_id, source_client_id,
+                        evidence_id, observed_at_json, received_at, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, '{}', ?6, ?6)
+                    "#,
+                    params![
+                        observation_id.to_string(),
+                        node.access.workspace_id().to_string(),
+                        node.access.profile_id().to_string(),
+                        node.access.client_id().to_string(),
+                        evidence.evidence_id().to_string(),
+                        created_at
+                    ],
+                )
+                .expect("observation");
+            transaction
+                .execute(
+                    "INSERT INTO occurrences(occurrence_id, workspace_id, profile_id, observation_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        occurrence_id.to_string(),
+                        node.access.workspace_id().to_string(),
+                        node.access.profile_id().to_string(),
+                        observation_id.to_string(),
+                        created_at
+                    ],
+                )
+                .expect("occurrence");
+            transaction
+                .execute(
+                    "INSERT INTO interpretations(interpretation_id, observation_id, occurrence_id, state, created_at) VALUES (?1, ?2, ?3, 'unresolved', ?4)",
+                    params![
+                        interpretation_id.to_string(),
+                        observation_id.to_string(),
+                        occurrence_id.to_string(),
+                        created_at
+                    ],
+                )
+                .expect("interpretation");
+
+            for _ in 0..operation_count {
+                let operation_id = OperationId::new_v7();
+                let receipt_id = ReceiptId::new_v7();
+                transaction
+                    .execute(
+                        r#"
+                        INSERT INTO receipts(
+                            receipt_id, operation_id, workspace_id, profile_id, client_id,
+                            capability_key, observation_id, occurrence_id, interpretation_id,
+                            evidence_id, payload_digest, resolution, received_at, committed_at,
+                            created_at
+                        ) VALUES (
+                            ?1, ?2, ?3, ?4, ?5, 'observation.accept', ?6, ?7, ?8,
+                            ?9, ?10, 'unresolved', ?11, ?11, ?11
+                        )
+                        "#,
+                        params![
+                            receipt_id.to_string(),
+                            operation_id.to_string(),
+                            node.access.workspace_id().to_string(),
+                            node.access.profile_id().to_string(),
+                            node.access.client_id().to_string(),
+                            observation_id.to_string(),
+                            occurrence_id.to_string(),
+                            interpretation_id.to_string(),
+                            evidence.evidence_id().to_string(),
+                            evidence.digest().to_string(),
+                            created_at
+                        ],
+                    )
+                    .expect("receipt");
+                transaction
+                    .execute(
+                        r#"
+                        INSERT INTO operations(
+                            workspace_id, client_id, operation_id, capability_key,
+                            semantic_digest, receipt_id, created_at
+                        ) VALUES (?1, ?2, ?3, 'observation.accept', ?4, ?5, ?6)
+                        "#,
+                        params![
+                            node.access.workspace_id().to_string(),
+                            node.access.client_id().to_string(),
+                            operation_id.to_string(),
+                            evidence.digest().to_string(),
+                            receipt_id.to_string(),
+                            created_at
+                        ],
+                    )
+                    .expect("operation");
+            }
+            transaction.commit().expect("commit operation fixtures");
+        }
+
+        let expected: u64 = {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            connection
+                .query_row(
+                    "SELECT COUNT(*) FROM operations WHERE workspace_id = ?1",
+                    [node.access.workspace_id().to_string()],
+                    |row| row.get(0),
+                )
+                .expect("expected operation count")
+        };
+        let mut bytes = Vec::new();
+        let outcome = node
+            .kernel
+            .export_workspace(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), node.access),
+                &mut bytes,
+            )
+            .expect("export workspace");
+
+        assert_eq!(expected, operation_count as u64);
+        assert_eq!(outcome.count(WorkspaceExportEntity::Operations), expected);
+        let lines: Vec<serde_json::Value> = std::str::from_utf8(&bytes)
+            .expect("UTF-8 export")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("JSON export line"))
+            .collect();
+        let operations = lines
+            .iter()
+            .position(|line| line.get("section") == Some(&serde_json::json!("operations")))
+            .expect("operations marker");
+        let trailer = lines
+            .iter()
+            .position(|line| line.get("section") == Some(&serde_json::json!("trailer")))
+            .expect("trailer marker");
+        assert_eq!(trailer - operations - 1, operation_count);
+    }
+
+    #[test]
+    fn export_reports_concurrent_count_change_as_storage_unavailable() {
+        let node = TestNode::new();
+        grant_scope(&node, ScopeKey::WorkspaceExport);
+        let mut sink = MutatingSink {
+            bytes: Vec::new(),
+            kernel: node.kernel.clone(),
+            workspace_id: node.access.workspace_id().to_string(),
+            mutated: false,
+        };
+
+        let error = node
+            .kernel
+            .export_workspace(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), node.access),
+                &mut sink,
+            )
+            .expect_err("concurrent mutation must fail export");
+
+        assert!(sink.mutated);
+        assert_eq!(error.code(), ProblemCode::StorageUnavailable);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -485,19 +704,25 @@ const EXPORT_PAGE: i64 = 256;
 /// Every exported key column is TEXT or INTEGER; the schema declares no REAL
 /// or BLOB column, and `write_row` rejects those types if one ever appears.
 #[derive(Debug, Clone, Copy)]
-enum CursorSeed {
+enum CursorColumn {
     /// Sorts before any non-empty TEXT key. Every identifier column is a
     /// non-empty ULID-style string.
-    BeforeAnyText,
+    Text(usize),
     /// Sorts before any non-negative INTEGER key.
-    BeforeAnyOrdinal,
+    NonNegativeInteger(usize),
 }
 
-impl CursorSeed {
+impl CursorColumn {
+    const fn index(self) -> usize {
+        match self {
+            Self::Text(index) | Self::NonNegativeInteger(index) => index,
+        }
+    }
+
     fn value(self) -> rusqlite::types::Value {
         match self {
-            Self::BeforeAnyText => rusqlite::types::Value::Text(String::new()),
-            Self::BeforeAnyOrdinal => rusqlite::types::Value::Integer(-1),
+            Self::Text(_) => rusqlite::types::Value::Text(String::new()),
+            Self::NonNegativeInteger(_) => rusqlite::types::Value::Integer(-1),
         }
     }
 }
@@ -514,7 +739,8 @@ struct ExportSection {
     /// Row count for the change fence. Binds `?1` = workspace id. It must
     /// count exactly the rows `sql` pages, including the same joins.
     count_sql: &'static str,
-    cursor_seed: &'static [CursorSeed],
+    /// Columns, in SQL keyset order, that form the next-page cursor.
+    cursor_columns: &'static [CursorColumn],
 }
 
 const EXPORT_SECTIONS: &[ExportSection] = &[
@@ -524,7 +750,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND workspace_id > ?2 \
               ORDER BY workspace_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM workspaces WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::Profiles,
@@ -532,7 +758,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND profile_id > ?2 \
               ORDER BY profile_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM profiles WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     // `current_credential_epoch` is deliberately absent: it is the live epoch
     // fence, and exporting it would let a stale credential re-validate after a
@@ -544,7 +770,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND client_id > ?2 \
               ORDER BY client_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM clients WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::Records,
@@ -552,7 +778,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND record_id > ?2 \
               ORDER BY record_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM records WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::ExternalIdentifiers,
@@ -562,7 +788,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND external_identifier_id > ?2 \
               ORDER BY external_identifier_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM external_identifiers WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     // Evidence is exported as a manifest of digests and sizes. Blob content is
     // not embedded in format version 1; see `evidence_content` in the header.
@@ -574,7 +800,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND evidence_id > ?2 \
               ORDER BY evidence_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM evidence WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::Observations,
@@ -584,7 +810,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND observation_id > ?2 \
               ORDER BY observation_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM observations WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     // Clues carry no workspace column; scope is reached through observations.
     ExportSection {
@@ -596,7 +822,10 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE o.workspace_id = ?1 AND (c.observation_id, c.ordinal) > (?2, ?3) \
               ORDER BY c.observation_id, c.ordinal LIMIT ?4",
         count_sql: "SELECT COUNT(*) FROM observation_clues c JOIN observations o ON o.observation_id = c.observation_id WHERE o.workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText, CursorSeed::BeforeAnyOrdinal],
+        cursor_columns: &[
+            CursorColumn::Text(0),
+            CursorColumn::NonNegativeInteger(1),
+        ],
     },
     ExportSection {
         entity: WorkspaceExportEntity::Occurrences,
@@ -606,7 +835,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND occurrence_id > ?2 \
               ORDER BY occurrence_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM occurrences WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     // Interpretations carry no workspace column either.
     ExportSection {
@@ -620,7 +849,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE o.workspace_id = ?1 AND i.interpretation_id > ?2 \
               ORDER BY i.interpretation_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM interpretations i JOIN observations o ON o.observation_id = i.observation_id WHERE o.workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::ReviewItems,
@@ -630,7 +859,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND review_item_id > ?2 \
               ORDER BY review_item_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM review_items WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::ReviewCandidates,
@@ -640,7 +869,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE r.workspace_id = ?1 AND (c.review_item_id, c.record_id) > (?2, ?3) \
               ORDER BY c.review_item_id, c.record_id LIMIT ?4",
         count_sql: "SELECT COUNT(*) FROM review_candidates c JOIN review_items r ON r.review_item_id = c.review_item_id WHERE r.workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText, CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0), CursorColumn::Text(1)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::Corrections,
@@ -651,7 +880,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND correction_id > ?2 \
               ORDER BY correction_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM corrections WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     // Ordered by receipt_id, not the AUTOINCREMENT sequence: `sequence` is
     // node-local and would not survive a restore into a clean database.
@@ -665,7 +894,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND receipt_id > ?2 \
               ORDER BY receipt_id LIMIT ?3",
         count_sql: "SELECT COUNT(*) FROM receipts WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
         entity: WorkspaceExportEntity::Operations,
@@ -675,7 +904,7 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND (client_id, operation_id) > (?2, ?3) \
               ORDER BY client_id, operation_id LIMIT ?4",
         count_sql: "SELECT COUNT(*) FROM operations WHERE workspace_id = ?1",
-        cursor_seed: &[CursorSeed::BeforeAnyText, CursorSeed::BeforeAnyText],
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
     },
 ];
 
@@ -743,24 +972,39 @@ impl WorkspaceExportPort for SqliteKernel {
         let access = query.access();
         let workspace_id = access.workspace_id();
 
-        // Fence the export with a durable row-count snapshot. Pages release
+        // Fence the export with a durable revision and row-count snapshot. Pages release
         // the connection lock so acceptance is not blocked for the whole
         // export; the closing comparison turns any concurrent mutation into a
         // failure instead of an archive with dangling references.
         //
-        // ponytail: snapshot-by-recount, matching `verify_workspace`. A single
+        // ponytail: revision fence, not the accepted online-backup snapshot. A single
         // long-lived read transaction would be a true snapshot but holds the
         // one global connection mutex for the entire export. Revisit if a
-        // reader pool ever exists.
+        // reader pool or bounded online backup exists.
         let opening = export_snapshot(self, access, capability, correlation_id)?;
 
         let mut sink = DigestSink::new(sink);
         write_header(&mut sink, workspace_id, capability, correlation_id)?;
 
         let mut counts = [0_u64; WorkspaceExportEntity::ALL.len()];
-        for section in EXPORT_SECTIONS {
-            counts[section.entity.index()] =
+        for (section_index, section) in EXPORT_SECTIONS.iter().enumerate() {
+            let written =
                 write_section(self, access, section, &mut sink, capability, correlation_id)?;
+            let expected = u64::try_from(opening.counts[section_index]).map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            if written != expected {
+                let current = export_snapshot(self, access, capability, correlation_id)?;
+                if current.revision != opening.revision {
+                    return Err(Box::new(FastiProblem::from_code(
+                        ProblemCode::StorageUnavailable,
+                        capability,
+                        correlation_id,
+                    )));
+                }
+                return integrity_failure(capability, correlation_id);
+            }
+            counts[section.entity.index()] = written;
         }
 
         let closing = export_snapshot(self, access, capability, correlation_id)?;
@@ -785,13 +1029,19 @@ impl WorkspaceExportPort for SqliteKernel {
     }
 }
 
-/// Durable row counts for every exported section, used as a change fence.
+#[derive(Debug, PartialEq, Eq)]
+struct ExportFence {
+    revision: i64,
+    counts: Vec<i64>,
+}
+
+/// Durable revision and row counts for every exported section.
 fn export_snapshot(
     kernel: &SqliteKernel,
     access: &RequestAccessContext,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
-) -> ApplicationResult<Vec<i64>> {
+) -> ApplicationResult<ExportFence> {
     let mut connection = kernel.lock_connection(capability, correlation_id)?;
     let transaction = map_sql(
         connection.transaction_with_behavior(TransactionBehavior::Deferred),
@@ -801,6 +1051,11 @@ fn export_snapshot(
     authorize_transaction(&transaction, capability, access, correlation_id)?;
 
     let workspace = access.workspace_id().to_string();
+    let revision = map_sql(
+        workspace_revision(&transaction, &workspace),
+        capability,
+        correlation_id,
+    )?;
     let mut counts = Vec::with_capacity(EXPORT_SECTIONS.len());
     for section in EXPORT_SECTIONS {
         let count = map_sql(
@@ -813,7 +1068,7 @@ fn export_snapshot(
         counts.push(count);
     }
     map_sql(transaction.commit(), capability, correlation_id)?;
-    Ok(counts)
+    Ok(ExportFence { revision, counts })
 }
 
 fn write_header(
@@ -886,9 +1141,9 @@ fn write_section(
 
     let workspace = access.workspace_id().to_string();
     let mut cursor: Vec<Value> = section
-        .cursor_seed
+        .cursor_columns
         .iter()
-        .map(|seed| seed.value())
+        .map(|column| column.value())
         .collect();
     let mut written = 0_u64;
 
@@ -952,7 +1207,6 @@ fn read_section_page(
     bindings.extend(cursor.iter().cloned());
     bindings.push(Value::Integer(EXPORT_PAGE));
 
-    let key_columns = section.cursor_seed.len();
     let mut rows = map_sql(
         statement.query(rusqlite::params_from_iter(bindings.iter())),
         capability,
@@ -964,7 +1218,7 @@ fn read_section_page(
         page.push(encode_row(
             row,
             &column_names,
-            key_columns,
+            section.cursor_columns,
             capability,
             correlation_id,
         )?);
@@ -982,12 +1236,12 @@ fn read_section_page(
 fn encode_row(
     row: &rusqlite::Row<'_>,
     column_names: &[String],
-    key_columns: usize,
+    cursor_columns: &[CursorColumn],
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<SectionRow> {
     let mut object = serde_json::Map::new();
-    let mut cursor = Vec::with_capacity(key_columns);
+    let mut cursor = Vec::with_capacity(cursor_columns.len());
 
     for (index, name) in column_names.iter().enumerate() {
         let raw = map_sql(row.get_ref(index), capability, correlation_id)?;
@@ -1010,7 +1264,10 @@ fn encode_row(
             }
         };
 
-        if index < key_columns {
+        if cursor_columns
+            .get(cursor.len())
+            .is_some_and(|column| column.index() == index)
+        {
             cursor.push(match &value {
                 serde_json::Value::String(text) => Value::Text(text.clone()),
                 serde_json::Value::Number(number) => {
@@ -1030,6 +1287,10 @@ fn encode_row(
         }
 
         object.insert(name.clone(), value);
+    }
+
+    if cursor.len() != cursor_columns.len() {
+        return integrity_failure(capability, correlation_id);
     }
 
     Ok((serde_json::Value::Object(object), cursor))
