@@ -80,6 +80,8 @@ jobs:
       - run: pnpm format:check
       - run: pnpm typecheck
       - run: pnpm test
+      - run: npx nx fix-ci
+        if: always()
 
   repository-truth:
     name: B0 repository truth
