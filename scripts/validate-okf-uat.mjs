@@ -18,6 +18,10 @@ const uatOwnershipPath = resolve(
   repositoryRoot,
   "tests/conformance/uat-ownership.v1.json",
 );
+const identityUatCsvPath = resolve(
+  repositoryRoot,
+  "tests/conformance/identity-uat-matrix.v1.csv",
+);
 
 const RESERVED_OKF_FILES = new Set(["index.md", "log.md"]);
 const ALLOWED_OKF_STATUS = new Set(["draft", "stable", "deprecated"]);
@@ -25,6 +29,55 @@ const ALLOWED_UAT_STATUS = new Set([
   "executable-b1",
   "contract-b1",
   "deferred",
+]);
+const IDENTITY_UAT_HEADER = [
+  "test_id",
+  "category",
+  "phase",
+  "persona",
+  "risk",
+  "precondition",
+  "action",
+  "expected_result",
+  "automation",
+  "source_basis",
+];
+const IDENTITY_UAT_ROW_COUNT = 126;
+const ALLOWED_IDENTITY_CATEGORIES = new Set([
+  "stable_entity",
+  "partial_identity",
+  "topology",
+  "interpretation",
+  "metadata_claims",
+  "custom_fields",
+  "migration",
+  "sync_offline",
+  "security",
+  "accessibility",
+  "developer_experience",
+]);
+const ALLOWED_IDENTITY_PHASES = new Set([
+  "M0",
+  "M1",
+  "M2",
+  "M3",
+  "M4",
+  "M5",
+  "M6",
+]);
+const ALLOWED_IDENTITY_RISK = new Set(["critical", "high", "medium"]);
+const ALLOWED_IDENTITY_AUTOMATION = new Set([
+  "automated",
+  "manual",
+  "manual+automated",
+  "contract",
+  "property",
+  "chaos",
+  "security",
+  "performance",
+  "migration",
+  "integration",
+  "mobile",
 ]);
 const ALLOWED_BODIES = new Set([
   "b1",
@@ -486,16 +539,93 @@ async function validateUat(registry) {
   };
 }
 
+async function validateIdentityUat() {
+  const rows = parseCsv(await readFile(identityUatCsvPath, "utf8"));
+  assert.deepEqual(
+    rows[0],
+    IDENTITY_UAT_HEADER,
+    "identity UAT matrix header must match the published v1 schema",
+  );
+  const sourceRows = rows.slice(1);
+  assert.equal(
+    sourceRows.length,
+    IDENTITY_UAT_ROW_COUNT,
+    `identity UAT matrix must contain ${IDENTITY_UAT_ROW_COUNT} rows`,
+  );
+  assert.ok(
+    sourceRows.every((row) => row.length === IDENTITY_UAT_HEADER.length),
+    "every identity UAT row must have the header field count",
+  );
+
+  // The identity matrix uses its own IDF- namespace. The product-wide
+  // uat-matrix.csv owns ID-. Sharing one namespace would let two different
+  // acceptance cases answer to the same trace ID.
+  const expectedIds = Array.from(
+    { length: IDENTITY_UAT_ROW_COUNT },
+    (_, index) => `IDF-${String(index + 1).padStart(3, "0")}`,
+  );
+  assert.deepEqual(
+    sourceRows.map(([id]) => id),
+    expectedIds,
+    "identity UAT IDs must be the complete ordered IDF-001 through IDF-126 set",
+  );
+
+  const column = Object.fromEntries(
+    IDENTITY_UAT_HEADER.map((name, index) => [name, index]),
+  );
+  const byPhase = new Map();
+  for (const row of sourceRows) {
+    const id = row[column.test_id];
+    assert.ok(
+      ALLOWED_IDENTITY_CATEGORIES.has(row[column.category]),
+      `${id} has invalid category`,
+    );
+    assert.ok(
+      ALLOWED_IDENTITY_PHASES.has(row[column.phase]),
+      `${id} has invalid phase`,
+    );
+    assert.ok(
+      ALLOWED_IDENTITY_RISK.has(row[column.risk]),
+      `${id} has invalid risk`,
+    );
+    assert.ok(
+      ALLOWED_IDENTITY_AUTOMATION.has(row[column.automation]),
+      `${id} has invalid automation class`,
+    );
+    for (const field of [
+      "persona",
+      "precondition",
+      "action",
+      "expected_result",
+      "source_basis",
+    ]) {
+      assert.ok(
+        row[column[field]].trim().length > 0,
+        `${id} must state a ${field}`,
+      );
+    }
+    byPhase.set(row[column.phase], (byPhase.get(row[column.phase]) ?? 0) + 1);
+  }
+
+  return {
+    caseCount: sourceRows.length,
+    criticalCount: sourceRows.filter((row) => row[column.risk] === "critical")
+      .length,
+    phaseCount: byPhase.size,
+  };
+}
+
 const registry = parseYaml(await readFile(registryPath, "utf8"));
 assert.ok(
   Array.isArray(registry.capabilities),
   "capability registry is malformed",
 );
-const [okf, uat] = await Promise.all([
+const [okf, uat, identityUat] = await Promise.all([
   validateOkf(registry),
   validateUat(registry),
+  validateIdentityUat(),
 ]);
 
 console.log(
-  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} deferred=${uat.deferredCount}`,
+  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
 );
