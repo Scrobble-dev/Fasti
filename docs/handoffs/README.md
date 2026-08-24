@@ -13,6 +13,7 @@ Read in this order. A document lower in the list never overrides one above it.
 | 3     | [`FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md`](FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md) | dated snapshot | Pull-request topology, B0-B8 disposition, evidence gaps, continuation order, machine-readable context envelope                    |
 | 4     | [`FASTI_EXTERNAL_HARNESS_HANDOFF_2026-08-24.md`](FASTI_EXTERNAL_HARNESS_HANDOFF_2026-08-24.md)           | dated snapshot | Implementation companion: exact-head QA receipts, the B3 correction slice, its security review, and the CI regression post-mortem |
 | 5     | [`FASTI_BRANCH_TOPOLOGY_CHANGE_2026-08-24.md`](FASTI_BRANCH_TOPOLOGY_CHANGE_2026-08-24.md)               | dated snapshot | Branch and pull-request topology only. Overrides the branch and PR facts in documents 3 and 4, which are otherwise unchanged      |
+| 6     | [`FASTI_B3_CONTINUATION_2026-08-24.md`](FASTI_B3_CONTINUATION_2026-08-24.md)                             | dated snapshot | Verified B0-B2 status with the three activation gates, and the state of the in-progress B3 export slice                           |
 
 Branch and pull-request facts in documents 3 and 4 are superseded by document 5. Documents 3 and 4 were written on the same day by different sessions and overlap. They are both retained because each carries material the other does not. When they disagree, prefer document 3 for programme state and document 4 for the B3 implementation slice, and prefer live source over both.
 
