@@ -2,3 +2,4 @@ packages:
   - "packages/*"
 allowBuilds:
   "@scarf/scarf": false
+  nx: true

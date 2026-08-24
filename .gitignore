@@ -51,3 +51,9 @@ lcov.info
 /benchmarks/b1/tauri-shell/evidence/
 __pycache__/
 *.py[cod]
+
+
+
+.nx/cache
+.nx/workspace-data
+.nx/migrate-runs

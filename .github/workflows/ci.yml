@@ -120,3 +120,34 @@ jobs:
             /tmp/fasti-source.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
+
+  coverage:
+    name: Code coverage (Rust & JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Rust coverage
+        run: cargo llvm-cov --workspace --locked --lcov --output-path coverage/rust-lcov.info
+      - name: Generate JavaScript coverage
+        run: pnpm run test:coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@b9ed7f1494572a181469e8915c245310b76b2b48 # v5.4.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/rust-lcov.info,coverage/js-lcov.info
+          fail_ci_if_error: false
+
