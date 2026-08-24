@@ -12,6 +12,12 @@
       "outputs": [
         "{projectRoot}/dist"
       ]
+    },
+    "typecheck": {
+      "cache": true,
+      "dependsOn": [
+        "build"
+      ]
     }
   }
 }
