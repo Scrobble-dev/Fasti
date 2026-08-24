@@ -35,9 +35,11 @@ version-1 streams, including `namespaces` after `records` and before
 `external_identifiers`. The Rust contract owns both strict hostile-input
 conversion and the application-to-wire RFC 8785/JCS projection. Freezing the
 archive format does not add a public capability, registry entry, route, SDK
-method, or CLI operation. The projection owns the checked DTO, canonical
-`manifest.json` bytes, and checksum-verified application value as one unit;
-store adapters must not rebuild or independently pair them. Restore success is
+method, or CLI operation. The outbound projection owns the checked DTO,
+canonical `manifest.json` bytes, application manifest, and digest as one opaque
+unit; it has no consuming parts API. Hostile inbound conversion returns a
+contract-owned verified manifest whose construction is private. Store adapters
+must not rebuild or independently pair wire values. Restore success is
 complete-only. Rejection and post-activation recovery-bootstrap pending states
 remain typed staged failures.
 

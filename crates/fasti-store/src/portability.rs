@@ -17,7 +17,7 @@ use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 const EVIDENCE_VERIFY_PAGE: i64 = 128;
@@ -26,9 +26,10 @@ type Snapshot = (u64, u64, i64);
 
 /// Map a stopped-node verify open failure without exposing adapter detail.
 ///
-/// The shared lock has a specific recovery action. Other open failures retain
-/// the existing bounded storage-unavailable meaning until their own verified
-/// offline recovery paths exist.
+/// The shared lock has a specific recovery action. Only explicitly transient
+/// operating-system or SQLite failures are retry-safe. Path, configuration,
+/// schema, and database-format failures are integrity failures so offline
+/// verification fails closed.
 pub fn map_offline_verify_open_error(
     error: StoreOpenError,
     correlation_id: fasti_domain::RequestCorrelationId,
@@ -38,11 +39,42 @@ pub fn map_offline_verify_open_error(
             CapabilityKey::VerifyWorkspace,
             correlation_id,
         )),
-        _ => Box::new(FastiProblem::storage_unavailable(
+        StoreOpenError::Io(error) if transient_io_error(error.kind()) => Box::new(
+            FastiProblem::storage_unavailable(CapabilityKey::VerifyWorkspace, correlation_id),
+        ),
+        StoreOpenError::Sqlite(error) if transient_sqlite_error(&error) => Box::new(
+            FastiProblem::storage_unavailable(CapabilityKey::VerifyWorkspace, correlation_id),
+        ),
+        StoreOpenError::Io(_)
+        | StoreOpenError::UnsafePath { .. }
+        | StoreOpenError::Sqlite(_)
+        | StoreOpenError::JournalMode(_)
+        | StoreOpenError::SynchronousLevel(_)
+        | StoreOpenError::SchemaVersion { .. } => Box::new(FastiProblem::integrity_failed(
             CapabilityKey::VerifyWorkspace,
             correlation_id,
         )),
     }
+}
+
+fn transient_io_error(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::Interrupted | ErrorKind::WouldBlock | ErrorKind::TimedOut
+    )
+}
+
+fn transient_sqlite_error(error: &rusqlite::Error) -> bool {
+    matches!(
+        error,
+        rusqlite::Error::SqliteFailure(sqlite, _)
+            if matches!(
+                sqlite.code,
+                rusqlite::ffi::ErrorCode::DatabaseBusy
+                    | rusqlite::ffi::ErrorCode::DatabaseLocked
+                    | rusqlite::ffi::ErrorCode::OperationInterrupted
+            )
+    )
 }
 
 impl WorkspaceVerificationPort for SqliteKernel {
@@ -591,6 +623,91 @@ mod tests {
         assert!(CapabilityKey::VerifyWorkspace
             .allowed_problem_codes()
             .contains(&ProblemCode::DataRootLocked));
+    }
+
+    fn sqlite_open_error(result_code: i32) -> StoreOpenError {
+        StoreOpenError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(result_code),
+            None,
+        ))
+    }
+
+    #[test]
+    fn offline_verify_maps_invariant_and_corrupt_open_failures_to_integrity() {
+        let failures = [
+            (
+                "unsafe path",
+                StoreOpenError::UnsafePath {
+                    path: PathBuf::from("unsafe-link"),
+                    reason: "symbolic link",
+                },
+            ),
+            (
+                "journal mode",
+                StoreOpenError::JournalMode("delete".to_owned()),
+            ),
+            ("synchronous level", StoreOpenError::SynchronousLevel(1)),
+            (
+                "schema version",
+                StoreOpenError::SchemaVersion {
+                    expected: 9,
+                    actual: 8,
+                },
+            ),
+            (
+                "SQLite corrupt",
+                sqlite_open_error(rusqlite::ffi::SQLITE_CORRUPT),
+            ),
+            (
+                "SQLite not a database",
+                sqlite_open_error(rusqlite::ffi::SQLITE_NOTADB),
+            ),
+            (
+                "non-transient I/O",
+                StoreOpenError::Io(io::Error::from(ErrorKind::PermissionDenied)),
+            ),
+            (
+                "non-transient SQLite",
+                sqlite_open_error(rusqlite::ffi::SQLITE_CANTOPEN),
+            ),
+        ];
+
+        for (label, failure) in failures {
+            let problem = map_offline_verify_open_error(failure, RequestCorrelationId::new_v7());
+            assert_eq!(problem.code(), ProblemCode::IntegrityFailed, "{label}");
+        }
+    }
+
+    #[test]
+    fn offline_verify_maps_only_explicitly_transient_open_failures_to_storage() {
+        let failures = [
+            (
+                "interrupted I/O",
+                StoreOpenError::Io(io::Error::from(ErrorKind::Interrupted)),
+            ),
+            (
+                "would-block I/O",
+                StoreOpenError::Io(io::Error::from(ErrorKind::WouldBlock)),
+            ),
+            (
+                "timed-out I/O",
+                StoreOpenError::Io(io::Error::from(ErrorKind::TimedOut)),
+            ),
+            ("SQLite busy", sqlite_open_error(rusqlite::ffi::SQLITE_BUSY)),
+            (
+                "SQLite locked",
+                sqlite_open_error(rusqlite::ffi::SQLITE_LOCKED),
+            ),
+            (
+                "SQLite interrupted",
+                sqlite_open_error(rusqlite::ffi::SQLITE_INTERRUPT),
+            ),
+        ];
+
+        for (label, failure) in failures {
+            let problem = map_offline_verify_open_error(failure, RequestCorrelationId::new_v7());
+            assert_eq!(problem.code(), ProblemCode::StorageUnavailable, "{label}");
+        }
     }
 
     #[test]

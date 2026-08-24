@@ -36,7 +36,8 @@ The application layer owns the use-case inputs and outcomes. It defines:
   requests, polled at bounded work boundaries;
 - ordered stream descriptors and evidence-blob descriptors;
 - a numeric workspace-revision watermark, full-workspace manifest, and a
-  separate manifest digest;
+  wire-neutral export completion summary containing workspace identity and
+  revision plus manifest/archive digests and archive bytes;
 - an owned restore request, archive reader, and complete-only success outcome.
 
 Restore rejection is a typed portability failure. It is never an `Ok` outcome.
@@ -55,9 +56,11 @@ the public export or restore capabilities.
 
 `fasti-contracts` owns the application-manifest to DTO projection, the JCS body
 checksum, and the canonical complete `manifest.json` bytes. The store adapter
-does not rebuild the wire mapping. Its projection is also the only producer of
-the checked application manifest paired with those canonical bytes; the
-application layer verifies the supplied checksum before accepting that value.
+does not rebuild the wire mapping. The outbound projection is the only type
+that associates the DTO, application manifest, digest, and canonical bytes; it
+does not expose a consuming parts API. Hostile inbound conversion verifies the
+JCS body digest and privately constructs a contract-owned verified manifest.
+The application layer has no wire-checksum constructor or canonical serializer.
 Archive-entry admission counts the mandatory final `manifest.json` as well as
 every stream and blob entry. The wire `migration_version` is bounded to the
 application `u32` maximum, `4294967295`.
@@ -79,23 +82,30 @@ The existing `capacity_exceeded`, `integrity_failed`, and
 admission cancellation of online export can direct the caller to stopped-node
 export. Restore lock contention directs the caller to stop the daemon through
 `data_root_locked`. Stopped-node verification maps the same shared-lock failure
-to `data_root_locked` for `VerifyWorkspace` without panicking. Recovery after
-activation uses `recovery_bootstrap_pending`, the safe state
+to `data_root_locked` for `VerifyWorkspace` without panicking. Unsafe paths,
+durability-configuration mismatches, schema mismatch, corrupt SQLite, and
+non-transient open failures map to non-retryable `integrity_failed`; only
+explicitly transient I/O and SQLite lock/interruption failures map to
+retry-safe `storage_unavailable`. Recovery after activation uses
+`recovery_bootstrap_pending`, the safe state
 `restored_data_active_bootstrap_pending`, and the next action
 `retry_recovery_bootstrap`. These problems are staged in the application
 capability policy. They do not enter the authored public registry until B3
 activation.
 
-Caller cancellation is explicit request state. Export aborts and removes its
-partial destination before it returns `export_canceled`. Restore rejects or
+Caller cancellation is explicit request state. Either export mode aborts and
+removes its partial destination before it returns mode-neutral
+`export_canceled`. Restore rejects or
 removes staging before it returns `operation_canceled`. Cancellation cannot
 return a partial success.
 
 Portability ports return a typed failure receipt outside the partial archive
-destination. Online and stopped-node export have distinct operation identities
-and use the request correlation ID. Clean restore and post-activation recovery
-bootstrap also have distinct operation identities and use both the correlation
-ID and restore-attempt ID. The adapter discards incomplete bytes before it
+destination. Every receipt constructor takes its concrete request, validates
+the problem capability, correlation ID, and operation-specific problem set,
+then derives identity from that request. Online and stopped-node export retain
+mode, workspace, and correlation. Clean restore retains correlation and restore
+attempt. Post-activation recovery bootstrap also retains workspace and the
+explicit selected profile. The adapter discards incomplete bytes before it
 returns an export or restore receipt.
 
 Stopped-node export is a distinct request mode. It carries the same

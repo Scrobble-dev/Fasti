@@ -14,7 +14,6 @@ use fasti_domain::{
     RequestCorrelationId, RestoreAttemptId, RestorePolicy, RestoreStatus, Sha256Digest,
     WorkspaceId,
 };
-use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::io::{Read, Seek, Write};
@@ -322,10 +321,10 @@ pub enum WorkspaceManifestError {
     DuplicateBlobDigest,
 }
 
-/// Checksummed full-workspace manifest body.
+/// Full-workspace manifest body before contract-owned wire projection.
 ///
-/// The checksum is deliberately held by [`ChecksummedWorkspaceManifest`], so
-/// it covers canonical bytes of this body without a self-reference.
+/// Canonical serialization and its checksum stay in `fasti-contracts`; the
+/// application layer owns only the representation-independent manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceManifest {
     workspace_id: WorkspaceId,
@@ -450,45 +449,6 @@ impl WorkspaceManifest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChecksummedWorkspaceManifest {
-    manifest: WorkspaceManifest,
-    digest: Sha256Digest,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContractManifestDigestError {
-    DigestMismatch,
-}
-
-impl ChecksummedWorkspaceManifest {
-    /// Construct only after the outer contract layer supplies canonical JCS
-    /// bytes for this manifest and a matching digest.
-    ///
-    /// The application layer verifies the byte-to-digest relation. The outer
-    /// contract remains responsible for projecting the application manifest to
-    /// those canonical wire bytes; serialization does not move inward.
-    pub fn try_from_contract_verified(
-        manifest: WorkspaceManifest,
-        canonical_manifest_body: &[u8],
-        digest: Sha256Digest,
-    ) -> Result<Self, ContractManifestDigestError> {
-        let computed = format!("sha256:{:x}", Sha256::digest(canonical_manifest_body));
-        if computed != digest.as_str() {
-            return Err(ContractManifestDigestError::DigestMismatch);
-        }
-        Ok(Self { manifest, digest })
-    }
-
-    pub const fn manifest(&self) -> &WorkspaceManifest {
-        &self.manifest
-    }
-
-    pub const fn digest(&self) -> &Sha256Digest {
-        &self.digest
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExportWorkspaceQuery {
     correlation_id: RequestCorrelationId,
@@ -585,9 +545,11 @@ impl StoppedNodeExportRequest {
 pub enum PortabilityFailureOperation {
     OnlineExport {
         correlation_id: RequestCorrelationId,
+        workspace_id: WorkspaceId,
     },
     StoppedNodeExport {
         correlation_id: RequestCorrelationId,
+        workspace_id: WorkspaceId,
     },
     CleanRestore {
         restore_attempt_id: RestoreAttemptId,
@@ -596,14 +558,16 @@ pub enum PortabilityFailureOperation {
     RecoveryBootstrap {
         restore_attempt_id: RestoreAttemptId,
         correlation_id: RequestCorrelationId,
+        workspace_id: WorkspaceId,
+        profile_id: ProfileId,
     },
 }
 
 impl PortabilityFailureOperation {
     pub const fn correlation_id(self) -> RequestCorrelationId {
         match self {
-            Self::OnlineExport { correlation_id }
-            | Self::StoppedNodeExport { correlation_id }
+            Self::OnlineExport { correlation_id, .. }
+            | Self::StoppedNodeExport { correlation_id, .. }
             | Self::CleanRestore { correlation_id, .. }
             | Self::RecoveryBootstrap { correlation_id, .. } => correlation_id,
         }
@@ -618,6 +582,24 @@ impl PortabilityFailureOperation {
             | Self::RecoveryBootstrap {
                 restore_attempt_id, ..
             } => Some(restore_attempt_id),
+        }
+    }
+
+    pub const fn workspace_id(self) -> Option<WorkspaceId> {
+        match self {
+            Self::OnlineExport { workspace_id, .. }
+            | Self::StoppedNodeExport { workspace_id, .. }
+            | Self::RecoveryBootstrap { workspace_id, .. } => Some(workspace_id),
+            Self::CleanRestore { .. } => None,
+        }
+    }
+
+    pub const fn profile_id(self) -> Option<ProfileId> {
+        match self {
+            Self::RecoveryBootstrap { profile_id, .. } => Some(profile_id),
+            Self::OnlineExport { .. }
+            | Self::StoppedNodeExport { .. }
+            | Self::CleanRestore { .. } => None,
         }
     }
 
@@ -646,64 +628,117 @@ pub struct PortabilityFailureReceipt {
     problem: Box<FastiProblem>,
 }
 
+fn validate_failure_problem(
+    problem: &FastiProblem,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    operation_allows_code: bool,
+) -> Result<(), PortabilityFailureReceiptError> {
+    if problem.capability() != capability {
+        return Err(PortabilityFailureReceiptError::CapabilityMismatch);
+    }
+    if problem.correlation_id() != correlation_id || !operation_allows_code {
+        return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
+    }
+    Ok(())
+}
+
 impl PortabilityFailureReceipt {
     pub fn try_online_export(
+        request: &ExportWorkspaceRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
-        if problem.capability() != CapabilityKey::ExportWorkspace {
-            return Err(PortabilityFailureReceiptError::CapabilityMismatch);
-        }
+        validate_failure_problem(
+            &problem,
+            CapabilityKey::ExportWorkspace,
+            request.query().correlation_id(),
+            matches!(
+                problem.code(),
+                crate::ProblemCode::CapabilityUnavailable
+                    | crate::ProblemCode::Forbidden
+                    | crate::ProblemCode::CapacityExceeded
+                    | crate::ProblemCode::ExportCanceled
+                    | crate::ProblemCode::IntegrityFailed
+                    | crate::ProblemCode::StoppedNodeExportRequired
+                    | crate::ProblemCode::StorageUnavailable
+            ),
+        )?;
         let operation = PortabilityFailureOperation::OnlineExport {
-            correlation_id: problem.correlation_id(),
+            correlation_id: request.query().correlation_id(),
+            workspace_id: request.query().access().workspace_id(),
         };
         Ok(Self { operation, problem })
     }
 
     pub fn try_clean_restore(
-        restore_attempt_id: RestoreAttemptId,
+        request: &RestoreWorkspaceRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
-        if problem.capability() != CapabilityKey::RestoreWorkspace {
-            return Err(PortabilityFailureReceiptError::CapabilityMismatch);
-        }
-        if problem.code() == crate::ProblemCode::RecoveryBootstrapPending {
-            return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
-        }
+        validate_failure_problem(
+            &problem,
+            CapabilityKey::RestoreWorkspace,
+            request.correlation_id(),
+            matches!(
+                problem.code(),
+                crate::ProblemCode::CapabilityUnavailable
+                    | crate::ProblemCode::Forbidden
+                    | crate::ProblemCode::ValidationFailed
+                    | crate::ProblemCode::CapacityExceeded
+                    | crate::ProblemCode::DataRootLocked
+                    | crate::ProblemCode::IntegrityFailed
+                    | crate::ProblemCode::OperationCanceled
+                    | crate::ProblemCode::StorageUnavailable
+                    | crate::ProblemCode::UnsupportedPlatform
+            ),
+        )?;
         let operation = PortabilityFailureOperation::CleanRestore {
-            restore_attempt_id,
-            correlation_id: problem.correlation_id(),
+            restore_attempt_id: request.restore_attempt_id(),
+            correlation_id: request.correlation_id(),
         };
         Ok(Self { operation, problem })
     }
 
     pub fn try_stopped_node_export(
+        request: &StoppedNodeExportRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
-        if problem.capability() != CapabilityKey::ExportWorkspace {
-            return Err(PortabilityFailureReceiptError::CapabilityMismatch);
-        }
-        if problem.code() == crate::ProblemCode::StoppedNodeExportRequired {
-            return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
-        }
+        validate_failure_problem(
+            &problem,
+            CapabilityKey::ExportWorkspace,
+            request.query().correlation_id(),
+            matches!(
+                problem.code(),
+                crate::ProblemCode::CapabilityUnavailable
+                    | crate::ProblemCode::Forbidden
+                    | crate::ProblemCode::CapacityExceeded
+                    | crate::ProblemCode::DataRootLocked
+                    | crate::ProblemCode::ExportCanceled
+                    | crate::ProblemCode::IntegrityFailed
+                    | crate::ProblemCode::StorageUnavailable
+            ),
+        )?;
         let operation = PortabilityFailureOperation::StoppedNodeExport {
-            correlation_id: problem.correlation_id(),
+            correlation_id: request.query().correlation_id(),
+            workspace_id: request.workspace_id(),
         };
         Ok(Self { operation, problem })
     }
 
     pub fn try_recovery_bootstrap(
-        restore_attempt_id: RestoreAttemptId,
+        request: &PrepareRecoveryBootstrapRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
-        if problem.capability() != CapabilityKey::RestoreWorkspace {
-            return Err(PortabilityFailureReceiptError::CapabilityMismatch);
-        }
-        if problem.code() != crate::ProblemCode::RecoveryBootstrapPending {
-            return Err(PortabilityFailureReceiptError::OperationProblemMismatch);
-        }
+        validate_failure_problem(
+            &problem,
+            CapabilityKey::RestoreWorkspace,
+            request.correlation_id(),
+            problem.code() == crate::ProblemCode::RecoveryBootstrapPending,
+        )?;
         let operation = PortabilityFailureOperation::RecoveryBootstrap {
-            restore_attempt_id,
-            correlation_id: problem.correlation_id(),
+            restore_attempt_id: request.restore_attempt_id(),
+            correlation_id: request.correlation_id(),
+            workspace_id: request.workspace_id(),
+            profile_id: request.profile_id(),
         };
         Ok(Self { operation, problem })
     }
@@ -784,22 +819,40 @@ pub trait WorkspaceArchiveDestination: Write + Send {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceArchiveExportOutcome {
+    workspace_id: WorkspaceId,
+    workspace_revision: u64,
+    manifest_digest: Sha256Digest,
     archive_bytes: u64,
     archive_digest: Sha256Digest,
-    manifest: ChecksummedWorkspaceManifest,
 }
 
 impl WorkspaceArchiveExportOutcome {
     pub const fn new(
+        workspace_id: WorkspaceId,
+        workspace_revision: u64,
+        manifest_digest: Sha256Digest,
         archive_bytes: u64,
         archive_digest: Sha256Digest,
-        manifest: ChecksummedWorkspaceManifest,
     ) -> Self {
         Self {
+            workspace_id,
+            workspace_revision,
+            manifest_digest,
             archive_bytes,
             archive_digest,
-            manifest,
         }
+    }
+
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    pub const fn workspace_revision(&self) -> u64 {
+        self.workspace_revision
+    }
+
+    pub const fn manifest_digest(&self) -> &Sha256Digest {
+        &self.manifest_digest
     }
 
     pub const fn archive_bytes(&self) -> u64 {
@@ -808,10 +861,6 @@ impl WorkspaceArchiveExportOutcome {
 
     pub const fn archive_digest(&self) -> &Sha256Digest {
         &self.archive_digest
-    }
-
-    pub const fn manifest(&self) -> &ChecksummedWorkspaceManifest {
-        &self.manifest
     }
 }
 
@@ -1332,29 +1381,6 @@ mod tests {
     }
 
     #[test]
-    fn checksummed_manifest_rejects_a_digest_unrelated_to_contract_bytes() {
-        let manifest = WorkspaceManifest::try_new(
-            WorkspaceId::new_v7(),
-            42,
-            "1.0.0".to_owned(),
-            2,
-            digest(2),
-            streams(),
-            Vec::new(),
-        )
-        .expect("valid manifest");
-        let canonical_contract_bytes = b"{\"contract\":\"verified\"}";
-        assert_eq!(
-            ChecksummedWorkspaceManifest::try_from_contract_verified(
-                manifest,
-                canonical_contract_bytes,
-                digest(9),
-            ),
-            Err(ContractManifestDigestError::DigestMismatch)
-        );
-    }
-
-    #[test]
     fn manifest_rejects_unbounded_contract_metadata() {
         assert_eq!(
             WorkspaceManifest::try_new(
@@ -1530,6 +1556,14 @@ mod tests {
         assert_eq!(complete.status(), RestoreStatus::Complete);
         assert_eq!(complete.workspace_id(), workspace_id);
         assert_eq!(complete.manifest_digest(), &digest(3));
+
+        let archive =
+            WorkspaceArchiveExportOutcome::new(workspace_id, 42, digest(4), 2_048, digest(5));
+        assert_eq!(archive.workspace_id(), workspace_id);
+        assert_eq!(archive.workspace_revision(), 42);
+        assert_eq!(archive.manifest_digest(), &digest(4));
+        assert_eq!(archive.archive_bytes(), 2_048);
+        assert_eq!(archive.archive_digest(), &digest(5));
     }
 
     #[test]
@@ -1563,22 +1597,43 @@ mod tests {
 
     #[test]
     fn failures_are_returned_outside_destination_with_typed_operation_identity() {
+        let workspace_id = WorkspaceId::new_v7();
+        let profile_id = ProfileId::new_v7();
+        let access = RequestAccessContext::new(
+            workspace_id,
+            profile_id,
+            ClientId::new_v7(),
+            CredentialId::new_v7(),
+            ProfileGrantId::new_v7(),
+            1,
+        );
         let export_correlation = RequestCorrelationId::new_v7();
-        let export = PortabilityFailureReceipt::try_online_export(Box::new(
-            FastiProblem::export_canceled(export_correlation),
-        ))
+        let export_request = ExportWorkspaceRequest::new(
+            ExportWorkspaceQuery::new(export_correlation, access),
+            limits(),
+            CancellationSignal::new(),
+        );
+        let export = PortabilityFailureReceipt::try_online_export(
+            &export_request,
+            Box::new(FastiProblem::export_canceled(export_correlation)),
+        )
         .expect("export failure receipt");
         assert_eq!(export.operation().correlation_id(), export_correlation);
         assert_eq!(export.operation().restore_attempt_id(), None);
+        assert_eq!(export.operation().workspace_id(), Some(workspace_id));
+        assert_eq!(export.operation().profile_id(), None);
         assert_eq!(
             export.operation().export_mode(),
             Some(WorkspaceExportMode::Online)
         );
         assert_eq!(export.problem().code(), crate::ProblemCode::ExportCanceled);
 
-        let stopped_node = PortabilityFailureReceipt::try_online_export(Box::new(
-            FastiProblem::stopped_node_export_required(RequestCorrelationId::new_v7()),
-        ))
+        let stopped_node = PortabilityFailureReceipt::try_online_export(
+            &export_request,
+            Box::new(FastiProblem::stopped_node_export_required(
+                export_correlation,
+            )),
+        )
         .expect("stopped-node export fallback receipt");
         assert_eq!(
             stopped_node.problem().code(),
@@ -1590,32 +1645,67 @@ mod tests {
             "the online operation reports the stopped-node next action"
         );
 
-        let stopped_failure = PortabilityFailureReceipt::try_stopped_node_export(Box::new(
-            FastiProblem::data_root_locked(
+        let stopped_correlation = RequestCorrelationId::new_v7();
+        let stopped_request = StoppedNodeExportRequest::new(
+            ExportWorkspaceQuery::new(stopped_correlation, access),
+            limits(),
+            CancellationSignal::new(),
+        );
+        let stopped_failure = PortabilityFailureReceipt::try_stopped_node_export(
+            &stopped_request,
+            Box::new(FastiProblem::data_root_locked(
                 CapabilityKey::ExportWorkspace,
-                RequestCorrelationId::new_v7(),
-            ),
-        ))
+                stopped_correlation,
+            )),
+        )
         .expect("stopped-node failure receipt");
         assert_eq!(
             stopped_failure.operation().export_mode(),
             Some(WorkspaceExportMode::StoppedNode)
         );
+        assert_eq!(
+            stopped_failure.operation().workspace_id(),
+            Some(workspace_id)
+        );
+        let stopped_canceled = PortabilityFailureReceipt::try_stopped_node_export(
+            &stopped_request,
+            Box::new(FastiProblem::export_canceled(stopped_correlation)),
+        )
+        .expect("mode-neutral cancellation applies to stopped-node export");
+        let canceled_detail = stopped_canceled
+            .problem()
+            .contract()
+            .detail(CapabilityKey::ExportWorkspace);
+        assert!(canceled_detail.contains("workspace export"));
+        assert!(!canceled_detail.contains("online export"));
 
         let restore_correlation = RequestCorrelationId::new_v7();
         let attempt_id = RestoreAttemptId::new_v7();
-        let restore = PortabilityFailureReceipt::try_clean_restore(
+        let restore_request = RestoreWorkspaceRequest::new(
             attempt_id,
+            restore_correlation,
+            limits(),
+            CancellationSignal::new(),
+        );
+        let restore = PortabilityFailureReceipt::try_clean_restore(
+            &restore_request,
             Box::new(FastiProblem::restore_canceled(restore_correlation)),
         )
         .expect("restore failure receipt");
         assert_eq!(restore.operation().correlation_id(), restore_correlation);
         assert_eq!(restore.operation().restore_attempt_id(), Some(attempt_id));
 
-        let bootstrap = PortabilityFailureReceipt::try_recovery_bootstrap(
+        let bootstrap_correlation = RequestCorrelationId::new_v7();
+        let bootstrap_request = PrepareRecoveryBootstrapRequest::new(
             attempt_id,
+            bootstrap_correlation,
+            workspace_id,
+            profile_id,
+        );
+        let bootstrap = PortabilityFailureReceipt::try_recovery_bootstrap(
+            &bootstrap_request,
             Box::new(FastiProblem::recovery_bootstrap_pending(
-                RequestCorrelationId::new_v7(),
+                bootstrap_correlation,
             )),
         )
         .expect("recovery-bootstrap failure receipt");
@@ -1624,6 +1714,8 @@ mod tests {
             PortabilityFailureOperation::RecoveryBootstrap { .. }
         ));
         assert_eq!(bootstrap.operation().restore_attempt_id(), Some(attempt_id));
+        assert_eq!(bootstrap.operation().workspace_id(), Some(workspace_id));
+        assert_eq!(bootstrap.operation().profile_id(), Some(profile_id));
         assert_eq!(
             bootstrap.problem().safe_state(),
             crate::SafeState::RestoredDataActiveBootstrapPending
@@ -1634,20 +1726,39 @@ mod tests {
         );
         assert_eq!(
             PortabilityFailureReceipt::try_recovery_bootstrap(
-                attempt_id,
-                Box::new(FastiProblem::restore_canceled(
-                    RequestCorrelationId::new_v7()
-                ))
+                &bootstrap_request,
+                Box::new(FastiProblem::restore_canceled(bootstrap_correlation))
             ),
             Err(PortabilityFailureReceiptError::OperationProblemMismatch),
             "a pre-activation cancellation cannot be mislabeled as recovery bootstrap"
         );
 
         assert_eq!(
-            PortabilityFailureReceipt::try_online_export(Box::new(FastiProblem::restore_canceled(
-                RequestCorrelationId::new_v7()
-            ),)),
+            PortabilityFailureReceipt::try_online_export(
+                &export_request,
+                Box::new(FastiProblem::restore_canceled(export_correlation)),
+            ),
             Err(PortabilityFailureReceiptError::CapabilityMismatch)
+        );
+
+        assert_eq!(
+            PortabilityFailureReceipt::try_online_export(
+                &export_request,
+                Box::new(FastiProblem::export_canceled(RequestCorrelationId::new_v7())),
+            ),
+            Err(PortabilityFailureReceiptError::OperationProblemMismatch),
+            "a problem from another request cannot be rebound to this export"
+        );
+
+        assert_eq!(
+            PortabilityFailureReceipt::try_stopped_node_export(
+                &stopped_request,
+                Box::new(FastiProblem::stopped_node_export_required(
+                    stopped_correlation
+                )),
+            ),
+            Err(PortabilityFailureReceiptError::OperationProblemMismatch),
+            "stopped-node export cannot request its own fallback"
         );
     }
 

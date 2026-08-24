@@ -272,7 +272,7 @@ define_problem_catalog!(
     },
     ExportCanceled => "export_canceled" {
         title: "Workspace export canceled", status: 409,
-        detail: ProblemDetail::Static("the online export ended before publication because authorization was revoked or the caller canceled"),
+        detail: ProblemDetail::Static("the workspace export ended before publication because authorization was revoked or the caller canceled"),
         documentation_path: "v1/problems/export-canceled", safe_state: PriorStateRetained,
         retryability: RetryAfterCorrection,
         default_next_action: ("restart_authorized_export", "Start a new authorized workspace export"),

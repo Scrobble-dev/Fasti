@@ -4,9 +4,9 @@
 //! HTTP, CLI, SDK, public registry, or runtime capability.
 
 use fasti_application::{
-    ChecksummedWorkspaceManifest, PortabilityLimits, WorkspaceBlobDescriptor,
-    WorkspaceExportEntity, WorkspaceManifest, WorkspaceManifestError, WorkspaceStreamDescriptor,
-    MAX_PORTABLE_JSON_INTEGER, WORKSPACE_ARCHIVE_FORMAT_VERSION,
+    PortabilityLimits, WorkspaceBlobDescriptor, WorkspaceExportEntity, WorkspaceManifest,
+    WorkspaceManifestError, WorkspaceStreamDescriptor, MAX_PORTABLE_JSON_INTEGER,
+    WORKSPACE_ARCHIVE_FORMAT_VERSION,
 };
 use fasti_domain::{EvidenceId, Sha256Digest, WorkspaceId};
 use schemars::JsonSchema;
@@ -155,6 +155,27 @@ impl fmt::Display for WorkspaceManifestConversionError {
 
 impl std::error::Error for WorkspaceManifestConversionError {}
 
+/// Hostile inbound manifest whose contract body checksum has been verified.
+///
+/// Construction stays private to this module so callers cannot pair an
+/// application manifest with an unrelated wire digest. Restore adapters can
+/// inspect the verified values but cannot construct this association directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedInboundWorkspaceManifest {
+    manifest: WorkspaceManifest,
+    manifest_digest: Sha256Digest,
+}
+
+impl VerifiedInboundWorkspaceManifest {
+    pub const fn manifest(&self) -> &WorkspaceManifest {
+        &self.manifest
+    }
+
+    pub const fn manifest_digest(&self) -> &Sha256Digest {
+        &self.manifest_digest
+    }
+}
+
 impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
     fn from(value: WorkspaceExportEntityDto) -> Self {
         match value {
@@ -210,7 +231,8 @@ impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
 pub struct CanonicalWorkspaceManifestProjection {
     dto: ChecksummedWorkspaceManifestDto,
     canonical_json_bytes: Vec<u8>,
-    application: ChecksummedWorkspaceManifest,
+    application_manifest: WorkspaceManifest,
+    manifest_digest: Sha256Digest,
 }
 
 impl CanonicalWorkspaceManifestProjection {
@@ -265,16 +287,11 @@ impl CanonicalWorkspaceManifestProjection {
         };
         let canonical_json_bytes = serde_json_canonicalizer::to_vec(&dto)
             .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
-        let application = ChecksummedWorkspaceManifest::try_from_contract_verified(
-            manifest,
-            &canonical_body,
-            manifest_digest,
-        )
-        .map_err(|_| WorkspaceManifestConversionError::ManifestDigestMismatch)?;
         Ok(Self {
             dto,
             canonical_json_bytes,
-            application,
+            application_manifest: manifest,
+            manifest_digest,
         })
     }
 
@@ -287,23 +304,18 @@ impl CanonicalWorkspaceManifestProjection {
         &self.canonical_json_bytes
     }
 
-    pub const fn application_manifest(&self) -> &ChecksummedWorkspaceManifest {
-        &self.application
+    pub const fn application_manifest(&self) -> &WorkspaceManifest {
+        &self.application_manifest
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (
-        ChecksummedWorkspaceManifestDto,
-        Vec<u8>,
-        ChecksummedWorkspaceManifest,
-    ) {
-        (self.dto, self.canonical_json_bytes, self.application)
+    pub const fn manifest_digest(&self) -> &Sha256Digest {
+        &self.manifest_digest
     }
 }
 
 impl ChecksummedWorkspaceManifestDto {
-    /// Convert one hostile archive manifest into the sole application model.
+    /// Verify and convert one hostile archive manifest into the application
+    /// model while retaining the checked digest in a contract-owned wrapper.
     ///
     /// Restore adapters must call this conversion after their byte-level
     /// archive ceilings and before staging any entry. Schemars annotations are
@@ -311,7 +323,7 @@ impl ChecksummedWorkspaceManifestDto {
     pub fn try_into_application(
         self,
         limits: PortabilityLimits,
-    ) -> Result<ChecksummedWorkspaceManifest, WorkspaceManifestConversionError> {
+    ) -> Result<VerifiedInboundWorkspaceManifest, WorkspaceManifestConversionError> {
         let body = &self.manifest;
         if body.format_version != WORKSPACE_ARCHIVE_FORMAT_VERSION {
             return Err(WorkspaceManifestConversionError::UnsupportedFormatVersion);
@@ -419,12 +431,16 @@ impl ChecksummedWorkspaceManifestDto {
             .map_err(|_| WorkspaceManifestConversionError::InvalidManifestDigest)?;
         let canonical_body = serde_json_canonicalizer::to_vec(body)
             .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
-        ChecksummedWorkspaceManifest::try_from_contract_verified(
+        let computed_manifest_digest =
+            Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(&canonical_body)))
+                .expect("SHA-256 output is canonical lowercase hexadecimal");
+        if supplied_manifest_digest != computed_manifest_digest {
+            return Err(WorkspaceManifestConversionError::ManifestDigestMismatch);
+        }
+        Ok(VerifiedInboundWorkspaceManifest {
             manifest,
-            &canonical_body,
-            supplied_manifest_digest,
-        )
-        .map_err(|_| WorkspaceManifestConversionError::ManifestDigestMismatch)
+            manifest_digest: supplied_manifest_digest,
+        })
     }
 }
 
@@ -512,7 +528,7 @@ mod tests {
             .expect("strict hostile-boundary conversion");
         assert_eq!(converted.manifest().workspace_revision(), 1);
         assert_eq!(
-            converted.digest().as_str(),
+            converted.manifest_digest().as_str(),
             "sha256:caf6143ace824b10a83f4d4d9ad0a72f65479840f657e0094e6ef8b3415fbd72"
         );
     }
@@ -642,7 +658,8 @@ mod tests {
         )
         .expect("application manifest projects to archive v1");
         assert_eq!(projected.dto(), &expected);
-        assert_eq!(projected.application_manifest(), &application);
+        assert_eq!(projected.application_manifest(), application.manifest());
+        assert_eq!(projected.manifest_digest(), application.manifest_digest());
 
         let decoded: ChecksummedWorkspaceManifestDto =
             serde_json::from_slice(projected.canonical_json_bytes())
