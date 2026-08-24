@@ -18,14 +18,15 @@
     "test": "pnpm run build && pnpm contracts:validate-authored && pnpm contracts:validate-generated && pnpm contracts:validate-examples && pnpm contracts:validate-okf && node scripts/check-js-workspace.mjs && node --test tests/js/*.test.mjs",
     "test:coverage": "pnpm run build && mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/js-lcov.info tests/js/*.test.mjs",
     "typecheck": "pnpm run build && pnpm --filter @fasti/tokens typecheck && pnpm --filter @fasti/sdk typecheck",
-    "format": "prettier --write .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\"",
-    "format:check": "prettier --check .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\""
+    "format": "prettier --write .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\"",
+    "format:check": "prettier --check .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\""
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "12.1.0",
     "@asyncapi/parser": "3.6.3",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
+    "canonicalize": "2.1.0",
     "jsonld": "9.0.0",
     "prettier": "^3.9.6",
     "typescript": "^7.0.2",

@@ -388,7 +388,14 @@ define_capabilities!(
         Scoped,
         [WorkspaceExport],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [
+            CapacityExceeded,
+            DataRootLocked,
+            ExportCanceled,
+            IntegrityFailed,
+            StoppedNodeExportRequired,
+            StorageUnavailable
+        ]
     ),
     (
         RestoreWorkspace,
@@ -399,7 +406,14 @@ define_capabilities!(
         Scoped,
         [WorkspaceRestore],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        []
+        [
+            CapacityExceeded,
+            DataRootLocked,
+            IntegrityFailed,
+            OperationCanceled,
+            StorageUnavailable,
+            UnsupportedPlatform
+        ]
     ),
     (
         VerifyWorkspace,
@@ -482,6 +496,28 @@ mod tests {
         assert!(!review
             .iter()
             .any(|code| code.contract_state() == ContractState::Reserved));
+
+        let export = CapabilityKey::ExportWorkspace.allowed_problem_codes();
+        for code in [
+            ProblemCode::CapacityExceeded,
+            ProblemCode::DataRootLocked,
+            ProblemCode::ExportCanceled,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StoppedNodeExportRequired,
+            ProblemCode::StorageUnavailable,
+        ] {
+            assert!(export.contains(&code));
+            assert!(!export.iter().any(|published| *published == code));
+        }
+
+        let restore = CapabilityKey::RestoreWorkspace.allowed_problem_codes();
+        for code in [
+            ProblemCode::OperationCanceled,
+            ProblemCode::UnsupportedPlatform,
+        ] {
+            assert!(restore.contains(&code));
+            assert!(!restore.iter().any(|published| *published == code));
+        }
     }
 
     #[test]

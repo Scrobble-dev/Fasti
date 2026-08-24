@@ -1,9 +1,12 @@
 import { strict as assert } from "node:assert";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { Parser } from "@asyncapi/parser";
+import Ajv2020 from "ajv/dist/2020.js";
+import canonicalize from "canonicalize";
 import jsonld from "jsonld";
 import { parseDocument as parseYamlDocument } from "yaml";
 
@@ -50,6 +53,14 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
   const examplePath = resolve(
     root,
     "contracts/examples/v1/observation.accept.receipt.jsonld",
+  );
+  const portabilitySchemaPath = resolve(
+    root,
+    "contracts/portability/v1/workspace-manifest.schema.json",
+  );
+  const portabilityExamplePath = resolve(
+    root,
+    "contracts/portability/v1/workspace-manifest.example.json",
   );
 
   const asyncApiSource = await readFile(asyncApiPath, "utf8");
@@ -205,6 +216,31 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
     "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
   );
 
+  const portabilitySchema = await readStrictJson(portabilitySchemaPath);
+  const portabilityExample = await readStrictJson(portabilityExamplePath);
+  assertInternalReferencesOnly(portabilitySchema);
+  const portabilityAjv = new Ajv2020({ allErrors: true, strict: true });
+  portabilityAjv.addKeyword("x-fasti-contract-state");
+  for (const format of ["fasti-evidence-id", "fasti-workspace-id", "sha256"]) {
+    portabilityAjv.addFormat(format, true);
+  }
+  const validatePortability = portabilityAjv.compile(portabilitySchema);
+  assert.equal(
+    validatePortability(portabilityExample),
+    true,
+    `portability example errors:\n${JSON.stringify(validatePortability.errors, null, 2)}`,
+  );
+  const canonicalManifest = canonicalize(portabilityExample.manifest);
+  assert.equal(typeof canonicalManifest, "string");
+  const computedManifestDigest = `sha256:${createHash("sha256")
+    .update(canonicalManifest, "utf8")
+    .digest("hex")}`;
+  assert.equal(
+    portabilityExample.manifest_digest,
+    computedManifestDigest,
+    "manifest_digest must cover RFC 8785/JCS canonical manifest bytes",
+  );
+
   const loadedFileUrls = [];
   const expectedContextUrl = pathToFileURL(contextPath).href;
   const localContext = await readStrictJson(contextPath);
@@ -280,6 +316,7 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
   return {
     asyncApiVersion: asyncApiValue.asyncapi,
     expandedDocumentCount: expandedExample.length + expandedVocabulary.length,
+    portabilityFormat: portabilityExample.manifest.format,
   };
 }
 
@@ -289,6 +326,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     : repositoryRoot;
   await validateAuthoredContracts(requestedRoot);
   console.log(
-    "PASS: authored AsyncAPI 3.1 and JSON-LD 1.1 contracts validate without network access",
+    "PASS: authored AsyncAPI 3.1, portability JSON Schema 2020-12, and JSON-LD 1.1 contracts validate without network access",
   );
 }

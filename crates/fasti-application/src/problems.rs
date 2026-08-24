@@ -253,6 +253,14 @@ define_problem_catalog!(
         default_next_action: ("restart_receipt_replay", "Start from an available receipt cursor"),
         param_policy: ProblemParamPolicy::Fixed("/last_event_id")
     },
+    DataRootLocked => "data_root_locked" {
+        title: "Data root locked", status: 409,
+        detail: ProblemDetail::Static("another daemon or offline operation holds the local data-root lock"),
+        documentation_path: "v1/problems/data-root-locked", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("stop_or_finish_active_operation", "Stop or finish the active local operation before retrying"),
+        param_policy: ProblemParamPolicy::None
+    },
     EvidenceNotFound => "evidence_not_found" {
         title: "Evidence not found", status: 404,
         detail: ProblemDetail::Static("the referenced evidence is not available in this workspace"),
@@ -260,6 +268,14 @@ define_problem_catalog!(
         retryability: RetryAfterCorrection,
         default_next_action: ("upload_evidence", "Upload the evidence and retry the observation"),
         param_policy: ProblemParamPolicy::Fixed("/evidence/evidence_id")
+    },
+    ExportCanceled => "export_canceled" {
+        title: "Workspace export canceled", status: 409,
+        detail: ProblemDetail::Static("the online export ended before publication because authorization was revoked or the caller canceled"),
+        documentation_path: "v1/problems/export-canceled", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("restart_authorized_export", "Start a new authorized workspace export"),
+        param_policy: ProblemParamPolicy::None
     },
     Forbidden => "forbidden" {
         title: "Forbidden", status: 403,
@@ -307,6 +323,14 @@ define_problem_catalog!(
         documentation_path: "v1/problems/malformed-json", safe_state: NoMutation,
         retryability: RetryAfterCorrection,
         default_next_action: ("correct_json", "Correct the JSON syntax and retry"),
+        param_policy: ProblemParamPolicy::None
+    },
+    OperationCanceled => "operation_canceled" {
+        title: "Restore canceled", status: 409,
+        detail: ProblemDetail::Static("the clean restore ended before an active data root was published"),
+        documentation_path: "v1/problems/operation-canceled", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("review_restore_cancellation", "Review the cancellation cause before retrying the clean restore"),
         param_policy: ProblemParamPolicy::None
     },
     InvalidObservation => "invalid_observation" {
@@ -357,6 +381,14 @@ define_problem_catalog!(
         default_next_action: ("retry_local_operation", "Check local storage and retry the same safe operation"),
         param_policy: ProblemParamPolicy::None
     },
+    StoppedNodeExportRequired => "stopped_node_export_required" {
+        title: "Stopped-node export required", status: 409,
+        detail: ProblemDetail::Static("the online export cannot complete within its authorization or resource bounds"),
+        documentation_path: "v1/problems/stopped-node-export-required", safe_state: PriorStateRetained,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("run_stopped_node_export", "Stop the local daemon and run a stopped-node workspace export"),
+        param_policy: ProblemParamPolicy::None
+    },
     UnsupportedListener => "unsupported_listener" {
         title: "Listener configuration unsupported", status: 422,
         detail: ProblemDetail::Static("the requested listener would cross an unproven remote trust boundary"),
@@ -364,6 +396,14 @@ define_problem_catalog!(
         retryability: NotRetryable,
         default_next_action: ("use_loopback_listener", "Use the loopback listener until remote transport is proven"),
         param_policy: ProblemParamPolicy::Fixed("/loopback_port")
+    },
+    UnsupportedPlatform => "unsupported_platform" {
+        title: "Platform unsupported", status: 422,
+        detail: ProblemDetail::Static("the current platform does not provide the proven atomic activation primitives required by this capability"),
+        documentation_path: "v1/problems/unsupported-platform", safe_state: NoMutation,
+        retryability: NotRetryable,
+        default_next_action: ("use_supported_linux_host", "Use a supported Linux host for restore activation"),
+        param_policy: ProblemParamPolicy::None
     },
     ValidationFailed => "validation_failed" {
         title: "Validation failed", status: 422,
@@ -397,6 +437,11 @@ impl ProblemCode {
             | Self::ReviewNotFound
             | Self::StorageUnavailable
             | Self::UnsupportedListener => CapabilityBody::B2,
+            Self::DataRootLocked
+            | Self::ExportCanceled
+            | Self::OperationCanceled
+            | Self::StoppedNodeExportRequired
+            | Self::UnsupportedPlatform => CapabilityBody::B3,
             _ => CapabilityBody::B1,
         }
     }
@@ -654,10 +699,43 @@ impl FastiProblem {
             correlation_id,
         )
     }
+    pub fn data_root_locked(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::DataRootLocked, capability, correlation_id)
+    }
+    pub fn export_canceled(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::ExportCanceled,
+            CapabilityKey::ExportWorkspace,
+            correlation_id,
+        )
+    }
+    pub fn restore_canceled(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::OperationCanceled,
+            CapabilityKey::RestoreWorkspace,
+            correlation_id,
+        )
+    }
     pub fn unsupported_listener(correlation_id: RequestCorrelationId) -> Self {
         Self::new(
             ProblemCode::UnsupportedListener,
             CapabilityKey::ConfigureListener,
+            correlation_id,
+        )
+    }
+    pub fn unsupported_platform(
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> Self {
+        Self::new(ProblemCode::UnsupportedPlatform, capability, correlation_id)
+    }
+    pub fn stopped_node_export_required(correlation_id: RequestCorrelationId) -> Self {
+        Self::new(
+            ProblemCode::StoppedNodeExportRequired,
+            CapabilityKey::ExportWorkspace,
             correlation_id,
         )
     }
@@ -843,6 +921,52 @@ mod tests {
             ProblemCode::Forbidden.contract_state(),
             ContractState::Finalized
         );
+
+        for code in [
+            ProblemCode::DataRootLocked,
+            ProblemCode::ExportCanceled,
+            ProblemCode::OperationCanceled,
+            ProblemCode::StoppedNodeExportRequired,
+            ProblemCode::UnsupportedPlatform,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::B3);
+            assert_eq!(code.contract_state(), ContractState::Reserved);
+        }
+    }
+
+    #[test]
+    fn portability_failures_state_safe_recovery_semantics() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let locked = FastiProblem::data_root_locked(CapabilityKey::ExportWorkspace, correlation_id);
+        assert_eq!(locked.status(), 409);
+        assert_eq!(locked.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(locked.retryability(), Retryability::RetryAfterCorrection);
+
+        let export_canceled = FastiProblem::export_canceled(correlation_id);
+        assert_eq!(export_canceled.capability(), CapabilityKey::ExportWorkspace);
+        assert_eq!(
+            export_canceled.next_actions()[0].id(),
+            "restart_authorized_export"
+        );
+
+        let canceled = FastiProblem::restore_canceled(correlation_id);
+        assert_eq!(canceled.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(canceled.retryability(), Retryability::RetryAfterCorrection);
+        assert_eq!(
+            canceled.next_actions()[0].id(),
+            "review_restore_cancellation"
+        );
+
+        let stopped = FastiProblem::stopped_node_export_required(correlation_id);
+        assert_eq!(stopped.capability(), CapabilityKey::ExportWorkspace);
+        assert_eq!(stopped.safe_state(), SafeState::PriorStateRetained);
+        assert_eq!(stopped.next_actions()[0].id(), "run_stopped_node_export");
+
+        let unsupported =
+            FastiProblem::unsupported_platform(CapabilityKey::RestoreWorkspace, correlation_id);
+        assert_eq!(unsupported.status(), 422);
+        assert_eq!(unsupported.safe_state(), SafeState::NoMutation);
+        assert_eq!(unsupported.retryability(), Retryability::NotRetryable);
     }
 
     #[test]

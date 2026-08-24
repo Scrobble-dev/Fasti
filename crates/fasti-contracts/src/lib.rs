@@ -17,9 +17,11 @@ fn explicit_null_openapi() -> utoipa::openapi::schema::Object {
 
 mod conformance;
 mod generated_capability_ids;
+mod portability;
 
 pub use conformance::*;
 pub use generated_capability_ids::public_capability_id;
+pub use portability::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]

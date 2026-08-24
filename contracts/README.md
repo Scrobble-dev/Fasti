@@ -15,6 +15,7 @@ The authored registry at [`registry/v1/capabilities.yaml`](registry/v1/capabilit
 | `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                  |
 | `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                        |
 | `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                  |
+| `portability/v1/`                     | Internal draft B3 workspace-manifest schema and example; stream inventory remains unfrozen    |
 | `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas    |
 | `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                       |
 | `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                     |
@@ -27,5 +28,11 @@ JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surface
 Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until named physical Raspberry Pi 5 and J4125 RAM evidence exists. B2 is not authorized.
 
 Provider seeds and manifest examples remain future adapter inputs, not working integrations. There is no supported install, release, persistence kernel, web interface, desktop package, or player.
+
+The [internal draft B3 workspace-manifest schema](portability/v1/workspace-manifest.schema.json)
+and [example](portability/v1/workspace-manifest.example.json) exercise the
+hostile restore boundary. They do not freeze the final stream count. Namespace
+ownership is unresolved, and no placeholder stream is included. These files do
+not add a public capability, route, CLI command, or generated registry entry.
 
 See the [human capability guide](../docs/capability-ledger.md) for a concise interpretation of the registry.
