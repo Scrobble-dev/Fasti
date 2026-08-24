@@ -12,6 +12,7 @@ mod online_archive;
 mod portability;
 mod restore;
 mod restore_activation;
+mod restore_import;
 mod review;
 mod schema;
 mod seed;

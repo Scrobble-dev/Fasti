@@ -79,6 +79,25 @@ destination mutation. It then rewinds the same opened source for the restore
 pass. It does not reopen a path after validation and does not spool the complete
 archive into memory.
 
+The private pass-two importer creates one fresh owner-only staging attempt only
+after pass one succeeds. It reuses the sole archive visitor and the same opened
+source, decodes bounded typed canonical NDJSON for all 16 frozen streams, and
+copies each evidence blob through descriptor-relative handles with a second
+size and digest check. It creates and migrates the staged SQLite database only
+through the shared schema helper. One immediate transaction defers foreign-key
+checks until all ordered streams are present, then verifies SQL counts,
+workspace and profile ownership, namespace bindings, identity and correction
+relations, receipt and operation semantics, SQLite integrity, the schema
+fingerprint, and a canonical re-export descriptor for every stored stream.
+Only after those checks does it set the exact manifest revision and commit.
+
+The staged database contains portable client shells but no `node_state`,
+credentials, grants, scopes, or initialization proof. Staging cleanup follows
+retained directory descriptors, reports cleanup failure, and never writes a
+COMPLETE marker or renames the attempt to `current`. Marker creation, atomic
+activation, recovery dispatch, and public adapter wiring remain separate
+gated slices.
+
 Operating-system paths, archive headers, lock handles, compression objects,
 temporary filenames, staging directories, synchronization calls, and atomic
 activation primitives stay in store and platform adapters.
@@ -230,9 +249,13 @@ Store regressions prove the v5 migration adds only the nullable recovery marker;
 prepare rejects wrong workspace/profile and imported authorization without
 mutation; replacement removes only a pending provisional; completion is atomic,
 concurrent, idempotent for the same caller-owned pair, closed for a different
-pair, and never persists plaintext secrets. The existing lock regression proves
-offline verify returns `data_root_locked`. The governed contract verifier must
-show that the public registry and generated public artifacts remain unchanged.
+pair, and never persists plaintext secrets. Pass-two regressions exercise a
+reachable fixture across all 16 frozen streams plus one evidence blob, verify
+zero node-local authorization state and no activation marker, and reject typed,
+ordering, cross-workspace, and missing-reference mutations while removing the
+failed attempt. The existing lock regression proves offline verify returns
+`data_root_locked`. The governed contract verifier must show that the public
+registry and generated public artifacts remain unchanged.
 
 ## Related records
 

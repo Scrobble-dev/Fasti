@@ -172,7 +172,7 @@ fn verify_database_snapshot(
     ))
 }
 
-fn verify_sqlite_integrity(
+pub(crate) fn verify_sqlite_integrity(
     transaction: &Transaction<'_>,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
@@ -201,7 +201,7 @@ fn verify_sqlite_integrity(
     Ok(())
 }
 
-fn verify_domain_relations(
+pub(crate) fn verify_domain_relations(
     transaction: &Transaction<'_>,
     workspace_id: fasti_domain::WorkspaceId,
     capability: CapabilityKey,

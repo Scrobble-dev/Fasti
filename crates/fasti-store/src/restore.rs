@@ -118,14 +118,14 @@ impl VerifiedArchivePreflight {
     }
 }
 
-struct DigestingReader<R> {
+pub(crate) struct DigestingReader<R> {
     inner: R,
     hasher: Sha256,
     bytes_read: u64,
 }
 
 impl<R> DigestingReader<R> {
-    fn new(inner: R) -> Self {
+    pub(crate) fn new(inner: R) -> Self {
         Self {
             inner,
             hasher: Sha256::new(),
@@ -133,8 +133,12 @@ impl<R> DigestingReader<R> {
         }
     }
 
-    fn digest(&self) -> Sha256Digest {
+    pub(crate) fn digest(&self) -> Sha256Digest {
         digest_from_bytes(&self.hasher.clone().finalize())
+    }
+
+    pub(crate) const fn bytes_read(&self) -> u64 {
+        self.bytes_read
     }
 }
 
@@ -342,7 +346,7 @@ fn inspect_blob(
     })
 }
 
-fn read_manifest(
+pub(crate) fn read_manifest(
     path: &str,
     size: u64,
     reader: &mut ArchiveEntryReader<'_>,

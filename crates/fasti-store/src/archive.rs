@@ -651,6 +651,31 @@ pub(crate) fn open_private_directory(_parent: &File, _name: &str) -> Result<File
     Err(ArchiveError::UnsupportedPlatform)
 }
 
+/// Opens or creates one owner-only child directory beneath an anchored parent.
+///
+/// The name is one validated path component. Existing directories are accepted
+/// only so a bounded importer can reuse a digest-prefix directory that it
+/// created earlier in the same fresh staging attempt.
+#[cfg(target_os = "linux")]
+pub(crate) fn open_or_create_private_directory(
+    parent: &File,
+    name: &str,
+) -> Result<File, ArchiveError> {
+    validate_activation_name(name)?;
+    match rustix::fs::mkdirat(parent, name, rustix::fs::Mode::from_raw_mode(0o700)) {
+        Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+        Err(error) => return Err(errno_to_archive_error(error)),
+    }
+    open_private_directory(parent, name)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn open_or_create_private_directory(
+    _parent: &File,
+    _name: &str,
+) -> Result<File, ArchiveError> {
+    Err(ArchiveError::UnsupportedPlatform)
+}
 /// Creates a new owner-only regular file beneath an already-open data root.
 #[cfg(target_os = "linux")]
 pub fn open_new_file_beneath(root: &File, relative: &Path) -> Result<File, ArchiveError> {
