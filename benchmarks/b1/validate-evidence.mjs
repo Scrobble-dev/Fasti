@@ -2901,7 +2901,20 @@ if (args.length === 1 && args[0] === "--self-test") {
   );
 } else if (args.length === 1 && !args[0].startsWith("--")) {
   const path = resolve(args[0]);
-  validateEvidence(loadJson(path), path, true, path);
+  const evidence = loadJson(path);
+  // The strongest checks in validateEvidence are gated on status === "complete":
+  // placeholder detection in the runner block, and byte-level verification of
+  // retained artifacts. Without this guard a receipt could set
+  // status: "test_fixture", skip both, and still print PASS with exit 0 - the
+  // exact shape a human reaches for when verifying a handed-in receipt. The
+  // Tauri validator already fails closed the same way.
+  if (evidence.status !== "complete") {
+    console.error(
+      `Refusing to validate ${path}: only a complete captured receipt can pass standalone validation, found status ${JSON.stringify(evidence.status)}`,
+    );
+    process.exit(1);
+  }
+  validateEvidence(evidence, path, true, path);
   console.log(`PASS: ${path}`);
 } else {
   console.error(
