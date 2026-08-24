@@ -1548,13 +1548,11 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
 /// snapshot. Physical root-page allocation is excluded because it is not
 /// schema meaning and can change after a byte-equivalent restore or VACUUM.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 pub(crate) struct SchemaFingerprint {
     migration_version: u32,
     digest: Sha256Digest,
 }
 
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 impl SchemaFingerprint {
     pub(crate) const fn migration_version(&self) -> u32 {
         self.migration_version
@@ -1570,13 +1568,11 @@ impl SchemaFingerprint {
 /// The relative path is retained for the later archive copier. This helper
 /// does not open or copy the immutable blob bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 pub(crate) struct SnapshotEvidenceBlob {
     descriptor: WorkspaceBlobDescriptor,
     relative_path: PathBuf,
 }
 
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 impl SnapshotEvidenceBlob {
     pub(crate) const fn descriptor(&self) -> &WorkspaceBlobDescriptor {
         &self.descriptor
@@ -1593,7 +1589,6 @@ impl SnapshotEvidenceBlob {
 /// snapshot database. The monitor runs before every bounded page query. It is
 /// responsible for cancellation and any live authorization/resource fence the
 /// caller must retain while disclosing snapshot bytes.
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 pub(crate) fn stream_archive_entity(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -1630,7 +1625,6 @@ pub(crate) fn stream_archive_entity(
 
 /// Fingerprints the migration version plus every semantically relevant,
 /// non-SQLite-owned row in `sqlite_schema`, in a fixed binary collation order.
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 pub(crate) fn schema_fingerprint(
     connection: &Connection,
     correlation_id: RequestCorrelationId,
@@ -1691,7 +1685,6 @@ pub(crate) fn schema_fingerprint(
     })
 }
 
-#[allow(dead_code)] // consumed by `schema_fingerprint` in the next B3 store slice
 fn hash_schema_field(
     hasher: &mut Sha256,
     value: Option<&str>,
@@ -1717,7 +1710,6 @@ fn hash_schema_field(
 /// Every descriptor is strictly ordered by parsed `EvidenceId`; both IDs and
 /// digests are unique. Stored digest, size, and path columns must be canonical
 /// before an archive copier is allowed to consume the inventory.
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 pub(crate) fn snapshot_evidence_blobs(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -1814,7 +1806,6 @@ pub(crate) fn snapshot_evidence_blobs(
     Ok(inventory)
 }
 
-#[allow(dead_code)] // consumed by the next B3 archive-orchestration store slice
 fn section_for_entity(
     entity: WorkspaceExportEntity,
     correlation_id: RequestCorrelationId,

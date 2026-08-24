@@ -8,6 +8,7 @@ mod evidence;
 mod identity;
 mod kernel;
 mod observation;
+mod online_archive;
 mod portability;
 mod restore;
 mod review;

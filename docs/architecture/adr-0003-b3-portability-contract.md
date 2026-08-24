@@ -151,6 +151,16 @@ blob digests before later archive code copies any bytes. These primitives do
 not create the tar stream, publish a destination, or activate a public export
 surface.
 
+The internal online assembler now combines those primitives without activating
+the public two-mode port. It preflights the destination for the conservative
+uncompressed archive plus cleanup reserve, and separately admits scratch space
+for one bounded snapshot plus one stream file. It releases the live snapshot
+connection before archive generation, reauthorizes at bounded disclosure
+points, opens evidence from the locked data-root descriptor on Linux, validates
+the same opened inode while copying, and keeps the destination under an abort
+guard until consuming completion succeeds. Public activation remains blocked
+on the distinct stopped-node export and clean-restore paths.
+
 ## Consequences
 
 - Store orchestration can implement one bounded contract without importing

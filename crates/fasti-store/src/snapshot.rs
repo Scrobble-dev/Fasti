@@ -104,93 +104,129 @@ impl SqliteKernel {
         &self,
         destination: impl AsRef<Path>,
         limits: SnapshotLimits,
-        mut between_steps: F,
+        between_steps: F,
     ) -> Result<SnapshotMetadata, SnapshotError>
     where
         F: FnMut(SnapshotProgress) -> ControlFlow<()>,
     {
         let source_path = self.database_path();
         reject_unsafe_existing_file(&source_path)?;
+        let source = Connection::open_with_flags(
+            &source_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        source.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
+        source.pragma_update(None, "query_only", "ON")?;
+        snapshot_database_from_connection(
+            &source,
+            destination.as_ref(),
+            limits,
+            true,
+            between_steps,
+        )
+    }
 
-        let destination = destination.as_ref();
-        let mut created = IncompleteDestination::create(destination)?;
-        let result = (|| {
-            let started = Instant::now();
-            let source = Connection::open_with_flags(
-                &source_path,
-                OpenFlags::SQLITE_OPEN_READ_ONLY
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-            )?;
-            source.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
-            source.pragma_update(None, "query_only", "ON")?;
+    /// Copies a caller-owned source connection into a descriptor-rooted private
+    /// destination. The caller retains and releases the source connection.
+    pub(crate) fn snapshot_database_from_connection<F>(
+        &self,
+        source: &Connection,
+        destination: impl AsRef<Path>,
+        limits: SnapshotLimits,
+        between_steps: F,
+    ) -> Result<SnapshotMetadata, SnapshotError>
+    where
+        F: FnMut(SnapshotProgress) -> ControlFlow<()>,
+    {
+        snapshot_database_from_connection(
+            source,
+            destination.as_ref(),
+            limits,
+            false,
+            between_steps,
+        )
+    }
+}
 
-            let mut target = Connection::open_with_flags(
-                destination,
-                OpenFlags::SQLITE_OPEN_READ_WRITE
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | OpenFlags::SQLITE_OPEN_NOFOLLOW,
-            )?;
-            target.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
+fn snapshot_database_from_connection<F>(
+    source: &Connection,
+    destination: &Path,
+    limits: SnapshotLimits,
+    nofollow_destination: bool,
+    mut between_steps: F,
+) -> Result<SnapshotMetadata, SnapshotError>
+where
+    F: FnMut(SnapshotProgress) -> ControlFlow<()>,
+{
+    let mut created = IncompleteDestination::create(destination)?;
+    let result = (|| {
+        let started = Instant::now();
+        let mut target_flags = OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        if nofollow_destination {
+            target_flags |= OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        }
+        let mut target = Connection::open_with_flags(destination, target_flags)?;
+        target.busy_timeout(limits.max_step_time.min(limits.max_total_time))?;
 
-            let page_count = {
-                let backup = Backup::new(&source, &mut target)?;
-                loop {
-                    if started.elapsed() >= limits.max_total_time {
-                        return Err(SnapshotError::OverallTimeout);
-                    }
+        let page_count = {
+            let backup = Backup::new(source, &mut target)?;
+            loop {
+                if started.elapsed() >= limits.max_total_time {
+                    return Err(SnapshotError::OverallTimeout);
+                }
 
-                    let step_started = Instant::now();
-                    let result = backup.step(limits.pages_per_step.get() as i32)?;
-                    let step_elapsed = step_started.elapsed();
-                    if step_elapsed >= limits.max_step_time {
-                        return Err(SnapshotError::StepTimeout);
-                    }
-                    if started.elapsed() >= limits.max_total_time {
-                        return Err(SnapshotError::OverallTimeout);
-                    }
+                let step_started = Instant::now();
+                let result = backup.step(limits.pages_per_step.get() as i32)?;
+                let step_elapsed = step_started.elapsed();
+                if step_elapsed >= limits.max_step_time {
+                    return Err(SnapshotError::StepTimeout);
+                }
+                if started.elapsed() >= limits.max_total_time {
+                    return Err(SnapshotError::OverallTimeout);
+                }
 
-                    let progress = checked_progress(backup.progress(), started.elapsed())?;
-                    match result {
-                        StepResult::Done => break progress.total_pages,
-                        result => {
-                            monitor_incomplete_step(result, progress, &mut between_steps)?;
-                            let elapsed = started.elapsed();
-                            if elapsed >= limits.max_total_time {
-                                return Err(SnapshotError::OverallTimeout);
-                            }
-                            if let Some(delay) = transient_retry_delay(
-                                result,
-                                limits.max_total_time.saturating_sub(elapsed),
-                            ) {
-                                thread::sleep(delay);
-                            }
+                let progress = checked_progress(backup.progress(), started.elapsed())?;
+                match result {
+                    StepResult::Done => break progress.total_pages,
+                    result => {
+                        monitor_incomplete_step(result, progress, &mut between_steps)?;
+                        let elapsed = started.elapsed();
+                        if elapsed >= limits.max_total_time {
+                            return Err(SnapshotError::OverallTimeout);
+                        }
+                        if let Some(delay) = transient_retry_delay(
+                            result,
+                            limits.max_total_time.saturating_sub(elapsed),
+                        ) {
+                            thread::sleep(delay);
                         }
                     }
                 }
-            };
-
-            verify_snapshot(&target, started, limits.max_total_time)?;
-            drop(target);
-            Ok(SnapshotMetadata {
-                page_count,
-                byte_len: fs::metadata(destination)?.len(),
-            })
-        })();
-
-        match result {
-            Ok(metadata) => {
-                created.keep();
-                Ok(metadata)
             }
-            Err(error) => match created.remove() {
-                Ok(()) => Err(error),
-                Err(source) => Err(SnapshotError::Cleanup {
-                    path: destination.to_path_buf(),
-                    source,
-                }),
-            },
+        };
+
+        verify_snapshot(&target, started, limits.max_total_time)?;
+        drop(target);
+        Ok(SnapshotMetadata {
+            page_count,
+            byte_len: fs::metadata(destination)?.len(),
+        })
+    })();
+
+    match result {
+        Ok(metadata) => {
+            created.keep();
+            Ok(metadata)
         }
+        Err(error) => match created.remove() {
+            Ok(()) => Err(error),
+            Err(source) => Err(SnapshotError::Cleanup {
+                path: destination.to_path_buf(),
+                source,
+            }),
+        },
     }
 }
 

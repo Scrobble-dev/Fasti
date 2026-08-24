@@ -830,6 +830,12 @@ pub trait WorkspaceArchiveDestination: Write + Send {
     /// will hold partial and completed archive bytes.
     fn preflight(&self, required_bytes: u64) -> std::io::Result<()>;
 
+    /// Publish the completed artifact atomically.
+    ///
+    /// This method consumes the destination. If publication fails, the
+    /// implementation must remove or otherwise make its partial artifact
+    /// unavailable before it returns the error; the caller can no longer call
+    /// [`Self::abort`].
     fn complete(
         self: Box<Self>,
         archive_digest: &Sha256Digest,
