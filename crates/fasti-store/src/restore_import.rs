@@ -223,7 +223,17 @@ impl StagedWorkspaceImport {
     pub(crate) fn activate(
         mut self,
         data_root: &File,
+        cancellation: &CancellationSignal,
     ) -> Result<RestoreActivationMarker, RestoreImportError> {
+        if cancellation.is_cancelled() {
+            return match self.cleanup_internal() {
+                Ok(()) => Err(RestoreImportError::Canceled),
+                Err(cleanup) => Err(RestoreImportError::Cleanup {
+                    failure: Box::new(RestoreImportError::Canceled),
+                    cleanup: Box::new(cleanup),
+                }),
+            };
+        }
         let marker = self.marker.clone();
         match activate_verified_restore(
             data_root,
@@ -2519,6 +2529,7 @@ mod tests {
     #[test]
     fn canceled_restore_and_failed_capacity_admission_do_not_create_staging() {
         let fixture = full_fixture();
+        let archive = fixture.archive;
         let canceled_root = tempfile::tempdir().expect("canceled restore root");
         let canceled_lock =
             LockedDataRoot::acquire(canceled_root.path()).expect("exclusive canceled root");
@@ -2526,7 +2537,7 @@ mod tests {
         cancellation.cancel();
         let canceled = stage_workspace_archive_pass_two(
             &canceled_lock,
-            &mut Cursor::new(fixture.archive.clone()),
+            &mut Cursor::new(archive.clone()),
             RestoreAttemptId::new_v7(),
             RequestCorrelationId::new_v7(),
             limits(),
@@ -2538,6 +2549,33 @@ mod tests {
         assert!(!canceled_root.path().join("staging").exists());
         assert!(!canceled_root.path().join("current").exists());
 
+        let activation_root = tempfile::tempdir().expect("activation cancellation root");
+        let activation_lock = LockedDataRoot::acquire(activation_root.path())
+            .expect("exclusive activation cancellation root");
+        let activation_cancellation = CancellationSignal::new();
+        let staged = stage_workspace_archive_pass_two(
+            &activation_lock,
+            &mut Cursor::new(archive.clone()),
+            RestoreAttemptId::new_v7(),
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &activation_cancellation,
+        )
+        .expect("stage before cancellation");
+        activation_cancellation.cancel();
+        let root = activation_lock
+            .anchored_directory()
+            .expect("anchored activation root");
+        let activation = staged
+            .activate(root, &activation_cancellation)
+            .expect_err("cancellation before marker must reject activation");
+        assert!(matches!(activation, RestoreImportError::Canceled));
+        assert!(!activation_root.path().join("current").exists());
+        assert!(std::fs::read_dir(activation_root.path().join("staging"))
+            .expect("empty staging")
+            .next()
+            .is_none());
+
         let capacity_root = tempfile::tempdir().expect("capacity restore root");
         let capacity_lock =
             LockedDataRoot::acquire(capacity_root.path()).expect("exclusive capacity root");
@@ -2547,7 +2585,7 @@ mod tests {
         );
         let capacity = stage_workspace_archive_pass_two(
             &capacity_lock,
-            &mut Cursor::new(fixture.archive),
+            &mut Cursor::new(archive),
             RestoreAttemptId::new_v7(),
             RequestCorrelationId::new_v7(),
             configured,
@@ -2618,7 +2656,9 @@ mod tests {
         .expect("stage verified fixture");
         let expected_marker = staged.marker().clone();
         let root = lock.anchored_directory().expect("anchored restore root");
-        let marker = staged.activate(root).expect("activate verified restore");
+        let marker = staged
+            .activate(root, &CancellationSignal::new())
+            .expect("activate verified restore");
         assert_eq!(marker, expected_marker);
         assert!(restore_root.path().join("current/fasti.sqlite3").is_file());
         assert!(!restore_root

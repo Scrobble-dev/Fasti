@@ -44,7 +44,7 @@ pub(crate) fn restore_clean_workspace(
         )
         .map_err(|error| import_problem(error, correlation_id))?;
         let marker = staged
-            .activate(root)
+            .activate(root, request.cancellation())
             .map_err(|error| import_problem(error, correlation_id))?;
         Ok(RestoreWorkspaceOutcome::complete(
             marker.restore_attempt_id(),
