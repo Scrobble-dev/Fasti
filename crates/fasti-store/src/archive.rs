@@ -577,6 +577,60 @@ fn validate_activation_name(name: &str) -> Result<(), ArchiveError> {
     validate_canonical_path(name).map_err(|_| ArchiveError::UnsafeActivationName)
 }
 
+/// Opens or creates the owner-only staging parent, then creates one fresh
+/// owner-only attempt directory beneath it.
+///
+/// Both names are validated before either directory can be created. The
+/// returned handles remain anchored if the path used to open the data root is
+/// later renamed or replaced. The attempt directory is always create-new;
+/// existing restore state is never reused implicitly.
+#[cfg(target_os = "linux")]
+pub fn create_staging_attempt(
+    root: &File,
+    staging_name: &str,
+    attempt_name: &str,
+) -> Result<(File, File), ArchiveError> {
+    validate_activation_name(staging_name)?;
+    validate_activation_name(attempt_name)?;
+
+    match rustix::fs::mkdirat(root, staging_name, rustix::fs::Mode::from_raw_mode(0o700)) {
+        Ok(()) | Err(rustix::io::Errno::EXIST) => {}
+        Err(error) => return Err(errno_to_archive_error(error)),
+    }
+    let staging = open_private_directory(root, staging_name)?;
+
+    rustix::fs::mkdirat(
+        &staging,
+        attempt_name,
+        rustix::fs::Mode::from_raw_mode(0o700),
+    )
+    .map_err(errno_to_archive_error)?;
+    let attempt = open_private_directory(&staging, attempt_name)?;
+    Ok((staging, attempt))
+}
+
+#[cfg(target_os = "linux")]
+fn open_private_directory(parent: &File, name: &str) -> Result<File, ArchiveError> {
+    let fd = rustix::fs::openat2(
+        parent,
+        name,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(errno_to_archive_error)?;
+    let directory = File::from(fd);
+    rustix::fs::fchmod(&directory, rustix::fs::Mode::from_raw_mode(0o700))
+        .map_err(errno_to_archive_error)?;
+    Ok(directory)
+}
+
 /// Creates a new owner-only regular file beneath an already-open data root.
 #[cfg(target_os = "linux")]
 pub fn open_new_file_beneath(root: &File, relative: &Path) -> Result<File, ArchiveError> {
@@ -602,23 +656,32 @@ pub fn open_new_file_beneath(root: &File, relative: &Path) -> Result<File, Archi
     Ok(File::from(fd))
 }
 
-/// Atomically activates one child of `root` without replacing a live child.
+/// Atomically moves one child between opened parents without replacing a live
+/// destination.
 #[cfg(target_os = "linux")]
 pub fn activate_no_replace(
-    root: &File,
-    staging_name: &str,
-    active_name: &str,
+    source_parent: &File,
+    source_name: &str,
+    destination_parent: &File,
+    destination_name: &str,
 ) -> Result<(), ArchiveError> {
-    validate_activation_name(staging_name)?;
-    validate_activation_name(active_name)?;
+    validate_activation_name(source_name)?;
+    validate_activation_name(destination_name)?;
     rustix::fs::renameat_with(
-        root,
-        staging_name,
-        root,
-        active_name,
+        source_parent,
+        source_name,
+        destination_parent,
+        destination_name,
         rustix::fs::RenameFlags::NOREPLACE,
     )
     .map_err(errno_to_archive_error)
+}
+
+/// Flushes one already-open regular file or directory without resolving a
+/// pathname again.
+#[cfg(target_os = "linux")]
+pub fn sync_open_handle(handle: &File) -> Result<(), ArchiveError> {
+    rustix::fs::fsync(handle).map_err(errno_to_archive_error)
 }
 
 #[cfg(target_os = "linux")]
@@ -638,11 +701,26 @@ pub fn open_new_file_beneath(_root: &File, _relative: &Path) -> Result<File, Arc
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn activate_no_replace(
+pub fn create_staging_attempt(
     _root: &File,
     _staging_name: &str,
-    _active_name: &str,
+    _attempt_name: &str,
+) -> Result<(File, File), ArchiveError> {
+    Err(ArchiveError::UnsupportedPlatform)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn activate_no_replace(
+    _source_parent: &File,
+    _source_name: &str,
+    _destination_parent: &File,
+    _destination_name: &str,
 ) -> Result<(), ArchiveError> {
+    Err(ArchiveError::UnsupportedPlatform)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn sync_open_handle(_handle: &File) -> Result<(), ArchiveError> {
     Err(ArchiveError::UnsupportedPlatform)
 }
 
@@ -1095,16 +1173,127 @@ mod tests {
         std::os::unix::fs::symlink("outside", root.path().join("link")).expect("hostile symlink");
         assert!(open_new_file_beneath(&root_fd, Path::new("link/escape")).is_err());
         assert!(!root.path().join("outside/escape").exists());
+    }
 
-        std::fs::create_dir(root.path().join("staging")).expect("staging directory");
-        activate_no_replace(&root_fd, "staging", "current").expect("activate staging");
-        assert!(root.path().join("current").is_dir());
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nested_staging_activation_and_open_handle_fsync_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
 
-        std::fs::create_dir(root.path().join("next")).expect("next staging directory");
+        let root = tempfile::tempdir().expect("temporary root");
+        let root_fd = File::open(root.path()).expect("open data root");
+        let (staging, attempt) = create_staging_attempt(&root_fd, "staging", "rst_attempt")
+            .expect("create nested staging attempt");
+
+        for directory in [&staging, &attempt] {
+            assert_eq!(
+                directory
+                    .metadata()
+                    .expect("directory metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+
+        let mut payload =
+            open_new_file_beneath(&attempt, Path::new("payload")).expect("create attempt payload");
+        payload.write_all(b"durable").expect("write payload");
+        sync_open_handle(&payload).expect("fsync payload");
+        sync_open_handle(&attempt).expect("fsync attempt");
+        sync_open_handle(&staging).expect("fsync staging parent");
+        sync_open_handle(&root_fd).expect("fsync data root before activation");
+
+        activate_no_replace(&staging, "rst_attempt", &root_fd, "current")
+            .expect("activate nested attempt");
+        sync_open_handle(&attempt).expect("fsync moved attempt handle");
+        sync_open_handle(&root_fd).expect("fsync activated data root");
+
+        assert_eq!(
+            std::fs::read(root.path().join("current/payload")).expect("active payload"),
+            b"durable"
+        );
+        assert!(!root.path().join("staging/rst_attempt").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nested_activation_never_reuses_an_attempt_or_replaces_current() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let root_fd = File::open(root.path()).expect("open data root");
+        let (staging, _attempt) =
+            create_staging_attempt(&root_fd, "staging", "rst_first").expect("create first attempt");
         assert!(matches!(
-            activate_no_replace(&root_fd, "next", "current"),
+            create_staging_attempt(&root_fd, "staging", "rst_first"),
             Err(ArchiveError::DestinationExists)
         ));
-        assert!(root.path().join("next").is_dir());
+
+        activate_no_replace(&staging, "rst_first", &root_fd, "current")
+            .expect("activate first attempt");
+        let (staging, _next) =
+            create_staging_attempt(&root_fd, "staging", "rst_next").expect("create next attempt");
+        assert!(matches!(
+            activate_no_replace(&staging, "rst_next", &root_fd, "current"),
+            Err(ArchiveError::DestinationExists)
+        ));
+        assert!(root.path().join("current").is_dir());
+        assert!(root.path().join("staging/rst_next").is_dir());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn staging_components_and_symlink_parents_fail_before_escape() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let root_fd = File::open(root.path()).expect("open data root");
+        assert!(matches!(
+            create_staging_attempt(&root_fd, "staging", "../escape"),
+            Err(ArchiveError::UnsafeActivationName)
+        ));
+        assert!(!root.path().join("staging").exists());
+
+        std::fs::create_dir(root.path().join("outside")).expect("outside directory");
+        std::os::unix::fs::symlink("outside", root.path().join("staging"))
+            .expect("hostile staging symlink");
+        assert!(create_staging_attempt(&root_fd, "staging", "rst_attempt").is_err());
+        assert!(!root.path().join("outside/rst_attempt").exists());
+        assert!(matches!(
+            activate_no_replace(&root_fd, "../source", &root_fd, "current"),
+            Err(ArchiveError::UnsafeActivationName)
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn anchored_activation_ignores_a_replaced_root_path() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root_path = temporary.path().join("fasti-data");
+        let moved_path = temporary.path().join("moved-fasti-data");
+        let guard = crate::LockedDataRoot::acquire(&root_path).expect("locked data root");
+        let root_fd = guard
+            .anchored_directory()
+            .expect("Linux anchored data root");
+
+        std::fs::rename(&root_path, &moved_path).expect("rename locked root");
+        std::fs::create_dir(&root_path).expect("replacement root path");
+
+        let (staging, attempt) = create_staging_attempt(root_fd, "staging", "rst_anchored")
+            .expect("create attempt under anchored root");
+        let mut marker =
+            open_new_file_beneath(&attempt, Path::new("marker")).expect("create anchored marker");
+        marker.write_all(b"anchored").expect("write marker");
+        sync_open_handle(&marker).expect("fsync marker");
+        sync_open_handle(&attempt).expect("fsync attempt");
+        sync_open_handle(&staging).expect("fsync staging");
+        activate_no_replace(&staging, "rst_anchored", root_fd, "current")
+            .expect("activate beneath anchored root");
+        sync_open_handle(root_fd).expect("fsync anchored root");
+
+        assert_eq!(
+            std::fs::read(moved_path.join("current/marker")).expect("anchored active marker"),
+            b"anchored"
+        );
+        assert!(!root_path.join("staging").exists());
+        assert!(!root_path.join("current").exists());
     }
 }
