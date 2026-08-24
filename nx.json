@@ -1,13 +1,17 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "defaultBase": "dev",
-  "nxCloudId": "6a8ca81bcd731b4dee77996f",
+  "nxCloudId": "6a8cbc750941e08f4629fc89",
   "analytics": true,
   "targetDefaults": {
     "build": {
       "cache": true,
-      "dependsOn": ["^build"],
-      "outputs": ["{projectRoot}/dist"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "{projectRoot}/dist"
+      ]
     }
   }
 }
