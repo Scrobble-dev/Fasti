@@ -9,6 +9,7 @@ mod identity;
 mod kernel;
 mod observation;
 mod portability;
+mod restore;
 mod review;
 mod schema;
 mod seed;

@@ -30,6 +30,12 @@ use std::sync::{
 /// frozen, but this does not activate a public format, capability, or route.
 pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 1;
 
+/// The sole archive-v1 contract version understood by this executable.
+///
+/// Restore rejects other values during hostile manifest conversion. Schema
+/// migration compatibility remains a separate import-pass decision.
+pub const WORKSPACE_ARCHIVE_CONTRACT_VERSION: &str = "1.0.0";
+
 /// Largest integer with one interoperable RFC 8785/I-JSON representation.
 pub const MAX_PORTABLE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -239,6 +245,20 @@ pub struct PortabilityLimits {
     pub cleanup_reserve_bytes: NonZeroU64,
     pub backup_step_pages: NonZeroU64,
     pub backup_step_millis: NonZeroU64,
+}
+
+impl PortabilityLimits {
+    /// Conservative ceiling for the expanded USTAR archive.
+    ///
+    /// Every admitted entry can add a 512-byte header and at most 511 bytes
+    /// of padding. The archive then ends with two 512-byte zero records.
+    pub fn archive_expanded_ceiling(self) -> Option<u64> {
+        self.max_entries
+            .get()
+            .checked_mul(512 + 511)
+            .and_then(|overhead| overhead.checked_add(1024))
+            .and_then(|overhead| self.max_uncompressed_bytes.get().checked_add(overhead))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1289,6 +1309,16 @@ mod tests {
         for (position, entity) in WorkspaceExportEntity::ALL.into_iter().enumerate() {
             assert_eq!(entity.index(), position, "{entity:?} index drifted");
         }
+    }
+
+    #[test]
+    fn archive_expanded_ceiling_accounts_for_headers_padding_and_trailer() {
+        assert_eq!(limits().archive_expanded_ceiling(), Some(1 + 1023 + 1024));
+
+        let mut overflowing = limits();
+        overflowing.max_uncompressed_bytes =
+            NonZeroU64::new(u64::MAX).expect("maximum is non-zero");
+        assert_eq!(overflowing.archive_expanded_ceiling(), None);
     }
 
     #[test]

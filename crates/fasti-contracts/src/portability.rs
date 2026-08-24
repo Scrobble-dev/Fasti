@@ -6,7 +6,7 @@
 use fasti_application::{
     PortabilityLimits, WorkspaceBlobDescriptor, WorkspaceExportEntity, WorkspaceManifest,
     WorkspaceManifestError, WorkspaceStreamDescriptor, MAX_PORTABLE_JSON_INTEGER,
-    WORKSPACE_ARCHIVE_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_CONTRACT_VERSION, WORKSPACE_ARCHIVE_FORMAT_VERSION,
 };
 use fasti_domain::{EvidenceId, Sha256Digest, WorkspaceId};
 use schemars::JsonSchema;
@@ -125,10 +125,13 @@ pub struct ChecksummedWorkspaceManifestDto {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceManifestConversionError {
+    InvalidJson,
+    NonCanonicalJson,
     UnsupportedFormatVersion,
     InvalidWorkspaceId,
     EmptyContractVersion,
     ContractVersionTooLong,
+    UnsupportedContractVersion,
     PortableIntegerOutOfRange,
     InvalidMigrationDigest,
     StreamCountExceeded,
@@ -167,6 +170,26 @@ pub struct VerifiedInboundWorkspaceManifest {
 }
 
 impl VerifiedInboundWorkspaceManifest {
+    /// Parse one complete hostile `manifest.json` only when its bytes already
+    /// use the frozen RFC 8785/JCS representation.
+    ///
+    /// Deserialization rejects duplicate known fields. Comparing the parsed
+    /// value's canonical encoding with the original bytes then rejects every
+    /// other alternate representation of the same JSON value.
+    pub fn try_from_canonical_json(
+        bytes: &[u8],
+        limits: PortabilityLimits,
+    ) -> Result<Self, WorkspaceManifestConversionError> {
+        let dto: ChecksummedWorkspaceManifestDto = serde_json::from_slice(bytes)
+            .map_err(|_| WorkspaceManifestConversionError::InvalidJson)?;
+        let canonical = serde_json_canonicalizer::to_vec(&dto)
+            .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
+        if canonical != bytes {
+            return Err(WorkspaceManifestConversionError::NonCanonicalJson);
+        }
+        dto.try_into_application(limits)
+    }
+
     pub const fn manifest(&self) -> &WorkspaceManifest {
         &self.manifest
     }
@@ -338,6 +361,9 @@ impl ChecksummedWorkspaceManifestDto {
         }
         if contract_version_length > 64 {
             return Err(WorkspaceManifestConversionError::ContractVersionTooLong);
+        }
+        if body.contract_version != WORKSPACE_ARCHIVE_CONTRACT_VERSION {
+            return Err(WorkspaceManifestConversionError::UnsupportedContractVersion);
         }
         if body.workspace_revision > MAX_PORTABLE_JSON_INTEGER {
             return Err(WorkspaceManifestConversionError::PortableIntegerOutOfRange);
@@ -681,6 +707,41 @@ mod tests {
     }
 
     #[test]
+    fn inbound_manifest_requires_complete_canonical_json_bytes() {
+        let application = checked_example()
+            .try_into_application(limits())
+            .expect("checked example converts to the application manifest");
+        let projected = CanonicalWorkspaceManifestProjection::try_from_application(
+            application.manifest().clone(),
+        )
+        .expect("application manifest projects to archive v1");
+
+        assert_eq!(
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(
+                projected.canonical_json_bytes(),
+                limits(),
+            ),
+            Ok(application)
+        );
+
+        let mut noncanonical = b" ".to_vec();
+        noncanonical.extend_from_slice(projected.canonical_json_bytes());
+        assert_eq!(
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&noncanonical, limits()),
+            Err(WorkspaceManifestConversionError::NonCanonicalJson)
+        );
+
+        let canonical =
+            std::str::from_utf8(projected.canonical_json_bytes()).expect("canonical JSON is UTF-8");
+        let duplicate = canonical.replacen("{\"manifest\":", "{\"manifest\":null,\"manifest\":", 1);
+        assert!(VerifiedInboundWorkspaceManifest::try_from_canonical_json(
+            duplicate.as_bytes(),
+            limits(),
+        )
+        .is_err());
+    }
+
+    #[test]
     fn manifest_dto_rejects_unknown_fields() {
         let mut value: serde_json::Value = serde_json::from_str(include_str!(
             "../../../contracts/portability/v1/workspace-manifest.example.json"
@@ -728,6 +789,13 @@ mod tests {
         assert_eq!(
             value.try_into_application(limits()),
             Err(WorkspaceManifestConversionError::ContractVersionTooLong)
+        );
+
+        let mut value = checked_example();
+        value.manifest.contract_version = "2.0.0".to_owned();
+        assert_eq!(
+            value.try_into_application(limits()),
+            Err(WorkspaceManifestConversionError::UnsupportedContractVersion)
         );
 
         let mut value = checked_example();

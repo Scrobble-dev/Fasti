@@ -484,18 +484,25 @@ impl<W: Write> ArchiveWriter<W> {
 /// This is the sole strict parser for `.fasti` archives. The visitor cannot
 /// retain the entry reader or access the underlying tar entry. A successful
 /// partial read is drained and counted here before parsing continues.
-pub(crate) fn visit_archive_entries<R, F>(
+pub(crate) fn visit_archive_entries<R, F, E>(
     source: R,
     limits: ArchiveLimits,
     mut visitor: F,
-) -> Result<ArchiveSummary, ArchiveError>
+) -> Result<ArchiveSummary, E>
 where
     R: Read,
-    F: for<'entry> FnMut(&str, u64, &mut ArchiveEntryReader<'entry>) -> Result<(), ArchiveError>,
+    F: for<'entry> FnMut(&str, u64, &mut ArchiveEntryReader<'entry>) -> Result<(), E>,
+    E: From<ArchiveError>,
 {
     let (source, limit_hit) = LimitedReader::new(source, limits.max_compressed_bytes);
     let source = BoundedReader::new(source);
-    let map_io = |error| map_validation_io(error, &limit_hit, limits.max_compressed_bytes);
+    let map_io = |error| {
+        E::from(map_validation_io(
+            error,
+            &limit_hit,
+            limits.max_compressed_bytes,
+        ))
+    };
     let mut decoder = zstd::stream::read::Decoder::new(source).map_err(&map_io)?;
     decoder.window_log_max(ZSTD_WINDOW_LOG).map_err(&map_io)?;
     let mut archive = tar::Archive::new(BoundedReader::new(decoder));
@@ -506,37 +513,41 @@ where
         let entries = archive.entries().map_err(&map_io)?.raw(true);
         for result in entries {
             if manifest_seen {
-                return Err(ArchiveError::EntryAfterManifest);
+                return Err(ArchiveError::EntryAfterManifest.into());
             }
             let mut entry = result.map_err(&map_io)?;
-            validate_header(entry.header())?;
+            validate_header(entry.header()).map_err(E::from)?;
             let path_bytes = entry.path_bytes();
-            let path = validate_entry(path_bytes.as_ref(), entry.header().entry_type())?.to_owned();
+            let path = validate_entry(path_bytes.as_ref(), entry.header().entry_type())
+                .map_err(E::from)?
+                .to_owned();
             let size = entry.header().size().map_err(&map_io)?;
-            budget.admit(&path, size)?;
+            budget.admit(&path, size).map_err(E::from)?;
             let mut reader = ArchiveEntryReader::new(&mut entry);
             let visit_result = visitor(&path, size, &mut reader);
             if limit_hit.get() {
                 return Err(ArchiveError::CompressedSizeExceeded {
                     limit: limits.max_compressed_bytes,
-                });
+                }
+                .into());
             }
             visit_result?;
             io::copy(&mut reader, &mut io::sink()).map_err(&map_io)?;
             if limit_hit.get() {
                 return Err(ArchiveError::CompressedSizeExceeded {
                     limit: limits.max_compressed_bytes,
-                });
+                }
+                .into());
             }
             if reader.bytes_read() != size {
-                return Err(ArchiveError::TruncatedEntry { path });
+                return Err(ArchiveError::TruncatedEntry { path }.into());
             }
             manifest_seen = path == "manifest.json";
         }
     }
 
     if !manifest_seen {
-        return Err(ArchiveError::MissingManifest);
+        return Err(ArchiveError::MissingManifest.into());
     }
 
     // The canonical builder writes exactly two zero TAR records. The iterator
@@ -552,10 +563,10 @@ where
         }
         trailer_bytes = trailer_bytes
             .checked_add(read as u64)
-            .ok_or(ArchiveError::TrailingData)?;
+            .ok_or_else(|| E::from(ArchiveError::TrailingData))?;
         if trailer_bytes > TAR_REMAINING_ZERO_BYTES || trailer[..read].iter().any(|byte| *byte != 0)
         {
-            return Err(ArchiveError::TrailingData);
+            return Err(ArchiveError::TrailingData.into());
         }
     }
     Ok(budget.summary())
@@ -566,7 +577,9 @@ pub fn validate_archive<R: Read>(
     source: R,
     limits: ArchiveLimits,
 ) -> Result<ArchiveSummary, ArchiveError> {
-    visit_archive_entries(source, limits, |_path, _size, _reader| Ok(()))
+    visit_archive_entries(source, limits, |_path, _size, _reader| {
+        Ok::<(), ArchiveError>(())
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -947,7 +960,7 @@ mod tests {
                 let mut bytes = Vec::new();
                 reader.read_to_end(&mut bytes)?;
                 visited.push((path.to_owned(), size, bytes));
-                Ok(())
+                Ok::<(), ArchiveError>(())
             })
             .expect("visit canonical archive");
 
@@ -978,7 +991,7 @@ mod tests {
                 let mut prefix = [0_u8; 1];
                 reader.read_exact(&mut prefix)?;
                 prefixes.push((path.to_owned(), size, prefix[0]));
-                Ok(())
+                Ok::<(), ArchiveError>(())
             })
             .expect("parser drains unread entry bytes");
         assert_eq!(summary.entries, 2);

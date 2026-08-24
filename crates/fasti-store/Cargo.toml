@@ -11,6 +11,7 @@ description = "Fasti SQLite and filesystem adapters for the local kernel"
 [dependencies]
 chrono = { workspace = true }
 fasti-application = { workspace = true }
+fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }
 getrandom = { workspace = true }
 rusqlite = { workspace = true }
