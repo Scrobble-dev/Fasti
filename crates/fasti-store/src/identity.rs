@@ -1,13 +1,118 @@
 use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
-    CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort,
+    CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ProblemCode,
+    RegisterNamespaceDefinitionCommand, RegisterNamespaceDefinitionOutcome,
 };
 use fasti_domain::{ExternalIdentifierClaim, ExternalIdentifierId, Grain, RecordId, WorkspaceId};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::collections::BTreeSet;
 
 impl IdentityPort for SqliteKernel {
+    fn register_namespace_definition(
+        &self,
+        command: RegisterNamespaceDefinitionCommand,
+    ) -> ApplicationResult<RegisterNamespaceDefinitionOutcome> {
+        let correlation_id = command.correlation_id();
+        let capability = CapabilityKey::AttachIdentifier;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let definition = command.definition();
+        let workspace_id = command.access().workspace_id().to_string();
+        let namespace = definition.namespace().as_str();
+        let supported_grains = definition
+            .grains()
+            .iter()
+            .map(|grain| grain.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let existing = map_sql(
+            transaction
+                .query_row(
+                    r#"
+                    SELECT label, supported_grains, id_pattern, normalization, licence_posture
+                    FROM namespace_definitions
+                    WHERE workspace_id = ?1 AND namespace = ?2
+                    "#,
+                    params![workspace_id, namespace],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .optional(),
+            capability,
+            correlation_id,
+        )?;
+        let expected = (
+            definition.label(),
+            supported_grains.as_str(),
+            definition.id_pattern(),
+            definition.normalization(),
+            definition.licence_posture().as_str(),
+        );
+        let created = match existing {
+            Some(existing)
+                if (
+                    existing.0.as_str(),
+                    existing.1.as_str(),
+                    existing.2.as_str(),
+                    existing.3.as_str(),
+                    existing.4.as_str(),
+                ) == expected =>
+            {
+                false
+            }
+            Some(_) => {
+                return Err(Box::new(FastiProblem::from_code(
+                    ProblemCode::ValidationFailed,
+                    capability,
+                    correlation_id,
+                )))
+            }
+            None => {
+                map_sql(
+                    transaction.execute(
+                        r#"
+                        INSERT INTO namespace_definitions(
+                            workspace_id, namespace, label, supported_grains, id_pattern,
+                            normalization, licence_posture, created_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                        "#,
+                        params![
+                            workspace_id,
+                            namespace,
+                            definition.label(),
+                            supported_grains,
+                            definition.id_pattern(),
+                            definition.normalization(),
+                            definition.licence_posture().as_str(),
+                            timestamp(now())
+                        ],
+                    ),
+                    capability,
+                    correlation_id,
+                )?;
+                true
+            }
+        };
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(RegisterNamespaceDefinitionOutcome::new(
+            definition.namespace().clone(),
+            created,
+        ))
+    }
+
     fn create_record(
         &self,
         command: CreateRecordCommand,
@@ -143,6 +248,31 @@ pub(crate) fn attach_identifier_tx(
         )));
     }
 
+    let declared_grains = map_sql(
+        transaction
+            .query_row(
+                r#"
+                SELECT supported_grains FROM namespace_definitions
+                WHERE workspace_id = ?1 AND namespace = ?2
+                "#,
+                params![workspace_id.to_string(), claim.namespace()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional(),
+        capability,
+        correlation_id,
+    )?;
+    if !declared_grains.is_some_and(|grains| {
+        grains
+            .split(',')
+            .any(|grain| grain == claim.grain().as_str())
+    }) {
+        return Err(Box::new(FastiProblem::invalid_identifier(
+            capability,
+            correlation_id,
+        )));
+    }
+
     let existing = map_sql(
         transaction
             .query_row(
@@ -260,4 +390,125 @@ pub(crate) fn matching_record_ids(
                 .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestNode;
+    use fasti_application::{IdentityPort, RegisterNamespaceDefinitionCommand};
+    use fasti_domain::{NamespaceDefinition, NamespaceLicencePosture, RequestCorrelationId};
+
+    fn definition(namespace: &str, grains: impl IntoIterator<Item = Grain>) -> NamespaceDefinition {
+        NamespaceDefinition::try_new(
+            namespace,
+            format!("{namespace} test namespace"),
+            grains,
+            ".+",
+            "identity",
+            NamespaceLicencePosture::Unknown,
+        )
+        .expect("valid test namespace definition")
+    }
+
+    #[test]
+    fn attachment_requires_a_workspace_namespace_for_the_claim_grain() {
+        let node = TestNode::new();
+        let record = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Release,
+            ))
+            .expect("create record")
+            .record_id();
+        let claim = ExternalIdentifierClaim::try_new("imdb", Grain::Release, "tt0903747")
+            .expect("valid claim syntax");
+
+        let error = node
+            .kernel
+            .attach_identifier(AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                record,
+                claim.clone(),
+            ))
+            .expect_err("undeclared namespace must fail");
+        assert_eq!(error.code(), ProblemCode::InvalidIdentifier);
+
+        let registered = node
+            .kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                definition("imdb", [Grain::Release]),
+            ))
+            .expect("register namespace");
+        assert!(registered.created());
+        assert_eq!(registered.namespace().as_str(), "imdb");
+
+        let film_record = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Film,
+            ))
+            .expect("create film record")
+            .record_id();
+        let film_claim = ExternalIdentifierClaim::try_new("imdb", Grain::Film, "tt0903747")
+            .expect("valid claim syntax");
+        let error = node
+            .kernel
+            .attach_identifier(AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                film_record,
+                film_claim,
+            ))
+            .expect_err("undeclared grain must fail");
+        assert_eq!(error.code(), ProblemCode::InvalidIdentifier);
+
+        node.kernel
+            .attach_identifier(AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                record,
+                claim,
+            ))
+            .expect("attach through registered namespace");
+    }
+
+    #[test]
+    fn registration_is_idempotent_but_cannot_redefine_a_key() {
+        let node = TestNode::new();
+        let command = || {
+            RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                definition("tmdb_tv", [Grain::Series]),
+            )
+        };
+        assert!(node
+            .kernel
+            .register_namespace_definition(command())
+            .expect("first registration")
+            .created());
+        assert!(!node
+            .kernel
+            .register_namespace_definition(command())
+            .expect("idempotent registration")
+            .created());
+
+        let error = node
+            .kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                definition("tmdb_tv", [Grain::Film]),
+            ))
+            .expect_err("same key cannot change comparison space");
+        assert_eq!(error.code(), ProblemCode::ValidationFailed);
+    }
 }

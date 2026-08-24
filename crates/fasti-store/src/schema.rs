@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 3;
+pub(crate) const SCHEMA_VERSION: i64 = 4;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -17,6 +17,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 2 {
         migrate_v3(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 3 {
+        migrate_v4(connection)?;
     }
     Ok(())
 }
@@ -372,9 +377,22 @@ fn migrate_v3(connection: &Connection) -> Result<()> {
     );
 
     for source in REVISION_SOURCES {
-        write!(
-            sql,
-            r#"
+        append_revision_triggers(&mut sql, source);
+    }
+
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 3;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
+fn append_revision_triggers(sql: &mut String, source: &RevisionSource) {
+    write!(
+        sql,
+        r#"
             CREATE TRIGGER workspace_revision_{table}_insert
             AFTER INSERT ON {table}
             BEGIN
@@ -409,16 +427,96 @@ fn migrate_v3(connection: &Connection) -> Result<()> {
                     SET revision = workspace_revisions.revision + 1;
             END;
             "#,
-            table = source.table,
-            new_workspace = source.new_workspace,
-            old_workspace = source.old_workspace,
-        )
-        .expect("writing migration SQL to a String cannot fail");
-    }
+        table = source.table,
+        new_workspace = source.new_workspace,
+        old_workspace = source.old_workspace,
+    )
+    .expect("writing migration SQL to a String cannot fail");
+}
 
+fn migrate_v4(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE namespace_definitions (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            namespace TEXT NOT NULL,
+            label TEXT NOT NULL,
+            supported_grains TEXT NOT NULL,
+            id_pattern TEXT NOT NULL,
+            normalization TEXT NOT NULL,
+            licence_posture TEXT NOT NULL CHECK (
+                licence_posture IN (
+                    'open', 'identifiers_only', 'indirect_only', 'excluded', 'unknown'
+                )
+            ),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, namespace)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER external_identifier_namespace_insert_guard
+        BEFORE INSERT ON external_identifiers
+        WHEN NOT EXISTS (
+            SELECT 1 FROM namespace_definitions
+            WHERE workspace_id = NEW.workspace_id
+              AND namespace = NEW.namespace
+              AND instr(',' || supported_grains || ',', ',' || NEW.grain || ',') > 0
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'external identifier namespace is not registered for this grain');
+        END;
+
+        CREATE TRIGGER external_identifier_namespace_update_guard
+        BEFORE UPDATE OF workspace_id, namespace, grain ON external_identifiers
+        WHEN NOT EXISTS (
+            SELECT 1 FROM namespace_definitions
+            WHERE workspace_id = NEW.workspace_id
+              AND namespace = NEW.namespace
+              AND instr(',' || supported_grains || ',', ',' || NEW.grain || ',') > 0
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'external identifier namespace is not registered for this grain');
+        END;
+
+        CREATE TRIGGER namespace_definition_delete_guard
+        BEFORE DELETE ON namespace_definitions
+        WHEN EXISTS (
+            SELECT 1 FROM external_identifiers
+            WHERE workspace_id = OLD.workspace_id AND namespace = OLD.namespace
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'namespace definition is referenced by external identifiers');
+        END;
+
+        CREATE TRIGGER namespace_definition_update_guard
+        BEFORE UPDATE OF workspace_id, namespace, supported_grains ON namespace_definitions
+        WHEN EXISTS (
+            SELECT 1 FROM external_identifiers
+            WHERE workspace_id = OLD.workspace_id
+              AND namespace = OLD.namespace
+              AND (
+                  NEW.workspace_id IS NOT OLD.workspace_id
+                  OR NEW.namespace IS NOT OLD.namespace
+                  OR instr(',' || NEW.supported_grains || ',', ',' || grain || ',') = 0
+              )
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'namespace definition update would orphan external identifiers');
+        END;
+        "#,
+    );
+    append_revision_triggers(
+        &mut sql,
+        &RevisionSource {
+            table: "namespace_definitions",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
     sql.push_str(
         r#"
-        PRAGMA user_version = 3;
+        PRAGMA user_version = 4;
         COMMIT;
         "#,
     );
@@ -458,6 +556,14 @@ mod tests {
                 params![WORKSPACE, CREATED_AT],
             )
             .expect("workspace");
+        for namespace in ["imdb", "tmdb"] {
+            connection
+                .execute(
+                    "INSERT INTO namespace_definitions(workspace_id, namespace, label, supported_grains, id_pattern, normalization, licence_posture, created_at) VALUES (?1, ?2, ?2, 'film', '.+', 'identity', 'unknown', ?3)",
+                    params![WORKSPACE, namespace, CREATED_AT],
+                )
+                .expect("namespace definition");
+        }
         connection
             .execute(
                 "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES ('prf_revision_test', ?1, ?2)",
@@ -472,7 +578,7 @@ mod tests {
             .expect("client");
         connection
             .execute(
-                "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES ('rec_revision_test', ?1, 'movie', 'active', ?2)",
+                "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES ('rec_revision_test', ?1, 'film', 'active', ?2)",
                 params![WORKSPACE, CREATED_AT],
             )
             .expect("record");
@@ -503,7 +609,7 @@ mod tests {
             .expect("observation");
         connection
             .execute(
-                "INSERT INTO observation_clues(observation_id, ordinal, namespace, grain, value) VALUES ('obs_revision_test', 0, 'imdb', 'movie', 'tt0000001')",
+                "INSERT INTO observation_clues(observation_id, ordinal, namespace, grain, value) VALUES ('obs_revision_test', 0, 'imdb', 'film', 'tt0000001')",
                 [],
             )
             .expect("observation clue");
@@ -548,6 +654,14 @@ mod tests {
             )
             .expect("find corrections table");
         assert_eq!(corrections, 1);
+        let namespace_definitions: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'namespace_definitions'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("find namespace definitions table");
+        assert_eq!(namespace_definitions, 1);
         let trigger_count: i64 = connection
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'workspace_revision_%'",
@@ -555,7 +669,7 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count revision triggers");
-        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3) as i64);
+        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3 + 3) as i64);
     }
 
     #[test]
@@ -720,6 +834,56 @@ mod tests {
     }
 
     #[test]
+    fn database_rejects_undeclared_namespace_attachment_and_orphaning() {
+        let connection = migrated_connection();
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("workspace");
+        connection
+            .execute(
+                "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES ('rec_namespace_guard', ?1, 'film', 'active', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("record");
+        let insert = || {
+            connection.execute(
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_namespace_guard', ?1, 'rec_namespace_guard', 'imdb', 'film', 'tt0000001', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+        };
+        assert!(insert().is_err(), "undeclared namespace must fail");
+        connection
+            .execute(
+                "INSERT INTO namespace_definitions(workspace_id, namespace, label, supported_grains, id_pattern, normalization, licence_posture, created_at) VALUES (?1, 'imdb', 'IMDb', 'series', '.+', 'identity', 'unknown', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("wrong-grain definition");
+        assert!(insert().is_err(), "undeclared grain must fail");
+        connection
+            .execute(
+                "UPDATE namespace_definitions SET supported_grains = 'film' WHERE workspace_id = ?1 AND namespace = 'imdb'",
+                [WORKSPACE],
+            )
+            .expect("declare film grain");
+        insert().expect("declared namespace and grain");
+        assert!(connection
+            .execute(
+                "DELETE FROM namespace_definitions WHERE workspace_id = ?1 AND namespace = 'imdb'",
+                [WORKSPACE],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "UPDATE namespace_definitions SET supported_grains = 'series' WHERE workspace_id = ?1 AND namespace = 'imdb'",
+                [WORKSPACE],
+            )
+            .is_err());
+    }
+
+    #[test]
     fn revision_tracks_identity_review_nested_and_equal_count_changes() {
         let connection = migrated_connection();
         seed_review_graph(&connection);
@@ -727,7 +891,7 @@ mod tests {
 
         connection
             .execute(
-                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_revision_test', ?1, 'rec_revision_test', 'imdb', 'movie', 'tt0000001', ?2)",
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_revision_test', ?1, 'rec_revision_test', 'imdb', 'film', 'tt0000001', ?2)",
                 params![WORKSPACE, CREATED_AT],
             )
             .expect("identity insert");
@@ -760,7 +924,7 @@ mod tests {
             .expect("identity count");
         connection
             .execute(
-                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_revision_replacement', ?1, 'rec_revision_test', 'tmdb', 'movie', '1', ?2)",
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_revision_replacement', ?1, 'rec_revision_test', 'tmdb', 'film', '1', ?2)",
                 params![WORKSPACE, CREATED_AT],
             )
             .expect("replacement identity insert");

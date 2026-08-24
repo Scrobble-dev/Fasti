@@ -246,6 +246,7 @@ fn verify_domain_relations(
                     OR receipt.operation_id <> operation.operation_id
                     OR receipt.capability_key <> operation.capability_key
                 )
+
             ) invalid
             "#,
             [workspace_id.to_string()],
@@ -255,6 +256,38 @@ fn verify_domain_relations(
         correlation_id,
     )?;
     if invalid != 0 {
+        return integrity_failure(capability, correlation_id);
+    }
+    verify_namespace_bindings(transaction, workspace_id, capability, correlation_id)?;
+    Ok(())
+}
+
+fn verify_namespace_bindings(
+    transaction: &Transaction<'_>,
+    workspace_id: fasti_domain::WorkspaceId,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<()> {
+    let invalid = map_sql(
+        transaction.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM external_identifiers external
+                LEFT JOIN namespace_definitions namespace
+                  ON namespace.workspace_id = external.workspace_id
+                 AND namespace.namespace = external.namespace
+                 AND instr(',' || namespace.supported_grains || ',', ',' || external.grain || ',') > 0
+                WHERE external.workspace_id = ?1 AND namespace.namespace IS NULL
+            )
+            "#,
+            [workspace_id.to_string()],
+            |row| row.get::<_, bool>(0),
+        ),
+        capability,
+        correlation_id,
+    )?;
+    if invalid {
         return integrity_failure(capability, correlation_id);
     }
     Ok(())
@@ -399,9 +432,13 @@ fn integrity_failure<T>(
 mod tests {
     use super::*;
     use crate::test_support::TestNode;
-    use fasti_application::{EvidenceUploadPort, EvidenceUploadRequest, ScopeKey};
+    use fasti_application::{
+        EvidenceUploadPort, EvidenceUploadRequest, IdentityPort,
+        RegisterNamespaceDefinitionCommand, ScopeKey,
+    };
     use fasti_domain::{
-        InterpretationId, ObservationId, OccurrenceId, OperationId, ReceiptId, RequestCorrelationId,
+        Grain, InterpretationId, NamespaceDefinition, NamespaceLicencePosture, ObservationId,
+        OccurrenceId, OperationId, ReceiptId, RequestCorrelationId,
     };
     use std::fs;
     use std::io;
@@ -508,6 +545,50 @@ mod tests {
             ))
             .expect_err("tampered evidence must fail verification");
         assert_eq!(error.code(), ProblemCode::IntegrityFailed);
+    }
+
+    #[test]
+    fn export_includes_registered_namespace_definitions() {
+        let node = TestNode::new();
+        grant_scope(&node, ScopeKey::WorkspaceExport);
+        node.kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                NamespaceDefinition::try_new(
+                    "imdb_title",
+                    "IMDb title",
+                    [Grain::Film, Grain::Series],
+                    "^tt[0-9]+$",
+                    "trim",
+                    NamespaceLicencePosture::IdentifiersOnly,
+                )
+                .expect("valid namespace"),
+            ))
+            .expect("register namespace");
+
+        let mut bytes = Vec::new();
+        let outcome = node
+            .kernel
+            .export_workspace(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), node.access),
+                &mut bytes,
+            )
+            .expect("export namespace");
+        assert_eq!(
+            outcome.count(WorkspaceExportEntity::NamespaceDefinitions),
+            1
+        );
+        let namespace = std::str::from_utf8(&bytes)
+            .expect("UTF-8 export")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("JSON line"))
+            .find(|line| line.get("namespace") == Some(&serde_json::json!("imdb_title")))
+            .expect("namespace row");
+        assert_eq!(
+            namespace.get("supported_grains"),
+            Some(&serde_json::json!("film,series"))
+        );
     }
 
     #[test]
@@ -781,6 +862,16 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
         cursor_columns: &[CursorColumn::Text(0)],
     },
     ExportSection {
+        entity: WorkspaceExportEntity::NamespaceDefinitions,
+        sql: "SELECT workspace_id, namespace, label, supported_grains, id_pattern, \
+                     normalization, licence_posture, created_at \
+              FROM namespace_definitions \
+              WHERE workspace_id = ?1 AND namespace > ?2 \
+              ORDER BY namespace LIMIT ?3",
+        count_sql: "SELECT COUNT(*) FROM namespace_definitions WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1)],
+    },
+    ExportSection {
         entity: WorkspaceExportEntity::ExternalIdentifiers,
         sql: "SELECT external_identifier_id, workspace_id, record_id, namespace, grain, value, \
                      created_at \
@@ -1049,6 +1140,12 @@ fn export_snapshot(
         correlation_id,
     )?;
     authorize_transaction(&transaction, capability, access, correlation_id)?;
+    verify_namespace_bindings(
+        &transaction,
+        access.workspace_id(),
+        capability,
+        correlation_id,
+    )?;
 
     let workspace = access.workspace_id().to_string();
     let revision = map_sql(

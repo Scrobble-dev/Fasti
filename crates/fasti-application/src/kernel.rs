@@ -574,7 +574,65 @@ impl AttachIdentifierOutcome {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisterNamespaceDefinitionCommand {
+    correlation_id: fasti_domain::RequestCorrelationId,
+    access: RequestAccessContext,
+    definition: fasti_domain::NamespaceDefinition,
+}
+
+impl RegisterNamespaceDefinitionCommand {
+    pub const fn new(
+        correlation_id: fasti_domain::RequestCorrelationId,
+        access: RequestAccessContext,
+        definition: fasti_domain::NamespaceDefinition,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access,
+            definition,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> fasti_domain::RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+
+    pub const fn definition(&self) -> &fasti_domain::NamespaceDefinition {
+        &self.definition
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisterNamespaceDefinitionOutcome {
+    namespace: fasti_domain::NamespaceKey,
+    created: bool,
+}
+
+impl RegisterNamespaceDefinitionOutcome {
+    pub const fn new(namespace: fasti_domain::NamespaceKey, created: bool) -> Self {
+        Self { namespace, created }
+    }
+
+    pub const fn namespace(&self) -> &fasti_domain::NamespaceKey {
+        &self.namespace
+    }
+
+    pub const fn created(&self) -> bool {
+        self.created
+    }
+}
+
 pub trait IdentityPort: Send + Sync {
+    fn register_namespace_definition(
+        &self,
+        command: RegisterNamespaceDefinitionCommand,
+    ) -> ApplicationResult<RegisterNamespaceDefinitionOutcome>;
+
     fn create_record(&self, command: CreateRecordCommand)
         -> ApplicationResult<CreateRecordOutcome>;
 

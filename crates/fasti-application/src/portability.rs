@@ -107,6 +107,7 @@ pub enum WorkspaceExportEntity {
     Profiles,
     Clients,
     Records,
+    NamespaceDefinitions,
     ExternalIdentifiers,
     Evidence,
     Observations,
@@ -122,11 +123,12 @@ pub enum WorkspaceExportEntity {
 
 impl WorkspaceExportEntity {
     /// Every exported entity, in archive section order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Workspaces,
         Self::Profiles,
         Self::Clients,
         Self::Records,
+        Self::NamespaceDefinitions,
         Self::ExternalIdentifiers,
         Self::Evidence,
         Self::Observations,
@@ -147,6 +149,7 @@ impl WorkspaceExportEntity {
             Self::Profiles => "profiles",
             Self::Clients => "clients",
             Self::Records => "records",
+            Self::NamespaceDefinitions => "namespaces",
             Self::ExternalIdentifiers => "external_identifiers",
             Self::Evidence => "evidence",
             Self::Observations => "observations",
