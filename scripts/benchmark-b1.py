@@ -2183,7 +2183,9 @@ def artifact_sizes(
         "/bin/sh",
         args.immutable_image,
         "-c",
-        "stat -c '%s %s' /usr/local/bin/fastid /usr/local/bin/fasti",
+        # One %s per file. `stat -c` applies the format once PER FILE, so
+        # '%s %s' prints each size twice and yields four tokens, not two.
+        "stat -c '%s' /usr/local/bin/fastid /usr/local/bin/fasti",
     ]
     binary_values = run_checked(binary_size_command).split()
     if len(binary_values) != 2:
