@@ -877,8 +877,14 @@ def capture(args: argparse.Namespace) -> int:
             temporary_output.unlink()
         if not published:
             remove_new_artifact(retained_artifact, retained_artifact_created)
+    # Report failure before success, for the same reason as benchmark-b1.py:
+    # a PASS line followed by a non-zero exit reads as a pass to any wrapper
+    # that greps for the prefix.
+    if receipt["verdict"]["status"] != "pass":
+        print(f"VERDICT_FAILED: {output}")
+        return 1
     print(f"PASS: wrote Tauri cgroup-v2 evidence {output}")
-    return 0 if receipt["verdict"]["status"] == "pass" else 1
+    return 0
 
 
 def self_test() -> None:

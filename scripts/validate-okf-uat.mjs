@@ -284,11 +284,13 @@ async function validateOkf(registry) {
   const concepts = files.filter(
     (path) => !RESERVED_OKF_FILES.has(path.slice(path.lastIndexOf(sep) + 1)),
   );
-  const indexTargets = new Set(
-    markdownTargets(documents.get(rootIndexPath).body)
-      .filter((target) => target.endsWith(".md"))
-      .map((target) => resolve(okfRoot, target)),
-  );
+  // Pass the list, not a Set. assertSameSet checks for duplicates by comparing
+  // list length to set size, and a Set has already collapsed duplicates before
+  // it arrives, so the duplicate check silently could not fire. Linking the
+  // same concept file twice is a normal copy-paste slip.
+  const indexTargets = markdownTargets(documents.get(rootIndexPath).body)
+    .filter((target) => target.endsWith(".md"))
+    .map((target) => resolve(okfRoot, target));
   assertSameSet(indexTargets, concepts, "OKF root index concept links");
 
   const finalizedB1 = registry.capabilities.filter(
@@ -383,10 +385,16 @@ async function validateOkf(registry) {
     "capabilities.md authorization assignments must exactly match finalized B1 registry capabilities",
   );
   for (const [id, authorization] of Object.entries(governedAuthorization)) {
+    // Scope the posture to the capability's own row. A global substring test
+    // passes as long as SOME row anywhere carries the posture, so a row could
+    // publish the wrong authorization for a capability and still validate.
+    const row = capabilityCatalogue.body
+      .split("\n")
+      .find((line) => line.includes(`| \`${id}\``));
+    assert.ok(row, `capabilities.md body must list ${id}`);
     assert.ok(
-      capabilityCatalogue.body.includes(`| \`${id}\``) &&
-        capabilityCatalogue.body.includes(`\`${authorization}\``),
-      `capabilities.md body must explain ${id} authorization ${authorization}`,
+      row.includes(`\`${authorization}\``),
+      `capabilities.md row for ${id} must state authorization ${authorization}`,
     );
   }
 
