@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 4;
+pub(crate) const SCHEMA_VERSION: i64 = 5;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -22,6 +22,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 3 {
         migrate_v4(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 4 {
+        migrate_v5(connection)?;
     }
     Ok(())
 }
@@ -523,6 +528,19 @@ fn migrate_v4(connection: &Connection) -> Result<()> {
     connection.execute_batch(&sql)
 }
 
+fn migrate_v5(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        r#"
+        BEGIN IMMEDIATE;
+
+        ALTER TABLE node_state ADD COLUMN recovery_restore_attempt_id TEXT;
+
+        PRAGMA user_version = 5;
+        COMMIT;
+        "#,
+    )
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -831,6 +849,72 @@ mod tests {
             workspaces, 1,
             "a newer database lost rows to an older binary"
         );
+    }
+
+    #[test]
+    fn version_four_upgrade_adds_only_the_nullable_recovery_attempt_marker() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("create version one database");
+        migrate_v2(&connection).expect("upgrade to version two");
+        migrate_v3(&connection).expect("upgrade to version three");
+        migrate_v4(&connection).expect("upgrade to version four");
+        connection
+            .execute(
+                "INSERT INTO node_state(singleton, initialized, created_at) VALUES (1, 0, ?1)",
+                [CREATED_AT],
+            )
+            .expect("seed pre-recovery node state");
+
+        let tables_before: Vec<String> = connection
+            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+            .expect("prepare table inventory")
+            .query_map([], |row| row.get(0))
+            .expect("query table inventory")
+            .collect::<Result<_, _>>()
+            .expect("collect table inventory");
+        let columns_before: Vec<String> = connection
+            .prepare("SELECT name FROM pragma_table_info('node_state') ORDER BY cid")
+            .expect("prepare node-state columns")
+            .query_map([], |row| row.get(0))
+            .expect("query node-state columns")
+            .collect::<Result<_, _>>()
+            .expect("collect node-state columns");
+
+        migrate(&connection).expect("upgrade version four database");
+
+        let tables_after: Vec<String> = connection
+            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+            .expect("prepare upgraded table inventory")
+            .query_map([], |row| row.get(0))
+            .expect("query upgraded table inventory")
+            .collect::<Result<_, _>>()
+            .expect("collect upgraded table inventory");
+        let columns_after: Vec<String> = connection
+            .prepare("SELECT name FROM pragma_table_info('node_state') ORDER BY cid")
+            .expect("prepare upgraded node-state columns")
+            .query_map([], |row| row.get(0))
+            .expect("query upgraded node-state columns")
+            .collect::<Result<_, _>>()
+            .expect("collect upgraded node-state columns");
+        assert_eq!(tables_after, tables_before);
+        assert_eq!(
+            columns_after,
+            columns_before
+                .into_iter()
+                .chain(["recovery_restore_attempt_id".to_owned()])
+                .collect::<Vec<_>>()
+        );
+        let marker: Option<String> = connection
+            .query_row(
+                "SELECT recovery_restore_attempt_id FROM node_state WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read nullable recovery marker");
+        assert_eq!(marker, None);
     }
 
     #[test]

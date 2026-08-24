@@ -117,9 +117,10 @@ destination. Every receipt constructor takes its concrete request, validates
 the problem capability, correlation ID, and operation-specific problem set,
 then derives identity from that request. Online and stopped-node export retain
 mode, workspace, and correlation. Clean restore retains correlation and restore
-attempt. Post-activation recovery bootstrap also retains workspace and the
-explicit selected profile. The adapter discards incomplete bytes before it
-returns an export or restore receipt.
+attempt. Recovery prepare also retains workspace and the explicit selected
+profile; completion additionally retains the concrete recovery client. The
+adapter discards incomplete bytes before it returns an export or restore
+receipt.
 
 Stopped-node export is a distinct request mode. It carries the same
 `ExportWorkspaceQuery` and `RequestAccessContext` as online export, derives the
@@ -127,12 +128,32 @@ workspace from that access context, and applies the same grant rules against
 the stopped database while holding the shared data-root lock. There is no
 second caller-supplied workspace identifier.
 
-After clean activation, recovery bootstrap must name the restored workspace and
-one existing profile explicitly. Non-secret imported client provenance remains
-available for audit and Chronicle references. Recovery creates a distinct fresh
-node-local client and one-time proof for the normal fresh-credential exchange.
-It never chooses a profile implicitly or reuses imported client authentication,
-credentials, grants, scopes, or node state.
+Verified clean activation leaves both `node_state` and the authorization tables
+empty. Recovery bootstrap must then name the restored workspace and one existing
+profile explicitly. Prepare runs in one immediate transaction: it creates a
+distinct fresh node-local client, a one-time proof digest, and one provisional
+grant with only `client_enroll`, and records the restore attempt in the newly
+inserted `node_state`. Explicit replacement can replace only that exact pending,
+unconsumed provisional state. It never chooses a profile implicitly or reuses
+imported client authentication, credentials, grants, scopes, or node state.
+
+Completion receives the one-time proof and an already-owned final credential
+from the caller. One immediate transaction revokes the proof credential, stores
+only the supplied credential digest, expands the provisional grant to the shared
+current administrator scopes, and consumes the proof. A retry with the same
+proof and final credential returns the original non-secret access metadata. A
+different pair fails with `bootstrap_closed`; no failure-attempt counter or
+post-commit secret generation exists.
+
+The store migration adds only nullable `node_state.recovery_restore_attempt_id`.
+The private prepare transaction core requires absent `node_state`, empty
+authorization tables, and an exact existing workspace/profile relation. It is
+not wired to `RecoveryBootstrapPort`: the stopped-node adapter must first prove
+the matching filesystem restore marker is COMPLETE. That verifier is not yet
+implemented, so there is deliberately no runtime dispatch seam, CLI, HTTP, or
+SDK activation. Ordinary initialization retains its existing closed result for
+a restored workspace until that durable marker proof can support a distinct
+recovery-required classification.
 
 The store predecessor for final archive assembly keeps the frozen entity SQL
 and row codec in one place. It can stream exactly one plain NDJSON entity from
@@ -182,13 +203,18 @@ on the distinct stopped-node export and clean-restore paths.
 
 Domain tests fix the archive policy and restore state machine. Application
 tests fix manifest order, bounded metadata, request policies, terminal restore
-outcomes, stopped-node authorization context, failure-operation identity, and
-staged problem ownership. Contract tests deserialize the checked-in example,
+outcomes, stopped-node authorization context, prepare/complete failure-operation
+identity, caller-owned recovery completion, and staged problem ownership.
+Contract tests deserialize the checked-in example,
 compare its bounds with the generated Schemars surface, reject values outside
 the DTO type range, and prove the canonical outbound projection round-trips.
-The store regression holds the real data-root lock and proves offline verify
-returns `data_root_locked`. The governed contract verifier must show that the
-public registry and generated public artifacts remain unchanged.
+Store regressions prove the v5 migration adds only the nullable recovery marker;
+prepare rejects wrong workspace/profile and imported authorization without
+mutation; replacement removes only a pending provisional; completion is atomic,
+concurrent, idempotent for the same caller-owned pair, closed for a different
+pair, and never persists plaintext secrets. The existing lock regression proves
+offline verify returns `data_root_locked`. The governed contract verifier must
+show that the public registry and generated public artifacts remain unchanged.
 
 ## Related records
 

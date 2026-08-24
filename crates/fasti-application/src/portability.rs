@@ -575,11 +575,18 @@ pub enum PortabilityFailureOperation {
         restore_attempt_id: RestoreAttemptId,
         correlation_id: RequestCorrelationId,
     },
-    RecoveryBootstrap {
+    RecoveryBootstrapPrepare {
         restore_attempt_id: RestoreAttemptId,
         correlation_id: RequestCorrelationId,
         workspace_id: WorkspaceId,
         profile_id: ProfileId,
+    },
+    RecoveryBootstrapComplete {
+        restore_attempt_id: RestoreAttemptId,
+        correlation_id: RequestCorrelationId,
+        workspace_id: WorkspaceId,
+        profile_id: ProfileId,
+        client_id: ClientId,
     },
 }
 
@@ -589,7 +596,8 @@ impl PortabilityFailureOperation {
             Self::OnlineExport { correlation_id, .. }
             | Self::StoppedNodeExport { correlation_id, .. }
             | Self::CleanRestore { correlation_id, .. }
-            | Self::RecoveryBootstrap { correlation_id, .. } => correlation_id,
+            | Self::RecoveryBootstrapPrepare { correlation_id, .. }
+            | Self::RecoveryBootstrapComplete { correlation_id, .. } => correlation_id,
         }
     }
 
@@ -599,7 +607,10 @@ impl PortabilityFailureOperation {
             Self::CleanRestore {
                 restore_attempt_id, ..
             }
-            | Self::RecoveryBootstrap {
+            | Self::RecoveryBootstrapPrepare {
+                restore_attempt_id, ..
+            }
+            | Self::RecoveryBootstrapComplete {
                 restore_attempt_id, ..
             } => Some(restore_attempt_id),
         }
@@ -609,17 +620,29 @@ impl PortabilityFailureOperation {
         match self {
             Self::OnlineExport { workspace_id, .. }
             | Self::StoppedNodeExport { workspace_id, .. }
-            | Self::RecoveryBootstrap { workspace_id, .. } => Some(workspace_id),
+            | Self::RecoveryBootstrapPrepare { workspace_id, .. }
+            | Self::RecoveryBootstrapComplete { workspace_id, .. } => Some(workspace_id),
             Self::CleanRestore { .. } => None,
         }
     }
 
     pub const fn profile_id(self) -> Option<ProfileId> {
         match self {
-            Self::RecoveryBootstrap { profile_id, .. } => Some(profile_id),
+            Self::RecoveryBootstrapPrepare { profile_id, .. }
+            | Self::RecoveryBootstrapComplete { profile_id, .. } => Some(profile_id),
             Self::OnlineExport { .. }
             | Self::StoppedNodeExport { .. }
             | Self::CleanRestore { .. } => None,
+        }
+    }
+
+    pub const fn client_id(self) -> Option<ClientId> {
+        match self {
+            Self::RecoveryBootstrapComplete { client_id, .. } => Some(client_id),
+            Self::OnlineExport { .. }
+            | Self::StoppedNodeExport { .. }
+            | Self::CleanRestore { .. }
+            | Self::RecoveryBootstrapPrepare { .. } => None,
         }
     }
 
@@ -627,7 +650,9 @@ impl PortabilityFailureOperation {
         match self {
             Self::OnlineExport { .. } => Some(WorkspaceExportMode::Online),
             Self::StoppedNodeExport { .. } => Some(WorkspaceExportMode::StoppedNode),
-            Self::CleanRestore { .. } | Self::RecoveryBootstrap { .. } => None,
+            Self::CleanRestore { .. }
+            | Self::RecoveryBootstrapPrepare { .. }
+            | Self::RecoveryBootstrapComplete { .. } => None,
         }
     }
 }
@@ -746,7 +771,7 @@ impl PortabilityFailureReceipt {
         Ok(Self { operation, problem })
     }
 
-    pub fn try_recovery_bootstrap(
+    pub fn try_recovery_bootstrap_prepare(
         request: &PrepareRecoveryBootstrapRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
@@ -754,13 +779,53 @@ impl PortabilityFailureReceipt {
             &problem,
             CapabilityKey::RestoreWorkspace,
             request.correlation_id(),
-            problem.code() == crate::ProblemCode::RecoveryBootstrapPending,
+            matches!(
+                problem.code(),
+                crate::ProblemCode::CapabilityUnavailable
+                    | crate::ProblemCode::DataRootLocked
+                    | crate::ProblemCode::Forbidden
+                    | crate::ProblemCode::IntegrityFailed
+                    | crate::ProblemCode::RecoveryBootstrapPending
+                    | crate::ProblemCode::StorageUnavailable
+                    | crate::ProblemCode::UnsupportedPlatform
+                    | crate::ProblemCode::ValidationFailed
+            ),
         )?;
-        let operation = PortabilityFailureOperation::RecoveryBootstrap {
+        let operation = PortabilityFailureOperation::RecoveryBootstrapPrepare {
             restore_attempt_id: request.restore_attempt_id(),
             correlation_id: request.correlation_id(),
             workspace_id: request.workspace_id(),
             profile_id: request.profile_id(),
+        };
+        Ok(Self { operation, problem })
+    }
+
+    pub fn try_recovery_bootstrap_complete(
+        request: &CompleteRecoveryBootstrapRequest,
+        problem: Box<FastiProblem>,
+    ) -> Result<Self, PortabilityFailureReceiptError> {
+        validate_failure_problem(
+            &problem,
+            CapabilityKey::RestoreWorkspace,
+            request.correlation_id(),
+            matches!(
+                problem.code(),
+                crate::ProblemCode::CapabilityUnavailable
+                    | crate::ProblemCode::BootstrapClosed
+                    | crate::ProblemCode::DataRootLocked
+                    | crate::ProblemCode::Forbidden
+                    | crate::ProblemCode::IntegrityFailed
+                    | crate::ProblemCode::StorageUnavailable
+                    | crate::ProblemCode::UnsupportedPlatform
+                    | crate::ProblemCode::ValidationFailed
+            ),
+        )?;
+        let operation = PortabilityFailureOperation::RecoveryBootstrapComplete {
+            restore_attempt_id: request.restore_attempt_id(),
+            correlation_id: request.correlation_id(),
+            workspace_id: request.workspace_id(),
+            profile_id: request.profile_id(),
+            client_id: request.client_id(),
         };
         Ok(Self { operation, problem })
     }
@@ -1113,6 +1178,7 @@ pub struct PrepareRecoveryBootstrapRequest {
     correlation_id: RequestCorrelationId,
     workspace_id: WorkspaceId,
     profile_id: ProfileId,
+    replace_pending: bool,
 }
 
 impl PrepareRecoveryBootstrapRequest {
@@ -1121,12 +1187,14 @@ impl PrepareRecoveryBootstrapRequest {
         correlation_id: RequestCorrelationId,
         workspace_id: WorkspaceId,
         profile_id: ProfileId,
+        replace_pending: bool,
     ) -> Self {
         Self {
             restore_attempt_id,
             correlation_id,
             workspace_id,
             profile_id,
+            replace_pending,
         }
     }
 
@@ -1146,6 +1214,10 @@ impl PrepareRecoveryBootstrapRequest {
         self.profile_id
     }
 
+    pub const fn replace_pending(&self) -> bool {
+        self.replace_pending
+    }
+
     pub const fn recovery_grant_policy(&self) -> RecoveryGrantPolicy {
         RecoveryGrantPolicy::RequireFreshBootstrap
     }
@@ -1155,10 +1227,10 @@ impl PrepareRecoveryBootstrapRequest {
 ///
 /// Non-secret imported client provenance remains required for audit and
 /// Chronicle references. A successful adapter creates a distinct node-local
-/// recovery client and one-time proof after proving the workspace/profile
-/// relation. The normal enrollment exchange replaces the proof with a fresh
-/// credential and fresh grants. Imported client authentication, credentials,
-/// grants, scopes, and node state are never reused.
+/// recovery client and one-time proof after proving the restore/workspace/profile
+/// relation. Completion consumes that proof and an already-owned final
+/// credential supplied by the caller. Imported client authentication,
+/// credentials, grants, scopes, and node state are never reused.
 pub struct PrepareRecoveryBootstrapOutcome {
     restore_attempt_id: RestoreAttemptId,
     workspace_id: WorkspaceId,
@@ -1205,12 +1277,107 @@ impl PrepareRecoveryBootstrapOutcome {
     }
 }
 
+/// Caller-owned proof and final credential for atomic recovery completion.
+///
+/// The final credential exists before the transaction starts. A lost response
+/// can therefore retry the same proof/credential pair without the store
+/// generating a second secret after commit.
+pub struct CompleteRecoveryBootstrapRequest {
+    restore_attempt_id: RestoreAttemptId,
+    correlation_id: RequestCorrelationId,
+    workspace_id: WorkspaceId,
+    profile_id: ProfileId,
+    client_id: ClientId,
+    initialization_proof: SecretMaterial,
+    credential: SecretMaterial,
+}
+
+impl CompleteRecoveryBootstrapRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        restore_attempt_id: RestoreAttemptId,
+        correlation_id: RequestCorrelationId,
+        workspace_id: WorkspaceId,
+        profile_id: ProfileId,
+        client_id: ClientId,
+        initialization_proof: SecretMaterial,
+        credential: SecretMaterial,
+    ) -> Self {
+        Self {
+            restore_attempt_id,
+            correlation_id,
+            workspace_id,
+            profile_id,
+            client_id,
+            initialization_proof,
+            credential,
+        }
+    }
+
+    pub const fn restore_attempt_id(&self) -> RestoreAttemptId {
+        self.restore_attempt_id
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    pub const fn profile_id(&self) -> ProfileId {
+        self.profile_id
+    }
+
+    pub const fn client_id(&self) -> ClientId {
+        self.client_id
+    }
+
+    pub const fn initialization_proof(&self) -> &SecretMaterial {
+        &self.initialization_proof
+    }
+
+    pub const fn credential(&self) -> &SecretMaterial {
+        &self.credential
+    }
+}
+
+/// Non-secret metadata for one committed recovery-bootstrap completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompleteRecoveryBootstrapOutcome {
+    restore_attempt_id: RestoreAttemptId,
+    access: RequestAccessContext,
+}
+
+impl CompleteRecoveryBootstrapOutcome {
+    pub const fn new(restore_attempt_id: RestoreAttemptId, access: RequestAccessContext) -> Self {
+        Self {
+            restore_attempt_id,
+            access,
+        }
+    }
+
+    pub const fn restore_attempt_id(&self) -> RestoreAttemptId {
+        self.restore_attempt_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+}
+
 /// Offline recovery-bootstrap step after verified clean activation.
 pub trait RecoveryBootstrapPort: Send + Sync {
     fn prepare_recovery_bootstrap(
         &self,
         request: PrepareRecoveryBootstrapRequest,
     ) -> PortabilityResult<PrepareRecoveryBootstrapOutcome>;
+
+    fn complete_recovery_bootstrap(
+        &self,
+        request: CompleteRecoveryBootstrapRequest,
+    ) -> PortabilityResult<CompleteRecoveryBootstrapOutcome>;
 }
 
 #[cfg(test)]
@@ -1764,8 +1931,9 @@ mod tests {
             bootstrap_correlation,
             workspace_id,
             profile_id,
+            false,
         );
-        let bootstrap = PortabilityFailureReceipt::try_recovery_bootstrap(
+        let bootstrap = PortabilityFailureReceipt::try_recovery_bootstrap_prepare(
             &bootstrap_request,
             Box::new(FastiProblem::recovery_bootstrap_pending(
                 bootstrap_correlation,
@@ -1774,11 +1942,12 @@ mod tests {
         .expect("recovery-bootstrap failure receipt");
         assert!(matches!(
             bootstrap.operation(),
-            PortabilityFailureOperation::RecoveryBootstrap { .. }
+            PortabilityFailureOperation::RecoveryBootstrapPrepare { .. }
         ));
         assert_eq!(bootstrap.operation().restore_attempt_id(), Some(attempt_id));
         assert_eq!(bootstrap.operation().workspace_id(), Some(workspace_id));
         assert_eq!(bootstrap.operation().profile_id(), Some(profile_id));
+        assert_eq!(bootstrap.operation().client_id(), None);
         assert_eq!(
             bootstrap.problem().safe_state(),
             crate::SafeState::RestoredDataActiveBootstrapPending
@@ -1788,12 +1957,78 @@ mod tests {
             "retry_recovery_bootstrap"
         );
         assert_eq!(
-            PortabilityFailureReceipt::try_recovery_bootstrap(
+            PortabilityFailureReceipt::try_recovery_bootstrap_prepare(
                 &bootstrap_request,
                 Box::new(FastiProblem::restore_canceled(bootstrap_correlation))
             ),
             Err(PortabilityFailureReceiptError::OperationProblemMismatch),
             "a pre-activation cancellation cannot be mislabeled as recovery bootstrap"
+        );
+        for code in [
+            crate::ProblemCode::DataRootLocked,
+            crate::ProblemCode::UnsupportedPlatform,
+            crate::ProblemCode::ValidationFailed,
+        ] {
+            let receipt = PortabilityFailureReceipt::try_recovery_bootstrap_prepare(
+                &bootstrap_request,
+                Box::new(FastiProblem::from_code(
+                    code,
+                    CapabilityKey::RestoreWorkspace,
+                    bootstrap_correlation,
+                )),
+            )
+            .expect("prepare owns offline prerequisites and identity validation");
+            assert_eq!(receipt.problem().code(), code);
+        }
+
+        let recovery_client_id = ClientId::new_v7();
+        let complete_request = CompleteRecoveryBootstrapRequest::new(
+            attempt_id,
+            bootstrap_correlation,
+            workspace_id,
+            profile_id,
+            recovery_client_id,
+            SecretMaterial::from_bytes([3; 32]),
+            SecretMaterial::from_bytes([4; 32]),
+        );
+        let complete = PortabilityFailureReceipt::try_recovery_bootstrap_complete(
+            &complete_request,
+            Box::new(FastiProblem::from_code(
+                crate::ProblemCode::BootstrapClosed,
+                CapabilityKey::RestoreWorkspace,
+                bootstrap_correlation,
+            )),
+        )
+        .expect("completion failure receipt");
+        assert!(matches!(
+            complete.operation(),
+            PortabilityFailureOperation::RecoveryBootstrapComplete { .. }
+        ));
+        assert_eq!(complete.operation().restore_attempt_id(), Some(attempt_id));
+        assert_eq!(complete.operation().workspace_id(), Some(workspace_id));
+        assert_eq!(complete.operation().profile_id(), Some(profile_id));
+        assert_eq!(complete.operation().client_id(), Some(recovery_client_id));
+        assert_eq!(
+            PortabilityFailureReceipt::try_recovery_bootstrap_complete(
+                &complete_request,
+                Box::new(FastiProblem::recovery_bootstrap_pending(
+                    bootstrap_correlation,
+                )),
+            ),
+            Err(PortabilityFailureReceiptError::OperationProblemMismatch),
+            "pending is a prepare result, not a bad completion proof"
+        );
+        assert_eq!(
+            PortabilityFailureReceipt::try_recovery_bootstrap_complete(
+                &complete_request,
+                Box::new(FastiProblem::from_code(
+                    crate::ProblemCode::BootstrapClosed,
+                    CapabilityKey::RestoreWorkspace,
+                    RequestCorrelationId::new_v7(),
+                )),
+            ),
+            Err(PortabilityFailureReceiptError::OperationProblemMismatch),
+            "a completion problem from another request cannot be rebound"
         );
 
         assert_eq!(
@@ -1835,9 +2070,11 @@ mod tests {
             RequestCorrelationId::new_v7(),
             workspace_id,
             profile_id,
+            false,
         );
         assert_eq!(request.workspace_id(), workspace_id);
         assert_eq!(request.profile_id(), profile_id);
+        assert!(!request.replace_pending());
         assert_eq!(
             request.recovery_grant_policy(),
             RecoveryGrantPolicy::RequireFreshBootstrap
@@ -1855,5 +2092,38 @@ mod tests {
         assert_eq!(outcome.profile_id(), profile_id);
         assert_eq!(outcome.client_id(), client_id);
         assert_eq!(outcome.initialization_proof().expose_bytes(), &[7; 32]);
+
+        let credential_id = CredentialId::new_v7();
+        let grant_id = ProfileGrantId::new_v7();
+        let complete_request = CompleteRecoveryBootstrapRequest::new(
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            workspace_id,
+            profile_id,
+            client_id,
+            SecretMaterial::from_bytes([7; 32]),
+            SecretMaterial::from_bytes([8; 32]),
+        );
+        assert_eq!(complete_request.restore_attempt_id(), attempt_id);
+        assert_eq!(complete_request.workspace_id(), workspace_id);
+        assert_eq!(complete_request.profile_id(), profile_id);
+        assert_eq!(complete_request.client_id(), client_id);
+        assert_eq!(
+            complete_request.initialization_proof().expose_bytes(),
+            &[7; 32]
+        );
+        assert_eq!(complete_request.credential().expose_bytes(), &[8; 32]);
+
+        let access = RequestAccessContext::new(
+            workspace_id,
+            profile_id,
+            client_id,
+            credential_id,
+            grant_id,
+            1,
+        );
+        let completed = CompleteRecoveryBootstrapOutcome::new(attempt_id, access);
+        assert_eq!(completed.restore_attempt_id(), attempt_id);
+        assert_eq!(completed.access(), &access);
     }
 }

@@ -409,6 +409,7 @@ define_capabilities!(
         [],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
         [
+            BootstrapClosed,
             CapacityExceeded,
             DataRootLocked,
             IntegrityFailed,
@@ -553,6 +554,7 @@ mod tests {
 
         let restore = CapabilityKey::RestoreWorkspace.allowed_problem_codes();
         for code in [
+            ProblemCode::BootstrapClosed,
             ProblemCode::OperationCanceled,
             ProblemCode::RecoveryBootstrapPending,
             ProblemCode::UnsupportedPlatform,
