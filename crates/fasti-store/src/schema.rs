@@ -300,4 +300,146 @@ mod tests {
             .expect("read version two");
         assert_eq!(after, SCHEMA_VERSION);
     }
+
+    /// Seed the minimum row set that a real version-one database would hold.
+    ///
+    /// The upgrade test above proves the version number moves. It inserts no
+    /// rows, so a migration that dropped or rewrote user data would still pass
+    /// it. These rows make that failure observable.
+    fn seed_version_one_rows(connection: &Connection) {
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_seed', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_seed', 'wsp_seed', '2026-08-24T00:00:01Z');
+                INSERT INTO clients(client_id, workspace_id, status,
+                                    current_credential_epoch, created_at)
+                    VALUES ('cli_seed', 'wsp_seed', 'active', 1, '2026-08-24T00:00:02Z');
+                INSERT INTO evidence(evidence_id, workspace_id, digest, size_bytes,
+                                     relative_path, created_at)
+                    VALUES ('evd_seed', 'wsp_seed', 'sha256:aa', 2,
+                            'payloads/sha256/aa/aa', '2026-08-24T00:00:03Z');
+                INSERT INTO observations(observation_id, workspace_id, profile_id,
+                                         source_client_id, evidence_id, occurred_at_json,
+                                         observed_at_json, received_at, created_at)
+                    VALUES ('obs_seed', 'wsp_seed', 'prf_seed', 'cli_seed', 'evd_seed',
+                            NULL, '{"claim":"seed"}', '2026-08-24T00:00:04Z',
+                            '2026-08-24T00:00:04Z');
+                "#,
+            )
+            .expect("seed version one rows");
+    }
+
+    #[test]
+    fn upgrading_a_populated_version_one_database_preserves_every_row() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("create version one database");
+        seed_version_one_rows(&connection);
+
+        migrate(&connection).expect("upgrade populated database");
+
+        // Every seeded row must still be readable, and readable unchanged. A
+        // migration that recreated a table and copied rows badly would show up
+        // here rather than in production.
+        for (table, key_column, key) in [
+            ("workspaces", "workspace_id", "wsp_seed"),
+            ("profiles", "profile_id", "prf_seed"),
+            ("clients", "client_id", "cli_seed"),
+            ("evidence", "evidence_id", "evd_seed"),
+            ("observations", "observation_id", "obs_seed"),
+        ] {
+            let found: i64 = connection
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {key_column} = ?1"),
+                    [key],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|error| panic!("read {table} after upgrade: {error}"));
+            assert_eq!(found, 1, "{table} lost {key} during the upgrade");
+        }
+
+        let observed: String = connection
+            .query_row(
+                "SELECT observed_at_json FROM observations WHERE observation_id = 'obs_seed'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read observation payload after upgrade");
+        assert_eq!(
+            observed, r#"{"claim":"seed"}"#,
+            "observation payload was rewritten during the upgrade"
+        );
+
+        // Foreign keys must still resolve after the schema changed underneath
+        // them. A silent constraint break is worse than a loud migration error.
+        let violations: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .expect("run foreign key check");
+        assert_eq!(violations, 0, "upgrade left dangling foreign keys");
+    }
+
+    #[test]
+    fn migrating_twice_is_a_no_op() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate(&connection).expect("first migration");
+        seed_version_one_rows(&connection);
+
+        // Re-running must not replay any step. Replaying migrate_v1 would fail
+        // on CREATE TABLE, and replaying migrate_v2 would drop the seeded rows.
+        migrate(&connection).expect("second migration is a no-op");
+
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user version");
+        assert_eq!(version, SCHEMA_VERSION);
+        let workspaces: i64 = connection
+            .query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))
+            .expect("count workspaces");
+        assert_eq!(workspaces, 1, "re-running migrate disturbed existing rows");
+    }
+
+    #[test]
+    fn a_database_from_a_newer_fasti_is_left_untouched() {
+        // Downgrade path. If a user runs a newer Fasti and then an older one,
+        // the older binary must not touch the file. Silently operating on a
+        // schema it does not understand is the corruption case; `migrate` must
+        // leave the version alone so `SqliteKernel::open` can reject it.
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate(&connection).expect("reach current schema");
+        seed_version_one_rows(&connection);
+        connection
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .expect("simulate a newer schema");
+
+        migrate(&connection).expect("migrate must not error on a newer schema");
+
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read user version");
+        assert_eq!(
+            version,
+            SCHEMA_VERSION + 1,
+            "an older binary must not rewrite a newer schema version"
+        );
+        let workspaces: i64 = connection
+            .query_row("SELECT COUNT(*) FROM workspaces", [], |row| row.get(0))
+            .expect("count workspaces");
+        assert_eq!(
+            workspaces, 1,
+            "a newer database lost rows to an older binary"
+        );
+    }
 }
