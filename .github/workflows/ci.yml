@@ -112,6 +112,31 @@ jobs:
       - name: Verify the native path works with the network denied
         run: bash scripts/smoke-native.sh target/release
 
+  low-hardware-envelope:
+    name: Low-hardware envelope (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Build the daemon under test
+        run: cargo build --locked --release --bin fastid
+      # The self-test runs first on purpose. A memory gate that cannot fail
+      # would report success forever, so the envelope proves it enforces its
+      # limits before any measurement taken with it is trusted.
+      - name: Prove the envelope enforces its limits
+        run: bash scripts/test-bench-envelope.sh
+      - name: Measure daemon idle memory inside the enforced envelope
+        run: bash scripts/bench-envelope.sh --target idle -- bash scripts/bench-daemon-idle.sh target/release/fastid
+
   review-source-snapshot:
     name: Exact tracked source snapshot
     runs-on: ubuntu-latest
