@@ -2553,10 +2553,13 @@ def capture_bound(
         for verdict in collection
         if verdict["status"] == "fail"
     ]
-    print(f"PASS: validated B1 performance evidence written to {args.output}")
+    # Report failure before success. Printing PASS and then exiting non-zero
+    # invites a wrapper doing `... | grep -q '^PASS:'` to read a budget failure
+    # as a pass, which is the convention used across the rest of this repo.
     if failures:
         print(f"BUDGET_FAILURES: {', '.join(failures)}")
         raise SystemExit(1)
+    print(f"PASS: validated B1 performance evidence written to {args.output}")
 
 
 def capture(args: argparse.Namespace) -> None:

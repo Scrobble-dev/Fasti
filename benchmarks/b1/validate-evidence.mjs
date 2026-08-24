@@ -2188,7 +2188,17 @@ function clone(value) {
 function expectLedgerFailure(ledger, label) {
   try {
     validateLedgerDocument(ledger);
-  } catch {
+  } catch (error) {
+    // A bare catch counts ANY throw as the sentinel passing, including a
+    // TypeError from dereferencing the very field the mutation deleted. The
+    // semantic assertion the sentinel claims to prove would never be reached,
+    // and the sentinel count would stay green while the check rotted away.
+    // Sibling helpers in this file already assert on the message.
+    if (error instanceof TypeError || error instanceof ReferenceError) {
+      throw new Error(
+        `device ledger sentinel for ${label} threw ${error.name} instead of a validation failure: ${error.message}`,
+      );
+    }
     return;
   }
   throw new Error(`invalid device ledger passed after removing ${label}`);
