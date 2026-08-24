@@ -139,8 +139,10 @@ if [[ -z "$rss_kib" ]]; then
   echo "Could not read idle memory for the native daemon" >&2
   exit 1
 fi
+# Compare in KiB. Truncating to whole MiB first would let 65537 KiB read as
+# 64 MiB and pass a 64 MiB budget, so the gate would be loose by up to 1023 KiB.
 rss_mib=$(( rss_kib / 1024 ))
-if (( rss_mib > idle_limit_mib )); then
+if (( rss_kib > idle_limit_mib * 1024 )); then
   echo "Native daemon idle memory ${rss_mib} MiB exceeds the ${idle_limit_mib} MiB budget" >&2
   exit 1
 fi
