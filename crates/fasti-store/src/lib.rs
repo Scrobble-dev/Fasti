@@ -15,4 +15,4 @@ mod seed;
 #[cfg(test)]
 mod test_support;
 
-pub use kernel::{SqliteKernel, StoreOpenError};
+pub use kernel::{LockedDataRoot, SqliteKernel, StoreOpenError};

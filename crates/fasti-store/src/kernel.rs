@@ -18,6 +18,9 @@ use thiserror::Error;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
+#[cfg(not(target_os = "linux"))]
+use std::fs::OpenOptions;
+
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_EVIDENCE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_TEMP_EVIDENCE_BYTES: u64 = 32 * 1024 * 1024;
@@ -42,6 +45,8 @@ pub enum StoreOpenError {
     SynchronousLevel(i64),
     #[error("SQLite schema version {actual} does not match expected version {expected}")]
     SchemaVersion { expected: i64, actual: i64 },
+    #[error("another daemon or offline operation holds the Fasti data-root lock")]
+    DataRootLocked,
 }
 
 #[derive(Debug, Clone)]
@@ -49,9 +54,32 @@ pub struct SqliteKernel {
     pub(crate) inner: Arc<KernelInner>,
 }
 
+/// Exclusive access to one data root without creating or opening `current/`.
+///
+/// The daemon kernel and stopped-node CLI use this same guard so restore can
+/// prove the daemon is stopped before it inspects staging or active data.
+#[derive(Debug)]
+pub struct LockedDataRoot {
+    path: PathBuf,
+    _lock: File,
+}
+
+impl LockedDataRoot {
+    pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
+        let path = path.as_ref().to_path_buf();
+        prepare_private_directory(&path)?;
+        let lock = acquire_data_root_lock(&path)?;
+        Ok(Self { path, _lock: lock })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct KernelInner {
-    pub(crate) data_root: PathBuf,
+    pub(crate) data_root: LockedDataRoot,
     pub(crate) current_root: PathBuf,
     pub(crate) payload_root: PathBuf,
     pub(crate) scratch_root: PathBuf,
@@ -67,12 +95,11 @@ pub(crate) struct UploadBudget {
 
 impl SqliteKernel {
     pub fn open(data_root: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
-        let data_root = data_root.as_ref().to_path_buf();
-        let current_root = data_root.join("current");
+        let data_root = LockedDataRoot::acquire(data_root)?;
+        let current_root = data_root.path().join("current");
         let payload_root = current_root.join("payloads").join("sha256");
         let scratch_root = current_root.join("scratch").join("uploads");
 
-        prepare_private_directory(&data_root)?;
         prepare_private_directory(&current_root)?;
         prepare_private_directory(&payload_root)?;
         prepare_private_directory(&scratch_root)?;
@@ -115,7 +142,7 @@ impl SqliteKernel {
     }
 
     pub fn data_root(&self) -> &Path {
-        &self.inner.data_root
+        self.inner.data_root.path()
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -147,6 +174,54 @@ impl SqliteKernel {
             ))
         })
     }
+}
+
+fn acquire_data_root_lock(data_root: &Path) -> Result<File, StoreOpenError> {
+    let file = open_data_root_lock(data_root)?;
+    if !file.metadata()?.is_file() {
+        return Err(unsafe_path(
+            &data_root.join("fasti.lock"),
+            "expected a regular file",
+        ));
+    }
+    set_owner_only_open_file_permissions(&file)?;
+    file.try_lock().map_err(|error| match error {
+        std::fs::TryLockError::WouldBlock => StoreOpenError::DataRootLocked,
+        std::fs::TryLockError::Error(error) => StoreOpenError::Io(error),
+    })?;
+    Ok(file)
+}
+
+#[cfg(target_os = "linux")]
+fn open_data_root_lock(data_root: &Path) -> Result<File, StoreOpenError> {
+    let root = File::open(data_root)?;
+    let fd = rustix::fs::openat2(
+        &root,
+        "fasti.lock",
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_data_root_lock(data_root: &Path) -> Result<File, StoreOpenError> {
+    let path = data_root.join("fasti.lock");
+    reject_unsafe_existing_file(&path)?;
+    Ok(OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?)
 }
 
 fn unsafe_path(path: &Path, reason: &'static str) -> StoreOpenError {
@@ -209,6 +284,17 @@ fn set_owner_only_file_permissions(path: &Path) -> Result<(), StoreOpenError> {
 
 #[cfg(not(unix))]
 fn set_owner_only_file_permissions(_path: &Path) -> Result<(), StoreOpenError> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_owner_only_open_file_permissions(file: &File) -> Result<(), StoreOpenError> {
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_open_file_permissions(_file: &File) -> Result<(), StoreOpenError> {
     Ok(())
 }
 
@@ -480,6 +566,37 @@ mod tests {
         {
             let _ = link;
         }
+    }
+
+    #[test]
+    fn data_root_lock_excludes_a_second_kernel_and_releases_on_drop() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let first = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        assert!(!root.join("current").exists());
+
+        assert!(matches!(
+            SqliteKernel::open(&root),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+
+        drop(first);
+        SqliteKernel::open(&root).expect("lock released with kernel");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_lock_rejects_a_symbolic_link() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        fs::create_dir(&root).expect("data root");
+        let outside = temporary.path().join("outside");
+        fs::write(&outside, b"unchanged").expect("outside file");
+        std::os::unix::fs::symlink(&outside, root.join("fasti.lock"))
+            .expect("hostile lock symlink");
+
+        assert!(SqliteKernel::open(&root).is_err());
+        assert_eq!(fs::read(outside).expect("outside bytes"), b"unchanged");
     }
 
     #[cfg(unix)]
