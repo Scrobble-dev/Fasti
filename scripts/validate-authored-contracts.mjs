@@ -258,11 +258,22 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
       `${term} must expand as xsd:dateTime`,
     );
   }
+  // Match the term IRI exactly on @id. A substring search over the serialized
+  // document would also accept a longer IRI such as .../v1/ObservationBatch, or
+  // the term appearing only as a value, and would not prove that the vocabulary
+  // declares it as a class.
+  const observationTermIri = "https://fasti.scrobble.dev/ns/v1/Observation";
+  const observationNode = expandedVocabulary.find(
+    (node) => node["@id"] === observationTermIri,
+  );
   assert.ok(
-    JSON.stringify(expandedVocabulary).includes(
-      "https://fasti.scrobble.dev/ns/v1/Observation",
-    ),
-    "expanded vocabulary must define Observation",
+    observationNode,
+    `expanded vocabulary must define ${observationTermIri}`,
+  );
+  assert.deepEqual(
+    observationNode["@type"],
+    ["http://www.w3.org/2000/01/rdf-schema#Class"],
+    "Observation must be declared as an rdfs:Class",
   );
   assert.deepEqual(loadedFileUrls, [expectedContextUrl]);
 
