@@ -241,6 +241,23 @@ impl ResolvedField {
 /// Tie-breaking within a tier is always by most-recent `fetched_at`, then by
 /// source namespace, so two callers resolving the same claim set never
 /// disagree on which provider wins.
+/// True when `candidate` should replace `current` as the tracked winner.
+///
+/// Matches `Iterator::max_by`'s documented tie-break exactly: forward
+/// iteration, and on a full tie the LAST element wins. Preserved deliberately
+/// so the single-pass selection below is behaviorally identical to the
+/// two-pass `Vec`-based version it replaces, not merely similar.
+fn prefer(current: Option<&FieldClaim>, candidate: &FieldClaim) -> bool {
+    match current {
+        None => true,
+        Some(current) => match candidate.fetched_at().cmp(&current.fetched_at()) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Equal => candidate.source() >= current.source(),
+            std::cmp::Ordering::Less => false,
+        },
+    }
+}
+
 pub fn resolve_field(
     override_: Option<&FieldOverride>,
     claims: &[FieldClaim],
@@ -257,38 +274,47 @@ pub fn resolve_field(
         };
     }
 
-    let most_recent = |claims: &[&FieldClaim]| -> Option<FieldClaim> {
-        claims
-            .iter()
-            .max_by(|left, right| {
-                left.fetched_at()
-                    .cmp(&right.fetched_at())
-                    .then_with(|| left.source().cmp(right.source()))
-            })
-            .map(|claim| (*claim).clone())
-    };
+    // Single pass, O(1) extra space regardless of claim count. The prior
+    // version built up to three `Vec<&FieldClaim>` proportional to the input
+    // slice, which has no declared upper bound; a long claim history could
+    // grow past the 192 MiB process ceiling during resolution alone. This
+    // tracks only the current winner per tier.
+    let mut best_preferred: Option<&FieldClaim> = None;
+    let mut best_fallback: Option<&FieldClaim> = None;
+    let mut best_any: Option<&FieldClaim> = None;
 
-    let fresh: Vec<&FieldClaim> = claims.iter().filter(|claim| claim.is_fresh(now)).collect();
-
-    if let (Some(preferred_source), Some(preferred_locale)) = (preferred_source, preferred_locale) {
-        let preferred: Vec<&FieldClaim> = fresh
-            .iter()
-            .copied()
-            .filter(|claim| {
-                claim.source() == preferred_source && claim.locale() == Some(preferred_locale)
-            })
-            .collect();
-        if let Some(claim) = most_recent(&preferred) {
-            return ResolvedField {
-                tier: FieldResolutionTier::PreferredProviderClaim,
-                value: Some(claim.value().to_owned()),
-                source: Some(claim.source().clone()),
-                is_stale: false,
-            };
+    for claim in claims {
+        if prefer(best_any, claim) {
+            best_any = Some(claim);
+        }
+        if !claim.is_fresh(now) {
+            continue;
+        }
+        if prefer(best_fallback, claim) {
+            best_fallback = Some(claim);
+        }
+        if let (Some(preferred_source), Some(preferred_locale)) =
+            (preferred_source, preferred_locale)
+        {
+            if claim.source() == preferred_source
+                && claim.locale() == Some(preferred_locale)
+                && prefer(best_preferred, claim)
+            {
+                best_preferred = Some(claim);
+            }
         }
     }
 
-    if let Some(claim) = most_recent(&fresh) {
+    if let Some(claim) = best_preferred {
+        return ResolvedField {
+            tier: FieldResolutionTier::PreferredProviderClaim,
+            value: Some(claim.value().to_owned()),
+            source: Some(claim.source().clone()),
+            is_stale: false,
+        };
+    }
+
+    if let Some(claim) = best_fallback {
         return ResolvedField {
             tier: FieldResolutionTier::FallbackProviderClaim,
             value: Some(claim.value().to_owned()),
@@ -297,8 +323,7 @@ pub fn resolve_field(
         };
     }
 
-    let all: Vec<&FieldClaim> = claims.iter().collect();
-    if let Some(claim) = most_recent(&all) {
+    if let Some(claim) = best_any {
         return ResolvedField {
             tier: FieldResolutionTier::LastKnownGood,
             value: Some(claim.value().to_owned()),
@@ -320,6 +345,7 @@ mod tests {
     use super::*;
     use crate::ReceivedAt;
     use chrono::TimeZone;
+    use proptest::prelude::*;
 
     fn at(seconds: i64) -> DateTime<Utc> {
         Utc.timestamp_opt(seconds, 0)
@@ -338,6 +364,143 @@ mod tests {
     fn claim(source: &str, value: &str, fetched: i64, expires: Option<i64>) -> FieldClaim {
         FieldClaim::try_new(ns(source), value, None, received(fetched), expires.map(at))
             .expect("valid claim")
+    }
+
+    // ---------------------------------------------------------------------
+    // Differential proof: the single-pass resolve_field must be exactly
+    // equivalent to the Vec-based version it replaced, not merely similar.
+    // The reference below is a deliberate frozen copy of the pre-rewrite
+    // logic, kept test-only so the production code has no unbounded
+    // allocation, while this proves the rewrite changed nothing observable.
+    // ---------------------------------------------------------------------
+
+    fn reference_resolve_field(
+        override_: Option<&FieldOverride>,
+        claims: &[FieldClaim],
+        preferred_source: Option<&NamespaceKey>,
+        preferred_locale: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> ResolvedField {
+        if let Some(override_) = override_ {
+            return ResolvedField {
+                tier: FieldResolutionTier::UserOverride,
+                value: Some(override_.value().to_owned()),
+                source: None,
+                is_stale: false,
+            };
+        }
+
+        let most_recent = |claims: &[&FieldClaim]| -> Option<FieldClaim> {
+            claims
+                .iter()
+                .max_by(|left, right| {
+                    left.fetched_at()
+                        .cmp(&right.fetched_at())
+                        .then_with(|| left.source().cmp(right.source()))
+                })
+                .map(|claim| (*claim).clone())
+        };
+
+        let fresh: Vec<&FieldClaim> = claims.iter().filter(|claim| claim.is_fresh(now)).collect();
+
+        if let (Some(preferred_source), Some(preferred_locale)) =
+            (preferred_source, preferred_locale)
+        {
+            let preferred: Vec<&FieldClaim> = fresh
+                .iter()
+                .copied()
+                .filter(|claim| {
+                    claim.source() == preferred_source && claim.locale() == Some(preferred_locale)
+                })
+                .collect();
+            if let Some(claim) = most_recent(&preferred) {
+                return ResolvedField {
+                    tier: FieldResolutionTier::PreferredProviderClaim,
+                    value: Some(claim.value().to_owned()),
+                    source: Some(claim.source().clone()),
+                    is_stale: false,
+                };
+            }
+        }
+
+        if let Some(claim) = most_recent(&fresh) {
+            return ResolvedField {
+                tier: FieldResolutionTier::FallbackProviderClaim,
+                value: Some(claim.value().to_owned()),
+                source: Some(claim.source().clone()),
+                is_stale: false,
+            };
+        }
+
+        let all: Vec<&FieldClaim> = claims.iter().collect();
+        if let Some(claim) = most_recent(&all) {
+            return ResolvedField {
+                tier: FieldResolutionTier::LastKnownGood,
+                value: Some(claim.value().to_owned()),
+                source: Some(claim.source().clone()),
+                is_stale: true,
+            };
+        }
+
+        ResolvedField {
+            tier: FieldResolutionTier::Empty,
+            value: None,
+            source: None,
+            is_stale: false,
+        }
+    }
+
+    fn arb_claim() -> impl Strategy<Value = FieldClaim> {
+        // A small alphabet for source and fetched_at deliberately produces
+        // real ties, which is exactly where a refactor of this kind breaks.
+        // `value` must vary independently of (source, fetched_at): two claims
+        // that fully tie on both still need to be distinguishable, or a wrong
+        // tie-break pick and a right one produce identical output and the
+        // property can never observe the difference.
+        (
+            prop::sample::select(vec!["tmdb", "tvdb", "imdb"]),
+            "[a-z]{1,4}",
+            0i64..5,
+            prop::option::of(5i64..10),
+            prop::option::of(prop::sample::select(vec!["en", "fr"])),
+        )
+            .prop_map(|(source, value, fetched, expires, locale)| {
+                let mut c = claim(source, &value, fetched, expires);
+                c.locale = locale.map(str::to_owned);
+                c
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn single_pass_resolution_matches_the_reference_implementation(
+            claims in prop::collection::vec(arb_claim(), 0..8),
+            has_override in any::<bool>(),
+            preferred_source in prop::option::of(prop::sample::select(vec!["tmdb", "tvdb", "imdb"])),
+            preferred_locale in prop::option::of(prop::sample::select(vec!["en", "fr"])),
+            now_secs in 0i64..10,
+        ) {
+            let override_ = has_override
+                .then(|| FieldOverride::try_new("override", received(0)).expect("valid override"));
+            let preferred_source = preferred_source.map(ns);
+            let now = at(now_secs);
+
+            let fast = resolve_field(
+                override_.as_ref(),
+                &claims,
+                preferred_source.as_ref(),
+                preferred_locale,
+                now,
+            );
+            let reference = reference_resolve_field(
+                override_.as_ref(),
+                &claims,
+                preferred_source.as_ref(),
+                preferred_locale,
+                now,
+            );
+            prop_assert_eq!(fast, reference);
+        }
     }
 
     #[test]

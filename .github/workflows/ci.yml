@@ -149,6 +149,15 @@ jobs:
       # limits before any measurement taken with it is trusted.
       - name: Prove the envelope enforces its limits
         run: bash scripts/test-bench-envelope.sh
+      # bench-envelope.sh refuses to write into an existing receipt directory,
+      # by design: evidence is write-once so a bug can never silently
+      # overwrite a prior measurement. But target/fasti-evidence sits inside
+      # the directory Swatinem/rust-cache saves and restores, so a cache hit
+      # from an earlier run reintroduces last time's directory and trips that
+      # same guard on an otherwise-clean run. The cache's job is build
+      # speed, not evidence state, so clear it explicitly before measuring.
+      - name: Clear cache-restored envelope evidence before a fresh measurement
+        run: rm -rf target/fasti-evidence
       - name: Measure the canonical daemon idle window inside the enforced envelope
         env:
           FASTI_ENVELOPE_ARCH: ${{ matrix.arch }}
