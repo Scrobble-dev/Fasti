@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -173,8 +174,10 @@ class ImmutableSourceTests(unittest.TestCase):
         if config is None:
             config = {
                 "architecture": "amd64",
+                "os": "linux",
                 "config": {"Labels": self.labels},
                 "rootfs": {
+                    "type": "layers",
                     "diff_ids": [
                         "sha256:" + hashlib.sha256(payload).hexdigest()
                         for _, payload in layers
@@ -201,6 +204,131 @@ class ImmutableSourceTests(unittest.TestCase):
             *((name, payload, tarfile.REGTYPE) for name, payload in layers),
         ]
         return image_id, members
+
+    def _oci_layout_fixture(
+        self,
+        *,
+        layer_media_types: list[str] | None = None,
+        config_size_delta: int = 0,
+        layer_size_delta: int = 0,
+        manifest_size_delta: int = 0,
+        target_size_delta: int = 0,
+        diff_ids: list[str] | None = None,
+        rootfs_type: str = "layers",
+        config_os: str = "linux",
+        nested_index: bool = False,
+    ) -> tuple[str, list[tuple[str, bytes, bytes]], dict[str, str]]:
+        uncompressed_layers = [b"plain layer", b"gzip layer"]
+        media_types = layer_media_types or [
+            "application/vnd.oci.image.layer.v1.tar",
+            "application/vnd.oci.image.layer.v1.tar+gzip",
+        ]
+        blobs = [
+            uncompressed_layers[0],
+            gzip.compress(uncompressed_layers[1], mtime=0),
+        ]
+
+        def descriptor(payload: bytes, media_type: str, size_delta: int = 0) -> dict[str, object]:
+            return {
+                "mediaType": media_type,
+                "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                "size": len(payload) + size_delta,
+            }
+
+        config_bytes = json.dumps(
+            {
+                "architecture": "amd64",
+                "os": config_os,
+                "config": {"Labels": self.labels},
+                "rootfs": {
+                    "type": rootfs_type,
+                    "diff_ids": (
+                        diff_ids
+                        if diff_ids is not None
+                        else [
+                            "sha256:" + hashlib.sha256(payload).hexdigest()
+                            for payload in uncompressed_layers
+                        ]
+                    )
+                },
+            },
+            separators=(",", ":"),
+        ).encode()
+        config_descriptor = descriptor(
+            config_bytes,
+            "application/vnd.oci.image.config.v1+json",
+            config_size_delta,
+        )
+        layer_descriptors = [
+            descriptor(
+                payload,
+                media_type,
+                layer_size_delta if index == 0 else 0,
+            )
+            for index, (payload, media_type) in enumerate(zip(blobs, media_types, strict=True))
+        ]
+        manifest_bytes = json.dumps(
+            {
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "config": config_descriptor,
+                "layers": layer_descriptors,
+            },
+            separators=(",", ":"),
+        ).encode()
+        manifest_descriptor = descriptor(
+            manifest_bytes,
+            "application/vnd.oci.image.manifest.v1+json",
+            manifest_size_delta,
+        )
+
+        def path(item: dict[str, object]) -> str:
+            return "blobs/sha256/" + str(item["digest"]).removeprefix("sha256:")
+
+        config_path = path(config_descriptor)
+        layer_paths = [path(item) for item in layer_descriptors]
+        target_descriptor = manifest_descriptor
+        graph_members: list[tuple[str, bytes, bytes]] = []
+        if nested_index:
+            nested_bytes = json.dumps(
+                {"schemaVersion": 2, "manifests": [manifest_descriptor]},
+                separators=(",", ":"),
+            ).encode()
+            target_descriptor = descriptor(
+                nested_bytes,
+                "application/vnd.oci.image.index.v1+json",
+                target_size_delta,
+            )
+            graph_members.append(
+                (path(target_descriptor), nested_bytes, tarfile.REGTYPE)
+            )
+        image_id = str(target_descriptor["digest"])
+        index_bytes = json.dumps(
+            {"schemaVersion": 2, "manifests": [target_descriptor]},
+            separators=(",", ":"),
+        ).encode()
+        legacy_manifest = json.dumps(
+            [{"Config": config_path, "Layers": layer_paths}],
+            separators=(",", ":"),
+        ).encode()
+        members = [
+            ("manifest.json", legacy_manifest, tarfile.REGTYPE),
+            ("oci-layout", b'{"imageLayoutVersion":"1.0.0"}', tarfile.REGTYPE),
+            ("index.json", index_bytes, tarfile.REGTYPE),
+            *graph_members,
+            (path(manifest_descriptor), manifest_bytes, tarfile.REGTYPE),
+            (config_path, config_bytes, tarfile.REGTYPE),
+            *(
+                (layer_path, payload, tarfile.REGTYPE)
+                for layer_path, payload in zip(layer_paths, blobs, strict=True)
+            ),
+        ]
+        return image_id, members, {
+            "config": config_path,
+            "layer": layer_paths[0],
+            "manifest": path(manifest_descriptor),
+            "target": path(target_descriptor),
+        }
 
     @staticmethod
     def _write_saved_oci_archive(
@@ -240,6 +368,191 @@ class ImmutableSourceTests(unittest.TestCase):
             members[-1] = ("layer/layer.tar", b"substituted", tarfile.REGTYPE)
             self._write_saved_oci_archive(archive_path, members)
             with self.assertRaisesRegex(benchmark.CaptureError, "layer bytes"):
+                benchmark.saved_oci_layer_bytes(
+                    archive_path, image_id, self._source()
+                )
+
+    def test_saved_oci_accepts_containerd_layout_and_counts_unpacked_layers(self) -> None:
+        for nested_index in (False, True):
+            with self.subTest(nested_index=nested_index):
+                image_id, members, _ = self._oci_layout_fixture(
+                    nested_index=nested_index
+                )
+                with tempfile.TemporaryDirectory() as temp_name:
+                    archive_path = Path(temp_name) / "image.tar.gz"
+                    self._write_saved_oci_archive(archive_path, members)
+                    self.assertEqual(
+                        benchmark.saved_oci_layer_bytes(
+                            archive_path, image_id, self._source()
+                        ),
+                        len(b"plain layer") + len(b"gzip layer"),
+                    )
+
+    def test_saved_oci_layout_binds_the_exported_target_image_id(self) -> None:
+        _, members, _ = self._oci_layout_fixture()
+        self._assert_saved_oci_rejected(
+            "sha256:" + "0" * 64,
+            members,
+            "bind exactly one immutable image ID",
+        )
+
+    def test_saved_oci_layout_verifies_config_digest_and_size(self) -> None:
+        image_id, members, paths = self._oci_layout_fixture()
+        corrupted = [
+            (name, b"x" * len(payload) if name == paths["config"] else payload, kind)
+            for name, payload, kind in members
+        ]
+        self._assert_saved_oci_rejected(image_id, corrupted, "descriptor digest")
+
+        sized_id, sized_members, _ = self._oci_layout_fixture(config_size_delta=1)
+        self._assert_saved_oci_rejected(sized_id, sized_members, "descriptor size")
+
+    def test_saved_oci_layout_verifies_layer_digest_and_size(self) -> None:
+        image_id, members, paths = self._oci_layout_fixture()
+        corrupted = [
+            (name, b"substituted" if name == paths["layer"] else payload, kind)
+            for name, payload, kind in members
+        ]
+        self._assert_saved_oci_rejected(image_id, corrupted, "descriptor digest")
+
+        sized_id, sized_members, _ = self._oci_layout_fixture(layer_size_delta=1)
+        self._assert_saved_oci_rejected(sized_id, sized_members, "descriptor size")
+
+    def test_saved_oci_layout_rejects_unknown_layer_compression(self) -> None:
+        image_id, members, _ = self._oci_layout_fixture(
+            layer_media_types=[
+                "application/vnd.oci.image.layer.v1.tar+zstd",
+                "application/vnd.oci.image.layer.v1.tar+gzip",
+            ]
+        )
+        self._assert_saved_oci_rejected(image_id, members, "layer compression")
+
+        gzip_id, gzip_members, _ = self._oci_layout_fixture(
+            layer_media_types=[
+                "application/vnd.oci.image.layer.v1.tar+gzip",
+                "application/vnd.oci.image.layer.v1.tar+gzip",
+            ]
+        )
+        self._assert_saved_oci_rejected(gzip_id, gzip_members, "cannot decompress")
+
+    def test_saved_oci_requires_layers_rootfs_type(self) -> None:
+        legacy_id, legacy_members = self._saved_oci_fixture(
+            config={
+                "architecture": "amd64",
+                "os": "linux",
+                "config": {"Labels": self.labels},
+                "rootfs": {
+                    "diff_ids": [
+                        "sha256:" + hashlib.sha256(b"layer bytes").hexdigest()
+                    ]
+                },
+            }
+        )
+        self._assert_saved_oci_rejected(
+            legacy_id, legacy_members, "target Linux layers"
+        )
+
+        oci_id, oci_members, _ = self._oci_layout_fixture(rootfs_type="other")
+        self._assert_saved_oci_rejected(oci_id, oci_members, "invalid OCI image config")
+
+    def test_saved_oci_requires_linux_config(self) -> None:
+        legacy_id, legacy_members = self._saved_oci_fixture(
+            config={
+                "architecture": "amd64",
+                "config": {"Labels": self.labels},
+                "rootfs": {
+                    "type": "layers",
+                    "diff_ids": [
+                        "sha256:" + hashlib.sha256(b"layer bytes").hexdigest()
+                    ],
+                },
+            }
+        )
+        self._assert_saved_oci_rejected(
+            legacy_id, legacy_members, "target Linux layers"
+        )
+
+        oci_id, oci_members, _ = self._oci_layout_fixture(config_os="windows")
+        self._assert_saved_oci_rejected(
+            oci_id, oci_members, "invalid OCI image config"
+        )
+
+    def test_saved_oci_layout_verifies_manifest_graph_descriptors(self) -> None:
+        for nested_index, path_key, size_argument in [
+            (False, "manifest", "manifest_size_delta"),
+            (True, "target", "target_size_delta"),
+        ]:
+            with self.subTest(nested_index=nested_index, failure="digest"):
+                image_id, members, paths = self._oci_layout_fixture(
+                    nested_index=nested_index
+                )
+                corrupted = [
+                    (
+                        name,
+                        b"x" * len(payload) if name == paths[path_key] else payload,
+                        kind,
+                    )
+                    for name, payload, kind in members
+                ]
+                self._assert_saved_oci_rejected(
+                    image_id, corrupted, "descriptor digest"
+                )
+            with self.subTest(nested_index=nested_index, failure="size"):
+                arguments = {size_argument: 1, "nested_index": nested_index}
+                image_id, members, _ = self._oci_layout_fixture(**arguments)
+                self._assert_saved_oci_rejected(image_id, members, "descriptor size")
+
+    def test_saved_oci_layout_checks_identity_and_gzip_diff_ids(self) -> None:
+        valid = [
+            "sha256:" + hashlib.sha256(payload).hexdigest()
+            for payload in [b"plain layer", b"gzip layer"]
+        ]
+        for layer_index in range(2):
+            with self.subTest(layer_index=layer_index):
+                diff_ids = valid.copy()
+                diff_ids[layer_index] = "sha256:" + "0" * 64
+                image_id, members, _ = self._oci_layout_fixture(diff_ids=diff_ids)
+                self._assert_saved_oci_rejected(
+                    image_id, members, "layer bytes do not match"
+                )
+
+    def test_saved_oci_layout_has_a_separate_injectable_safety_ceiling(self) -> None:
+        self.assertEqual(
+            benchmark.SAVED_OCI_UNPACKED_SAFETY_CEILING_BYTES,
+            4 * benchmark.ARTIFACT_LIMITS["oci_image_unpacked"],
+        )
+        image_id, members, _ = self._oci_layout_fixture()
+        with tempfile.TemporaryDirectory() as temp_name:
+            archive_path = Path(temp_name) / "image.tar.gz"
+            self._write_saved_oci_archive(archive_path, members)
+            with self.assertRaisesRegex(benchmark.CaptureError, "bounded unpacked size"):
+                benchmark.saved_oci_layer_bytes(
+                    archive_path,
+                    image_id,
+                    self._source(),
+                    unpacked_safety_ceiling_bytes=20,
+                )
+
+    def test_saved_oci_rejects_outer_archive_size_and_entry_bombs(self) -> None:
+        image_id, members, _ = self._oci_layout_fixture()
+        with tempfile.TemporaryDirectory() as temp_name:
+            archive_path = Path(temp_name) / "image.tar.gz"
+            self._write_saved_oci_archive(archive_path, members)
+            with (
+                patch.object(
+                    benchmark,
+                    "SAVED_OCI_ARCHIVE_SAFETY_CEILING_BYTES",
+                    archive_path.stat().st_size - 1,
+                ),
+                self.assertRaisesRegex(benchmark.CaptureError, "compressed archive"),
+            ):
+                benchmark.saved_oci_layer_bytes(
+                    archive_path, image_id, self._source()
+                )
+            with (
+                patch.object(benchmark, "SAVED_OCI_ENTRY_SAFETY_CEILING", 2),
+                self.assertRaisesRegex(benchmark.CaptureError, "archive entry"),
+            ):
                 benchmark.saved_oci_layer_bytes(
                     archive_path, image_id, self._source()
                 )
@@ -407,8 +720,10 @@ class ImmutableSourceTests(unittest.TestCase):
         stale_id, stale = self._saved_oci_fixture(
             config={
                 "architecture": "amd64",
+                "os": "linux",
                 "config": {"Labels": stale_labels},
                 "rootfs": {
+                    "type": "layers",
                     "diff_ids": [
                         "sha256:" + hashlib.sha256(b"layer bytes").hexdigest()
                     ]
@@ -441,8 +756,9 @@ class ImmutableSourceTests(unittest.TestCase):
                     layers=layers,
                     config={
                         "architecture": "amd64",
+                        "os": "linux",
                         "config": {"Labels": self.labels},
-                        "rootfs": {"diff_ids": diff_ids},
+                        "rootfs": {"type": "layers", "diff_ids": diff_ids},
                     },
                 )
                 self._assert_saved_oci_rejected(image_id, members, message)

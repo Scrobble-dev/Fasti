@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::{BufWriter, Read, Seek, Write};
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -34,7 +34,10 @@ const EVIDENCE_SUPPORT_FILES: &[&str] = &[
     "scripts/lib/strict-json.mjs",
 ];
 const MAX_SAMPLE_LATENESS_NS: u64 = 500_000_000;
+const OCI_UNPACKED_SAFETY_CEILING_BYTES: u64 = 400 * 1024 * 1024;
 const OCI_ARCHIVE_METADATA_ALLOWANCE_BYTES: u64 = 16 * 1024 * 1024;
+const OCI_ARCHIVE_METADATA_FILE_LIMIT_BYTES: u64 = 1024 * 1024;
+const OCI_ARCHIVE_ENTRY_LIMIT: u64 = 4096;
 const VERIFIER_SOURCE_INPUTS_PATH: &str = ".fasti-verifier/source-inputs.json";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
@@ -400,6 +403,58 @@ struct ArtifactBudgetRetainedArtifact {
     path: PathBuf,
     sha256: String,
     size_bytes: u64,
+}
+
+#[derive(Debug)]
+struct SavedOciArchiveFile {
+    position: u64,
+    size: u64,
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OciLayout {
+    image_layout_version: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OciIndex {
+    schema_version: u64,
+    media_type: Option<String>,
+    manifests: Vec<OciDescriptor>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OciDescriptor {
+    media_type: String,
+    digest: String,
+    size: u64,
+    platform: Option<OciPlatform>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OciPlatform {
+    architecture: String,
+    os: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OciImageManifest {
+    schema_version: u64,
+    media_type: Option<String>,
+    config: OciDescriptor,
+    layers: Vec<OciDescriptor>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DockerArchiveManifestEntry {
+    config: String,
+    layers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1991,14 +2046,10 @@ fn validate_artifact_budget_receipt(
             "artifact budget retained file digest does not recompute"
         );
         if name == "oci_image_compressed" {
-            let unpacked_limit = limits
-                .get("oci_image_unpacked")
-                .and_then(Value::as_u64)
-                .context("OCI unpacked artifact budget limit is missing")?;
             recomputed_oci_image_bytes = Some(validate_saved_oci_archive(
                 &retained_path,
                 &receipt,
-                unpacked_limit,
+                OCI_UNPACKED_SAFETY_CEILING_BYTES,
             )?);
         }
         retained.push((path, reference.sha256.clone()));
@@ -2064,9 +2115,9 @@ fn validate_artifact_budget_receipt(
 fn validate_saved_oci_archive(
     compressed_path: &Path,
     receipt: &ArtifactBudgetReceipt,
-    unpacked_limit: u64,
+    unpacked_safety_ceiling: u64,
 ) -> anyhow::Result<u64> {
-    let decompressed_limit = unpacked_limit
+    let decompressed_limit = unpacked_safety_ceiling
         .checked_add(OCI_ARCHIVE_METADATA_ALLOWANCE_BYTES)
         .context("OCI archive decompression limit overflowed")?;
     let mut child = Command::new("gzip")
@@ -2099,24 +2150,21 @@ fn validate_saved_oci_archive(
         .rewind()
         .context("failed to rewind retained OCI archive")?;
 
-    let image_digest = receipt
-        .oci_image_id
-        .strip_prefix("sha256:")
-        .context("OCI image ID is not sha256")?;
-    let expected_config_path = PathBuf::from(format!("{image_digest}.json"));
-    let mut archive = tar::Archive::new(decompressed);
+    let mut archive = tar::Archive::new(
+        decompressed
+            .try_clone()
+            .context("failed to clone retained OCI archive buffer")?,
+    );
     let mut paths = BTreeSet::new();
-    let mut layer_sizes = BTreeMap::new();
-    let mut manifest_bytes = None;
-    let mut config_bytes = None;
+    let mut files = BTreeMap::new();
     let mut entry_count = 0_u64;
     for entry in archive
-        .entries()
+        .entries_with_seek()
         .context("failed to enumerate retained OCI archive")?
     {
         entry_count += 1;
         ensure!(
-            entry_count <= 1024,
+            entry_count <= OCI_ARCHIVE_ENTRY_LIMIT,
             "retained OCI archive has too many entries"
         );
         let mut entry = entry.context("failed to read retained OCI archive entry")?;
@@ -2132,98 +2180,525 @@ fn validate_saved_oci_archive(
         if !entry.header().entry_type().is_file() {
             continue;
         }
+        let position = entry.raw_file_position();
         let size = entry
             .header()
             .size()
             .context("retained OCI archive entry size is invalid")?;
-        if path == Path::new("manifest.json") || path == expected_config_path {
-            ensure!(
-                size <= 1024 * 1024,
-                "retained OCI archive manifest or config is too large"
-            );
-            let mut bytes = Vec::with_capacity(size as usize);
-            entry
-                .read_to_end(&mut bytes)
-                .context("failed to read retained OCI archive metadata")?;
-            if path == Path::new("manifest.json") {
-                manifest_bytes = Some(bytes);
-            } else {
-                config_bytes = Some(bytes);
-            }
-        } else if path.extension().and_then(|value| value.to_str()) == Some("tar") {
-            let (digest, read_bytes) = sha256_reader(&mut entry, "retained OCI layer")?;
-            ensure!(
-                read_bytes == size,
-                "retained OCI layer bytes do not match the tar header"
-            );
-            ensure!(
-                layer_sizes.insert(path, (size, digest)).is_none(),
-                "retained OCI archive contains a duplicate layer"
-            );
-        }
+        let (sha256, read_bytes) = sha256_reader(&mut entry, "retained OCI archive entry")?;
+        ensure!(
+            read_bytes == size,
+            "retained OCI archive entry bytes do not match the tar header"
+        );
+        files.insert(
+            path,
+            SavedOciArchiveFile {
+                position,
+                size,
+                sha256,
+            },
+        );
     }
+    drop(archive);
 
-    let manifest: Value = serde_json::from_slice(
-        manifest_bytes
-            .as_deref()
-            .context("retained OCI archive omits manifest.json")?,
-    )
-    .context("retained OCI archive manifest is invalid")?;
-    let manifests = manifest
-        .as_array()
-        .context("retained OCI archive manifest is not an array")?;
+    let has_layout = files.contains_key(Path::new("oci-layout"));
+    let has_index = files.contains_key(Path::new("index.json"));
+    if has_layout || has_index {
+        ensure!(
+            has_layout && has_index,
+            "retained OCI layout must contain both oci-layout and index.json"
+        );
+        validate_oci_layout_archive(&mut decompressed, &files, receipt, unpacked_safety_ceiling)
+    } else {
+        validate_legacy_docker_archive(&mut decompressed, &files, receipt, unpacked_safety_ceiling)
+    }
+}
+
+fn read_saved_oci_archive_file(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+    path: &Path,
+    label: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let file = files
+        .get(path)
+        .with_context(|| format!("retained OCI archive omits {label}"))?;
+    ensure!(
+        file.size <= OCI_ARCHIVE_METADATA_FILE_LIMIT_BYTES,
+        "retained OCI archive {label} is too large"
+    );
+    archive
+        .seek(SeekFrom::Start(file.position))
+        .with_context(|| format!("failed to seek to retained OCI archive {label}"))?;
+    let capacity = usize::try_from(file.size).context("retained OCI metadata is too large")?;
+    let mut bytes = Vec::with_capacity(capacity);
+    archive
+        .take(file.size)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("failed to read retained OCI archive {label}"))?;
+    ensure!(
+        bytes.len() as u64 == file.size,
+        "retained OCI archive {label} is truncated"
+    );
+    Ok(bytes)
+}
+
+fn docker_archive_manifest(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+) -> anyhow::Result<DockerArchiveManifestEntry> {
+    let bytes =
+        read_saved_oci_archive_file(archive, files, Path::new("manifest.json"), "manifest.json")?;
+    let mut manifests: Vec<DockerArchiveManifestEntry> =
+        serde_json::from_slice(&bytes).context("retained OCI archive manifest.json is invalid")?;
     ensure!(
         manifests.len() == 1,
         "retained OCI archive must contain exactly one image"
     );
-    let image = manifests[0]
-        .as_object()
-        .context("retained OCI archive image manifest is invalid")?;
+    Ok(manifests.remove(0))
+}
+
+fn validate_legacy_docker_archive(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+    receipt: &ArtifactBudgetReceipt,
+    unpacked_safety_ceiling: u64,
+) -> anyhow::Result<u64> {
+    let image_digest = oci_sha256_digest(&receipt.oci_image_id, "OCI image ID")?;
+    let expected_config_path = PathBuf::from(format!("{image_digest}.json"));
+    let manifest = docker_archive_manifest(archive, files)?;
     ensure!(
-        image.get("Config").and_then(Value::as_str) == expected_config_path.to_str(),
+        manifest.config == expected_config_path.to_string_lossy(),
         "retained OCI archive config does not match the immutable image ID"
     );
-    let layer_paths = image
-        .get("Layers")
-        .and_then(Value::as_array)
-        .context("retained OCI archive manifest omits layers")?;
     ensure!(
-        !layer_paths.is_empty(),
+        !manifest.layers.is_empty(),
         "retained OCI archive layer inventory is empty"
     );
     let mut expected_layers = BTreeSet::new();
-    for layer in layer_paths {
-        let path = PathBuf::from(
-            layer
-                .as_str()
-                .context("retained OCI archive layer path is not a string")?,
-        );
+    for layer in &manifest.layers {
+        let path = PathBuf::from(layer);
         validate_relative_path(&path)?;
         ensure!(
             expected_layers.insert(path),
             "retained OCI archive manifest duplicates a layer"
         );
     }
+    let actual_layers = files
+        .keys()
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("tar"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
     ensure!(
-        expected_layers == layer_sizes.keys().cloned().collect(),
+        expected_layers == actual_layers,
         "retained OCI archive layer files do not match its manifest"
     );
 
-    let config_bytes = config_bytes.context("retained OCI archive omits image config")?;
+    let config_file = files
+        .get(&expected_config_path)
+        .context("retained OCI archive omits image config")?;
     ensure!(
-        sha256_bytes(&config_bytes) == image_digest,
+        config_file.sha256 == image_digest,
         "retained OCI archive config digest does not match the immutable image ID"
     );
-    let config: Value = serde_json::from_slice(&config_bytes)
-        .context("retained OCI archive image config is invalid")?;
-    let expected_architecture = match receipt.runner.architecture.as_str() {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
+    let config_bytes =
+        read_saved_oci_archive_file(archive, files, &expected_config_path, "image config")?;
+    let diff_ids = manifest
+        .layers
+        .iter()
+        .map(|path| {
+            files
+                .get(Path::new(path))
+                .map(|file| format!("sha256:{}", file.sha256))
+                .context("retained OCI archive omits a manifest layer")
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    validate_saved_oci_config(&config_bytes, receipt, &diff_ids)?;
+
+    let unpacked_bytes = manifest.layers.into_iter().try_fold(0_u64, |total, path| {
+        total
+            .checked_add(files[Path::new(&path)].size)
+            .context("retained OCI layer size sum overflowed")
+    })?;
+    ensure!(
+        unpacked_bytes <= unpacked_safety_ceiling,
+        "retained OCI layers exceed the unpacked safety ceiling"
+    );
+    Ok(unpacked_bytes)
+}
+
+fn validate_oci_layout_archive(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+    receipt: &ArtifactBudgetReceipt,
+    unpacked_safety_ceiling: u64,
+) -> anyhow::Result<u64> {
+    let layout: OciLayout = serde_json::from_slice(&read_saved_oci_archive_file(
+        archive,
+        files,
+        Path::new("oci-layout"),
+        "oci-layout",
+    )?)
+    .context("retained OCI archive oci-layout is invalid")?;
+    ensure!(
+        layout.image_layout_version == "1.0.0",
+        "retained OCI archive layout version is unsupported"
+    );
+    let index: OciIndex = serde_json::from_slice(&read_saved_oci_archive_file(
+        archive,
+        files,
+        Path::new("index.json"),
+        "index.json",
+    )?)
+    .context("retained OCI archive index.json is invalid")?;
+    ensure!(
+        index.schema_version == 2
+            && index
+                .media_type
+                .as_deref()
+                .is_none_or(is_oci_index_media_type),
+        "retained OCI archive index.json media type or schema is invalid"
+    );
+    let target = index
+        .manifests
+        .iter()
+        .filter(|descriptor| descriptor.digest == receipt.oci_image_id)
+        .collect::<Vec<_>>();
+    ensure!(
+        target.len() == 1,
+        "retained OCI archive image ID must resolve to exactly one index target"
+    );
+    let expected_architecture = docker_architecture(&receipt.runner.architecture)?;
+    let mut visited = BTreeSet::new();
+    let mut manifests = Vec::new();
+    collect_oci_platform_manifests(
+        archive,
+        files,
+        target[0],
+        expected_architecture,
+        0,
+        &mut visited,
+        &mut manifests,
+    )?;
+    let compatibility = docker_archive_manifest(archive, files)?;
+    let compatibility_config_path = PathBuf::from(&compatibility.config);
+    validate_relative_path(&compatibility_config_path)?;
+    ensure!(
+        !compatibility.layers.is_empty(),
+        "retained OCI archive layer inventory is empty"
+    );
+    let compatibility_layer_paths = compatibility
+        .layers
+        .iter()
+        .map(|path| {
+            let path = PathBuf::from(path);
+            validate_relative_path(&path)?;
+            Ok(path)
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    ensure!(
+        compatibility_layer_paths
+            .iter()
+            .collect::<BTreeSet<_>>()
+            .len()
+            == compatibility_layer_paths.len(),
+        "retained OCI archive manifest.json duplicates a layer"
+    );
+    let mut selected = Vec::new();
+    for descriptor in manifests {
+        let manifest: OciImageManifest = read_oci_descriptor_json(
+            archive,
+            files,
+            &descriptor,
+            "selected platform manifest candidate",
+        )?;
+        ensure!(
+            manifest.schema_version == 2
+                && manifest
+                    .media_type
+                    .as_deref()
+                    .is_none_or(|media_type| media_type == descriptor.media_type),
+            "retained OCI archive selected manifest media type or schema is invalid"
+        );
+        let config_path = oci_descriptor_path(&manifest.config.digest)?;
+        let layer_paths = manifest
+            .layers
+            .iter()
+            .map(|layer| oci_descriptor_path(&layer.digest))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        if config_path == compatibility_config_path && layer_paths == compatibility_layer_paths {
+            selected.push(manifest);
+        }
+    }
+    ensure!(
+        selected.len() == 1,
+        "retained OCI archive image target must resolve to exactly one selected platform manifest whose descriptors match manifest.json"
+    );
+    let manifest = selected.remove(0);
+    ensure!(
+        is_oci_config_media_type(&manifest.config.media_type),
+        "retained OCI archive image config media type is unsupported"
+    );
+
+    verify_oci_descriptor(files, &manifest.config, "image config")?;
+    let config_bytes =
+        read_oci_descriptor_json_bytes(archive, files, &manifest.config, "image config")?;
+    let mut unpacked_bytes = 0_u64;
+    let mut diff_ids = Vec::with_capacity(manifest.layers.len());
+    for descriptor in &manifest.layers {
+        let file = verify_oci_descriptor(files, descriptor, "image layer")?;
+        let remaining = unpacked_safety_ceiling.saturating_sub(unpacked_bytes);
+        let (diff_id, size) = hash_oci_layer(archive, file, &descriptor.media_type, remaining)?;
+        unpacked_bytes = unpacked_bytes
+            .checked_add(size)
+            .context("retained OCI layer size sum overflowed")?;
+        diff_ids.push(format!("sha256:{diff_id}"));
+    }
+    validate_saved_oci_config(&config_bytes, receipt, &diff_ids)?;
+    Ok(unpacked_bytes)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_oci_platform_manifests(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+    descriptor: &OciDescriptor,
+    expected_architecture: &str,
+    depth: usize,
+    visited: &mut BTreeSet<String>,
+    manifests: &mut Vec<OciDescriptor>,
+) -> anyhow::Result<()> {
+    ensure!(
+        depth <= 16,
+        "retained OCI archive descriptor graph is too deep"
+    );
+    if descriptor.platform.as_ref().is_some_and(|platform| {
+        platform.os != "linux" || platform.architecture != expected_architecture
+    }) {
+        return Ok(());
+    }
+    ensure!(
+        visited.insert(descriptor.digest.clone()),
+        "retained OCI archive descriptor graph is cyclic or ambiguous"
+    );
+    verify_oci_descriptor(files, descriptor, "descriptor graph blob")?;
+    if is_oci_manifest_media_type(&descriptor.media_type) {
+        manifests.push(descriptor.clone());
+        return Ok(());
+    }
+    ensure!(
+        is_oci_index_media_type(&descriptor.media_type),
+        "retained OCI archive descriptor graph has an unsupported media type"
+    );
+    let index: OciIndex =
+        read_oci_descriptor_json(archive, files, descriptor, "descriptor graph index")?;
+    ensure!(
+        index.schema_version == 2
+            && index
+                .media_type
+                .as_deref()
+                .is_none_or(|media_type| media_type == descriptor.media_type),
+        "retained OCI archive descriptor graph index is invalid"
+    );
+    for child in &index.manifests {
+        collect_oci_platform_manifests(
+            archive,
+            files,
+            child,
+            expected_architecture,
+            depth + 1,
+            visited,
+            manifests,
+        )?;
+    }
+    Ok(())
+}
+
+fn verify_oci_descriptor<'a>(
+    files: &'a BTreeMap<PathBuf, SavedOciArchiveFile>,
+    descriptor: &OciDescriptor,
+    label: &str,
+) -> anyhow::Result<&'a SavedOciArchiveFile> {
+    let path = oci_descriptor_path(&descriptor.digest)?;
+    let expected_digest = oci_sha256_digest(&descriptor.digest, label)?;
+    let file = files
+        .get(&path)
+        .with_context(|| format!("retained OCI archive omits {label} blob"))?;
+    ensure!(
+        file.size == descriptor.size && file.sha256 == expected_digest,
+        "retained OCI archive {label} digest or size does not match its descriptor"
+    );
+    Ok(file)
+}
+
+fn read_oci_descriptor_json<T: for<'de> Deserialize<'de>>(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+    descriptor: &OciDescriptor,
+    label: &str,
+) -> anyhow::Result<T> {
+    serde_json::from_slice(&read_oci_descriptor_json_bytes(
+        archive, files, descriptor, label,
+    )?)
+    .with_context(|| format!("retained OCI archive {label} is invalid JSON"))
+}
+
+fn read_oci_descriptor_json_bytes(
+    archive: &mut fs::File,
+    files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
+    descriptor: &OciDescriptor,
+    label: &str,
+) -> anyhow::Result<Vec<u8>> {
+    verify_oci_descriptor(files, descriptor, label)?;
+    read_saved_oci_archive_file(
+        archive,
+        files,
+        &oci_descriptor_path(&descriptor.digest)?,
+        label,
+    )
+}
+
+fn oci_descriptor_path(digest: &str) -> anyhow::Result<PathBuf> {
+    Ok(PathBuf::from("blobs")
+        .join("sha256")
+        .join(oci_sha256_digest(digest, "OCI descriptor")?))
+}
+
+fn oci_sha256_digest<'a>(digest: &'a str, label: &str) -> anyhow::Result<&'a str> {
+    let value = digest
+        .strip_prefix("sha256:")
+        .with_context(|| format!("{label} is not a sha256 digest"))?;
+    ensure!(
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "{label} is not a canonical sha256 digest"
+    );
+    Ok(value)
+}
+
+fn is_oci_index_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "application/vnd.oci.image.index.v1+json"
+            | "application/vnd.docker.distribution.manifest.list.v2+json"
+    )
+}
+
+fn is_oci_manifest_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "application/vnd.oci.image.manifest.v1+json"
+            | "application/vnd.docker.distribution.manifest.v2+json"
+    )
+}
+
+fn is_oci_config_media_type(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "application/vnd.oci.image.config.v1+json"
+            | "application/vnd.docker.container.image.v1+json"
+    )
+}
+
+fn hash_oci_layer(
+    archive: &mut fs::File,
+    file: &SavedOciArchiveFile,
+    media_type: &str,
+    remaining_safety_ceiling: u64,
+) -> anyhow::Result<(String, u64)> {
+    archive
+        .seek(SeekFrom::Start(file.position))
+        .context("failed to seek to retained OCI layer")?;
+    match media_type {
+        "application/vnd.oci.image.layer.v1.tar"
+        | "application/vnd.oci.image.layer.nondistributable.v1.tar"
+        | "application/vnd.docker.image.rootfs.diff.tar" => {
+            ensure!(
+                file.size <= remaining_safety_ceiling,
+                "retained OCI layers exceed the unpacked safety ceiling"
+            );
+            let (digest, bytes) =
+                sha256_reader(&mut archive.take(file.size), "uncompressed OCI layer")?;
+            ensure!(
+                bytes == file.size,
+                "retained OCI uncompressed layer is truncated"
+            );
+            Ok((digest, bytes))
+        }
+        "application/vnd.oci.image.layer.v1.tar+gzip"
+        | "application/vnd.oci.image.layer.nondistributable.v1.tar+gzip"
+        | "application/vnd.docker.image.rootfs.diff.tar.gzip"
+        | "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip" => {
+            let mut compressed = tempfile::tempfile()
+                .context("failed to create retained OCI compressed layer buffer")?;
+            let copied = std::io::copy(&mut archive.take(file.size), &mut compressed)
+                .context("failed to copy retained OCI compressed layer")?;
+            ensure!(
+                copied == file.size,
+                "retained OCI compressed layer is truncated"
+            );
+            compressed
+                .rewind()
+                .context("failed to rewind retained OCI compressed layer")?;
+            let mut child = Command::new("gzip")
+                .arg("-cd")
+                .stdin(Stdio::from(compressed))
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("failed to start retained OCI layer decompression")?;
+            let stdout = child.stdout.take().context("gzip stdout is unavailable")?;
+            let (digest, bytes) = sha256_reader(
+                &mut stdout.take(remaining_safety_ceiling.saturating_add(1)),
+                "uncompressed OCI layer",
+            )?;
+            if bytes > remaining_safety_ceiling {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("retained OCI layers exceed the unpacked safety ceiling");
+            }
+            ensure!(
+                child
+                    .wait()
+                    .context("failed to wait for retained OCI layer decompression")?
+                    .success(),
+                "retained OCI layer does not match its declared gzip media type"
+            );
+            Ok((digest, bytes))
+        }
+        _ => bail!("retained OCI layer uses an unsupported compression media type"),
+    }
+}
+
+fn docker_architecture(architecture: &str) -> anyhow::Result<&'static str> {
+    match architecture {
+        "x86_64" => Ok("amd64"),
+        "aarch64" => Ok("arm64"),
         _ => bail!("artifact budget runner architecture is unsupported"),
-    };
+    }
+}
+
+fn validate_saved_oci_config(
+    config_bytes: &[u8],
+    receipt: &ArtifactBudgetReceipt,
+    expected_diff_ids: &[String],
+) -> anyhow::Result<()> {
+    let config: Value = serde_json::from_slice(config_bytes)
+        .context("retained OCI archive image config is invalid")?;
+    ensure!(
+        config.pointer("/rootfs/type").and_then(Value::as_str) == Some("layers"),
+        "retained OCI archive config rootfs type is unsupported"
+    );
+    let expected_architecture = docker_architecture(&receipt.runner.architecture)?;
     ensure!(
         config.get("architecture").and_then(Value::as_str) == Some(expected_architecture),
         "retained OCI archive architecture does not match the runner"
+    );
+    ensure!(
+        config.get("os").and_then(Value::as_str) == Some("linux"),
+        "retained OCI archive operating system is not Linux"
     );
     let labels = config
         .pointer("/config/Labels")
@@ -2261,30 +2736,14 @@ fn validate_saved_oci_archive(
         .and_then(Value::as_array)
         .context("retained OCI archive config omits layer identities")?;
     ensure!(
-        diff_ids.len() == layer_paths.len()
-            && layer_paths.iter().zip(diff_ids).all(|(path, diff_id)| {
-                let Some(path) = path.as_str().map(Path::new) else {
-                    return false;
-                };
-                diff_id.as_str().is_some_and(|diff_id| {
-                    diff_id
-                        == format!(
-                            "sha256:{}",
-                            layer_sizes
-                                .get(path)
-                                .map(|entry| entry.1.as_str())
-                                .unwrap_or("")
-                        )
-                })
-            }),
+        diff_ids.len() == expected_diff_ids.len()
+            && diff_ids
+                .iter()
+                .zip(expected_diff_ids)
+                .all(|(actual, expected)| actual.as_str() == Some(expected)),
         "retained OCI archive config layer identities do not match the retained bytes"
     );
-
-    expected_layers.into_iter().try_fold(0_u64, |total, path| {
-        total
-            .checked_add(layer_sizes[&path].0)
-            .context("retained OCI layer size sum overflowed")
-    })
+    Ok(())
 }
 
 fn cpu_limit_basis_points(percent: f64) -> anyhow::Result<u64> {
@@ -3055,6 +3514,24 @@ mod tests {
         }
     }
 
+    fn gzip_fixture(bytes: &[u8]) -> Vec<u8> {
+        let mut child = Command::new("gzip")
+            .args(["-n", "-9"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start fixture gzip");
+        child
+            .stdin
+            .take()
+            .expect("fixture gzip stdin")
+            .write_all(bytes)
+            .expect("write fixture gzip input");
+        let output = child.wait_with_output().expect("finish fixture gzip");
+        assert!(output.status.success());
+        output.stdout
+    }
+
     fn saved_oci_fixture(
         architecture: &str,
         source: &SourceBinding,
@@ -3068,6 +3545,7 @@ mod tests {
         let layer = vec![b'x'; 1000];
         let config = serde_json::to_vec(&serde_json::json!({
             "architecture": docker_architecture,
+            "os": "linux",
             "config": {"Labels": {
                 "org.opencontainers.image.revision": source.git_commit,
                 "dev.scrobble.fasti.source.tree": source.git_tree,
@@ -3075,7 +3553,7 @@ mod tests {
                 "dev.scrobble.fasti.build.recipe.sha256": sha256_bytes(b"recipe\n"),
                 "dev.scrobble.fasti.build.context.archive.sha256": "6".repeat(64)
             }},
-            "rootfs": {"diff_ids": [format!(
+            "rootfs": {"type": "layers", "diff_ids": [format!(
                 "sha256:{}",
                 if valid_layer_identity { sha256_bytes(&layer) } else { "7".repeat(64) }
             )]}
@@ -3105,21 +3583,233 @@ mod tests {
                 .expect("append OCI fixture entry");
         }
         let archive = archive.into_inner().expect("finish OCI fixture tar");
-        let mut child = Command::new("gzip")
-            .args(["-n", "-9"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("start fixture gzip");
-        child
-            .stdin
-            .take()
-            .expect("fixture gzip stdin")
-            .write_all(&archive)
-            .expect("write fixture gzip input");
-        let output = child.wait_with_output().expect("finish fixture gzip");
-        assert!(output.status.success());
-        (output.stdout, image_id, layer.len() as u64)
+        (gzip_fixture(&archive), image_id, layer.len() as u64)
+    }
+
+    #[derive(Clone, Copy)]
+    enum OciLayoutFixtureMutation {
+        None,
+        WrongImageId,
+        StaleSource,
+        BlobDigest,
+        DescriptorSize,
+        DiffId,
+        RootfsType,
+        WrongOs,
+        IndexBlobDigest,
+        ManifestBlobDigest,
+        UnknownCompression,
+        AmbiguousPlatform,
+        Traversal,
+        CompatibilityManifest,
+        CompatibilityLayers,
+    }
+
+    struct SavedOciLayoutFixture {
+        archive: Vec<u8>,
+        image_id: String,
+        unpacked_bytes: u64,
+    }
+
+    fn saved_oci_layout_fixture(
+        receipt: &ArtifactBudgetReceipt,
+        mutation: OciLayoutFixtureMutation,
+    ) -> SavedOciLayoutFixture {
+        let architecture = match receipt.runner.architecture.as_str() {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            _ => panic!("unsupported fixture architecture"),
+        };
+        let gzip_layer = b"gzip layer bytes";
+        let plain_layer = b"plain layer bytes";
+        let mut gzip_blob = gzip_fixture(gzip_layer);
+        let gzip_digest = sha256_bytes(&gzip_blob);
+        let plain_digest = sha256_bytes(plain_layer);
+        let labels = serde_json::json!({
+            "org.opencontainers.image.revision": if matches!(mutation, OciLayoutFixtureMutation::StaleSource) {
+                "0".repeat(40)
+            } else {
+                receipt.source.git_commit.clone()
+            },
+            "dev.scrobble.fasti.source.tree": receipt.source.git_tree,
+            "dev.scrobble.fasti.contracts": receipt.source.contract_ref,
+            "dev.scrobble.fasti.build.recipe.sha256": receipt.source.build_recipe_sha256,
+            "dev.scrobble.fasti.build.context.archive.sha256": receipt.source.build_context_archive_sha256,
+        });
+        let config = serde_json::to_vec(&serde_json::json!({
+            "architecture": architecture,
+            "os": if matches!(mutation, OciLayoutFixtureMutation::WrongOs) {
+                "windows"
+            } else {
+                "linux"
+            },
+            "config": {"Labels": labels},
+            "rootfs": {
+                "type": if matches!(mutation, OciLayoutFixtureMutation::RootfsType) {
+                    "not-layers"
+                } else {
+                    "layers"
+                },
+                "diff_ids": [
+                format!("sha256:{}", if matches!(mutation, OciLayoutFixtureMutation::DiffId) {
+                    "7".repeat(64)
+                } else {
+                    sha256_bytes(gzip_layer)
+                }),
+                format!("sha256:{}", sha256_bytes(plain_layer)),
+            ]}
+        }))
+        .expect("serialize OCI layout config");
+        let config_digest = sha256_bytes(&config);
+        let gzip_media_type = if matches!(mutation, OciLayoutFixtureMutation::UnknownCompression) {
+            "application/vnd.oci.image.layer.v1.tar+zstd"
+        } else {
+            "application/vnd.oci.image.layer.v1.tar+gzip"
+        };
+        let config_size = config.len() as u64
+            + u64::from(matches!(mutation, OciLayoutFixtureMutation::DescriptorSize));
+        let config_descriptor = serde_json::json!({
+            "mediaType": "application/vnd.oci.image.config.v1+json",
+            "digest": format!("sha256:{config_digest}"),
+            "size": config_size,
+        });
+        let layer_descriptors = serde_json::json!([
+            {
+                "mediaType": gzip_media_type,
+                "digest": format!("sha256:{gzip_digest}"),
+                "size": gzip_blob.len(),
+            },
+            {
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "digest": format!("sha256:{plain_digest}"),
+                "size": plain_layer.len(),
+            },
+        ]);
+        let mut manifest = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": config_descriptor,
+            "layers": layer_descriptors,
+        }))
+        .expect("serialize OCI layout manifest");
+        let manifest_digest = sha256_bytes(&manifest);
+        let manifest_descriptor = serde_json::json!({
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": format!("sha256:{manifest_digest}"),
+            "size": manifest.len(),
+            "platform": {"architecture": architecture, "os": "linux"},
+        });
+        let mut graph_manifests = vec![manifest_descriptor];
+        let mut extra_manifest = None;
+        if matches!(mutation, OciLayoutFixtureMutation::AmbiguousPlatform) {
+            let bytes = serde_json::to_vec(&serde_json::json!({
+                "schemaVersion": 2,
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "config": config_descriptor,
+                "layers": layer_descriptors,
+                "annotations": {"fixture": "ambiguous"},
+            }))
+            .expect("serialize ambiguous manifest");
+            let digest = sha256_bytes(&bytes);
+            graph_manifests.push(serde_json::json!({
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": format!("sha256:{digest}"),
+                "size": bytes.len(),
+                "platform": {"architecture": architecture, "os": "linux"},
+            }));
+            extra_manifest = Some((digest, bytes));
+        }
+        let mut target = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": graph_manifests,
+        }))
+        .expect("serialize OCI target index");
+        let target_digest = sha256_bytes(&target);
+        let index = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [{
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "digest": format!("sha256:{target_digest}"),
+                "size": target.len(),
+            }],
+        }))
+        .expect("serialize OCI layout index");
+        let config_path = format!("blobs/sha256/{config_digest}");
+        let gzip_path = format!("blobs/sha256/{gzip_digest}");
+        let plain_path = format!("blobs/sha256/{plain_digest}");
+        let compatibility_config =
+            if matches!(mutation, OciLayoutFixtureMutation::CompatibilityManifest) {
+                format!("blobs/sha256/{}", "f".repeat(64))
+            } else {
+                config_path.clone()
+            };
+        let compatibility_layers =
+            if matches!(mutation, OciLayoutFixtureMutation::CompatibilityLayers) {
+                vec![plain_path.clone(), gzip_path.clone()]
+            } else {
+                vec![gzip_path.clone(), plain_path.clone()]
+            };
+        let compatibility = serde_json::to_vec(&serde_json::json!([{
+            "Config": compatibility_config,
+            "RepoTags": ["fasti:test"],
+            "Layers": compatibility_layers,
+        }]))
+        .expect("serialize Docker compatibility manifest");
+        if matches!(mutation, OciLayoutFixtureMutation::IndexBlobDigest) {
+            target[0] ^= 0xff;
+        }
+        if matches!(mutation, OciLayoutFixtureMutation::ManifestBlobDigest) {
+            manifest[0] ^= 0xff;
+        }
+        if matches!(mutation, OciLayoutFixtureMutation::BlobDigest) {
+            gzip_blob[0] ^= 0xff;
+        }
+
+        let mut members = vec![
+            ("manifest.json".to_owned(), compatibility),
+            (
+                "oci-layout".to_owned(),
+                br#"{"imageLayoutVersion":"1.0.0"}"#.to_vec(),
+            ),
+            ("index.json".to_owned(), index),
+            (format!("blobs/sha256/{target_digest}"), target),
+            (format!("blobs/sha256/{manifest_digest}"), manifest),
+            (config_path, config),
+            (gzip_path, gzip_blob),
+            (plain_path, plain_layer.to_vec()),
+        ];
+        if let Some((digest, bytes)) = extra_manifest {
+            members.push((format!("blobs/sha256/{digest}"), bytes));
+        }
+        let mut archive = tar::Builder::new(Vec::new());
+        for (path, bytes) in members {
+            let mut header = tar::Header::new_gnu();
+            header.set_mode(0o600);
+            header.set_size(bytes.len() as u64);
+            header.set_cksum();
+            archive
+                .append_data(&mut header, path, bytes.as_slice())
+                .expect("append OCI layout fixture entry");
+        }
+        if matches!(mutation, OciLayoutFixtureMutation::Traversal) {
+            let bytes = b"escape";
+            let mut header = tar::Header::new_gnu();
+            header.as_mut_bytes()[..9].copy_from_slice(b"../escape");
+            header.set_mode(0o600);
+            header.set_size(bytes.len() as u64);
+            header.set_cksum();
+            archive
+                .append(&header, bytes.as_slice())
+                .expect("append traversal fixture entry");
+        }
+        let archive = archive.into_inner().expect("finish OCI layout fixture tar");
+        SavedOciLayoutFixture {
+            archive: gzip_fixture(&archive),
+            image_id: format!("sha256:{target_digest}"),
+            unpacked_bytes: (gzip_layer.len() + plain_layer.len()) as u64,
+        }
     }
 
     fn write_performance_fixture_with_layer_identity(
@@ -3389,6 +4079,19 @@ mod tests {
             serde_json::to_vec(&receipt).expect("serialize envelope receipt"),
         )
         .expect("write envelope receipt");
+    }
+
+    fn artifact_budget_fixture_receipt(root: &Path) -> ArtifactBudgetReceipt {
+        let (receipt_path, _) = write_performance_fixture(root, "x86_64", "12345");
+        let receipt_file = root.join(receipt_path);
+        let receipt = read_json(receipt_file.clone()).expect("read envelope receipt");
+        let artifact_budget_path = receipt_file.parent().expect("receipt parent").join(
+            receipt["artifact_budget_receipt"]["path"]
+                .as_str()
+                .expect("artifact budget path"),
+        );
+        serde_json::from_slice(&fs::read(artifact_budget_path).expect("read artifact budget"))
+            .expect("parse artifact budget")
     }
 
     #[test]
@@ -3863,6 +4566,91 @@ mod tests {
         )
         .expect_err("wrong executable architecture fails");
         assert!(error.to_string().contains("architecture does not match"));
+    }
+
+    #[test]
+    fn artifact_budget_accepts_bound_oci_layout_descriptor_graph() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let mut receipt = artifact_budget_fixture_receipt(root.path());
+        let fixture = saved_oci_layout_fixture(&receipt, OciLayoutFixtureMutation::None);
+        receipt.oci_image_id = fixture.image_id;
+        let archive_path = root.path().join("oci-layout.tar.gz");
+        fs::write(&archive_path, fixture.archive).expect("write OCI layout fixture");
+
+        assert_eq!(
+            validate_saved_oci_archive(&archive_path, &receipt, 1024 * 1024)
+                .expect("valid OCI layout descriptor graph"),
+            fixture.unpacked_bytes
+        );
+        let budgets = read_json(root.path().join("benchmarks/b1/budgets.json"))
+            .expect("read fixture budgets");
+        let unpacked_policy_limit = budgets
+            .pointer("/artifact_bytes/oci_image_unpacked")
+            .and_then(Value::as_u64)
+            .expect("fixture OCI unpacked policy limit");
+        assert!(OCI_UNPACKED_SAFETY_CEILING_BYTES > unpacked_policy_limit);
+        let error = validate_saved_oci_archive(&archive_path, &receipt, fixture.unpacked_bytes - 1)
+            .expect_err("OCI layout must enforce its independent safety ceiling");
+        assert!(error.to_string().contains("unpacked safety ceiling"));
+    }
+
+    #[test]
+    fn artifact_budget_rejects_hostile_oci_layout_descriptor_graphs() {
+        for (mutation, expected) in [
+            (
+                OciLayoutFixtureMutation::WrongImageId,
+                "exactly one index target",
+            ),
+            (
+                OciLayoutFixtureMutation::StaleSource,
+                "source label is stale",
+            ),
+            (OciLayoutFixtureMutation::BlobDigest, "digest or size"),
+            (OciLayoutFixtureMutation::DescriptorSize, "digest or size"),
+            (OciLayoutFixtureMutation::DiffId, "layer identities"),
+            (OciLayoutFixtureMutation::RootfsType, "rootfs type"),
+            (OciLayoutFixtureMutation::WrongOs, "not Linux"),
+            (OciLayoutFixtureMutation::IndexBlobDigest, "digest or size"),
+            (
+                OciLayoutFixtureMutation::ManifestBlobDigest,
+                "digest or size",
+            ),
+            (
+                OciLayoutFixtureMutation::UnknownCompression,
+                "unsupported compression",
+            ),
+            (
+                OciLayoutFixtureMutation::AmbiguousPlatform,
+                "exactly one selected platform manifest",
+            ),
+            (OciLayoutFixtureMutation::Traversal, "forbidden component"),
+            (
+                OciLayoutFixtureMutation::CompatibilityManifest,
+                "descriptors match manifest.json",
+            ),
+            (
+                OciLayoutFixtureMutation::CompatibilityLayers,
+                "descriptors match manifest.json",
+            ),
+        ] {
+            let root = tempfile::tempdir().expect("temporary workspace");
+            let mut receipt = artifact_budget_fixture_receipt(root.path());
+            let fixture = saved_oci_layout_fixture(&receipt, mutation);
+            receipt.oci_image_id = if matches!(mutation, OciLayoutFixtureMutation::WrongImageId) {
+                format!("sha256:{}", "0".repeat(64))
+            } else {
+                fixture.image_id
+            };
+            let archive_path = root.path().join("oci-layout.tar.gz");
+            fs::write(&archive_path, fixture.archive).expect("write OCI layout fixture");
+
+            let error = validate_saved_oci_archive(&archive_path, &receipt, 1024 * 1024)
+                .expect_err("hostile OCI layout fixture must fail");
+            assert!(
+                error.to_string().contains(expected),
+                "unexpected validation error: {error:#}"
+            );
+        }
     }
 
     #[test]
