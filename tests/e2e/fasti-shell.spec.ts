@@ -146,7 +146,7 @@ test("invalid health responses use the contract recovery state", async ({
   });
 });
 
-test("a superseded retry cannot replace the current loading state", async ({
+test("the loading state prevents duplicate concurrent retries", async ({
   page,
 }) => {
   let requestCount = 0;
@@ -161,8 +161,6 @@ test("a superseded retry cannot replace the current loading state", async ({
       return;
     }
     if (requestCount === 2) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    } else if (requestCount === 3) {
       await currentResponse;
     }
     await route.fulfill({
@@ -186,6 +184,7 @@ test("a superseded retry cannot replace the current loading state", async ({
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   );
+  expect(requestCount).toBe(2);
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
   releaseCurrentResponse!();

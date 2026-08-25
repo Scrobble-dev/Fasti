@@ -15,7 +15,7 @@ body {
   font-family: var(--fasti-font-body);
   font-size: 1rem;
   line-height: 1.5;
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizelegibility;
 }
 
 button,

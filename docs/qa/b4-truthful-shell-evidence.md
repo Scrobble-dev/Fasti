@@ -44,7 +44,7 @@ health proof. The UI suite retains light and dark screenshots at 320, 768, and
 - 44 by 44 CSS pixel minimum controls, which is a Fasti product rule rather than
   a general WCAG claim;
 - skip-link focus, keyboard order, next-action theme labels, persistence, and
-  retry recovery, including restored focus and superseded-request isolation;
+  retry recovery, including restored focus and duplicate-request prevention;
 - saved-theme colors before the application module loads;
 - system dark mode when reading local theme storage is unavailable, theme
   changes when writing it is unavailable, and both toggle directions;
@@ -72,7 +72,7 @@ health proof. The UI suite retains light and dark screenshots at 320, 768, and
 | Latency reduction | Loading feedback appears immediately. The request times out after three seconds and does not retry automatically. |
 | Learnability | One task, concrete nouns, visible status, and one recovery action require no learned navigation model. |
 | Metaphors | The surface uses literal service and response terms. It does not invent a dashboard or inbox metaphor. |
-| Protect the user's work | The harness is read-only. Retry aborts the old request before starting another request. |
+| Protect the user's work | The harness is read-only. A retry starts one new bounded request after the failed request. |
 | Readability | A bounded reading column, short paragraphs, clear headings, and tested text spacing preserve scanning. |
 | Simplicity | Only the active health capability is present. Complexity is removed, not hidden. |
 | State tracking | Loading, healthy, invalid-response, and unavailable states are explicit. The theme state persists locally. |
