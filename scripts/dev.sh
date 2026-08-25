@@ -73,13 +73,16 @@ _stop_pidfile() {
   local pid=""
   if pid="$(_tracked_pid "$name")"; then
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
     for _ in {1..10}; do
       kill -0 "$pid" 2>/dev/null || break
       sleep 0.1
     done
     if kill -0 "$pid" 2>/dev/null; then
       kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      for _ in {1..10}; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.1
+      done
     fi
   fi
   rm -f "$RUNDIR/$name.pid"
@@ -159,6 +162,7 @@ _start_native() {
 
   "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
+  set +m
   _write_pidfile daemon "$daemon_pid"
   echo "Fasti daemon started (PID: $daemon_pid, log: .dev-logs/fastid.log)"
 
@@ -178,12 +182,12 @@ _self_test() {
   local old_rundir="$RUNDIR"
   RUNDIR="$(mktemp -d)"
   trap '_stop_pidfile child; rm -f "$RUNDIR/stale.pid"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
-  set -m
-  bash -c 'sleep 30 & wait' &
+  setsid bash -c 'trap "" TERM; sleep 30 & wait' &
   local leader=$!
   _write_pidfile child "$leader"
   [[ "$(_tracked_pid child)" == "$leader" ]]
   _stop_pidfile child
+  wait "$leader" 2>/dev/null || true
   ! kill -0 "$leader" 2>/dev/null
   printf '%s|invalid start time\n' "$$" > "$RUNDIR/stale.pid"
   _stop_pidfile stale
