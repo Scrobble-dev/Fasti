@@ -306,6 +306,25 @@
   </header>
 
   <div class="settings-layout">
+    <label class="settings-nav-label" for="settings-section"
+      >Settings section</label
+    >
+    <select
+      id="settings-section"
+      class="settings-nav-select"
+      bind:value={activeSettingsSection}
+    >
+      <option value="connection">Connection</option>
+      <option value="appearance">Appearance & Theme</option>
+      <option value="navigation">Navigation & Menus</option>
+      <option value="providers">Metadata Providers & Keys</option>
+      <option value="connectors">Nuvio & Media Connectors</option>
+      <option value="tokens">Personal Access Tokens (PAT)</option>
+      <option value="oidc">Single Sign-On (OIDC)</option>
+      <option value="notifications">Notifications & Apprise</option>
+      <option value="importers">Lossless Importers & Backups</option>
+    </select>
+
     <!-- Left Settings Navigation -->
     <nav class="settings-nav" aria-label="Settings subnavigation">
       <button
@@ -1300,6 +1319,11 @@
     gap: 4px;
   }
 
+  .settings-nav-label,
+  .settings-nav-select {
+    display: none;
+  }
+
   .nav-tab-btn {
     display: flex;
     align-items: center;
@@ -1770,6 +1794,18 @@
     gap: 12px;
   }
 
+  @media (max-width: 1100px) {
+    .settings-layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .settings-nav {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
   @media (max-width: 760px) {
     .settings-container {
       padding: 20px 16px;
@@ -1780,14 +1816,30 @@
       font-size: 2rem;
     }
 
-    .settings-layout {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 16px;
+    .settings-nav {
+      display: none;
     }
 
-    .settings-nav {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
+    .settings-nav-label,
+    .settings-nav-select {
+      display: block;
+    }
+
+    .settings-nav-label {
+      margin-bottom: -10px;
+      color: var(--fasti-text-primary);
+      font-weight: 700;
+    }
+
+    .settings-nav-select {
+      width: 100%;
+      min-height: var(--fasti-touch-target-min, 44px);
+      padding: 8px 12px;
+      border: 1px solid
+        color-mix(in srgb, var(--fasti-text-muted) 40%, transparent);
+      border-radius: 4px;
+      background: var(--fasti-surface-paper);
+      color: var(--fasti-text-primary);
     }
 
     .settings-content-card {

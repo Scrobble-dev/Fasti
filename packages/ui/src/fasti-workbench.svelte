@@ -53,10 +53,7 @@
     providerCredentials: ProviderCredentialStatus[];
     onSaveConnection: (value: string) => Promise<ConnectionEndpoint>;
     onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
-    onSaveProviderKey: (
-      provider: string,
-      key: string | null,
-    ) => Promise<void>;
+    onSaveProviderKey: (provider: string, key: string | null) => Promise<void>;
     onSearchProvider: (
       provider: string,
       query: string,
@@ -847,6 +844,7 @@
   .search-field-wrapper {
     position: relative;
     flex: 1;
+    min-width: 0;
     max-width: 440px;
     display: flex;
     align-items: center;
@@ -861,6 +859,7 @@
 
   .global-search-input {
     width: 100%;
+    min-height: var(--fasti-touch-target-min, 44px);
     padding: 8px 12px 8px 38px;
     background: var(--fasti-surface-archive);
     border: 1px solid
@@ -885,7 +884,7 @@
   }
 
   .scope-select {
-    min-height: 38px;
+    min-height: var(--fasti-touch-target-min, 44px);
     padding: 8px 12px;
     background: var(--fasti-surface-archive);
     border: 1px solid
@@ -897,7 +896,7 @@
   }
 
   .tool-btn {
-    min-height: 38px;
+    min-height: var(--fasti-touch-target-min, 44px);
     display: flex;
     align-items: center;
     gap: 6px;
@@ -918,16 +917,16 @@
   }
 
   .tool-btn.icon-only {
-    min-width: 38px;
-    min-height: 38px;
+    min-width: var(--fasti-touch-target-min, 44px);
+    min-height: var(--fasti-touch-target-min, 44px);
     padding: 7px;
     display: grid;
     place-items: center;
   }
 
   .status-indicator {
-    min-width: 38px;
-    min-height: 38px;
+    min-width: var(--fasti-touch-target-min, 44px);
+    min-height: var(--fasti-touch-target-min, 44px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -952,5 +951,24 @@
     overflow-y: auto;
     background-color: var(--fasti-surface-archive);
     box-sizing: border-box;
+  }
+
+  @media (max-width: 520px) {
+    .top-nav-bar {
+      gap: 8px;
+      padding: 8px;
+    }
+
+    .top-nav-bar > :first-child {
+      min-width: 0;
+    }
+
+    .scope-select {
+      display: none;
+    }
+
+    .top-actions-right {
+      gap: 4px;
+    }
   }
 </style>
