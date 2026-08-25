@@ -14,6 +14,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGDIR="$PROJECT_ROOT/.dev-logs"
 DATADIR="$PROJECT_ROOT/.dev-data"
 
+# _status reports Fasti daemon and web process status and probes API health on ports 8420 and 4000.
 _status() {
   echo "=== Fasti Dev Status ==="
   local daemon_pid
@@ -43,6 +44,7 @@ _status() {
   fi
 }
 
+# _stop stops Fasti development processes and the `fasti-dev` Podman container.
 _stop() {
   echo "Stopping Fasti dev processes..."
   pkill -f "target/.*/fastid" 2>/dev/null || true
@@ -52,6 +54,7 @@ _stop() {
   echo "All Fasti dev processes stopped."
 }
 
+# _start_podman launches the Fasti development container with persistent data and reports its API health.
 _start_podman() {
   echo "=== Launching Fasti Podman Container ==="
   mkdir -p "$DATADIR"
@@ -71,12 +74,14 @@ _start_podman() {
   echo "API Health: $(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:8420/api/v1/health || echo 'starting...')"
 }
 
+# _start_desktop launches the Fasti Tauri desktop application from its source directory.
 _start_desktop() {
   echo "=== Launching Fasti Desktop (Tauri v2) ==="
   cd "$PROJECT_ROOT/apps/desktop/src-tauri"
   PKG_CONFIG=/usr/bin/pkg-config cargo run
 }
 
+# _start_native builds and starts the local Fasti daemon and, when available, the web workbench.
 _start_native() {
   trap _stop EXIT INT TERM
   mkdir -p "$LOGDIR" "$DATADIR"
