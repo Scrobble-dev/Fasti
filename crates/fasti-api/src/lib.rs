@@ -85,7 +85,7 @@ pub fn api_router(kernel: Arc<dyn LocalKernel>, bind_addr: SocketAddr, data_root
         "api_router requires loopback bind address, got non-loopback {bind_addr}"
     );
     assert!(
-        data_root.as_os_str().len() > 0,
+        !data_root.as_os_str().is_empty(),
         "api_router requires non-empty data_root"
     );
     health_router().merge(local::router(kernel))
