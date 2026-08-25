@@ -757,6 +757,36 @@
 </div>
 
 <style>
+  .theme-dark {
+    --fasti-surface-archive: #0f172a;
+    --fasti-surface-paper: #1e293b;
+    --fasti-surface-night: #090d16;
+    --fasti-text-primary: #f8fafc;
+    --fasti-text-muted: #94a3b8;
+    --fasti-brand-mark: #d34b45;
+    --fasti-brand-gold: #f1d06e;
+    --fasti-state-verified: #4ade80;
+    --fasti-state-attention: #fbbf24;
+    --tblr-body-bg: #0f172a;
+    --tblr-card-bg: #1e293b;
+    --tblr-body-color: #f8fafc;
+  }
+
+  .theme-night {
+    --fasti-surface-archive: #000000;
+    --fasti-surface-paper: #09090b;
+    --fasti-surface-night: #000000;
+    --fasti-text-primary: #ffffff;
+    --fasti-text-muted: #a1a1aa;
+    --fasti-brand-mark: #ef4444;
+    --fasti-brand-gold: #eab308;
+    --fasti-state-verified: #22c55e;
+    --fasti-state-attention: #eab308;
+    --tblr-body-bg: #000000;
+    --tblr-card-bg: #09090b;
+    --tblr-body-color: #ffffff;
+  }
+
   .fasti-workbench-layout {
     display: flex !important;
     flex-direction: row !important;

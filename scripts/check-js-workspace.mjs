@@ -1,22 +1,31 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const expectedPackages = new Map([
-  ["sdk", "@fasti/sdk"],
-  ["schemas", "@fasti/schemas"],
-  ["tokens", "@fasti/tokens"],
-  ["ui", "@fasti/ui"],
+const expectedWorkspaces = new Map([
+  ["apps/web", "@fasti/web"],
+  ["packages/sdk", "@fasti/sdk"],
+  ["packages/schemas", "@fasti/schemas"],
+  ["packages/tokens", "@fasti/tokens"],
+  ["packages/ui", "@fasti/ui"],
 ]);
-const buildablePackages = new Set(["sdk", "tokens", "ui"]);
+const buildableWorkspaces = new Set([
+  "apps/web",
+  "packages/sdk",
+  "packages/tokens",
+  "packages/ui",
+]);
+const entrypointWorkspaces = new Set([
+  "packages/sdk",
+  "packages/tokens",
+  "packages/ui",
+]);
 const failures = [];
 
 function packageEntryPath(packageRoot, entry) {
-  if (typeof entry !== "string" || isAbsolute(entry)) {
-    return undefined;
-  }
+  if (typeof entry !== "string" || isAbsolute(entry)) return undefined;
   const path = resolve(packageRoot, entry);
   const fromRoot = relative(packageRoot, path);
   if (
@@ -32,12 +41,7 @@ function packageEntryPath(packageRoot, entry) {
 
 function packageEntryExists(packageRoot, entry) {
   const entryPath = packageEntryPath(packageRoot, entry);
-  if (entryPath === undefined) {
-    return false;
-  }
-  // packageEntryPath confines this dynamic path to the package root.
-  // eslint-disable-next-line security/detect-non-literal-fs-filename
-  return existsSync(entryPath);
+  return entryPath !== undefined && existsSync(entryPath);
 }
 
 assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);
@@ -48,27 +52,22 @@ assert.equal(
   join(repoRoot, "package.json"),
 );
 
-const actualDirectories = readdirSync(join(repoRoot, "packages"), {
-  withFileTypes: true,
+const actualWorkspaces = globSync("{apps,packages}/*/package.json", {
+  cwd: repoRoot,
 })
-  .filter(
-    (entry) =>
-      entry.isDirectory() &&
-      existsSync(join(repoRoot, "packages", entry.name, "package.json")),
-  )
-  .map((entry) => entry.name)
+  .map((manifestPath) => dirname(manifestPath))
   .sort();
 
 if (
-  actualDirectories.join(",") !== [...expectedPackages.keys()].sort().join(",")
+  actualWorkspaces.join(",") !== [...expectedWorkspaces.keys()].sort().join(",")
 ) {
   failures.push(
-    `package inventory drift: expected ${[...expectedPackages.keys()].sort().join(",")}; found ${actualDirectories.join(",")}`,
+    `workspace inventory drift: expected ${[...expectedWorkspaces.keys()].sort().join(",")}; found ${actualWorkspaces.join(",")}`,
   );
 }
 
-for (const [directory, expectedName] of expectedPackages) {
-  const packageRoot = join(repoRoot, "packages", directory);
+for (const [directory, expectedName] of expectedWorkspaces) {
+  const packageRoot = join(repoRoot, directory);
   const manifestPath = join(packageRoot, "package.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
@@ -78,31 +77,28 @@ for (const [directory, expectedName] of expectedPackages) {
   if (manifest.private !== true) {
     failures.push(`${directory}: package must remain private before B8`);
   }
-
-  if (!buildablePackages.has(directory)) {
-    continue;
-  }
+  if (!buildableWorkspaces.has(directory)) continue;
 
   for (const script of ["build", "typecheck"]) {
     if (typeof manifest.scripts?.[script] !== "string") {
       failures.push(`${directory}: missing required ${script} script`);
     }
   }
+  if (!entrypointWorkspaces.has(directory)) continue;
 
-  const primaryEntry = manifest.main ?? manifest.svelte;
-  if (!packageEntryExists(packageRoot, primaryEntry)) {
-    failures.push(
-      `${directory}: primary entrypoint does not resolve to an existing file`,
-    );
+  for (const [field, target] of [
+    ["primary", manifest.main ?? manifest.svelte],
+    ["types", manifest.types],
+  ]) {
+    if (!packageEntryExists(packageRoot, target)) {
+      failures.push(
+        `${directory}: ${field} does not resolve to a confined built entrypoint`,
+      );
+    }
   }
-
-  if (!packageEntryExists(packageRoot, manifest.types)) {
-    failures.push(`${directory}: types does not resolve to an existing file`);
-  }
-
   if (manifest.module && !packageEntryExists(packageRoot, manifest.module)) {
     failures.push(
-      `${directory}: module does not resolve to a built entrypoint`,
+      `${directory}: module does not resolve to a confined built entrypoint`,
     );
   }
 }
@@ -113,5 +109,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  "PASS: retained JavaScript package inventory, scripts, privacy, and entrypoints are strict",
+  "PASS: retained JavaScript workspace inventory, scripts, privacy, and entrypoints are strict",
 );

@@ -3,13 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Fasti local administration interface",
+  "description": "Pre-production Fasti health and interface quality harness",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "typecheck": "svelte-check --tsgo --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "@fasti/sdk": "workspace:*",
     "@fasti/tokens": "workspace:*",
     "@fasti/ui": "workspace:*",
     "@tabler/core": "^1.4.0",

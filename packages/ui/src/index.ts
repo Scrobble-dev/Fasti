@@ -1,3 +1,5 @@
+export { default as StatusPanel } from "./status-panel.svelte";
+export type { StatusPanelState, StatusProblem } from "./status-types.js";
 export { default as SetupPanel } from "./setup-panel.svelte";
 export { default as NavSidebar } from "./nav-sidebar.svelte";
 export { default as ChronicleView } from "./chronicle-view.svelte";

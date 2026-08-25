@@ -2504,7 +2504,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       },
       "ui": {
-        "reason": "Fasti is headless through B3.",
+        "reason": "Product UI is not active through B3; the local health diagnostic is evidence tooling.",
         "state": "not_applicable"
       }
     },

@@ -64,5 +64,28 @@ export const cssVariables = `
   --fasti-font-body: ${typography.body};
   --fasti-font-mono: ${typography.mono};
   --fasti-touch-target-min: ${touchTargets.minimum};
+  --fasti-background: var(--fasti-surface-archive);
+  --fasti-panel: var(--fasti-surface-paper);
+  --fasti-foreground: var(--fasti-text-primary);
+  --fasti-muted: var(--fasti-text-muted);
+  --fasti-action: var(--fasti-action-primary);
+  --fasti-action-contrast: var(--fasti-surface-paper);
+  --fasti-verified: var(--fasti-state-verified);
+  --fasti-attention: var(--fasti-state-attention);
+  --fasti-border: color-mix(in srgb, var(--fasti-text-muted) 42%, transparent);
+  --fasti-focus: var(--fasti-state-attention);
+}
+
+[data-bs-theme="dark"] {
+  --fasti-background: var(--fasti-surface-night);
+  --fasti-panel: color-mix(in srgb, var(--fasti-surface-night) 88%, var(--fasti-surface-paper));
+  --fasti-foreground: var(--fasti-surface-paper);
+  --fasti-muted: color-mix(in srgb, var(--fasti-surface-paper) 72%, var(--fasti-surface-night));
+  --fasti-action: color-mix(in srgb, var(--fasti-action-primary) 50%, var(--fasti-surface-paper));
+  --fasti-action-contrast: var(--fasti-surface-night);
+  --fasti-verified: color-mix(in srgb, var(--fasti-state-verified) 55%, var(--fasti-surface-paper));
+  --fasti-attention: color-mix(in srgb, var(--fasti-state-attention) 45%, var(--fasti-surface-paper));
+  --fasti-border: color-mix(in srgb, var(--fasti-surface-paper) 35%, transparent);
+  --fasti-focus: color-mix(in srgb, var(--fasti-state-attention) 45%, var(--fasti-surface-paper));
 }
 `;

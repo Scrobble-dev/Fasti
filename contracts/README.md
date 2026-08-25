@@ -27,7 +27,7 @@ JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surface
 
 Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until the current aggregate milestone manifest, including Tauri and both low-hardware envelope architectures, passes. B2 is not authorized.
 
-Provider seeds and manifest examples remain future adapter inputs, not working integrations. Durable setup does not make the staged observation, identity, review, or portability paths public. There is no supported install, release, web interface, desktop package, or player.
+Provider seeds and manifest examples remain future adapter inputs, not working integrations. Durable setup does not make the staged observation, identity, review, or portability paths public. The local health QA harness consumes the generated SDK and adds no contract surface. There is no supported install, release, product web interface, desktop package, or player.
 
 The [internal staged B3 archive-v1 manifest schema](portability/v1/workspace-manifest.schema.json)
 and [example](portability/v1/workspace-manifest.example.json) freeze the 16

@@ -169,10 +169,11 @@ export class FastiClient {
       "timeoutMs",
     );
     this.#retryPolicy = normalizeRetryPolicy(options.retryPolicy);
-    this.#fetch = options.fetch ?? globalThis.fetch;
-    if (typeof this.#fetch !== "function") {
+    const fetch = options.fetch ?? globalThis.fetch?.bind(globalThis);
+    if (typeof fetch !== "function") {
       throw new TypeError("A Fetch API implementation is required");
     }
+    this.#fetch = fetch;
   }
 
   health(options: CallOptions = {}): Promise<HealthResponse> {

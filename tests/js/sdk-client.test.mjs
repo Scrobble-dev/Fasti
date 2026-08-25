@@ -107,6 +107,26 @@ test("durable bootstrap SDK keeps one-time secrets in JSON bodies", async () => 
   ]);
 });
 
+test("default fetch keeps the platform receiver", async () => {
+  const originalFetch = globalThis.fetch;
+  let receiver;
+  globalThis.fetch = function () {
+    receiver = this;
+    return Promise.resolve(
+      new Response(JSON.stringify({ status: "healthy", version: "0.1.0" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  };
+  try {
+    const client = new FastiClient({ baseUrl: "http://127.0.0.1:8420" });
+    assert.equal((await client.health()).status, "healthy");
+    assert.equal(receiver, globalThis);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("media types are matched case-insensitively", async () => {
   const client = new FastiClient({
     baseUrl: "http://127.0.0.1:8420",
