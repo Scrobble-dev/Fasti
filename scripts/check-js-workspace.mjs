@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, globSync, readFileSync } from "node:fs";
+import { globSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,7 +41,8 @@ function packageEntryPath(packageRoot, entry) {
 
 function packageEntryExists(packageRoot, entry) {
   const entryPath = packageEntryPath(packageRoot, entry);
-  return entryPath !== undefined && existsSync(entryPath);
+  if (entryPath === undefined) return false;
+  return statSync(entryPath, { throwIfNoEntry: false })?.isFile() === true;
 }
 
 assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);

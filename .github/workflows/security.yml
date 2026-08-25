@@ -23,3 +23,7 @@ jobs:
         run: cargo audit --file Cargo.lock
       - name: Audit isolated Tauri benchmark lockfile
         run: cargo audit --file benchmarks/b1/tauri-shell/src-tauri/Cargo.lock
+      - name: Audit desktop Tauri lockfile
+        # Tauri 2's GTK3 stack pins glib 0.18.5. Keep every other advisory fatal.
+        # Upstream migration: https://github.com/tauri-apps/tauri-docs/issues/3143
+        run: cargo audit --file apps/desktop/src-tauri/Cargo.lock --ignore RUSTSEC-2024-0429
