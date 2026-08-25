@@ -553,3 +553,173 @@ fn plex_webhook_redelivered_with_the_same_observed_at_replays_rather_than_duplic
         "the redelivery must replay the first attempt's receipt, not duplicate it"
     );
 }
+
+#[test]
+fn jellyfin_completed_rewatch_at_the_same_terminal_position_the_same_day_is_a_distinct_commit() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    let base = JellyfinWebhookPayload {
+        notification_type: "PlaybackStop".to_owned(),
+        item_type: "Movie".to_owned(),
+        item_id: "jf-movie-same-day".to_owned(),
+        name: "Spirited Away".to_owned(),
+        series_name: None,
+        season_number: None,
+        episode_number: None,
+        year: Some(2001),
+        provider_tmdb: None,
+        provider_imdb: None,
+        provider_tvdb: None,
+        played_to_completion: true,
+        user_id: Some("user-jellyfin-1".to_owned()),
+        playback_position_ticks: Some(75_000_000_000),
+    };
+    let first_watch = base.clone();
+    let second_watch = base;
+
+    let first_cmd = first_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"))
+        .expect("generates valid command");
+    let second_cmd = second_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T22:00:00Z"))
+        .expect("generates valid command");
+
+    assert_ne!(
+        first_cmd.operation_id(),
+        second_cmd.operation_id(),
+        "two same-day completed occurrences at the same terminal position must not collide"
+    );
+
+    let outcome1 = fixture.authorize_and_accept(first_cmd).expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(second_cmd).expect("accepts");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Committed(_)),
+        "the second same-day occurrence must commit as its own observation"
+    );
+}
+
+#[test]
+fn jellyfin_webhook_redelivered_with_the_same_observed_at_replays_rather_than_duplicating() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    let payload = JellyfinWebhookPayload {
+        notification_type: "PlaybackStop".to_owned(),
+        item_type: "Movie".to_owned(),
+        item_id: "jf-movie-redelivery".to_owned(),
+        name: "Spirited Away".to_owned(),
+        series_name: None,
+        season_number: None,
+        episode_number: None,
+        year: Some(2001),
+        provider_tmdb: None,
+        provider_imdb: None,
+        provider_tvdb: None,
+        played_to_completion: true,
+        user_id: Some("user-jellyfin-1".to_owned()),
+        playback_position_ticks: Some(75_000_000_000),
+    };
+
+    let first_attempt = payload
+        .to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"))
+        .expect("generates valid command");
+    let redelivery = payload
+        .to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"))
+        .expect("generates valid command");
+
+    assert_eq!(
+        first_attempt.operation_id(),
+        redelivery.operation_id(),
+        "a redelivery with the same observed_at must derive the same operation id"
+    );
+
+    let outcome1 = fixture
+        .authorize_and_accept(first_attempt)
+        .expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(redelivery).expect("replays");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Replayed(_)),
+        "the redelivery must replay the first attempt's receipt, not duplicate it"
+    );
+}
+
+#[test]
+fn mpris_completed_replay_at_the_same_terminal_position_the_same_day_is_a_distinct_commit() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    let event = MprisMediaEvent {
+        player_identity: "VLC".to_owned(),
+        track_id: "file:///music/daft_punk/discovery/one_more_time.flac".to_owned(),
+        title: "One More Time".to_owned(),
+        artist: Some("Daft Punk".to_owned()),
+        album: Some("Discovery".to_owned()),
+        duration_micros: Some(320000000),
+        position_micros: Some(320000000),
+        is_completed: true,
+    };
+
+    let first_cmd =
+        event.to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"));
+    let second_cmd =
+        event.to_observation_command(access, sample_observed_at("2026-08-25T22:00:00Z"));
+
+    assert_ne!(
+        first_cmd.operation_id(),
+        second_cmd.operation_id(),
+        "two same-day completed plays at the same terminal position must not collide"
+    );
+
+    let outcome1 = fixture.authorize_and_accept(first_cmd).expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(second_cmd).expect("accepts");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Committed(_)),
+        "the second same-day play must commit as its own observation"
+    );
+}
+
+#[test]
+fn mpris_event_redelivered_with_the_same_observed_at_replays_rather_than_duplicating() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    let event = MprisMediaEvent {
+        player_identity: "VLC".to_owned(),
+        track_id: "file:///music/daft_punk/discovery/one_more_time.flac".to_owned(),
+        title: "One More Time".to_owned(),
+        artist: Some("Daft Punk".to_owned()),
+        album: Some("Discovery".to_owned()),
+        duration_micros: Some(320000000),
+        position_micros: Some(320000000),
+        is_completed: true,
+    };
+
+    let first_attempt =
+        event.to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"));
+    let redelivery =
+        event.to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"));
+
+    assert_eq!(
+        first_attempt.operation_id(),
+        redelivery.operation_id(),
+        "a redelivery with the same observed_at must derive the same operation id"
+    );
+
+    let outcome1 = fixture
+        .authorize_and_accept(first_attempt)
+        .expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(redelivery).expect("replays");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Replayed(_)),
+        "the redelivery must replay the first attempt's receipt, not duplicate it"
+    );
+}
