@@ -67,6 +67,7 @@ SAVED_OCI_ARCHIVE_SAFETY_CEILING_BYTES = (
 SAVED_OCI_ENTRY_SAFETY_CEILING = 4096
 SAMPLE_INTERVAL_MS = int(LOCKED_BUDGETS["timing_seconds"]["sample_interval_ms"])
 CONTRACT_SDK_BUILD_COMMAND = ("pnpm", "--filter", "@fasti/sdk", "build")
+GOVERNED_BUILD_PROVENANCE_ARG = "--provenance=false"
 IMAGE_SOURCE_LABELS = {
     "git_commit": "org.opencontainers.image.revision",
     "git_tree": "dev.scrobble.fasti.source.tree",
@@ -882,18 +883,8 @@ def host_architecture() -> tuple[str, str]:
     return architecture
 
 
-def docker_save_command(image_ref: str) -> list[str]:
-    _, docker_platform = host_architecture()
-    return ["docker", "image", "save", "--platform", docker_platform, image_ref]
-
-
 def inspect_bound_image(image_ref: str, expected_source: dict[str, str]) -> dict[str, Any]:
-    _, docker_platform = host_architecture()
-    documents = json.loads(
-        run_checked(
-            ["docker", "image", "inspect", "--platform", docker_platform, image_ref]
-        )
-    )
+    documents = json.loads(run_checked(["docker", "image", "inspect", image_ref]))
     if not isinstance(documents, list) or len(documents) != 1:
         raise CaptureError(f"Docker returned an unexpected image inspection for {image_ref!r}")
     document = documents[0]
@@ -994,6 +985,7 @@ def governed_build_image(args: argparse.Namespace, context: dict[str, Any]) -> l
         command = [
             "docker",
             "build",
+            GOVERNED_BUILD_PROVENANCE_ARG,
             "--file",
             str(archived_recipe),
             "--tag",
@@ -2546,7 +2538,7 @@ def artifact_sizes(
         temp = Path(temp_name)
         oci_archive = temp / "fasti-oci.tar.gz"
         contract_pack = temp / "fasti-contract-pack.tar.gz"
-        docker_save = docker_save_command(args.immutable_image)
+        docker_save = ["docker", "image", "save", args.immutable_image]
         contract_context = temp / "contract-context"
         contract_context_provenance = create_exact_git_archive_context(contract_context)
         sdk_install_command = ["pnpm", "--offline", "install", "--frozen-lockfile"]
