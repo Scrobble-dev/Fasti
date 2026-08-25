@@ -62,7 +62,8 @@ export interface FastiClientOptions {
   readonly fetch?: typeof globalThis.fetch;
 }
 
-export type ConnectionValueSource = "default" | "saved" | "environment" | "build";
+export type ConnectionValueSource =
+  "default" | "saved" | "environment" | "build";
 
 export type ConnectionTrust = "http" | "https";
 
@@ -746,7 +747,11 @@ export function normalizeBaseUrl(value: string): URL {
 
 function loopbackAliases(url: URL): readonly string[] {
   const hostname = url.hostname.toLowerCase();
-  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]") {
+  if (
+    hostname !== "localhost" &&
+    hostname !== "127.0.0.1" &&
+    hostname !== "[::1]"
+  ) {
     return Object.freeze([]);
   }
   const port = url.port === "" ? "" : `:${url.port}`;

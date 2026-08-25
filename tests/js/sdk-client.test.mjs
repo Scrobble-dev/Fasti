@@ -610,11 +610,7 @@ test("connection endpoints preserve custom domains and expose loopback alternati
   });
   assert.deepEqual(
     connectionEndpoint("http://localhost:8420").loopbackAliases,
-    [
-      "http://localhost:8420",
-      "http://127.0.0.1:8420",
-      "http://[::1]:8420",
-    ],
+    ["http://localhost:8420", "http://127.0.0.1:8420", "http://[::1]:8420"],
   );
 });
 
