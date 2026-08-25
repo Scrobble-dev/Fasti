@@ -35,7 +35,6 @@ struct DesktopState {
     data_root: PathBuf,
     kernel: Mutex<Option<Arc<SqliteKernel>>>,
     setup_gate: Mutex<()>,
-    secrets: KeyringSetupSecretStore,
     network: NetworkConfigStore,
 }
 
@@ -62,7 +61,7 @@ impl DesktopState {
 #[tauri::command(async)]
 fn setup_status(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, DesktopProblem> {
     let kernel = state.kernel()?;
-    setup::inspect_setup(&kernel, &state.secrets)
+    setup::inspect_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -73,7 +72,7 @@ fn complete_setup(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, 
         .lock()
         .map_err(|_| DesktopProblem::storage("The setup lock is unavailable."))?;
     let kernel = state.kernel()?;
-    setup::complete_setup(&kernel, &state.secrets)
+    setup::complete_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -197,7 +196,6 @@ pub fn run() {
             let config_root = app.path().app_config_dir()?;
             let data_root = data_root(app)?;
             app.manage(DesktopState {
-                secrets: KeyringSetupSecretStore::new(&data_root),
                 data_root,
                 kernel: Mutex::new(None),
                 setup_gate: Mutex::new(()),

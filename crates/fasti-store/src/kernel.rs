@@ -85,6 +85,7 @@ impl LockedDataRoot {
         }
         prepare_private_directory(&path)?;
         let root_directory = open_data_root_directory(&path)?;
+        let path = fs::read_link(format!("/proc/self/fd/{}", root_directory.as_raw_fd()))?;
         let lock = acquire_data_root_lock(&path, &root_directory)?;
         Ok(Self {
             path,
@@ -673,6 +674,20 @@ mod tests {
         {
             let _ = link;
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_reports_the_opened_physical_path() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let configured = temporary.path().join(".").join("fasti-data");
+        assert!(!configured.exists());
+
+        let guard = LockedDataRoot::acquire(&configured).expect("offline data-root guard");
+        assert_eq!(
+            guard.path(),
+            configured.canonicalize().expect("physical path")
+        );
     }
 
     #[cfg(target_os = "linux")]
