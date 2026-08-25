@@ -23,6 +23,31 @@ use serde::{Deserialize, Serialize};
 /// oversized or hostile payload cannot force unbounded claim-construction work.
 const MAX_INGEST_GUIDS: usize = 16;
 
+/// Assembles the canonical command shared by every ingest adapter, once the
+/// caller has built the source-specific lexeme and identity claims.
+fn build_ingest_command(
+    access: RequestAccessContext,
+    observed_at: ObservedAt,
+    lexeme: &str,
+    claims: Vec<ExternalIdentifierClaim>,
+    grain: Grain,
+) -> AcceptObservationCommand {
+    let op_id = derive_ingest_operation_id(lexeme);
+    let evidence_digest = derive_ingest_evidence_digest(lexeme);
+    let evidence =
+        EvidenceReference::new(EvidenceId::new_v7(), evidence_digest, lexeme.len() as u64);
+
+    AcceptObservationCommand::new(
+        RequestCorrelationId::new_v7(),
+        access,
+        op_id,
+        None,
+        observed_at,
+        evidence,
+    )
+    .with_identity_clues(claims, Some(grain))
+}
+
 // ---------------------------------------------------------------------------
 // 1. Plex Webhook Adapter
 // ---------------------------------------------------------------------------
@@ -138,22 +163,14 @@ impl PlexWebhookPayload {
             "plex:account:{account_id}:key:{}:event:{}:offset:{view_offset}:at:{occurred_at}",
             metadata.rating_key, self.event
         );
-        let op_id = derive_ingest_operation_id(&lexeme);
-        let evidence_digest = derive_ingest_evidence_digest(&lexeme);
-        let evidence =
-            EvidenceReference::new(EvidenceId::new_v7(), evidence_digest, lexeme.len() as u64);
 
-        let command = AcceptObservationCommand::new(
-            RequestCorrelationId::new_v7(),
+        Some(build_ingest_command(
             access,
-            op_id,
-            None,
             observed_at,
-            evidence,
-        )
-        .with_identity_clues(claims, Some(grain));
-
-        Some(command)
+            &lexeme,
+            claims,
+            grain,
+        ))
     }
 }
 
@@ -256,22 +273,14 @@ impl JellyfinWebhookPayload {
             "jellyfin:user:{user_str}:item:{}:event:{}:position:{position}:at:{occurred_at}",
             self.item_id, self.notification_type
         );
-        let op_id = derive_ingest_operation_id(&lexeme);
-        let evidence_digest = derive_ingest_evidence_digest(&lexeme);
-        let evidence =
-            EvidenceReference::new(EvidenceId::new_v7(), evidence_digest, lexeme.len() as u64);
 
-        let command = AcceptObservationCommand::new(
-            RequestCorrelationId::new_v7(),
+        Some(build_ingest_command(
             access,
-            op_id,
-            None,
             observed_at,
-            evidence,
-        )
-        .with_identity_clues(claims, Some(grain));
-
-        Some(command)
+            &lexeme,
+            claims,
+            grain,
+        ))
     }
 }
 
@@ -317,10 +326,6 @@ impl MprisMediaEvent {
             "mpris:player:{}:track:{}:completed:{}:position:{position}:at:{occurred_at}",
             self.player_identity, self.track_id, self.is_completed
         );
-        let op_id = derive_ingest_operation_id(&lexeme);
-        let evidence_digest = derive_ingest_evidence_digest(&lexeme);
-        let evidence =
-            EvidenceReference::new(EvidenceId::new_v7(), evidence_digest, lexeme.len() as u64);
 
         // track_id is a local player-session identifier (e.g. a DBus object
         // path), not a stable cross-device identity -- record it as
@@ -330,15 +335,7 @@ impl MprisMediaEvent {
                 .map(|claim| vec![claim])
                 .unwrap_or_default();
 
-        AcceptObservationCommand::new(
-            RequestCorrelationId::new_v7(),
-            access,
-            op_id,
-            None,
-            observed_at,
-            evidence,
-        )
-        .with_identity_clues(claims, Some(Grain::Track))
+        build_ingest_command(access, observed_at, &lexeme, claims, Grain::Track)
     }
 }
 
