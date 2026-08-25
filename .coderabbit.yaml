@@ -98,3 +98,18 @@ reviews:
       instructions: |
         Verify test assertions:
         - Ensure tests verify observable behavior, failure modes, and invariant boundaries rather than internal mock implementation details.
+
+    - path: "packages/sdk/**"
+      instructions: |
+        Verify TypeScript SDK contracts and behavior:
+        - Contract conformance: Match authored DTO schemas and non-retrying idempotent operations.
+        - Response validation: Validate all responses against typed problems.
+        - Zero telemetry: Strictly verify no telemetry, tracking, or phone-home code.
+        - Product boundary: Fasti records. Players play. No playback or stream handling.
+
+    - path: "scripts/**"
+      instructions: |
+        Verify development and build tooling:
+        - Process lifecycle: Ensure long-running launchers clean up background child processes on exit/signals.
+        - Determinism: Code generation and lint checks must be reproducible and offline-safe.
+        - Secret safety: Never print tokens or sensitive data to stdout or log files.

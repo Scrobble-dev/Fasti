@@ -73,6 +73,7 @@ _start_desktop() {
 }
 
 _start_native() {
+  trap _stop EXIT INT TERM
   mkdir -p "$LOGDIR" "$DATADIR"
 
   echo "=== 1. Compiling & Starting Fasti Daemon ==="

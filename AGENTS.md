@@ -109,11 +109,28 @@ Also run focused checks for changed surfaces. Add regression tests for fixed def
 
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
 
-## Design system
+## Design system & UI Component Standards
 
-Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision. Font choices, colors, spacing, and aesthetic direction are defined there. Do not deviate without explicit approval.
+Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision.
 
-In QA mode, flag any code that does not match `brand/DESIGN.md`.
+### UI Invariants & Requirements:
+- **Tabler-First Policy**: Always use upstream Tabler (`@tabler/core` and `@tabler/icons`) layout, grid, typography, cards, tables, forms, modals, and badge classes first.
+- **Component Decision Hierarchy**:
+  1. Tabler Core Component (direct usage)
+  2. Tabler Pattern Composition
+  3. Fasti Token-Skinned Tabler Element (`brand/tokens/tokens.json`)
+  4. Custom Svelte Component (STRICT EXCEPTION: only if Tabler has zero equivalent; requires explicit documented architectural rationale).
+- **Impeccable Craft Floor**: Surface mode must be `Operate` (workbench, triage, settings) or `Read` (annal, chronicle, markdown docs). Zero layout shifts (`CLS = 0`), no purple/violet AI gradients, no generic SaaS card walls, no continuous decorative animations, and strict 44px min touch targets.
+- **Interaction & Usability Standards**: All UI flows must be audited against:
+  - AskTog interaction principles (anticipation, Fitts's law, latency reduction, user work protection, state continuity)
+  - Gestalt grouping principles (proximity, similarity, common region, continuity, closure, figure/ground)
+  - All 10 Nielsen Norman usability heuristics
+  - IxDF research topics (cognitive load reduction, progressive disclosure, dark mode halation prevention, motor precision)
+- **Accessibility & Regulatory Conformance**:
+  - WCAG 2.2 Level AA full compliance (3px high-contrast focus rings with 2px offset, >= 4.5:1 text contrast / 7.0:1 on paper cards, 44px hitboxes, non-obscured focus).
+  - EN 301 549 compliance across Clause 9 (Web), Clause 10 (Non-Web Docs), Clause 11 (Desktop/Software Assistive Tech Interoperability), and Clause 12 (Documentation).
+
+In QA mode, flag any code that does not match `brand/DESIGN.md` or violates the Tabler-first ladder.
 
 ## Skill routing
 
@@ -129,7 +146,7 @@ Key routing rules:
 - Bugs/errors → invoke /investigate
 - QA/testing site behavior → invoke /qa or /qa-only
 - Code review/diff check → invoke /review
-- Visual polish → invoke /design-review
+- Visual polish → invoke /design-review or /impeccable polish
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
 - Resume context → invoke /context-restore
@@ -144,7 +161,8 @@ Document:
 - offline impact;
 - security impact;
 - performance evidence;
-- accessibility impact;
+- design & Tabler-first component compliance;
+- accessibility evidence (WCAG 2.2 AA & EN 301 549 audit + Axe-core zero-violation report);
 - tests;
 - rollback.
 
