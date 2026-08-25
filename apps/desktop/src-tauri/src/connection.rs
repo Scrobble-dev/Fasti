@@ -1,5 +1,5 @@
+use crate::outbound_http::bounded_body;
 use crate::setup::DesktopProblem;
-use futures_util::StreamExt;
 use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -40,22 +40,9 @@ pub(crate) async fn test(endpoint: String) -> Result<ConnectionStatus, DesktopPr
             response.status().as_u16()
         )));
     }
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_HEALTH_RESPONSE_BYTES as u64)
-    {
-        return Err(invalid_response("The health response was too large."));
-    }
-
-    let mut body = Vec::new();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| invalid_response("The health response was incomplete."))?;
-        if body.len().saturating_add(chunk.len()) > MAX_HEALTH_RESPONSE_BYTES {
-            return Err(invalid_response("The health response was too large."));
-        }
-        body.extend_from_slice(&chunk);
-    }
+    let body = bounded_body(response, MAX_HEALTH_RESPONSE_BYTES)
+        .await
+        .map_err(invalid_response)?;
     let health: HealthResponse = serde_json::from_slice(&body)
         .map_err(|_| invalid_response("The endpoint did not return a Fasti health response."))?;
     if health.status != "healthy" || health.version.trim().is_empty() {

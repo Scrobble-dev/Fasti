@@ -6,7 +6,7 @@ use fasti_domain::RequestCorrelationId;
 use fasti_store::SqliteKernel;
 use serde::Serialize;
 
-const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
+pub(crate) const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SetupSecret {
@@ -46,7 +46,7 @@ impl DesktopProblem {
         }
     }
 
-    fn secure_storage(detail: impl Into<String>) -> Self {
+    pub(crate) fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
             title: "Secure storage is unavailable",

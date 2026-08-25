@@ -138,7 +138,6 @@ pub fn authorize_outbound(
     host: &str,
     addresses: &[IpAddr],
 ) -> Result<(), AccessDenial> {
-    require_declared("provider", declaration.provider, &[declaration.provider])?;
     require_declared("capability", capability, declaration.capabilities)?;
     require_declared("host", host, declaration.hosts)?;
     narrow(

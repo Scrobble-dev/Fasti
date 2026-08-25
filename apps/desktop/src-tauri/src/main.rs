@@ -1,4 +1,6 @@
 mod connection;
+mod outbound_http;
+mod provider;
 mod setup;
 
 use fasti_store::SqliteKernel;
@@ -57,6 +59,29 @@ async fn test_endpoint_connection(
     connection::test(endpoint).await
 }
 
+#[tauri::command(async)]
+fn provider_credential_status() -> Result<Vec<provider::ProviderCredentialStatus>, DesktopProblem> {
+    provider::credential_status()
+}
+
+#[tauri::command(async)]
+fn save_provider_key(
+    provider: String,
+    key: Option<String>,
+) -> Result<Vec<provider::ProviderCredentialStatus>, DesktopProblem> {
+    provider::save_key(&provider, key)?;
+    provider::credential_status()
+}
+
+#[tauri::command(async)]
+async fn search_provider(
+    provider: String,
+    query: String,
+    policy: fasti_application::OutboundAccessPolicy,
+) -> Result<Vec<fasti_application::ProviderCandidate>, DesktopProblem> {
+    provider::search(provider, query, policy).await
+}
+
 fn explicit_data_root(value: Option<OsString>) -> io::Result<PathBuf> {
     value
         .filter(|value| !value.is_empty())
@@ -84,7 +109,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             setup_status,
             complete_setup,
-            test_endpoint_connection
+            test_endpoint_connection,
+            provider_credential_status,
+            save_provider_key,
+            search_provider
         ])
         .run(tauri::generate_context!())
         .expect("Fasti desktop shell failed");
