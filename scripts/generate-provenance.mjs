@@ -12,10 +12,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repositoryRoot = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 async function sha256(path) {
   const bytes = await readFile(path);
@@ -94,5 +91,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     resolve(outputDir, "provenance-statement.json"),
     JSON.stringify(statement, null, 2) + "\n",
   );
-  console.log(`PASS: provenance statement written for ${subjectPaths.length} subject(s)`);
+  console.log(
+    `PASS: provenance statement written for ${subjectPaths.length} subject(s)`,
+  );
 }

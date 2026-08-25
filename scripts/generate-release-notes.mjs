@@ -7,10 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repositoryRoot = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function extractReleaseNotes(changelog, tag) {
   const version = tag.replace(/^v/, "");
@@ -27,7 +24,9 @@ export function extractReleaseNotes(changelog, tag) {
   const start = startMatch.index + startMatch[0].length;
   const rest = changelog.slice(start);
   const nextHeadingMatch = /^##\s*\[/m.exec(rest);
-  const section = nextHeadingMatch ? rest.slice(0, nextHeadingMatch.index) : rest;
+  const section = nextHeadingMatch
+    ? rest.slice(0, nextHeadingMatch.index)
+    : rest;
   return section.trim() + "\n";
 }
 

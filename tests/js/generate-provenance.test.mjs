@@ -41,10 +41,7 @@ test("binds the statement to the exact content and commit of its subjects", asyn
     assert.equal(statement.subject.length, 1);
     assert.equal(statement.subject[0].name, "artifact.txt");
     assert.equal(statement.source.git_commit, commit);
-    assert.equal(
-      statement.predicate.runDetails.metadata.invocationId,
-      "12345",
-    );
+    assert.equal(statement.predicate.runDetails.metadata.invocationId, "12345");
   });
 });
 
