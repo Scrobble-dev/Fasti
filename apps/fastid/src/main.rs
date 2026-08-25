@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
                 "Fasti durable local listener starting on http://{} with data root {:?}",
                 addr, data_root
             );
-            api_router(kernel)
+            api_router(kernel, addr, &data_root)
         }
         None => {
             if !remote_health_only {

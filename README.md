@@ -44,7 +44,7 @@ The production daemon deliberately exposes only behavior it can prove:
 
 | Surface                                 | Current state                                                                                                                                            |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document                                                                                 |
+| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document, which covers health and durable setup routes                                   |
 | One-time node initialization/enrollment | Durable production routes are mounted only for a loopback bind with an explicit `FASTI_DATA_ROOT`; one-time secrets remain in JSON bodies                |
 | B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability  |
 | B2 local kernel                         | Constructed by `fastid` only for durable local setup; observation, identity, evidence, receipt, and review operations remain internal                     |
@@ -103,7 +103,7 @@ Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an e
 
 B1 has a machine-readable capability registry as the authoritative public ledger. Deterministic generation projects that meaning into:
 
-- a production OpenAPI 3.1 document generated from the one mounted health handler;
+- a production OpenAPI 3.1 document covering health and durable setup routes;
 - a separate OpenAPI 3.1 document for real, feature-gated conformance handlers and shared public DTOs;
 - AsyncAPI 3.x transport binding for the `receipt.stream` SSE channel;
 - JSON Schema 2020-12 for public payloads;

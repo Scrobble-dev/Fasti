@@ -65,9 +65,11 @@ test("health omits credentials and returns the exact public contract", async () 
 test("durable bootstrap SDK keeps one-time secrets in JSON bodies", async () => {
   const proof = "a".repeat(64);
   const credential = "b".repeat(64);
+  const setupCredential = "c".repeat(64);
   const requests = [];
   const client = new FastiClient({
     baseUrl: "http://127.0.0.1:8420",
+    credential: setupCredential,
     fetch: async (url, init) => {
       requests.push({
         url: String(url),

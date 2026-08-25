@@ -1575,25 +1575,82 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
             expected.method,
             expected.path
         );
+
+        // Extract and validate request schema from OpenAPI
+        let request_name = match expected.request {
+            Some(expected_request) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/requestBody/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_request);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production request schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                expected_request
+            }
+            None => {
+                ensure!(
+                    operation.get("requestBody").is_none(),
+                    "unexpected request body for {} {}",
+                    expected.method,
+                    expected.path
+                );
+                "undefined"
+            }
+        };
+
+        // Extract and validate response schema from OpenAPI
+        let response_name = match expected.response {
+            Some(expected_response) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/responses/200/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_response);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production response schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                expected_response
+            }
+            None => "undefined",
+        };
+
+        // Derive authenticated from registry authorization; bootstrap operations explicitly
+        // send no credential during scoped enrollment because the proof is in the body
+        let authorization = string_at(operation, "/x-fasti-authorization")?;
+        let authenticated = authorization != "scoped_enrollment";
+
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
         let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
         let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
         writeln!(
             output,
-            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: false, runtimeAvailability: {}, durability: \"durable\", retry: \"never\", requestSchema: {}, responseSchema: {} }},",
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: \"never\", requestSchema: {}, responseSchema: {} }},",
             expected.alias,
             json_string(expected.operation_id)?,
             json_string(&expected.method.to_ascii_uppercase())?,
             json_string(expected.path)?,
             json_string(expected.capability_id)?,
-            json_string(string_at(operation, "/x-fasti-authorization")?)?,
+            json_string(authorization)?,
+            authenticated,
             json_string(string_at(
                 operation,
                 "/x-fasti-runtime-availability"
             )?)?,
-            json_string(expected.request.expect("bootstrap request schema"))?,
-            json_string(expected.response.expect("bootstrap response schema"))?,
+            json_string(request_name)?,
+            json_string(response_name)?,
         )?;
     }
     output.push_str("} as const;\n\n");

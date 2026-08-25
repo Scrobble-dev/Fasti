@@ -38,13 +38,20 @@
         <IconLock size={20} /> No credential is sent to a browser or network port.
       </p>
       <button type="button" onclick={onSetup}>Create local record</button>
-    {:else if state === "blocked" && problem}
-      <div class="problem" role="alert">
-        <p class="eyebrow">{problem.code}</p>
-        <h2>{problem.title}</h2>
-        <p>{problem.detail}</p>
-        <p><strong>Next:</strong> {problem.next_action}</p>
-      </div>
+    {:else if state === "blocked"}
+      {#if problem}
+        <div class="problem" role="alert">
+          <p class="eyebrow">{problem.code}</p>
+          <h2>{problem.title}</h2>
+          <p>{problem.detail}</p>
+          <p><strong>Next:</strong> {problem.next_action}</p>
+        </div>
+      {:else}
+        <div class="problem" role="alert">
+          <h2>Setup blocked</h2>
+          <p>The local record could not be created.</p>
+        </div>
+      {/if}
       <button type="button" class="secondary" onclick={onSetup}>Retry</button>
     {:else}
       <h2>Review inbox</h2>
@@ -145,7 +152,7 @@
   }
 
   button:focus-visible {
-    outline: 3px solid var(--fasti-brand-gold);
+    outline: 3px solid var(--fasti-action-primary);
     outline-offset: 3px;
   }
 

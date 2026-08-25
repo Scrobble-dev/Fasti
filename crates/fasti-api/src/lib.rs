@@ -3,6 +3,8 @@
 use axum::{routing::get, Json, Router};
 use fasti_application::LocalKernel;
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
+use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use utoipa::OpenApi;
 
@@ -62,7 +64,30 @@ pub fn health_router() -> Router {
 }
 
 /// Constructs the durable loopback API router for fastid.
-pub fn api_router(kernel: Arc<dyn LocalKernel>) -> Router {
+///
+/// # Contract
+///
+/// This function merges health and durable local routes and validates that:
+/// - `bind_addr` is a loopback address (panics if not)
+/// - `data_root` is non-empty (panics if empty)
+///
+/// These validations enforce the durable route security model: local capability
+/// routes must never be exposed on non-loopback listeners, and must always have
+/// an explicit data root. Non-loopback listeners or missing data roots must use
+/// [`health_router`] instead.
+///
+/// # Panics
+///
+/// Panics if `bind_addr` is not a loopback address or if `data_root` is empty.
+pub fn api_router(kernel: Arc<dyn LocalKernel>, bind_addr: SocketAddr, data_root: &Path) -> Router {
+    assert!(
+        bind_addr.ip().is_loopback(),
+        "api_router requires loopback bind address, got non-loopback {bind_addr}"
+    );
+    assert!(
+        data_root.as_os_str().len() > 0,
+        "api_router requires non-empty data_root"
+    );
     health_router().merge(local::router(kernel))
 }
 
@@ -85,6 +110,11 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = Arc::new(fasti_store::SqliteKernel::open(root.path()).expect("SQLite kernel"));
         (root, kernel)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn test_bind_addr() -> SocketAddr {
+        "127.0.0.1:8420".parse().expect("loopback address")
     }
 
     #[test]
@@ -125,8 +155,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn documented_health_route_is_mounted() {
-        let (_root, kernel) = test_kernel();
-        let response = api_router(kernel)
+        let (root, kernel) = test_kernel();
+        let response = api_router(kernel, test_bind_addr(), root.path())
             .oneshot(
                 Request::get("/api/v1/health")
                     .body(Body::empty())
@@ -141,8 +171,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn durable_bootstrap_issues_one_credential_and_closes_initialization() {
-        let (_root, kernel) = test_kernel();
-        let app = api_router(kernel.clone());
+        let (root, kernel) = test_kernel();
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
 
         let initialized = app
             .clone()
@@ -253,8 +283,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn event_submission_is_absent_until_it_can_persist() {
-        let (_root, kernel) = test_kernel();
-        let response = api_router(kernel)
+        let (root, kernel) = test_kernel();
+        let response = api_router(kernel, test_bind_addr(), root.path())
             .oneshot(
                 Request::post("/api/v1/events")
                     .body(Body::empty())
@@ -269,7 +299,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn all_b1_fixture_routes_are_absent_from_production() {
-        let (_root, kernel) = test_kernel();
+        let (root, kernel) = test_kernel();
         for (method, path) in [
             ("GET", "/api/v1/capabilities"),
             ("POST", "/api/v1/observations"),
@@ -280,7 +310,7 @@ mod tests {
             ("POST", "/api/v1/credential-revocations"),
             ("PUT", "/api/v1/listener-configuration"),
         ] {
-            let response = api_router(kernel.clone())
+            let response = api_router(kernel.clone(), test_bind_addr(), root.path())
                 .oneshot(
                     Request::builder()
                         .method(method)
