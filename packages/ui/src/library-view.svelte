@@ -259,6 +259,8 @@
         {#each kinds as k}
           <button
             type="button"
+            role="radio"
+            aria-checked={selectedKind === k.id}
             class="filter-pill"
             class:active={selectedKind === k.id}
             onclick={() => (selectedKind = k.id)}
@@ -272,6 +274,8 @@
         {#each statuses as s}
           <button
             type="button"
+            role="radio"
+            aria-checked={selectedStatus === s.id}
             class="filter-pill status"
             class:active={selectedStatus === s.id}
             onclick={() => (selectedStatus = s.id)}

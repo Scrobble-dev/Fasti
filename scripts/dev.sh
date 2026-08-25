@@ -63,8 +63,13 @@ _port_in_use() {
   local port="$1"
   if command -v ss >/dev/null 2>&1; then
     ss -ltn "sport = :$port" 2>/dev/null | grep -q ":$port"
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  elif command -v nc >/dev/null 2>&1; then
+    nc -z 127.0.0.1 "$port" >/dev/null 2>&1
   else
-    curl --silent --max-time 1 "http://127.0.0.1:$port" >/dev/null 2>&1
+    echo "Cannot inspect TCP port $port: install ss, lsof, or nc." >&2
+    return 0
   fi
 }
 

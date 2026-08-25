@@ -822,10 +822,12 @@
       {:else if activeSettingsSection === "oidc"}
         <section class="section-pane">
           <h2 class="pane-title">Single Sign-On & OpenID Connect (OIDC)</h2>
-          <p class="pane-desc">
-            OIDC configuration is not available until a host command can
-            validate and store it.
-          </p>
+          {#if !onSaveOidc}
+            <p class="pane-desc">
+              OIDC configuration is not available until a host command can
+              validate and store it.
+            </p>
+          {/if}
 
           {#if onSaveOidc}
             <form
@@ -897,10 +899,12 @@
       {:else if activeSettingsSection === "notifications"}
         <section class="section-pane">
           <h2 class="pane-title">Notifications & Apprise Webhooks</h2>
-          <p class="pane-desc">
-            Notification configuration is not available until a host command can
-            validate and store it.
-          </p>
+          {#if !onSaveApprise}
+            <p class="pane-desc">
+              Notification configuration is not available until a host command
+              can validate and store it.
+            </p>
+          {/if}
 
           {#if onSaveApprise}
             <div class="apprise-box">

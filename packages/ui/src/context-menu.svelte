@@ -81,6 +81,7 @@
   }
 
   onMount(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     clampToViewport();
     focusFirstItem();
     window.addEventListener("keydown", handleKeyDown);
@@ -90,6 +91,14 @@
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleWindowClick);
       window.removeEventListener("resize", handleResize);
+      queueMicrotask(() => {
+        if (
+          document.activeElement === document.body &&
+          previouslyFocused?.isConnected
+        ) {
+          previouslyFocused.focus();
+        }
+      });
     };
   });
 </script>

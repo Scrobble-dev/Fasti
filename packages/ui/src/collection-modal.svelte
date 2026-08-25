@@ -16,25 +16,24 @@
 
   let { record, collections, onClose, onSaveCollection }: Props = $props();
 
-  let selected = $state<string[]>([]);
+  let selected = $state<string>();
   let availableCollections = $state<string[]>([]);
   let syncedRecordId = $state("");
 
   $effect(() => {
+    availableCollections = [...collections];
+  });
+
+  $effect(() => {
     if (record.id !== syncedRecordId) {
       syncedRecordId = record.id;
-      availableCollections = [...collections];
-      selected = record.collectionName ? [record.collectionName] : [];
+      selected = record.collectionName;
     }
   });
   let newCollectionInput = $state("");
 
-  function handleToggle(name: string): void {
-    if (selected.includes(name)) {
-      selected = selected.filter((s) => s !== name);
-    } else {
-      selected = [...selected, name];
-    }
+  function handleSelect(name: string): void {
+    selected = name;
   }
 
   function handleCreateCollection(e: Event): void {
@@ -47,13 +46,13 @@
         ...availableCollections,
         newCollectionInput.trim(),
       ];
-      selected = [...selected, newCollectionInput.trim()];
+      selected = newCollectionInput.trim();
       newCollectionInput = "";
     }
   }
 
   function handleSave(): void {
-    onSaveCollection(record.id, selected);
+    onSaveCollection(record.id, selected ? [selected] : []);
     onClose();
   }
 </script>
@@ -81,16 +80,27 @@
 
     <div class="modal-body">
       <p class="body-desc">
-        Organize this record into curated personal lists or franchises.
+        Organize this record in one curated personal list or franchise.
       </p>
 
       <div class="collections-list">
+        <label class="collection-item" class:checked={!selected}>
+          <input
+            type="radio"
+            name="collection"
+            checked={!selected}
+            onchange={() => (selected = undefined)}
+          />
+          <IconFolder size={18} class="folder-icon" />
+          <span class="collection-name">No collection</span>
+        </label>
         {#each availableCollections as c}
-          <label class="collection-item" class:checked={selected.includes(c)}>
+          <label class="collection-item" class:checked={selected === c}>
             <input
-              type="checkbox"
-              checked={selected.includes(c)}
-              onchange={() => handleToggle(c)}
+              type="radio"
+              name="collection"
+              checked={selected === c}
+              onchange={() => handleSelect(c)}
             />
             <IconFolder size={18} class="folder-icon" />
             <span class="collection-name">{c}</span>
@@ -114,7 +124,7 @@
     <div class="modal-footer">
       <button type="button" class="btn-cancel" onclick={onClose}>Cancel</button>
       <button type="button" class="btn-save" onclick={handleSave}>
-        <IconCheck size={16} /> Save Collections ({selected.length})
+        <IconCheck size={16} /> Save Collection
       </button>
     </div>
   </div>
