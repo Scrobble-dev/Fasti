@@ -67,7 +67,6 @@ SAVED_OCI_ARCHIVE_SAFETY_CEILING_BYTES = (
 SAVED_OCI_ENTRY_SAFETY_CEILING = 4096
 SAMPLE_INTERVAL_MS = int(LOCKED_BUDGETS["timing_seconds"]["sample_interval_ms"])
 CONTRACT_SDK_BUILD_COMMAND = ("pnpm", "--filter", "@fasti/sdk", "build")
-GOVERNED_BUILD_PROVENANCE_ARG = "--provenance=false"
 IMAGE_SOURCE_LABELS = {
     "git_commit": "org.opencontainers.image.revision",
     "git_tree": "dev.scrobble.fasti.source.tree",
@@ -985,7 +984,6 @@ def governed_build_image(args: argparse.Namespace, context: dict[str, Any]) -> l
         command = [
             "docker",
             "build",
-            GOVERNED_BUILD_PROVENANCE_ARG,
             "--file",
             str(archived_recipe),
             "--tag",
@@ -2312,10 +2310,14 @@ def saved_oci_layer_bytes(
                 if isinstance(descriptor, dict)
                 and descriptor.get("digest") == image_id
             ]
-            if len(target_descriptors) != 1:
+            if len(target_descriptors) > 1:
                 raise CaptureError(
-                    "Docker save OCI index does not bind exactly one immutable image ID"
+                    "Docker save OCI index duplicates the immutable image ID"
                 )
+            uses_target_identity = len(target_descriptors) == 1
+            graph_roots = (
+                target_descriptors if uses_target_identity else index["manifests"]
+            )
 
             candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
             visited: set[str] = set()
@@ -2350,7 +2352,8 @@ def saved_oci_layer_bytes(
                 for child in children:
                     visit_descriptor(child, depth + 1)
 
-            visit_descriptor(target_descriptors[0])
+            for root in graph_roots:
+                visit_descriptor(root)
             matches: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
             for _, candidate in candidates:
                 config_descriptor = candidate.get("config")
@@ -2361,11 +2364,19 @@ def saved_oci_layer_bytes(
                 candidate_layer_paths = [
                     descriptor_path(descriptor) for descriptor in layer_descriptors
                 ]
-                if candidate_config_path == config_path and candidate_layer_paths == layers:
+                identity_matches = uses_target_identity or (
+                    config_descriptor.get("digest") == image_id
+                )
+                if (
+                    identity_matches
+                    and candidate_config_path == config_path
+                    and candidate_layer_paths == layers
+                ):
                     matches.append((config_descriptor, layer_descriptors))
             if len(matches) != 1:
                 raise CaptureError(
-                    "Docker save OCI graph does not select exactly one manifest.json image"
+                    "Docker save OCI graph does not bind the immutable image ID to "
+                    "exactly one manifest.json image"
                 )
 
             config_descriptor, layer_descriptors = matches[0]

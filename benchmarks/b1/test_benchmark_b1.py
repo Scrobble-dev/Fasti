@@ -217,6 +217,8 @@ class ImmutableSourceTests(unittest.TestCase):
         rootfs_type: str = "layers",
         config_os: str = "linux",
         nested_index: bool = False,
+        config_identity: bool = False,
+        ambiguous_config_identity: bool = False,
     ) -> tuple[str, list[tuple[str, bytes, bytes]], dict[str, str]]:
         uncompressed_layers = [b"plain layer", b"gzip layer"]
         media_types = layer_media_types or [
@@ -302,9 +304,35 @@ class ImmutableSourceTests(unittest.TestCase):
             graph_members.append(
                 (path(target_descriptor), nested_bytes, tarfile.REGTYPE)
             )
-        image_id = str(target_descriptor["digest"])
+        index_descriptors = [target_descriptor]
+        if ambiguous_config_identity:
+            if nested_index:
+                raise ValueError("ambiguous config identity fixture must use direct manifests")
+            extra_manifest_bytes = json.dumps(
+                {
+                    "schemaVersion": 2,
+                    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                    "config": config_descriptor,
+                    "layers": layer_descriptors,
+                    "annotations": {"fixture": "ambiguous"},
+                },
+                separators=(",", ":"),
+            ).encode()
+            extra_descriptor = descriptor(
+                extra_manifest_bytes,
+                "application/vnd.oci.image.manifest.v1+json",
+            )
+            index_descriptors.append(extra_descriptor)
+            graph_members.append(
+                (path(extra_descriptor), extra_manifest_bytes, tarfile.REGTYPE)
+            )
+        image_id = str(
+            config_descriptor["digest"]
+            if config_identity
+            else target_descriptor["digest"]
+        )
         index_bytes = json.dumps(
-            {"schemaVersion": 2, "manifests": [target_descriptor]},
+            {"schemaVersion": 2, "manifests": index_descriptors},
             separators=(",", ":"),
         ).encode()
         legacy_manifest = json.dumps(
@@ -388,12 +416,39 @@ class ImmutableSourceTests(unittest.TestCase):
                         len(b"plain layer") + len(b"gzip layer"),
                     )
 
+    def test_saved_oci_accepts_containerd_config_digest_identity(self) -> None:
+        image_id, members, _ = self._oci_layout_fixture(config_identity=True)
+        with tempfile.TemporaryDirectory() as temp_name:
+            archive_path = Path(temp_name) / "image.tar.gz"
+            self._write_saved_oci_archive(archive_path, members)
+            self.assertEqual(
+                benchmark.saved_oci_layer_bytes(archive_path, image_id, self._source()),
+                len(b"plain layer") + len(b"gzip layer"),
+            )
+
+    def test_saved_oci_config_identity_rejects_wrong_id_and_ambiguity(self) -> None:
+        _, members, _ = self._oci_layout_fixture(config_identity=True)
+        self._assert_saved_oci_rejected(
+            "sha256:" + "0" * 64,
+            members,
+            "immutable image ID",
+        )
+        image_id, ambiguous, _ = self._oci_layout_fixture(
+            config_identity=True,
+            ambiguous_config_identity=True,
+        )
+        self._assert_saved_oci_rejected(
+            image_id,
+            ambiguous,
+            "exactly one manifest.json image",
+        )
+
     def test_saved_oci_layout_binds_the_exported_target_image_id(self) -> None:
         _, members, _ = self._oci_layout_fixture()
         self._assert_saved_oci_rejected(
             "sha256:" + "0" * 64,
             members,
-            "bind exactly one immutable image ID",
+            "immutable image ID",
         )
 
     def test_saved_oci_layout_verifies_config_digest_and_size(self) -> None:
@@ -790,7 +845,7 @@ class ImmutableSourceTests(unittest.TestCase):
                     },
                 )
 
-    def test_image_build_avoids_an_unretained_provenance_index(self) -> None:
+    def test_image_inspection_binds_the_immutable_image_id(self) -> None:
         inspection = json.dumps(
             [{"Id": self.image_id, "Config": {"Labels": self.labels}}]
         )
@@ -803,9 +858,6 @@ class ImmutableSourceTests(unittest.TestCase):
         self.assertEqual(observed["id"], self.image_id)
         run_checked.assert_called_once_with(
             ["docker", "image", "inspect", "fasti:mutable"]
-        )
-        self.assertEqual(
-            benchmark.GOVERNED_BUILD_PROVENANCE_ARG, "--provenance=false"
         )
 
     def test_measurement_command_refuses_mutable_tag(self) -> None:

@@ -432,13 +432,6 @@ struct OciDescriptor {
     media_type: String,
     digest: String,
     size: u64,
-    platform: Option<OciPlatform>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct OciPlatform {
-    architecture: String,
-    os: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2359,27 +2352,26 @@ fn validate_oci_layout_archive(
                 .is_none_or(is_oci_index_media_type),
         "retained OCI archive index.json media type or schema is invalid"
     );
-    let target = index
+    let direct_targets = index
         .manifests
         .iter()
         .filter(|descriptor| descriptor.digest == receipt.oci_image_id)
         .collect::<Vec<_>>();
     ensure!(
-        target.len() == 1,
-        "retained OCI archive image ID must resolve to exactly one index target"
+        direct_targets.len() <= 1,
+        "retained OCI archive index duplicates the immutable image ID"
     );
-    let expected_architecture = docker_architecture(&receipt.runner.architecture)?;
+    let uses_target_identity = direct_targets.len() == 1;
+    let graph_roots = if uses_target_identity {
+        direct_targets
+    } else {
+        index.manifests.iter().collect()
+    };
     let mut visited = BTreeSet::new();
     let mut manifests = Vec::new();
-    collect_oci_platform_manifests(
-        archive,
-        files,
-        target[0],
-        expected_architecture,
-        0,
-        &mut visited,
-        &mut manifests,
-    )?;
+    for root in graph_roots {
+        collect_oci_manifests(archive, files, root, 0, &mut visited, &mut manifests)?;
+    }
     let compatibility = docker_archive_manifest(archive, files)?;
     let compatibility_config_path = PathBuf::from(&compatibility.config);
     validate_relative_path(&compatibility_config_path)?;
@@ -2426,13 +2418,18 @@ fn validate_oci_layout_archive(
             .iter()
             .map(|layer| oci_descriptor_path(&layer.digest))
             .collect::<anyhow::Result<Vec<_>>>()?;
-        if config_path == compatibility_config_path && layer_paths == compatibility_layer_paths {
+        let identity_matches =
+            uses_target_identity || manifest.config.digest == receipt.oci_image_id;
+        if identity_matches
+            && config_path == compatibility_config_path
+            && layer_paths == compatibility_layer_paths
+        {
             selected.push(manifest);
         }
     }
     ensure!(
         selected.len() == 1,
-        "retained OCI archive image target must resolve to exactly one selected platform manifest whose descriptors match manifest.json"
+        "retained OCI archive image graph does not bind the immutable image ID to exactly one selected platform manifest whose descriptors match manifest.json"
     );
     let manifest = selected.remove(0);
     ensure!(
@@ -2459,11 +2456,10 @@ fn validate_oci_layout_archive(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn collect_oci_platform_manifests(
+fn collect_oci_manifests(
     archive: &mut fs::File,
     files: &BTreeMap<PathBuf, SavedOciArchiveFile>,
     descriptor: &OciDescriptor,
-    expected_architecture: &str,
     depth: usize,
     visited: &mut BTreeSet<String>,
     manifests: &mut Vec<OciDescriptor>,
@@ -2472,11 +2468,6 @@ fn collect_oci_platform_manifests(
         depth <= 16,
         "retained OCI archive descriptor graph is too deep"
     );
-    if descriptor.platform.as_ref().is_some_and(|platform| {
-        platform.os != "linux" || platform.architecture != expected_architecture
-    }) {
-        return Ok(());
-    }
     ensure!(
         visited.insert(descriptor.digest.clone()),
         "retained OCI archive descriptor graph is cyclic or ambiguous"
@@ -2501,15 +2492,7 @@ fn collect_oci_platform_manifests(
         "retained OCI archive descriptor graph index is invalid"
     );
     for child in &index.manifests {
-        collect_oci_platform_manifests(
-            archive,
-            files,
-            child,
-            expected_architecture,
-            depth + 1,
-            visited,
-            manifests,
-        )?;
+        collect_oci_manifests(archive, files, child, depth + 1, visited, manifests)?;
     }
     Ok(())
 }
@@ -3596,10 +3579,12 @@ mod tests {
         DiffId,
         RootfsType,
         WrongOs,
+        DuplicateDirectRoot,
         IndexBlobDigest,
         ManifestBlobDigest,
         UnknownCompression,
         AmbiguousPlatform,
+        HiddenDuplicatePlatform,
         Traversal,
         CompatibilityManifest,
         CompatibilityLayers,
@@ -3608,6 +3593,7 @@ mod tests {
     struct SavedOciLayoutFixture {
         archive: Vec<u8>,
         image_id: String,
+        config_image_id: String,
         unpacked_bytes: u64,
     }
 
@@ -3701,7 +3687,11 @@ mod tests {
         });
         let mut graph_manifests = vec![manifest_descriptor];
         let mut extra_manifest = None;
-        if matches!(mutation, OciLayoutFixtureMutation::AmbiguousPlatform) {
+        if matches!(
+            mutation,
+            OciLayoutFixtureMutation::AmbiguousPlatform
+                | OciLayoutFixtureMutation::HiddenDuplicatePlatform
+        ) {
             let bytes = serde_json::to_vec(&serde_json::json!({
                 "schemaVersion": 2,
                 "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -3711,11 +3701,21 @@ mod tests {
             }))
             .expect("serialize ambiguous manifest");
             let digest = sha256_bytes(&bytes);
+            let extra_architecture =
+                if matches!(mutation, OciLayoutFixtureMutation::HiddenDuplicatePlatform) {
+                    if architecture == "amd64" {
+                        "arm64"
+                    } else {
+                        "amd64"
+                    }
+                } else {
+                    architecture
+                };
             graph_manifests.push(serde_json::json!({
                 "mediaType": "application/vnd.oci.image.manifest.v1+json",
                 "digest": format!("sha256:{digest}"),
                 "size": bytes.len(),
-                "platform": {"architecture": architecture, "os": "linux"},
+                "platform": {"architecture": extra_architecture, "os": "linux"},
             }));
             extra_manifest = Some((digest, bytes));
         }
@@ -3726,14 +3726,20 @@ mod tests {
         }))
         .expect("serialize OCI target index");
         let target_digest = sha256_bytes(&target);
+        let target_descriptor = serde_json::json!({
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": format!("sha256:{target_digest}"),
+            "size": target.len(),
+        });
+        let index_manifests = if matches!(mutation, OciLayoutFixtureMutation::DuplicateDirectRoot) {
+            vec![target_descriptor.clone(), target_descriptor]
+        } else {
+            vec![target_descriptor]
+        };
         let index = serde_json::to_vec(&serde_json::json!({
             "schemaVersion": 2,
             "mediaType": "application/vnd.oci.image.index.v1+json",
-            "manifests": [{
-                "mediaType": "application/vnd.oci.image.index.v1+json",
-                "digest": format!("sha256:{target_digest}"),
-                "size": target.len(),
-            }],
+            "manifests": index_manifests,
         }))
         .expect("serialize OCI layout index");
         let config_path = format!("blobs/sha256/{config_digest}");
@@ -3808,6 +3814,7 @@ mod tests {
         SavedOciLayoutFixture {
             archive: gzip_fixture(&archive),
             image_id: format!("sha256:{target_digest}"),
+            config_image_id: format!("sha256:{config_digest}"),
             unpacked_bytes: (gzip_layer.len() + plain_layer.len()) as u64,
         }
     }
@@ -4595,11 +4602,65 @@ mod tests {
     }
 
     #[test]
+    fn artifact_budget_supports_config_digest_identity_without_ambiguity() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        let mut receipt = artifact_budget_fixture_receipt(root.path());
+        let fixture = saved_oci_layout_fixture(&receipt, OciLayoutFixtureMutation::None);
+        receipt.oci_image_id = fixture.config_image_id;
+        let archive_path = root.path().join("oci-layout.tar.gz");
+        fs::write(&archive_path, fixture.archive).expect("write OCI layout fixture");
+        assert_eq!(
+            validate_saved_oci_archive(&archive_path, &receipt, 1024 * 1024)
+                .expect("valid config-digest OCI identity"),
+            fixture.unpacked_bytes
+        );
+
+        receipt.oci_image_id = format!("sha256:{}", "0".repeat(64));
+        let error = validate_saved_oci_archive(&archive_path, &receipt, 1024 * 1024)
+            .expect_err("unbound config digest must fail");
+        assert!(error
+            .to_string()
+            .contains("does not bind the immutable image ID"));
+
+        for (mutation, use_config_identity, expected) in [
+            (
+                OciLayoutFixtureMutation::AmbiguousPlatform,
+                true,
+                "exactly one selected platform manifest",
+            ),
+            (
+                OciLayoutFixtureMutation::DuplicateDirectRoot,
+                false,
+                "duplicates the immutable image ID",
+            ),
+            (
+                OciLayoutFixtureMutation::HiddenDuplicatePlatform,
+                true,
+                "exactly one selected platform manifest",
+            ),
+        ] {
+            let fixture = saved_oci_layout_fixture(&receipt, mutation);
+            receipt.oci_image_id = if use_config_identity {
+                fixture.config_image_id
+            } else {
+                fixture.image_id
+            };
+            fs::write(&archive_path, fixture.archive).expect("write hostile OCI fixture");
+            let error = validate_saved_oci_archive(&archive_path, &receipt, 1024 * 1024)
+                .expect_err("ambiguous OCI identity must fail");
+            assert!(
+                error.to_string().contains(expected),
+                "unexpected validation error: {error:#}"
+            );
+        }
+    }
+
+    #[test]
     fn artifact_budget_rejects_hostile_oci_layout_descriptor_graphs() {
         for (mutation, expected) in [
             (
                 OciLayoutFixtureMutation::WrongImageId,
-                "exactly one index target",
+                "does not bind the immutable image ID",
             ),
             (
                 OciLayoutFixtureMutation::StaleSource,
