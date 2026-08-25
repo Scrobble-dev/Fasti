@@ -65,13 +65,13 @@ export interface FastiClientOptions {
 export type ConnectionValueSource =
   "default" | "saved" | "environment" | "build";
 
-export type ConnectionTrust = "http" | "https";
+export type ConnectionScheme = "http" | "https";
 
 export interface ConnectionEndpoint {
   readonly url: string;
   readonly source: ConnectionValueSource;
   readonly managed: boolean;
-  readonly trust: ConnectionTrust;
+  readonly scheme: ConnectionScheme;
   readonly loopbackAliases: readonly string[];
 }
 
@@ -87,7 +87,7 @@ export function connectionEndpoint(
     url: url.origin,
     source,
     managed: source === "environment" || source === "build",
-    trust: url.protocol === "https:" ? "https" : "http",
+    scheme: url.protocol === "https:" ? "https" : "http",
     loopbackAliases: loopbackAliases(url),
   });
 }
@@ -746,6 +746,9 @@ export function normalizeBaseUrl(value: string): URL {
       "baseUrl must be an origin URL without an application path",
     );
   }
+  if (url.port === "0") {
+    throw new TypeError("baseUrl port must be from 1 to 65535");
+  }
   return url;
 }
 
@@ -756,10 +759,12 @@ function isLoopbackHostname(hostname: string): boolean {
 function loopbackAliases(url: URL): readonly string[] {
   if (!isLoopbackHostname(url.hostname)) return Object.freeze([]);
   const port = url.port === "" ? "" : `:${url.port}`;
+  if (url.hostname.toLowerCase() === "[::1]") {
+    return Object.freeze([`${url.protocol}//[::1]${port}`]);
+  }
   return Object.freeze([
     `${url.protocol}//localhost${port}`,
     `${url.protocol}//127.0.0.1${port}`,
-    `${url.protocol}//[::1]${port}`,
   ]);
 }
 
