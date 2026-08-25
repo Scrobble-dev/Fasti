@@ -53,3 +53,10 @@ test("errors on a version with no matching section", () => {
     /9\.9\.9/,
   );
 });
+
+test("rejects a tag that isn't a semantic version before it ever reaches RegExp", () => {
+  assert.throws(
+    () => extractReleaseNotes(fixtureChangelog, "v1.0.0)(.*"),
+    /must be a semantic version/,
+  );
+});

@@ -140,7 +140,7 @@ jobs:
       - name: Stage SBOM output
         run: |
           mkdir -p target/fasti-evidence/b8b/sbom
-          find . -name '*.cdx.json' -not -path './target/fasti-evidence/*' -exec cp {} target/fasti-evidence/b8b/sbom/ \;
+          find . -name '*.cdx.json' -not -path './target/fasti-evidence/*' -not -path '*/node_modules/*' -exec cp {} target/fasti-evidence/b8b/sbom/ \;
       - name: Sanity-check every SBOM is CycloneDX and non-empty
         run: |
           for f in target/fasti-evidence/b8b/sbom/*.cdx.json; do

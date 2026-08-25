@@ -9,7 +9,15 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+const SEMVER_TAG_PATTERN =
+  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+
 export function extractReleaseNotes(changelog, tag) {
+  if (typeof tag !== "string" || !SEMVER_TAG_PATTERN.test(tag)) {
+    throw new Error(
+      `tag must be a semantic version like "v1.2.3", got: ${JSON.stringify(tag)}`,
+    );
+  }
   const version = tag.replace(/^v/, "");
   const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const headingPattern = new RegExp(
