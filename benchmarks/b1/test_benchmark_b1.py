@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -54,6 +55,105 @@ class HardwareProfileTests(unittest.TestCase):
 
         self.assertEqual(reading["sensor"], "k10temp:Tctl")
         self.assertEqual(reading["celsius"], 91.25)
+
+    def test_temperature_prefers_named_cpu_zone_over_generic_zone(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            generic = thermal_root / "thermal_zone0"
+            generic.mkdir(parents=True)
+            (generic / "type").write_text("acpitz\n", encoding="ascii")
+            (generic / "temp").write_text("30000\n", encoding="ascii")
+            pkg = thermal_root / "thermal_zone1"
+            pkg.mkdir()
+            (pkg / "type").write_text("x86_pkg_temp\n", encoding="ascii")
+            (pkg / "temp").write_text("55000\n", encoding="ascii")
+            hwmon_root = root / "hwmon"
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "x86_pkg_temp")
+        self.assertEqual(reading["celsius"], 55.0)
+
+    def test_temperature_ignores_hwmon_chips_outside_the_cpu_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+            unrelated = hwmon_root / "hwmon0"
+            unrelated.mkdir(parents=True)
+            (unrelated / "name").write_text("nvme\n", encoding="ascii")
+            (unrelated / "temp1_input").write_text("41000\n", encoding="ascii")
+
+            with self.assertRaisesRegex(
+                benchmark.CaptureError,
+                r"no plausible CPU/SoC thermal reading",
+            ):
+                benchmark.parse_temperature(thermal_root, hwmon_root)
+
+    def test_temperature_falls_back_to_the_raw_input_name_without_a_label_file(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+            cpu = hwmon_root / "hwmon0"
+            cpu.mkdir(parents=True)
+            (cpu / "name").write_text("coretemp\n", encoding="ascii")
+            (cpu / "temp2_input").write_text("62500\n", encoding="ascii")
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "coretemp:temp2")
+        self.assertEqual(reading["celsius"], 62.5)
+
+    def test_temperature_skips_out_of_range_readings_for_a_plausible_candidate(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+            cpu = hwmon_root / "hwmon0"
+            cpu.mkdir(parents=True)
+            (cpu / "name").write_text("coretemp\n", encoding="ascii")
+            (cpu / "temp1_label").write_text("AAA\n", encoding="ascii")
+            (cpu / "temp1_input").write_text("300000\n", encoding="ascii")
+            (cpu / "temp2_label").write_text("ZZZ\n", encoding="ascii")
+            (cpu / "temp2_input").write_text("42000\n", encoding="ascii")
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "coretemp:ZZZ")
+        self.assertEqual(reading["celsius"], 42.0)
+
+    def test_temperature_raises_when_no_thermal_or_hwmon_evidence_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            hwmon_root = root / "hwmon"
+
+            with self.assertRaisesRegex(
+                benchmark.CaptureError,
+                r"/sys/class/\{thermal,hwmon\}",
+            ):
+                benchmark.parse_temperature(thermal_root, hwmon_root)
+
+    def test_temperature_treats_small_raw_values_as_already_in_celsius(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            zone = thermal_root / "thermal_zone0"
+            zone.mkdir(parents=True)
+            (zone / "type").write_text("soc_thermal\n", encoding="ascii")
+            (zone / "temp").write_text("45\n", encoding="ascii")
+            hwmon_root = root / "hwmon"
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "soc_thermal")
+        self.assertEqual(reading["celsius"], 45.0)
 
     def test_profiles_are_derived_from_observed_fingerprint(self) -> None:
         self.assertEqual(
@@ -1613,6 +1713,37 @@ class EvidenceInputTests(unittest.TestCase):
         self.assertEqual(statuses["oci_image_compressed"], "pass")
         self.assertEqual(statuses["oci_image_unpacked"], "fail")
         self.assertEqual(statuses["contract_pack_compressed"], "pass")
+
+
+class ThermalReadingSchemaTests(unittest.TestCase):
+    """The evidence schema's thermalReading.source pattern must admit hwmon
+    paths (the new fallback capture path) while still admitting thermal_zone
+    paths and rejecting unrelated sysfs classes."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        schema_path = ROOT / "benchmarks" / "b1" / "evidence.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        cls.pattern = schema["$defs"]["thermalReading"]["properties"]["source"]["pattern"]
+
+    def test_pattern_admits_thermal_zone_sources(self) -> None:
+        self.assertIsNotNone(
+            re.match(self.pattern, "/sys/class/thermal/thermal_zone0/temp")
+        )
+
+    def test_pattern_admits_hwmon_sources(self) -> None:
+        self.assertIsNotNone(
+            re.match(self.pattern, "/sys/class/hwmon/hwmon1/temp1_input")
+        )
+
+    def test_pattern_rejects_unrelated_sysfs_classes(self) -> None:
+        for source in [
+            "/sys/class/power_supply/BAT0/temp",
+            "/proc/thermal/thermal_zone0/temp",
+            "/sys/classy/thermal/thermal_zone0/temp",
+        ]:
+            with self.subTest(source=source):
+                self.assertIsNone(re.match(self.pattern, source))
 
 
 if __name__ == "__main__":

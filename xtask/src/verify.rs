@@ -1097,4 +1097,43 @@ mod tests {
         clear_receipt(root.path()).expect("clear stale receipt");
         assert!(!receipt.exists());
     }
+
+    #[test]
+    fn tool_version_always_queries_the_plain_version_flag() {
+        // Prior to the Podman migration, a gate whose program was "docker"
+        // and whose first argument was "buildx" received special-cased
+        // `buildx version` arguments instead of `--version`. That branch has
+        // been removed: every gate must now be queried with a plain
+        // `--version`, regardless of its own arguments. Using "git" here
+        // (rather than "docker") proves the query is unconditional: git has
+        // no "buildx" subcommand, so this only succeeds if the gate's own
+        // arguments were ignored in favor of "--version".
+        let gate = CommandGate::new(
+            "package.arm64_oci_build",
+            "git",
+            ["buildx", "build", "--platform", "linux/arm64"],
+            "fix",
+        );
+        let version = tool_version(Path::new("."), &gate).expect("git --version must succeed");
+        assert!(
+            version.to_lowercase().contains("git"),
+            "unexpected version text: {version}"
+        );
+    }
+
+    #[test]
+    fn tool_version_fails_closed_when_the_program_is_missing() {
+        let gate = CommandGate::new(
+            "package.missing_tool",
+            "definitely-not-a-real-fasti-binary",
+            ["--version"],
+            "install the missing tool",
+        );
+        let error =
+            tool_version(Path::new("."), &gate).expect_err("missing binary must fail closed");
+        assert!(error.to_string().contains("failed to bind"));
+        assert!(error
+            .to_string()
+            .contains("definitely-not-a-real-fasti-binary"));
+    }
 }
