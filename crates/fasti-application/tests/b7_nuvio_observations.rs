@@ -1,6 +1,9 @@
 #![cfg(feature = "conformance-fixture")]
 
-//! B7a Nuvio client observation, pairing, and durable outbox integration tests.
+//! In-memory conformance tests for Nuvio-shaped observations and application models.
+//!
+//! These tests do not run a Nuvio client, network transport, pairing endpoint,
+//! or durable outbox.
 //!
 //! # Product Boundary & Invariants
 //!
@@ -49,7 +52,7 @@ fn sample_tmdb_claim(id: &str) -> ExternalIdentifierClaim {
 }
 
 #[test]
-fn nuvio_pairing_and_client_enrollment() {
+fn fixture_enrollment_supplies_nuvio_shaped_access_context() {
     let fixture = B1ConformanceFixture::new();
     let enrollment = enroll(&fixture);
     let access = *enrollment.access();
@@ -137,7 +140,7 @@ fn nuvio_completion_observation_emits_watched_event() {
 }
 
 #[test]
-fn nuvio_offline_outbox_buffers_during_total_fasti_outage_and_drains() {
+fn process_local_outbox_buffers_failed_dispatch_and_drains() {
     let fixture = B1ConformanceFixture::new();
     let enrollment = enroll(&fixture);
     let access = *enrollment.access();
@@ -183,7 +186,7 @@ fn nuvio_offline_outbox_buffers_during_total_fasti_outage_and_drains() {
 }
 
 #[test]
-fn nuvio_outbox_reconnect_replays_without_duplicate_rewatches() {
+fn process_local_outbox_replay_avoids_duplicate_rewatches() {
     let fixture = B1ConformanceFixture::new();
     let enrollment = enroll(&fixture);
     let access = *enrollment.access();
