@@ -2,30 +2,24 @@ use crate::outbound_http::bounded_body;
 use crate::secure_storage::{Entry, Error as SecureStorageError};
 use crate::setup::{DesktopProblem, KEYRING_SERVICE};
 use fasti_application::{
-    authorize_outbound, NetworkClass, OutboundAccessPolicy, ProviderAccessDeclaration,
-    ProviderCandidate,
+    authorize_outbound, OutboundAccessPolicy, ProviderCandidate, GOOGLE_BOOKS_ACCESS,
+    GOOGLE_BOOKS_HOST, GOOGLE_BOOKS_PROVIDER_ID, GOOGLE_BOOKS_SEARCH_CAPABILITY,
 };
-use reqwest::{redirect::Policy, Client, Url};
+use reqwest::{header::HeaderValue, redirect::Policy, Client, StatusCode, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Duration;
 
-const PROVIDER_ID: &str = "google-books";
+const PROVIDER_ID: &str = GOOGLE_BOOKS_PROVIDER_ID;
 const PROVIDER_LABEL: &str = "Google Books";
-const PROVIDER_HOST: &str = "www.googleapis.com";
+const PROVIDER_HOST: &str = GOOGLE_BOOKS_HOST;
 const PROVIDER_KEY_ACCOUNT: &str = "provider/google-books/api-key";
 const PROVIDER_KEY_ENV: &str = "GOOGLE_BOOKS_API_KEY";
 const MAX_KEY_BYTES: usize = 512;
 const MAX_QUERY_BYTES: usize = 256;
 const MAX_RESPONSE_BYTES: usize = 2_000_000;
 const MAX_RESULTS: usize = 10;
-const DECLARATION: ProviderAccessDeclaration<'static> = ProviderAccessDeclaration {
-    provider: PROVIDER_ID,
-    capabilities: &["metadata.search"],
-    hosts: &[PROVIDER_HOST],
-    networks: &[NetworkClass::Public],
-};
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ProviderCredentialStatus {
@@ -99,9 +93,9 @@ pub(crate) async fn search(
 
     let addresses = resolve_provider().await?;
     authorize_outbound(
-        DECLARATION,
+        GOOGLE_BOOKS_ACCESS,
         &policy,
-        "metadata.search",
+        GOOGLE_BOOKS_SEARCH_CAPABILITY,
         PROVIDER_HOST,
         &addresses,
     )
@@ -131,23 +125,28 @@ pub(crate) async fn search(
         .map_err(|_| provider_unavailable("Fasti could not initialize the provider client."))?;
     let mut url =
         Url::parse("https://www.googleapis.com/books/v1/volumes").expect("constant provider URL");
-    {
-        let mut parameters = url.query_pairs_mut();
-        parameters
-            .append_pair("q", query)
-            .append_pair("startIndex", "0")
-            .append_pair("maxResults", &MAX_RESULTS.to_string())
-            .append_pair("projection", "lite");
-        if let Some(key) = load_key()? {
-            parameters.append_pair("key", &key);
-        }
+    url.query_pairs_mut()
+        .append_pair("q", query)
+        .append_pair("startIndex", "0")
+        .append_pair("maxResults", &MAX_RESULTS.to_string())
+        .append_pair("projection", "lite");
+    let mut request = client.get(url);
+    if let Some(key) = load_key()? {
+        request = request.header("x-goog-api-key", key);
     }
-    let response = client
-        .get(url)
+    let response = request
         .send()
         .await
         .map_err(|error| provider_unavailable(provider_error_detail(&error)))?;
-    if response.status().as_u16() == 429 {
+    require_success(response.status())?;
+    let body = bounded_body(response, MAX_RESPONSE_BYTES)
+        .await
+        .map_err(provider_unavailable)?;
+    parse_candidates(&body)
+}
+
+fn require_success(status: StatusCode) -> Result<(), DesktopProblem> {
+    if status.as_u16() == 429 {
         return Err(provider_problem(
             "provider_rate_limited",
             "Google Books limited the request",
@@ -155,16 +154,17 @@ pub(crate) async fn search(
             "Wait before searching again. Fasti local data is unchanged.",
         ));
     }
-    if !response.status().is_success() {
+    if !status.is_success() {
         return Err(provider_unavailable(format!(
             "Google Books returned HTTP {}.",
-            response.status().as_u16()
+            status.as_u16()
         )));
     }
-    let body = bounded_body(response, MAX_RESPONSE_BYTES)
-        .await
-        .map_err(provider_unavailable)?;
-    let response: GoogleBooksResponse = serde_json::from_slice(&body).map_err(|_| {
+    Ok(())
+}
+
+fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    let response: GoogleBooksResponse = serde_json::from_slice(body).map_err(|_| {
         provider_problem(
             "invalid_provider_response",
             "Google Books returned invalid data",
@@ -187,7 +187,7 @@ fn candidate(volume: GoogleBook) -> Option<ProviderCandidate> {
     ProviderCandidate::try_new(
         PROVIDER_ID,
         volume.id,
-        volume.volume_info.title,
+        volume.volume_info.title?,
         "book",
         description,
         None,
@@ -264,6 +264,7 @@ fn validate_key(value: &str) -> Result<(), DesktopProblem> {
     if value.is_empty()
         || value.len() > MAX_KEY_BYTES
         || !value.bytes().all(|byte| byte.is_ascii_graphic())
+        || HeaderValue::from_str(value).is_err()
     {
         return Err(provider_problem(
             "invalid_provider_credential",
@@ -330,7 +331,7 @@ struct GoogleBook {
 
 #[derive(Debug, Deserialize)]
 struct GoogleBookInfo {
-    title: String,
+    title: Option<String>,
     authors: Option<Vec<String>>,
 }
 
@@ -363,5 +364,20 @@ mod tests {
         assert!(validate_key("").is_err());
         assert!(validate_key("contains a space").is_err());
         assert!(validate_key(&"x".repeat(MAX_KEY_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn response_errors_and_partial_items_are_typed() {
+        assert!(format!("{:?}", require_success(StatusCode::TOO_MANY_REQUESTS))
+            .contains("provider_rate_limited"));
+        assert!(format!("{:?}", require_success(StatusCode::BAD_GATEWAY))
+            .contains("provider_unavailable"));
+        assert!(format!("{:?}", parse_candidates(b"not json"))
+            .contains("invalid_provider_response"));
+        let candidates = parse_candidates(
+            br#"{"items":[{"id":"missing-title","volumeInfo":{}},{"id":"valid","volumeInfo":{"title":"A Book"}}]}"#,
+        )
+        .expect("partial response");
+        assert_eq!(candidates.len(), 1);
     }
 }

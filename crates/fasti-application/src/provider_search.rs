@@ -8,6 +8,15 @@ use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 const MAX_CANDIDATE_TEXT_BYTES: usize = 512;
+pub const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
+pub const GOOGLE_BOOKS_HOST: &str = "www.googleapis.com";
+pub const GOOGLE_BOOKS_SEARCH_CAPABILITY: &str = "metadata.search";
+pub const GOOGLE_BOOKS_ACCESS: ProviderAccessDeclaration<'static> = ProviderAccessDeclaration {
+    provider: GOOGLE_BOOKS_PROVIDER_ID,
+    capabilities: &[GOOGLE_BOOKS_SEARCH_CAPABILITY],
+    hosts: &[GOOGLE_BOOKS_HOST],
+    networks: &[NetworkClass::Public],
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderCandidate {
@@ -251,13 +260,6 @@ fn ipv6_class(address: Ipv6Addr) -> NetworkClass {
 mod tests {
     use super::*;
 
-    const DECLARATION: ProviderAccessDeclaration<'static> = ProviderAccessDeclaration {
-        provider: "google-books",
-        capabilities: &["metadata.search"],
-        hosts: &["www.googleapis.com"],
-        networks: &[NetworkClass::Public],
-    };
-
     #[test]
     fn user_allows_cannot_widen_a_provider_declaration() {
         let policy = OutboundAccessPolicy {
@@ -267,7 +269,7 @@ mod tests {
         };
         assert_eq!(
             authorize_outbound(
-                DECLARATION,
+                GOOGLE_BOOKS_ACCESS,
                 &policy,
                 "metadata.search",
                 "metadata.internal",
@@ -301,7 +303,7 @@ mod tests {
             },
         ] {
             assert!(authorize_outbound(
-                DECLARATION,
+                GOOGLE_BOOKS_ACCESS,
                 &policy,
                 "metadata.search",
                 "www.googleapis.com",
@@ -314,7 +316,7 @@ mod tests {
     #[test]
     fn default_policy_accepts_only_the_declared_public_destination() {
         assert!(authorize_outbound(
-            DECLARATION,
+            GOOGLE_BOOKS_ACCESS,
             &OutboundAccessPolicy::default(),
             "metadata.search",
             "www.googleapis.com",
@@ -335,7 +337,7 @@ mod tests {
         ] {
             assert!(
                 authorize_outbound(
-                    DECLARATION,
+                    GOOGLE_BOOKS_ACCESS,
                     &OutboundAccessPolicy::default(),
                     "metadata.search",
                     "www.googleapis.com",
