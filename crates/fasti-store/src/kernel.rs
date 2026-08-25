@@ -8,7 +8,7 @@ use fasti_application::{
 use fasti_domain::{
     ClientId, CredentialId, ProfileGrantId, ProfileId, RequestCorrelationId, WorkspaceId,
 };
-use rusqlite::{Connection, OptionalExtension, Transaction};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -17,6 +17,9 @@ use thiserror::Error;
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
 
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_EVIDENCE_BYTES: u64 = 8 * 1024 * 1024;
@@ -29,7 +32,10 @@ pub const MAX_PREPARED_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_CONCURRENT_UPLOADS: usize = 4;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum StoreOpenError {
+    #[error("this platform does not provide the required data-root locking semantics")]
+    UnsupportedPlatform,
     #[error("failed to prepare the Fasti data root: {0}")]
     Io(#[from] std::io::Error),
     #[error("refusing unsafe data path {path:?}: {reason}")]
@@ -42,6 +48,10 @@ pub enum StoreOpenError {
     SynchronousLevel(i64),
     #[error("SQLite schema version {actual} does not match expected version {expected}")]
     SchemaVersion { expected: i64, actual: i64 },
+    #[error("another daemon or offline operation holds the Fasti data-root lock")]
+    DataRootLocked,
+    #[error("restore activation state is incomplete or invalid")]
+    RestoreActivation,
 }
 
 #[derive(Debug, Clone)]
@@ -49,14 +59,90 @@ pub struct SqliteKernel {
     pub(crate) inner: Arc<KernelInner>,
 }
 
+/// Exclusive access to one data root without creating or opening `current/`.
+///
+/// The daemon kernel and stopped-node CLI use this same guard so restore can
+/// prove the daemon is stopped before it inspects staging or active data.
+/// The lock follows the opened physical root across a rename; a replacement at
+/// the configured pathname is a distinct root.
+#[derive(Debug)]
+pub struct LockedDataRoot {
+    path: PathBuf,
+    #[cfg(target_os = "linux")]
+    root_directory: File,
+    _lock: File,
+}
+
+impl LockedDataRoot {
+    #[cfg(target_os = "linux")]
+    pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
+        let path = path.as_ref().to_path_buf();
+        if path.file_name().is_none() {
+            return Err(unsafe_path(
+                &path,
+                "data root must have a final path component",
+            ));
+        }
+        prepare_private_directory(&path)?;
+        let root_directory = open_data_root_directory(&path)?;
+        let lock = acquire_data_root_lock(&path, &root_directory)?;
+        Ok(Self {
+            path,
+            root_directory,
+            _lock: lock,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn acquire(_path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
+        Err(StoreOpenError::UnsupportedPlatform)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns an anchored data-root directory handle where descriptor-relative
+    /// filesystem operations are supported.
+    ///
+    /// Linux restore and recovery code must use this handle instead of
+    /// resolving child paths from [`Self::path`] again. Acquiring the guard
+    /// fails on other platforms until they provide equivalent semantics.
+    pub fn anchored_directory(&self) -> Option<&File> {
+        #[cfg(target_os = "linux")]
+        {
+            Some(&self.root_directory)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            None
+        }
+    }
+
+    fn current_path(&self) -> PathBuf {
+        #[cfg(target_os = "linux")]
+        {
+            PathBuf::from(format!(
+                "/proc/self/fd/{}/current",
+                self.root_directory.as_raw_fd()
+            ))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.path.join("current")
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct KernelInner {
-    pub(crate) data_root: PathBuf,
     pub(crate) current_root: PathBuf,
     pub(crate) payload_root: PathBuf,
     pub(crate) scratch_root: PathBuf,
     pub(crate) connection: Mutex<Connection>,
     pub(crate) upload_budget: Mutex<UploadBudget>,
+    // Rust drops fields in declaration order; release this lock last.
+    pub(crate) data_root: LockedDataRoot,
 }
 
 #[derive(Debug, Default)]
@@ -67,19 +153,33 @@ pub(crate) struct UploadBudget {
 
 impl SqliteKernel {
     pub fn open(data_root: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
-        let data_root = data_root.as_ref().to_path_buf();
-        let current_root = data_root.join("current");
+        let data_root = LockedDataRoot::acquire(data_root)?;
+        Self::open_locked(data_root)
+    }
+
+    /// Opens the local kernel without releasing an already-held data-root lock.
+    pub fn open_locked(data_root: LockedDataRoot) -> Result<Self, StoreOpenError> {
+        if let Some(root) = data_root.anchored_directory() {
+            crate::restore_activation::recover_activation_before_database_open(root)
+                .map_err(|_| StoreOpenError::RestoreActivation)?;
+        }
+        let current_root = data_root.current_path();
         let payload_root = current_root.join("payloads").join("sha256");
         let scratch_root = current_root.join("scratch").join("uploads");
 
-        prepare_private_directory(&data_root)?;
         prepare_private_directory(&current_root)?;
         prepare_private_directory(&payload_root)?;
         prepare_private_directory(&scratch_root)?;
 
         let database_path = current_root.join("fasti.sqlite3");
         reject_unsafe_existing_file(&database_path)?;
-        let connection = Connection::open(&database_path)?;
+        let flags = OpenFlags::default();
+        #[cfg(not(target_os = "linux"))]
+        let flags = flags | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        // Linux is already rooted through a retained directory descriptor.
+        // SQLite rejects NOFOLLOW when `/proc/self/fd` appears in the path,
+        // while its final file open still uses the bundled no-follow guard.
+        let connection = Connection::open_with_flags(&database_path, flags)?;
         harden_private_regular_file(&database_path)?;
         connection.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -104,18 +204,18 @@ impl SqliteKernel {
 
         Ok(Self {
             inner: Arc::new(KernelInner {
-                data_root,
                 current_root,
                 payload_root,
                 scratch_root,
                 connection: Mutex::new(connection),
                 upload_budget: Mutex::new(UploadBudget::default()),
+                data_root,
             }),
         })
     }
 
     pub fn data_root(&self) -> &Path {
-        &self.inner.data_root
+        self.inner.data_root.path()
     }
 
     pub fn database_path(&self) -> PathBuf {
@@ -147,6 +247,68 @@ impl SqliteKernel {
             ))
         })
     }
+}
+
+#[cfg(target_os = "linux")]
+fn acquire_data_root_lock(data_root: &Path, root_directory: &File) -> Result<File, StoreOpenError> {
+    let file = open_data_root_lock(root_directory)?;
+    finish_data_root_lock(data_root, file)
+}
+
+#[cfg(target_os = "linux")]
+fn finish_data_root_lock(data_root: &Path, file: File) -> Result<File, StoreOpenError> {
+    if !file.metadata()?.is_file() {
+        return Err(unsafe_path(
+            &data_root.join("fasti.lock"),
+            "expected a regular file",
+        ));
+    }
+    set_owner_only_open_file_permissions(&file)?;
+    file.try_lock().map_err(|error| match error {
+        std::fs::TryLockError::WouldBlock => StoreOpenError::DataRootLocked,
+        std::fs::TryLockError::Error(error) => StoreOpenError::Io(error),
+    })?;
+    Ok(file)
+}
+
+#[cfg(target_os = "linux")]
+fn open_data_root_directory(data_root: &Path) -> Result<File, StoreOpenError> {
+    let directory = open_directory(data_root)?;
+    set_owner_only_open_directory_permissions(&directory)?;
+    Ok(directory)
+}
+
+#[cfg(target_os = "linux")]
+fn open_directory(path: &Path) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
+}
+
+#[cfg(target_os = "linux")]
+fn open_data_root_lock(root_directory: &File) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat2(
+        root_directory,
+        "fasti.lock",
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
 }
 
 fn unsafe_path(path: &Path, reason: &'static str) -> StoreOpenError {
@@ -190,7 +352,13 @@ pub(crate) fn harden_private_regular_file(path: &Path) -> Result<(), StoreOpenEr
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
+fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
+    let directory = open_directory(path)?;
+    set_owner_only_open_directory_permissions(&directory)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
 fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     Ok(())
@@ -209,6 +377,18 @@ fn set_owner_only_file_permissions(path: &Path) -> Result<(), StoreOpenError> {
 
 #[cfg(not(unix))]
 fn set_owner_only_file_permissions(_path: &Path) -> Result<(), StoreOpenError> {
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn set_owner_only_open_file_permissions(file: &File) -> Result<(), StoreOpenError> {
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn set_owner_only_open_directory_permissions(file: &File) -> Result<(), StoreOpenError> {
+    file.set_permissions(fs::Permissions::from_mode(0o700))?;
     Ok(())
 }
 
@@ -292,7 +472,6 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::CorrectionRead => "correction_read",
         ScopeKey::CorrectionWrite => "correction_write",
         ScopeKey::WorkspaceExport => "workspace_export",
-        ScopeKey::WorkspaceRestore => "workspace_restore",
         ScopeKey::WorkspaceVerify => "workspace_verify",
     }
 }
@@ -460,6 +639,20 @@ pub(crate) fn problem(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn unsupported_platform_fails_before_touching_the_data_root() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+
+        assert!(matches!(
+            LockedDataRoot::acquire(&root),
+            Err(StoreOpenError::UnsupportedPlatform)
+        ));
+        assert!(!root.exists());
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn data_root_rejects_a_symbolic_link() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -482,7 +675,202 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_lock_excludes_a_second_kernel_and_releases_on_drop() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        assert!(!root.join("current").exists());
+        let first = SqliteKernel::open_locked(guard).expect("kernel from held guard");
+
+        assert!(matches!(
+            SqliteKernel::open(&root),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+
+        drop(first);
+        SqliteKernel::open(&root).expect("lock released with kernel");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_rejects_a_path_without_a_final_component() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let child = temporary.path().join("child");
+        assert!(matches!(
+            SqliteKernel::open(child.join("..")),
+            Err(StoreOpenError::UnsafePath { .. })
+        ));
+        assert!(!child.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_directory_handle_remains_anchored_after_a_path_rename() {
+        use std::os::unix::fs::MetadataExt;
+
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let moved = temporary.path().join("moved-fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        let anchored = guard
+            .anchored_directory()
+            .expect("Linux anchored directory");
+        let before = anchored.metadata().expect("anchored metadata");
+
+        fs::rename(&root, &moved).expect("rename data root");
+        fs::create_dir(&root).expect("replacement directory");
+
+        let after = anchored.metadata().expect("metadata after rename");
+        let moved_metadata = fs::metadata(&moved).expect("renamed directory metadata");
+        assert_eq!((after.dev(), after.ino()), (before.dev(), before.ino()));
+        assert_eq!(
+            (after.dev(), after.ino()),
+            (moved_metadata.dev(), moved_metadata.ino())
+        );
+        assert!(matches!(
+            LockedDataRoot::acquire(&moved),
+            Err(StoreOpenError::DataRootLocked)
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sqlite_sidecar_reopen_fails_closed_when_the_database_path_is_replaced() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let moved = temporary.path().join("moved-fasti-data");
+        let kernel = SqliteKernel::open(&root).expect("kernel");
+        let connection = kernel.inner.connection.lock().expect("connection");
+        let mode: String = connection
+            .query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))
+            .expect("close WAL sidecars");
+        assert!(mode.eq_ignore_ascii_case("delete"));
+
+        fs::rename(&root, &moved).expect("rename data root");
+        fs::create_dir_all(root.join("current")).expect("replacement current directory");
+
+        let error = connection
+            .query_row("PRAGMA journal_mode = WAL", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect_err("moved database must reject a sidecar reopen");
+        assert!(matches!(
+            error,
+            rusqlite::Error::SqliteFailure(error, _)
+                if error.extended_code == rusqlite::ffi::SQLITE_READONLY_DBMOVED
+        ));
+        assert!(!root.join("current/fasti.sqlite3-wal").exists());
+        assert!(!root.join("current/fasti.sqlite3-shm").exists());
+        assert!(!root.join("current/fasti.sqlite3-journal").exists());
+        assert!(moved.join("current/fasti.sqlite3").is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn daemon_open_refuses_incomplete_restore_staging_before_creating_current() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        let anchored = guard.anchored_directory().expect("anchored data root");
+        let (_staging, attempt) = crate::archive::create_staging_attempt(
+            anchored,
+            crate::restore_activation::RESTORE_STAGING_DIRECTORY,
+            "attempt-one",
+        )
+        .expect("restore staging");
+        crate::restore_activation::write_restore_phase(
+            &attempt,
+            fasti_domain::RestoreStatus::Received,
+        )
+        .expect("received phase");
+        drop(attempt);
+
+        assert!(matches!(
+            SqliteKernel::open_locked(guard),
+            Err(StoreOpenError::RestoreActivation)
+        ));
+        assert!(!root.join("current").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn daemon_open_completes_a_verified_post_rename_restore_before_sqlite() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let guard = LockedDataRoot::acquire(&root).expect("offline data-root guard");
+        let anchored = guard.anchored_directory().expect("anchored data root");
+        let (staging, attempt) = crate::archive::create_staging_attempt(
+            anchored,
+            crate::restore_activation::RESTORE_STAGING_DIRECTORY,
+            "attempt-two",
+        )
+        .expect("restore staging");
+        let database = root.join("staging/attempt-two/fasti.sqlite3");
+        let connection = Connection::open(&database).expect("staged database");
+        migrate(&connection).expect("staged schema");
+        drop(connection);
+        for status in [
+            fasti_domain::RestoreStatus::Received,
+            fasti_domain::RestoreStatus::Staging,
+            fasti_domain::RestoreStatus::Verified,
+        ] {
+            crate::restore_activation::write_restore_phase(&attempt, status).expect("phase");
+        }
+        let marker = crate::restore_activation::RestoreActivationMarker::new(
+            fasti_domain::RestoreAttemptId::new_v7(),
+            fasti_domain::WorkspaceId::new_v7(),
+            0,
+            fasti_domain::Sha256Digest::parse(format!("sha256:{}", "11".repeat(32)))
+                .expect("archive digest"),
+            fasti_domain::Sha256Digest::parse(format!("sha256:{}", "22".repeat(32)))
+                .expect("manifest digest"),
+        );
+        crate::restore_activation::activate_verified_restore(
+            anchored,
+            &staging,
+            &attempt,
+            "attempt-two",
+            &marker,
+        )
+        .expect("activate restore");
+        fs::remove_file(root.join("current/restore.complete"))
+            .expect("simulate crash before COMPLETE");
+        drop(attempt);
+        drop(staging);
+
+        let moved = temporary.path().join("moved-fasti-data");
+        fs::rename(&root, &moved).expect("rename locked data root");
+        fs::create_dir(&root).expect("replacement data root");
+        fs::write(root.join("replacement-marker"), b"unchanged").expect("replacement marker");
+
+        let kernel = SqliteKernel::open_locked(guard).expect("recovered kernel");
+        assert!(moved.join("current/restore.complete").is_file());
+        assert!(!root.join("current").exists());
+        assert_eq!(
+            fs::read(root.join("replacement-marker")).expect("replacement marker"),
+            b"unchanged"
+        );
+        drop(kernel);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn data_root_lock_rejects_a_symbolic_link() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        fs::create_dir(&root).expect("data root");
+        let outside = temporary.path().join("outside");
+        fs::write(&outside, b"unchanged").expect("outside file");
+        std::os::unix::fs::symlink(&outside, root.join("fasti.lock"))
+            .expect("hostile lock symlink");
+
+        assert!(SqliteKernel::open(&root).is_err());
+        assert_eq!(fs::read(outside).expect("outside bytes"), b"unchanged");
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn data_root_and_database_are_owner_only() {
         let temporary = tempfile::tempdir().expect("temporary directory");

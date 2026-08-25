@@ -10,6 +10,7 @@ pub mod identity;
 pub mod ids;
 pub mod media;
 pub mod observation;
+pub mod portability;
 pub mod review;
 pub mod time;
 
@@ -19,5 +20,6 @@ pub use identity::*;
 pub use ids::*;
 pub use media::*;
 pub use observation::*;
+pub use portability::*;
 pub use review::*;
 pub use time::*;

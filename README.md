@@ -18,7 +18,7 @@
 
 <br/>
 
-[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b2-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b3-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 <br/>
 
@@ -38,21 +38,22 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. Pull request [#20](https://github.com/Scrobble-dev/Fasti/pull/20) also contains a B2 local-kernel implementation for review. The B2 kernel is not mounted by the production daemon, its public B2 surfaces remain reserved, and no B2 milestone or release claim is made. The B1 milestone also remains open on physical Raspberry Pi 5 and J4125 evidence.
+This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. The B1 milestone also remains open on physical Raspberry Pi 5 and J4125 evidence.
 
 The production daemon deliberately exposes only behavior it can prove:
 
-| Surface                                 | Current state                                                                                                                                           |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document                                                                                |
-| B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability |
+| Surface                                 | Current state                                                                                                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document                                                                                 |
+| B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability  |
 | B2 local kernel                         | Implemented behind application ports and SQLite/filesystem adapters for review; not constructed by `fastid`, not a public route, and not a release claim |
+| B3 correction and portability           | Implemented behind application ports and Linux SQLite/filesystem adapters for review; not mounted by `fastid` or `fasti` and not a release claim         |
 | `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
-| `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                |
-| `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                        |
-| Web UI                                  | Not implemented; B4 owns the approved Tabler-based media interface                                                                                      |
-| Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                      |
-| Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                     |
+| `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
+| `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
+| Web UI                                  | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
+| Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
+| Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
 
 The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
 
@@ -71,7 +72,7 @@ The controlling engineering rules are in [the Fasti constitution](docs/constitut
 
 See the [glossary](docs/glossary.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md) for the shared vocabulary and gates.
 
-## Current B0-B2 review architecture
+## Current B0-B3 review architecture
 
 The active workspace has an inward-facing ownership spine and executable B1 contract surfaces:
 
@@ -84,7 +85,7 @@ crates/fasti-contracts
                      shared public DTOs and generated capability identifiers
 crates/fasti-api     production Utoipa health API plus a separately gated loopback fixture
 crates/fasti-cli     local capability discovery and explicit B3 nonzero guards
-crates/fasti-store   B2 SQLite and content-addressed evidence adapters; not production-mounted
+crates/fasti-store   B2 kernel plus staged B3 correction, export, verify, restore, and recovery adapters; not production-mounted
 
 contracts            authoritative registry, authored semantics, examples, and generated artifacts
 packages/sdk         generated typed TypeScript HTTP/SSE client
@@ -139,11 +140,7 @@ In a second terminal:
 curl --fail --silent http://127.0.0.1:8420/api/v1/health
 ```
 
-The exact response is:
-
-```json
-{"status":"healthy","version":"0.1.0"}
-```
+The exact response is `{"status":"healthy","version":"0.1.0"}`.
 
 That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
 
@@ -191,7 +188,16 @@ docker build --tag fasti:b0 .
 bash scripts/smoke-oci.sh fasti:b0
 ```
 
-The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. That one-shot container sample is a regression sentinel, not the Raspberry Pi 5 or J4125 performance receipt required to close B1. Override the default command to inspect a guarded command, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3.
+The staged B3 portability slice has runnable internal gates. These commands do not activate the guarded CLI:
+
+```bash
+cargo test -p fasti-store archive::tests::filesystem_destination_sigkill_matrix --locked -- --exact
+cargo test -p fasti-store restore_import::tests::full_restore_sigkill_matrix --locked -- --exact
+cargo test -p fasti-store restore_import::tests::full_import_activation_survives_owner_drop_and_opens_exact_database --locked -- --exact
+cargo test -p fasti-store stopped_portability::tests::stopped_adapter_restore_refuses_a_live_data_root_before_archive_input --locked -- --exact
+```
+
+The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. That one-shot container sample is a regression sentinel, not the Raspberry Pi 5 or J4125 performance receipt required to close B1. Override the default command to inspect a guarded command, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3 public activation.
 
 ## Brand and design system
 
@@ -207,8 +213,8 @@ The product interface arrives after the headless contract and local kernel. Its 
 
 - **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
 - **B1: Executable contract spine** — software surfaces are executable and drift-proof, and the headless QA/developer-experience reviews pass; closure still requires physical Pi 5/J4125 RAM evidence.
-- **B2: Local kernel** — implementation is present on draft PR #20 for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
-- **B3: Corrections and portability** — append-only interpretation revision plus complete export, clean restore, and equality proof.
+- **B2: Local kernel** — implementation is present behind internal ports for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
+- **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
 - **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
 
 Nuvio adaptation does not begin before the B7 provider gate, applicable B8 evidence, and maintainer agreement. See [ROADMAP.md](ROADMAP.md) for the dependency order.

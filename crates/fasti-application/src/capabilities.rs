@@ -42,6 +42,7 @@ pub enum RuntimeAvailability {
 pub enum AuthorizationKind {
     Unauthenticated,
     BootstrapOnly,
+    LocalOperator,
     Scoped,
 }
 
@@ -388,7 +389,15 @@ define_capabilities!(
         Scoped,
         [WorkspaceExport],
         [CapabilityUnavailable, Forbidden],
-        []
+        [
+            CapacityExceeded,
+            DataRootLocked,
+            ExportCanceled,
+            IntegrityFailed,
+            StoppedNodeExportRequired,
+            StorageUnavailable,
+            UnsupportedPlatform
+        ]
     ),
     (
         RestoreWorkspace,
@@ -396,10 +405,19 @@ define_capabilities!(
         B3,
         Reserved,
         Guarded,
-        Scoped,
-        [WorkspaceRestore],
+        LocalOperator,
+        [],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        []
+        [
+            BootstrapClosed,
+            CapacityExceeded,
+            DataRootLocked,
+            IntegrityFailed,
+            OperationCanceled,
+            RecoveryBootstrapPending,
+            StorageUnavailable,
+            UnsupportedPlatform
+        ]
     ),
     (
         VerifyWorkspace,
@@ -410,7 +428,7 @@ define_capabilities!(
         Scoped,
         [WorkspaceVerify],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, StorageUnavailable]
+        [DataRootLocked, IntegrityFailed, StorageUnavailable]
     ),
 );
 
@@ -461,6 +479,43 @@ mod tests {
             CapabilityKey::ExportWorkspace.runtime_availability(),
             RuntimeAvailability::Guarded
         );
+        assert_eq!(
+            CapabilityKey::RestoreWorkspace.runtime_availability(),
+            RuntimeAvailability::Guarded
+        );
+        assert_eq!(
+            CapabilityKey::RestoreWorkspace.authorization_kind(),
+            AuthorizationKind::LocalOperator
+        );
+        assert!(CapabilityKey::RestoreWorkspace.required_scopes().is_empty());
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.authorization_kind(),
+            AuthorizationKind::Scoped
+        );
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.required_scopes(),
+            &[ScopeKey::WorkspaceExport]
+        );
+        assert_eq!(
+            CapabilityKey::VerifyWorkspace.authorization_kind(),
+            AuthorizationKind::Scoped
+        );
+        assert_eq!(
+            CapabilityKey::VerifyWorkspace.required_scopes(),
+            &[ScopeKey::WorkspaceVerify]
+        );
+
+        let local_operator_capabilities: Vec<_> = CapabilityKey::ALL
+            .iter()
+            .copied()
+            .filter(|capability| {
+                capability.authorization_kind() == AuthorizationKind::LocalOperator
+            })
+            .collect();
+        assert_eq!(
+            local_operator_capabilities,
+            [CapabilityKey::RestoreWorkspace]
+        );
     }
 
     #[test]
@@ -482,6 +537,37 @@ mod tests {
         assert!(!review
             .iter()
             .any(|code| code.contract_state() == ContractState::Reserved));
+
+        let export = CapabilityKey::ExportWorkspace.allowed_problem_codes();
+        for code in [
+            ProblemCode::CapacityExceeded,
+            ProblemCode::DataRootLocked,
+            ProblemCode::ExportCanceled,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StoppedNodeExportRequired,
+            ProblemCode::StorageUnavailable,
+            ProblemCode::UnsupportedPlatform,
+        ] {
+            assert!(export.contains(&code));
+            assert!(!export.iter().any(|published| *published == code));
+        }
+
+        let restore = CapabilityKey::RestoreWorkspace.allowed_problem_codes();
+        for code in [
+            ProblemCode::BootstrapClosed,
+            ProblemCode::OperationCanceled,
+            ProblemCode::RecoveryBootstrapPending,
+            ProblemCode::UnsupportedPlatform,
+        ] {
+            assert!(restore.contains(&code));
+            assert!(!restore.iter().any(|published| *published == code));
+        }
+
+        let verify = CapabilityKey::VerifyWorkspace.allowed_problem_codes();
+        assert!(verify.contains(&ProblemCode::DataRootLocked));
+        assert!(!verify
+            .iter()
+            .any(|published| *published == ProblemCode::DataRootLocked));
     }
 
     #[test]

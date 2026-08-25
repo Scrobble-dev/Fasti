@@ -3,11 +3,11 @@ use fasti_application::{
     AttachIdentifierCommand, CorrectionPort, CorrectionTarget, CreateRecordCommand,
     EnrollFirstClientCommand, EvidenceUploadPort, EvidenceUploadRequest, IdentityPort,
     InitializeNodeCommand, InspectCorrectionChainQuery, ObservationAcceptancePort, ProblemCode,
-    RequestAccessContext, ScopeKey, SecretMaterial,
+    RegisterNamespaceDefinitionCommand, RequestAccessContext, ScopeKey, SecretMaterial,
 };
 use fasti_domain::{
-    ClaimedTrust, ExternalIdentifierClaim, Grain, ObservedAt, OperationId, ProfileGrantId,
-    ProfileId, RequestCorrelationId,
+    ClaimedTrust, ExternalIdentifierClaim, Grain, NamespaceDefinition, NamespaceLicencePosture,
+    ObservedAt, OperationId, ProfileGrantId, ProfileId, RequestCorrelationId,
 };
 use fasti_store::SqliteKernel;
 use rusqlite::{params, Connection};
@@ -60,6 +60,21 @@ impl TestNode {
     }
 
     fn create_resolved_observation(&self) -> fasti_domain::ObservationId {
+        self.kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                self.access,
+                NamespaceDefinition::try_new(
+                    "imdb",
+                    "IMDb title",
+                    [Grain::Release],
+                    "^tt[0-9]+$",
+                    "trim",
+                    NamespaceLicencePosture::IdentifiersOnly,
+                )
+                .expect("valid IMDb test namespace"),
+            ))
+            .expect("register IMDb namespace");
         let record = self
             .kernel
             .create_record(CreateRecordCommand::new(

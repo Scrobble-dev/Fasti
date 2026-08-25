@@ -35,7 +35,6 @@ define_scope_keys!(
     (CorrectionRead, "correction_read"),
     (CorrectionWrite, "correction_write"),
     (WorkspaceExport, "workspace_export"),
-    (WorkspaceRestore, "workspace_restore"),
     (WorkspaceVerify, "workspace_verify"),
 );
 

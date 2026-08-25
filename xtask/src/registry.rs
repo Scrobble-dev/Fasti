@@ -380,8 +380,11 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
             match capability.authorization {
                 AuthorizationKind::Unauthenticated => requirement.is_unauthenticated(),
                 AuthorizationKind::BootstrapOnly => requirement.is_bootstrap_only(),
+                AuthorizationKind::LocalOperator => requirement.is_local_operator(),
                 AuthorizationKind::Scoped => {
-                    !requirement.is_unauthenticated() && !requirement.is_bootstrap_only()
+                    !requirement.is_unauthenticated()
+                        && !requirement.is_bootstrap_only()
+                        && !requirement.is_local_operator()
                 }
             },
             "{label}: authorization disagrees with effective AuthorizationRequirement"
@@ -708,6 +711,69 @@ mod tests {
             .expect("initialize capability")
             .authorization = AuthorizationKind::Scoped;
         assert!(validate_capabilities(&registry).is_err());
+
+        let mut restore_as_scoped = load_validated(root).expect("authored registry is valid");
+        restore_as_scoped
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::RestoreWorkspace)
+            .expect("restore capability")
+            .authorization = AuthorizationKind::Scoped;
+        assert!(validate_capabilities(&restore_as_scoped).is_err());
+
+        let mut scoped_as_local = load_validated(root).expect("authored registry is valid");
+        scoped_as_local
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::ExportWorkspace)
+            .expect("export capability")
+            .authorization = AuthorizationKind::LocalOperator;
+        assert!(validate_capabilities(&scoped_as_local).is_err());
+
+        let mut restore_with_scope = load_validated(root).expect("authored registry is valid");
+        restore_with_scope
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.application_key == CapabilityKey::RestoreWorkspace)
+            .expect("restore capability")
+            .scopes = vec![ScopeKey::WorkspaceExport];
+        assert!(validate_capabilities(&restore_with_scope).is_err());
+    }
+
+    #[test]
+    fn restore_is_the_only_local_operator_capability() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask lives under workspace root");
+        let registry = load_validated(root).expect("authored registry is valid");
+        let local_operator: Vec<_> = registry
+            .capabilities
+            .iter()
+            .filter(|capability| capability.authorization == AuthorizationKind::LocalOperator)
+            .collect();
+
+        assert_eq!(local_operator.len(), 1);
+        assert_eq!(
+            local_operator[0].application_key,
+            CapabilityKey::RestoreWorkspace
+        );
+        assert!(local_operator[0].scopes.is_empty());
+
+        let export = registry
+            .capabilities
+            .iter()
+            .find(|capability| capability.application_key == CapabilityKey::ExportWorkspace)
+            .expect("export capability");
+        assert_eq!(export.authorization, AuthorizationKind::Scoped);
+        assert_eq!(export.scopes, [ScopeKey::WorkspaceExport]);
+
+        let verify = registry
+            .capabilities
+            .iter()
+            .find(|capability| capability.application_key == CapabilityKey::VerifyWorkspace)
+            .expect("verify capability");
+        assert_eq!(verify.authorization, AuthorizationKind::Scoped);
+        assert_eq!(verify.scopes, [ScopeKey::WorkspaceVerify]);
     }
 
     #[test]

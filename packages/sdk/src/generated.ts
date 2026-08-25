@@ -64,7 +64,7 @@ export interface AcceptObservationResponse {
 }
 
 export interface CapabilityDescriptorDto {
-  readonly authorization: "bootstrap_only" | "scoped" | "unauthenticated";
+  readonly authorization: "bootstrap_only" | "local_operator" | "scoped" | "unauthenticated";
   readonly bounded_context: string;
   readonly contract_body: "b1" | "b2" | "b3";
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
@@ -72,7 +72,7 @@ export interface CapabilityDescriptorDto {
   readonly lifecycle: CapabilityLifecycleDto;
   readonly problems: ReadonlyArray<"capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3";
-  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_restore" | "workspace_verify">;
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
   readonly surface_profile: "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
@@ -263,6 +263,7 @@ const B1_CONFORMANCE_SCHEMAS = {
       "authorization": {
         "enum": [
           "bootstrap_only",
+          "local_operator",
           "scoped",
           "unauthenticated"
         ],
@@ -380,7 +381,6 @@ const B1_CONFORMANCE_SCHEMAS = {
             "review_read",
             "review_write",
             "workspace_export",
-            "workspace_restore",
             "workspace_verify"
           ],
           "type": "string"
@@ -1745,7 +1745,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "uat": []
     },
     {
-      "authorization": "scoped",
+      "authorization": "local_operator",
       "bounded_context": "portability.workspace",
       "contract_body": "b3",
       "examples": [],
@@ -1761,9 +1761,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "validation_failed"
       ],
       "runtime_body": "b3",
-      "scopes": [
-        "workspace_restore"
-      ],
+      "scopes": [],
       "surface_profile": "later_b3",
       "uat": []
     },

@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/internal-staged/portability/v1/workspace-manifest.json",
+  "title": "InternalStagedChecksummedWorkspaceManifestV1",
+  "$comment": "Internal staged B3 archive v1. Its stream inventory is frozen for format version 1; this does not activate a public capability, registry entry, route, SDK, or CLI operation.",
+  "x-fasti-contract-state": "internal_staged_archive_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest", "manifest_digest"],
+  "properties": {
+    "manifest": { "$ref": "#/$defs/WorkspaceManifest" },
+    "manifest_digest": {
+      "$ref": "#/$defs/Sha256Digest",
+      "$comment": "SHA-256 over RFC 8785/JCS canonical JSON bytes of the manifest object only."
+    }
+  },
+  "$defs": {
+    "Sha256Digest": {
+      "type": "string",
+      "format": "sha256",
+      "minLength": 71,
+      "maxLength": 71,
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "WorkspaceStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entity", "row_count", "byte_length", "digest"],
+      "properties": {
+        "entity": {
+          "enum": [
+            "workspaces",
+            "profiles",
+            "clients",
+            "records",
+            "namespaces",
+            "external_identifiers",
+            "evidence",
+            "observations",
+            "observation_clues",
+            "occurrences",
+            "interpretations",
+            "review_items",
+            "review_candidates",
+            "corrections",
+            "receipts",
+            "operations"
+          ]
+        },
+        "row_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "digest": { "$ref": "#/$defs/Sha256Digest" }
+      }
+    },
+    "WorkspaceBlob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "byte_length", "digest"],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "format": "fasti-evidence-id",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^evd_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "byte_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "digest": { "$ref": "#/$defs/Sha256Digest" }
+      }
+    },
+    "WorkspaceManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "format_version",
+        "workspace_id",
+        "export_scope",
+        "archive_profile",
+        "restore_policy",
+        "recovery_grant_policy",
+        "workspace_revision",
+        "contract_version",
+        "migration_version",
+        "migration_digest",
+        "streams",
+        "blobs"
+      ],
+      "properties": {
+        "format": { "const": "fasti.workspace.manifest" },
+        "format_version": { "const": 1 },
+        "workspace_id": {
+          "type": "string",
+          "format": "fasti-workspace-id",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
+        },
+        "export_scope": { "const": "full_workspace" },
+        "archive_profile": { "const": "zstd-l3-w22" },
+        "restore_policy": { "const": "clean_only" },
+        "recovery_grant_policy": { "const": "require_fresh_bootstrap" },
+        "workspace_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "contract_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "migration_version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "migration_digest": { "$ref": "#/$defs/Sha256Digest" },
+        "streams": {
+          "type": "array",
+          "$comment": "Frozen archive-v1 stream inventory. Public capability activation remains separate.",
+          "minItems": 16,
+          "maxItems": 16,
+          "prefixItems": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "workspaces" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "profiles" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "clients" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "records" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "namespaces" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entity": { "const": "external_identifiers" }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "evidence" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "observations" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": {
+                    "entity": { "const": "observation_clues" }
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "occurrences" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "interpretations" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "review_items" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "review_candidates" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "corrections" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "receipts" } }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/WorkspaceStream" },
+                {
+                  "type": "object",
+                  "properties": { "entity": { "const": "operations" } }
+                }
+              ]
+            }
+          ],
+          "items": false
+        },
+        "blobs": {
+          "type": "array",
+          "$comment": "Entries are strictly ordered by evidence_id; evidence_id and digest values are unique. Runtime limits supply the maximum count.",
+          "items": { "$ref": "#/$defs/WorkspaceBlob" }
+        }
+      }
+    }
+  }
+}

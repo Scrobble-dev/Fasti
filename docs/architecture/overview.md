@@ -2,7 +2,7 @@
 
 Fasti is an identity-first local system of record for media activity. It is not a media player.
 
-## Current B1 contract spine
+## Current B0-B3 review spine
 
 ```text
 fasti-domain
@@ -13,6 +13,7 @@ fasti-domain
               ├── fasti-api ──> production health router
               │                 └── feature-gated loopback conformance router
               ├── fasti CLI ──> capability list/show; guarded B3 commands
+              ├── fasti-store ──> staged B2 kernel and B3 portability adapters
               └── generated TypeScript HTTP/SSE SDK
 
 authored capability registry
@@ -25,7 +26,7 @@ authored capability registry
 
 Dependencies point inward. Domain meaning is owned once and projected outward; HTTP, CLI, SDK, provider, storage, and later presentation types cannot become domain primitives. The retired `fasti-core`, `fasti-activity`, and `fasti-auth` scaffolds are not compatibility layers. Their raw IDs, collapsed activity envelope, caller-controlled server times, and token claims were not proven domain primitives.
 
-`fasti-store` is intentionally empty until B2 implements and proves the local kernel. Production `fastid` mounts only `GET /api/v1/health`, and its generated OpenAPI document contains only that route. B1’s separate conformance server is compile-time feature-gated, binds only to IPv4 loopback, holds bounded data in memory, and labels every success as fixture-only with no durability. It exercises the frozen contract without claiming durable observation acceptance, production access control, identity resolution, export, restore, or replication.
+`fasti-store` contains the staged B2 local kernel and B3 correction/portability adapters. Production `fastid` still mounts only `GET /api/v1/health`, and its generated OpenAPI document contains only that route. B1’s separate conformance server is compile-time feature-gated, binds only to IPv4 loopback, holds bounded data in memory, and labels every success as fixture-only with no durability. Neither path activates durable observation acceptance, identity resolution, export, restore, or recovery through a supported production surface.
 
 ## Target bounded contexts
 
@@ -39,7 +40,7 @@ The authored capability registry is the authoritative machine ledger. Determinis
 
 ## Durability sequence
 
-The local kernel does not exist until B2, and B2 is not authorized while B1 is open. Its planned success sequence is:
+The staged B2 kernel uses this success sequence:
 
 ```text
 authorize current grant and reserve limits
@@ -55,7 +56,7 @@ Any failure before the durability boundary returns a typed problem and cannot re
 
 ## Distribution
 
-The native daemon and CLI are the current executable shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. There is no supported installation, release, player, persistence kernel, web application, or desktop package.
+The native daemon and CLI are the current executable shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. There is no supported installation, release, player, production-mounted persistence kernel, web application, or desktop package.
 
 B1 cannot close on software checks alone. Its software, mandatory headless QA, and developer-experience gates pass on this branch; named physical Raspberry Pi 5 and J4125 RAM measurements under the agreed limits remain missing. B4 adds a local browser presentation only after B0-B3 prove the headless kernel. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
 

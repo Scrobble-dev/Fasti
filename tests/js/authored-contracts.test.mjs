@@ -20,6 +20,7 @@ const withContracts = async (mutate, assertRejected) => {
       "contracts/generated/v1",
       "contracts/jsonld/v1",
       "contracts/examples/v1",
+      "contracts/portability/v1",
     ]) {
       await mkdir(join(root, directory), { recursive: true });
       await cp(join(repositoryRoot, directory), join(root, directory), {
@@ -33,11 +34,77 @@ const withContracts = async (mutate, assertRejected) => {
   }
 };
 
-test("authored AsyncAPI and JSON-LD validate locally", async () => {
+test("authored AsyncAPI, portability, and JSON-LD validate locally", async () => {
   const result = await validateAuthoredContracts();
   assert.equal(result.asyncApiVersion, "3.1.0");
   assert.ok(result.expandedDocumentCount >= 2);
+  assert.equal(result.portabilityFormat, "fasti.workspace.manifest");
 });
+
+test("portability manifest stream reordering is rejected", async () => {
+  await withContracts(
+    async (root) => {
+      const path = join(
+        root,
+        "contracts/portability/v1/workspace-manifest.example.json",
+      );
+      const document = JSON.parse(await readFile(path, "utf8"));
+      [document.manifest.streams[0], document.manifest.streams[1]] = [
+        document.manifest.streams[1],
+        document.manifest.streams[0],
+      ];
+      await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+    },
+    (result) => assert.rejects(result, /portability example errors/u),
+  );
+});
+
+test("portability manifest mutation invalidates the JCS checksum", async () => {
+  await withContracts(
+    async (root) => {
+      const path = join(
+        root,
+        "contracts/portability/v1/workspace-manifest.example.json",
+      );
+      const document = JSON.parse(await readFile(path, "utf8"));
+      document.manifest.workspace_revision += 1;
+      await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+    },
+    (result) => assert.rejects(result, /manifest_digest must cover RFC 8785/u),
+  );
+});
+
+for (const [label, mutate] of [
+  ["format version", (manifest) => (manifest.format_version = 2)],
+  ["workspace ID", (manifest) => (manifest.workspace_id = "wsp_invalid")],
+  [
+    "migration-version bound",
+    (manifest) => (manifest.migration_version = 4_294_967_296),
+  ],
+  [
+    "stream digest",
+    (manifest) => (manifest.streams[0].digest = `sha256:${"AB".repeat(32)}`),
+  ],
+  [
+    "contract-version bound",
+    (manifest) => (manifest.contract_version = "x".repeat(65)),
+  ],
+]) {
+  test(`portability schema rejects the DTO ${label} mutation`, async () => {
+    await withContracts(
+      async (root) => {
+        const path = join(
+          root,
+          "contracts/portability/v1/workspace-manifest.example.json",
+        );
+        const document = JSON.parse(await readFile(path, "utf8"));
+        mutate(document.manifest);
+        await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+      },
+      (result) => assert.rejects(result, /portability example errors/u),
+    );
+  });
+}
 
 test("AsyncAPI version mutation is rejected", async () => {
   await withContracts(

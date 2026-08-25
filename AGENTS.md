@@ -83,6 +83,13 @@ Run the canonical gate:
 cargo xtask test pr
 ```
 
+On Linuxbrew hosts, use the system `pkg-config` so the Tauri gate can find the
+APT-installed GTK and WebKit metadata:
+
+```bash
+PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr
+```
+
 The Tauri performance gate inside that command needs prerequisites. Install them once:
 
 ```bash

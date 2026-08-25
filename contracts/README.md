@@ -15,6 +15,7 @@ The authored registry at [`registry/v1/capabilities.yaml`](registry/v1/capabilit
 | `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                  |
 | `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                        |
 | `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                  |
+| `portability/v1/`                     | Internal staged B3 archive-v1 manifest schema and example; version-1 stream order is frozen    |
 | `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas    |
 | `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                       |
 | `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                     |
@@ -27,5 +28,23 @@ JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surface
 Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until named physical Raspberry Pi 5 and J4125 RAM evidence exists. B2 is not authorized.
 
 Provider seeds and manifest examples remain future adapter inputs, not working integrations. There is no supported install, release, persistence kernel, web interface, desktop package, or player.
+
+The [internal staged B3 archive-v1 manifest schema](portability/v1/workspace-manifest.schema.json)
+and [example](portability/v1/workspace-manifest.example.json) freeze the 16
+version-1 streams, including `namespaces` after `records` and before
+`external_identifiers`. The Rust contract owns both strict hostile-input
+conversion and the application-to-wire RFC 8785/JCS projection. Freezing the
+archive format does not add a public capability, registry entry, route, SDK
+method, or CLI operation. The outbound projection owns the checked DTO,
+canonical `manifest.json` bytes, application manifest, and digest as one opaque
+unit; it has no consuming parts API. Hostile inbound conversion returns a
+contract-owned verified manifest whose construction is private. Store adapters
+must not rebuild or independently pair wire values. Restore success is
+complete-only. Rejection and post-activation recovery-bootstrap pending states
+remain typed staged failures. Restore uses the non-delegable `local_operator`
+authorization disposition with no credential scope. Recovery bootstrap prepare
+and complete remain phases of that restore capability; they do not create a
+second capability. This metadata does not add a route, SDK method, or CLI
+operation.
 
 See the [human capability guide](../docs/capability-ledger.md) for a concise interpretation of the registry.

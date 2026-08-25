@@ -662,7 +662,7 @@ capabilities:
     bounded_context: portability.workspace
     contract_body: b3
     runtime_body: b3
-    authorization: scoped
+    authorization: local_operator
     lifecycle:
       {
         introduced_in: b1,
@@ -670,7 +670,7 @@ capabilities:
         runtime_availability: guarded,
       }
     surface_profile: later_b3
-    scopes: [workspace_restore]
+    scopes: []
     problems: [capability_unavailable, forbidden, validation_failed]
     examples: []
     uat: []

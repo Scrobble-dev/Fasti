@@ -252,10 +252,21 @@ impl AuthorizationRequirement {
         matches!(self.kind, AuthorizationKind::BootstrapOnly)
     }
 
+    /// Return true when an adapter must prove local data-root authority.
+    ///
+    /// Credential and grant snapshots cannot satisfy this disposition. The
+    /// adapter must establish owner-only local authority and the exclusive
+    /// data-root lock before it dispatches the capability.
+    pub const fn is_local_operator(&self) -> bool {
+        matches!(self.kind, AuthorizationKind::LocalOperator)
+    }
+
     pub const fn required_scopes(&self) -> &'static [ScopeKey] {
         match self.kind {
             AuthorizationKind::Scoped => self.capability.required_scopes(),
-            AuthorizationKind::Unauthenticated | AuthorizationKind::BootstrapOnly => &[],
+            AuthorizationKind::Unauthenticated
+            | AuthorizationKind::BootstrapOnly
+            | AuthorizationKind::LocalOperator => &[],
         }
     }
 }
@@ -293,6 +304,10 @@ pub fn authorize(
     let allowed = match requirement.kind {
         AuthorizationKind::Unauthenticated => true,
         AuthorizationKind::BootstrapOnly => snapshot.is_some_and(AccessSnapshot::is_bootstrap_open),
+        // Local-operator authority is an adapter-owned proof over the local
+        // data root and its exclusive lock. No credential/grant snapshot can
+        // be promoted into that proof by this ordinary request evaluator.
+        AuthorizationKind::LocalOperator => false,
         AuthorizationKind::Scoped => {
             let required_scopes = requirement.capability.required_scopes();
             match (
@@ -394,22 +409,62 @@ mod tests {
     fn requirement_is_derived_from_capability_without_a_policy_override() {
         let health = AuthorizationRequirement::for_capability(CapabilityKey::SystemHealth);
         assert!(health.is_unauthenticated());
+        assert!(!health.is_local_operator());
         assert!(health.required_scopes().is_empty());
 
         let initialize = AuthorizationRequirement::for_capability(CapabilityKey::InitializeNode);
         assert!(initialize.is_bootstrap_only());
+        assert!(!initialize.is_local_operator());
         assert!(initialize.required_scopes().is_empty());
+
+        let restore = AuthorizationRequirement::for_capability(CapabilityKey::RestoreWorkspace);
+        assert!(restore.is_local_operator());
+        assert!(!restore.is_unauthenticated());
+        assert!(!restore.is_bootstrap_only());
+        assert!(restore.required_scopes().is_empty());
 
         for capability in CapabilityKey::ALL.iter().copied().filter(|capability| {
             !matches!(
                 capability,
-                CapabilityKey::SystemHealth | CapabilityKey::InitializeNode
+                CapabilityKey::SystemHealth
+                    | CapabilityKey::InitializeNode
+                    | CapabilityKey::RestoreWorkspace
             )
         }) {
             let requirement = AuthorizationRequirement::for_capability(capability);
             assert!(!requirement.is_unauthenticated());
             assert!(!requirement.is_bootstrap_only());
+            assert!(!requirement.is_local_operator());
             assert_eq!(requirement.required_scopes(), capability.required_scopes());
+        }
+    }
+
+    #[test]
+    fn local_operator_restore_cannot_be_satisfied_by_request_credentials_or_scopes() {
+        let ids = Identities::distinct();
+        let requirement = AuthorizationRequirement::for_capability(CapabilityKey::RestoreWorkspace);
+        let request = request(ids, [true; 5], 7);
+        let every_delegable_scope = ScopeKey::ALL.iter().copied();
+        let established = AccessSnapshot::established(
+            ids.workspace,
+            ids.profile,
+            ids.client,
+            ids.credential,
+            ids.grant,
+            CredentialStatus::Active,
+            GrantStatus::Active,
+            7,
+            every_delegable_scope,
+        );
+
+        for snapshot in [
+            None,
+            Some(&AccessSnapshot::bootstrap_open()),
+            Some(&AccessSnapshot::bootstrap_closed()),
+            Some(&established),
+        ] {
+            assert!(authorize(&requirement, Some(&request), snapshot).is_err());
+            assert!(authorize(&requirement, None, snapshot).is_err());
         }
     }
 
