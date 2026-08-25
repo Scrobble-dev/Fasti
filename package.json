@@ -10,25 +10,30 @@
     "url": "https://github.com/Scrobble-dev/Fasti.git"
   },
   "scripts": {
-    "build": "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build",
+    "dev:web": "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/web dev",
+    "build": "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/ui build && pnpm --filter @fasti/web build",
     "contracts:validate-authored": "node scripts/validate-authored-contracts.mjs",
     "contracts:validate-examples": "node scripts/validate-examples.mjs",
     "contracts:validate-generated": "node scripts/validate-generated-contracts.mjs",
     "contracts:validate-okf": "node scripts/validate-okf-uat.mjs",
     "test": "pnpm run build && pnpm contracts:validate-authored && pnpm contracts:validate-generated && pnpm contracts:validate-examples && pnpm contracts:validate-okf && node scripts/check-js-workspace.mjs && node --test tests/js/*.test.mjs",
+    "test:ui": "playwright test",
     "test:coverage": "pnpm run build && mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/js-lcov.info tests/js/*.test.mjs",
-    "typecheck": "pnpm run build && pnpm --filter @fasti/tokens typecheck && pnpm --filter @fasti/sdk typecheck",
-    "format": "prettier --write .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\"",
-    "format:check": "prettier --check .prettierrc.json package.json pnpm-workspace.yaml tsconfig.base.json \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts}\" \"scripts/**/*.mjs\" \"tests/js/**/*.mjs\""
+    "typecheck": "pnpm run build && pnpm --filter @fasti/tokens typecheck && pnpm --filter @fasti/sdk typecheck && pnpm --filter @fasti/ui typecheck && pnpm --filter @fasti/web typecheck",
+    "format": "prettier --write .prettierrc.json package.json playwright.config.ts pnpm-workspace.yaml tsconfig.base.json \"apps/web/**/*.{json,ts,svelte,css,html}\" \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts,svelte}\" \"scripts/**/*.mjs\" \"tests/**/*.{mjs,ts}\"",
+    "format:check": "prettier --check .prettierrc.json package.json playwright.config.ts pnpm-workspace.yaml tsconfig.base.json \"apps/web/**/*.{json,ts,svelte,css,html}\" \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts,svelte}\" \"scripts/**/*.mjs\" \"tests/**/*.{mjs,ts}\""
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "12.1.0",
     "@asyncapi/parser": "3.6.3",
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.55.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "canonicalize": "2.1.0",
     "jsonld": "9.0.0",
     "prettier": "^3.9.6",
+    "prettier-plugin-svelte": "4.1.1",
     "typescript": "^7.0.2",
     "yaml": "2.9.0",
     "nx": "23.1.1"

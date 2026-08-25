@@ -15,6 +15,9 @@ fasti-domain
               ├── fasti CLI ──> capability list/show; guarded B3 commands
               ├── fasti-store ──> staged B2 kernel and B3 portability adapters
               └── generated TypeScript HTTP/SSE SDK
+                        └── apps/web local health QA harness
+                                  ├── packages/ui presentation
+                                  └── packages/tokens design projection
 
 authored capability registry
     ├── production + conformance OpenAPI 3.1
@@ -56,8 +59,8 @@ Any failure before the durability boundary returns a typed problem and cannot re
 
 ## Distribution
 
-The native daemon and CLI are the current executable shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. There is no supported installation, release, player, production-mounted persistence kernel, web application, or desktop package.
+The native daemon and CLI are the current executable product shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. `apps/web` is a local, private, unpackaged QA harness over the generated `system.health` binding. It activates no product capability or presentation milestone. There is no supported installation, release, player, production-mounted persistence kernel, product web application, or desktop package.
 
-B1 cannot close on software checks alone. Its milestone manifest binds contract, QA, Tauri, raw-gate, and retained performance artifacts. The two performance receipts must declare one exact `dev` push and workflow attempt, cover x86_64 and aarch64, complete the 600-second warm-up and 900-second route-less idle window, and bind the kernel-applied 192 MiB, one-vCPU, zero-swap envelope. The verifier recomputes memory, CPU, architecture, and applicable artifact-size results. Optional Pi 5 and J4125 specifications remain useful comparison targets but do not gate the milestone. B4 adds a local browser presentation only after B0-B3 prove the headless kernel. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
+B1 cannot close on software checks alone. Its milestone manifest binds contract, QA, Tauri, raw-gate, and retained performance artifacts. The two performance receipts must declare one exact `dev` push and workflow attempt, cover x86_64 and aarch64, complete the 600-second warm-up and 900-second route-less idle window, and bind the kernel-applied 192 MiB, one-vCPU, zero-swap envelope. The verifier recomputes memory, CPU, architecture, and applicable artifact-size results. Optional Pi 5 and J4125 specifications remain useful comparison targets but do not gate the milestone. B4 adds the product browser presentation only after B0-B3 prove the headless kernel; the earlier health harness gathers interface-quality evidence without changing that sequence. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
 
 See [the constitution](../constitution.md), [capability ledger](../capability-ledger.md), and [contract ownership](../../contracts/README.md).

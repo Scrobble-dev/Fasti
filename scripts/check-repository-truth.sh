@@ -3,8 +3,6 @@ set -euo pipefail
 
 retired_paths=(
   "apps/desktop"
-  "apps/web"
-  "packages/ui"
   "crates/fasti-player"
   "crates/fasti-sync"
   "crates/fasti-connectors"
@@ -156,7 +154,7 @@ while IFS= read -r claim_file; do
   [[ -f "$claim_file" ]] || continue
   case "$claim_file" in
     brand/* | contracts/* | fixtures/* | knowledge/* | scripts/* | tests/*) continue ;;
-    *.md | *.toml | *.json | *.yml | *.yaml | *.rs | *.ts | *.mjs)
+    *.md | *.toml | *.json | *.yml | *.yaml | *.rs | *.ts | *.mjs | *.svelte | *.html)
       active_claim_files+=("$claim_file")
       ;;
   esac

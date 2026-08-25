@@ -109,6 +109,20 @@ Also run focused checks for changed surfaces. Add regression tests for fixed def
 
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
 
+The local browser QA harness may expose only generated capabilities that are
+active in the capability ledger. Run its Chrome, Axe, keyboard, reflow, motion,
+and theme checks with:
+
+```bash
+pnpm test:ui
+```
+
+The runner uses `127.0.0.1:4173` and a bounded health stub on
+`127.0.0.1:18422`, and it refuses to reuse occupied ports. It does not take over
+the documented local development URL at `127.0.0.1:5173`. A QA harness is
+evidence tooling. It does not activate a product milestone, runtime listener
+setting, or desktop surface.
+
 ## Design system
 
 Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision. Font choices, colors, spacing, and aesthetic direction are defined there. Do not deviate without explicit approval.

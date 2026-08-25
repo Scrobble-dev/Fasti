@@ -14,6 +14,8 @@ A Fasti body is complete only when all applicable evidence below is current and 
 - Mandatory QA completes with a report and regression evidence for each defect fixed.
 - Rendered UI or UX changes also complete design review with screenshots and accessibility evidence.
 
+A local pre-body diagnostic harness may exercise an already implemented capability before the next body starts. It must be private, unpackaged, contract-backed, and explicit about unavailable later capabilities. Its checks can retire interface defects, but the harness does not satisfy predecessor acceptance, activate a capability, or count as body completion evidence.
+
 ## Contracts
 
 From B1 onward, every implemented capability has a registry entry and an explicit disposition for domain/application, HTTP/OpenAPI, SSE/AsyncAPI, CLI, JSON Schema, JSON-LD/OKF, SDK, knowledge, package smoke, and UI.

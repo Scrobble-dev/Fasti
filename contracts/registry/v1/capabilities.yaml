@@ -33,7 +33,11 @@ surface_profiles:
       }
     package_smoke:
       { state: required, binding: "package-smoke:production-health" }
-    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+    ui:
+      {
+        state: not_applicable,
+        reason: Product UI is not active through B3; the local health diagnostic is evidence tooling.,
+      }
 
   b1_http_fixture:
     domain_application:

@@ -115,6 +115,7 @@ We organize contributions into explicit lanes to set expectations on review requ
    pnpm format:check
    pnpm typecheck
    pnpm test
+   pnpm test:ui
 
    bash scripts/check-repository-truth.sh
    bash scripts/check-no-publish.sh
