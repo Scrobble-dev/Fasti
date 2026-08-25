@@ -41,7 +41,7 @@ export function extractReleaseNotes(changelog, tag) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const tag = process.argv[2];
   if (!tag) {
-    console.error("usage: generate-release-notes.mjs <vX.Y.Z>");
+    console.error("usage: generate-release-notes.mjs vX.Y.Z");
     process.exit(1);
   }
   const changelog = await readFile(

@@ -219,22 +219,28 @@ jobs:
           # a {"type":"summary",...} line -- never to stdout.
           cargo deny --format json check > /dev/null 2> /tmp/cargo-deny-workspace.ndjson || true
           cargo audit --file Cargo.lock --json > /tmp/cargo-audit-workspace.json 2>/dev/null || true
+          # Fails the job (not just the receipt) if either tool didn't
+          # produce parseable output, rather than silently recording a
+          # null-shaped receipt that only fails later, at verification time.
           jq -n \
             --slurpfile deny_lines /tmp/cargo-deny-workspace.ndjson \
             --slurpfile audit /tmp/cargo-audit-workspace.json \
             --arg git_commit "$(git rev-parse --verify HEAD)" \
             --arg git_tree "$(git rev-parse HEAD^{tree})" \
-            '($deny_lines | map(select(.type == "summary")) | last | .fields) as $deny |
+            '($deny_lines | map(select(.type == "summary")) | last) as $deny_summary |
+             if $deny_summary == null then error("cargo-deny produced no summary line; refusing to record an empty security-review receipt") else . end |
+             ($audit[0]) as $audit_result |
+             if $audit_result == null then error("cargo-audit produced no JSON output; refusing to record an empty security-review receipt") else . end |
              {
                source: {git_commit: $git_commit, git_tree: $git_tree},
                cargo_deny: {
-                 advisories_errors: $deny.advisories.errors,
-                 bans_errors: $deny.bans.errors,
-                 licenses_errors: $deny.licenses.errors,
-                 sources_errors: $deny.sources.errors
+                 advisories_errors: $deny_summary.fields.advisories.errors,
+                 bans_errors: $deny_summary.fields.bans.errors,
+                 licenses_errors: $deny_summary.fields.licenses.errors,
+                 sources_errors: $deny_summary.fields.sources.errors
                },
                cargo_audit: {
-                 vulnerabilities_found: ($audit[0].vulnerabilities.count // 0)
+                 vulnerabilities_found: $audit_result.vulnerabilities.count
                }
              }' \
             > target/fasti-evidence/b8b/security-review/b8b-security-review.json

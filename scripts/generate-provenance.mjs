@@ -74,7 +74,7 @@ export async function generateProvenance(root, subjectPaths, env = {}) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const subjectPaths = process.argv.slice(2);
   if (subjectPaths.length === 0) {
-    console.error("usage: generate-provenance.mjs <artifact-path>...");
+    console.error("usage: generate-provenance.mjs [artifact-path]...");
     process.exit(1);
   }
   const statement = await generateProvenance(
