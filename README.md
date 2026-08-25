@@ -14,6 +14,7 @@
 <br/>
 
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14234/badge)](https://www.bestpractices.dev/projects/14234)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 <br/>
@@ -222,11 +223,19 @@ Nuvio adaptation does not begin before the B7 provider gate, applicable B8 evide
 
 ## Contributing
 
-Fasti is an open community project under AGPL-3.0-or-later and DCO 1.1. Collaboration on code, documentation, fixtures, accessibility, security, provider patterns, recipes, and design is encouraged.
+Fasti is an independent, community-driven project under AGPL-3.0-or-later and DCO 1.1. We are **actively seeking co-maintainers, code reviewers, and contributors** across Rust systems engineering, TypeScript/UI presentation, OpenAPI contracts, and hardware benchmarks.
 
-Before writing code or opening a pull request, begin or join a GitHub Discussion and align the problem, bounded context, scope, and required review gates. This is technical and product scope alignment, not legal approval. A CLA or legal review is not required.
+### 🤝 Maintainers & Contributors Wanted
 
-Then follow [CONTRIBUTING.md](CONTRIBUTING.md), sign commits with the [Developer Certificate of Origin](https://developercertificate.org/) using `git commit -s`, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+We are intentionally expanding the maintainer team to improve the project's bus factor and code-review coverage:
+* **Co-Maintainers & Reviewers**: We welcome maintainers familiar with async Rust (`axum`, `rusqlite`), Domain-Driven Design, OpenAPI 3.1 / AsyncAPI 3.x schema validation, and Svelte / Tauri presentation.
+* **Good First Issues**: Check out our curated list of [Good First Issues](https://github.com/Scrobble-dev/Fasti/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for well-scoped onboarding tasks with step-by-step instructions and test commands.
+* **Hardware Receipts**: Help us test and benchmark Milestone B1 memory envelopes (<= 64 MiB idle) on diverse physical hardware (Raspberry Pi 5, Intel J4125, Apple Silicon, TV boxes per [#49](https://github.com/Scrobble-dev/Fasti/issues/49) and [#50](https://github.com/Scrobble-dev/Fasti/issues/50)).
+
+To contribute:
+1. Browse open [Issues](https://github.com/Scrobble-dev/Fasti/issues) or start a [GitHub Discussion](https://github.com/Scrobble-dev/Fasti/discussions) to align on scope.
+2. Follow [CONTRIBUTING.md](CONTRIBUTING.md) and sign your commits with the [Developer Certificate of Origin](https://developercertificate.org/) (`git commit -s`).
+3. Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 

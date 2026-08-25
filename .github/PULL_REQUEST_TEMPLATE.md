@@ -22,7 +22,8 @@ Supersedes or follows:
 
 ## Target Branch
 
-- [ ] `release` — Standard integration target unless the linked Discussion names another branch. This PR cannot publish a public image, package, attestation, binary, or GitHub Release.
+- [ ] `dev` — Standard integration target. This PR cannot publish a public image, package, attestation, binary, or GitHub Release.
+- [ ] `release` — Reserved strictly for release candidate stabilization.
 
 ## Category of Change
 
@@ -36,14 +37,14 @@ Supersedes or follows:
 ## Invariant & Impact Checklist
 
 - [ ] **DCO Sign-off:** All commits are signed off with `git commit -s` (`Signed-off-by: Name <email>`).
-- [ ] **Discussion-first scope:** The linked Discussion predates implementation and the change stays inside its bounded context and accepted scope.
+- [ ] **Scope alignment:** The PR references an open issue, accepted RFC, or linked Discussion (Tier 3/4 domain/identity changes require prior alignment).
 - [ ] **Meaning ownership:** Domain meaning has one owner; adapters and generated surfaces do not redefine it, and dependencies point toward the governed rules.
-- [ ] **Data Model Invariants:** If changing schema or persistence, an ADR/RFC has been approved and backward compatibility / migration tests are included.
+- [ ] **Identity & Data Invariants:** Fasti records; players play. Provider IDs are claims (`xid_*`), observations (`obs_*`) are immutable evidence, and local record keys (`rec_*`) remain stable.
 - [ ] **Scrobble.dev Boundary:** This PR does not unilaterally modify normative Scrobble.dev specification definitions.
-- [ ] **Contract parity:** Every applicable OpenAPI, AsyncAPI, Schema, JSON-LD, OKF, CLI, SDK, permission, error, example, and knowledge surface agrees or is explicitly `N/A` / later body.
-- [ ] **Tests and QA:** Automated evidence is included and mandatory QA has passed.
+- [ ] **Contract parity:** Every applicable OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF 0.2, CLI, and SDK surface agrees or is explicitly `N/A`.
+- [ ] **Tests and QA:** Automated evidence is included (`cargo xtask contract verify --locked` / tests) and mandatory QA has passed.
 - [ ] **Accessibility and design (if rendered):** Design review passed with keyboard, screen reader, responsive, 44 px target, reduced-motion, focus-return, and ADHD/AuDHD state-continuity evidence.
-- [ ] **Performance and portability:** Applicable memory, artifact, native, OCI, network-denied, packaging, and recovery evidence is attached without estimated pass claims.
+- [ ] **Performance and portability:** Memory budget respected (64 MiB idle, 192 MiB ceiling). Zero runtime telemetry or phone-home code.
 - [ ] **Security:** No unauthenticated endpoints, link-local SSRF vulnerabilities, or unredacted log leaks.
 - [ ] **Publishing posture:** Repository workflows remain non-publishing before B8 and an explicit release action.
 

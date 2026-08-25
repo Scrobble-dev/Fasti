@@ -1,0 +1,41 @@
+# cargo-deny configuration: final security review gate for B8b.
+#
+# The allow-list below is exactly the set of licenses currently present in
+# the workspace's own dependency graph (verified via `cargo metadata`), plus
+# a small number of common permissive licenses a future dependency might
+# reasonably carry. All are compatible with distributing Fasti under
+# AGPL-3.0-or-later (see NOTICE) as a dependency, not as a derivative of
+# Fasti itself.
+
+[graph]
+targets = []
+
+[licenses]
+version = 2
+allow = [
+    "AGPL-3.0-or-later",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "LGPL-2.1-or-later",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

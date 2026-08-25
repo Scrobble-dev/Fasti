@@ -137,8 +137,6 @@ Key routing rules:
 
 ## Review and handoff
 
-Preserve issue and PR history. Do not edit another contributor's original body.
-
 Document:
 
 - user impact;
@@ -149,3 +147,13 @@ Document:
 - accessibility impact;
 - tests;
 - rollback.
+
+## Quality and Security Invariants
+
+- **Single Integration Branch**: All active development and pull requests target `dev`. `release` is reserved strictly for release candidate stabilization.
+- **Zero Deployment Blockers**: External SaaS/AI tools (CodeRabbit, Codacy, Codecov, Scorecard) provide advisory feedback and must never block emergency hotfixes, local builds, or CI deployments.
+- **Strict Bounded Performance**: The daemon (`fastid`) must strictly observe memory ceilings: 64 MiB idle, 96 MiB normal, 192 MiB process tree ceiling.
+- **Zero Runtime Telemetry**: The daemon and client libraries must never include phone-home code, tracking SDKs, or external analytics.
+- **YouTrack Workflow**: Fasti uses YouTrack (`fasti.youtrack.cloud`) for sprint execution, milestone tracking (B0–B8), and hardware receipts. Prefix commit messages and PR titles with YouTrack IDs (`FASTI-###`).
+- **No-Publish Guardrail**: Workflows in `.github/workflows/` must have strictly read-only permissions before Milestone B8 release readiness.
+

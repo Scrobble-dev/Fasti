@@ -27,7 +27,15 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 These controls make the development baseline and B2 review implementation safer; they do not mount B2 in production or make Fasti a supported service.
 
-## Current threat model
+## Security Assurance Case
+
+Fasti provides a formal security assurance case structured around four core pillars:
+1. **Threat Model & Protected Assets**: Local identity integrity, raw immutable observations, authorization grants, deterministic receipts, and private runner credentials.
+2. **Trust Boundaries & Mediation**: Strict boundary between untrusted network/IPC inputs and the domain kernel. The production daemon binds loopback by default with link-local SSRF guards.
+3. **Secure Design Principles**: Fail-closed authorization, economy of mechanism, complete mediation, least privilege, and zero runtime telemetry.
+4. **Common Weakness Mitigations**: Parameterized SQLite queries (anti-SQLi), 100% safe Rust (anti-buffer overflow / memory corruption), bounded request/archive sizes (anti-DoS / decompression bombs), and strict JSON Schema 2020-12 allowlists.
+
+### Current Threat Model
 
 The current source tree protects these assets:
 

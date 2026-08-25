@@ -1,9 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+version: "2"
 language: "en-US"
-tone_instructions: >
-  Be concise and highly specific. Focus strictly on architectural integrity, correctness,
-  safety, and domain boundaries. Do not comment on stylistic formatting or minor linting
-  (already enforced by rustfmt and clippy).
+early_access: false
 
 reviews:
   profile: "chill"
@@ -18,43 +16,85 @@ reviews:
     base_branches:
       - "dev"
       - "release"
-      - "main"
-
+    ignore_title_keywords:
+      - "WIP"
+      - "wip"
+      - "Draft"
+      - "draft"
+    exclude_users:
+      - "dependabot[bot]"
+      - "github-actions[bot]"
+  
   path_filters:
     - "!contracts/generated/**"
-    - "!contracts/examples/**"
-    - "!fixtures/**"
-    - "!brand/**"
+    - "!packages/sdk/src/generated/**"
     - "!Cargo.lock"
     - "!pnpm-lock.yaml"
     - "!target/**"
+    - "!benchmarks/b1/fixtures/**"
+    - "!fixtures/**"
+    - "!brand/assets/**"
 
   path_instructions:
     - path: "crates/fasti-domain/**"
-      instructions: >
-        Enforce strict domain boundaries: fasti-domain MUST NOT depend on axum, rusqlite,
-        tokio, tracing, fasti-api, fasti-store, or any adapter/runtime layer. Domain rules
-        own identity and meaning.
+      instructions: |
+        Verify domain invariants and identity rules:
+        - Product boundary: Fasti records. Players play. No playback or player claims.
+        - Canonical identity: Every record has an opaque immutable local ID (`rec_*`). External provider IDs (IMDb, Spotify, TMDB) are typed claims (`xid_*`) and NEVER canonical keys.
+        - Uncertainty preservation: Incomplete/unresolved records are valid first-class data. Never drop or guess missing fields.
+        - Immutability: Original observations (`obs_*`) are immutable evidence.
+        - Append-only semantics: Audits, splits, and merges must preserve provenance.
 
     - path: "crates/fasti-application/**"
-      instructions: >
-        fasti-application MUST NOT depend on adapter or schema runtime packages (axum,
-        rusqlite, tokio, tracing-subscriber, fasti-api, fasti-store). It coordinates domain
-        capabilities and ports.
+      instructions: |
+        Verify application capabilities, ports, and authorization:
+        - Capability ownership: Capabilities must correspond to registry definitions in `contracts/registry/v1/capabilities.yaml`.
+        - Authorization: Check permissions before data mutation.
+        - Idempotency: All mutating operations with retries must guarantee idempotent execution and durable receipts.
+        - Error handling: Use typed problems; do not leak unredacted raw errors or secrets.
+
+    - path: "crates/fasti-store/**"
+      instructions: |
+        Verify persistence, migrations, and concurrency:
+        - Crash durability & ACID: SQLite transactions must be atomic and crash-resilient.
+        - Migration safety: Migrations must be reversible or explicitly audited for backward compatibility.
+        - Zero unhandled panic paths in database transaction boundaries.
+
+    - path: "crates/fasti-api/**"
+      instructions: |
+        Verify REST API handlers and DTO mappings:
+        - OpenAPI parity: Operations and DTOs must bind cleanly to Utoipa specs matching generated OpenAPI schemas.
+        - Input boundaries: Reject oversized or malformed payloads fail-closed.
+        - Typed responses: Return RFC 7807 problem payloads on errors.
+
+    - path: "apps/fastid/**"
+      instructions: |
+        Verify daemon runtime boundaries:
+        - Resource boundaries: Strictly enforce the 64 MiB idle and 192 MiB process ceiling memory envelopes.
+        - Network binding: Default to IPv4 loopback (`127.0.0.1`) only; verify link-local SSRF defenses.
+        - Zero telemetry: Strictly reject any third-party analytics, tracking, or phone-home code.
+
+    - path: "crates/fasti-cli/**"
+      instructions: |
+        Verify CLI command boundaries:
+        - Guarded execution: Ensure CLI commands consume generated capability projections and respect non-delegable authorization.
+        - Error formatting: Emit machine-readable typed problems and actionable human diagnostics.
+
+    - path: "contracts/**"
+      instructions: |
+        Check for semantic contract drift:
+        - The registry at `contracts/registry/v1/capabilities.yaml` and seeds at `contracts/identity/` own machine truth.
+        - Flag any breaking change to OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, or OKF 0.2 surfaces.
+        - Do not comment on formatting or code style for generated contract outputs.
 
     - path: ".github/workflows/**"
-      instructions: >
-        Strict security invariant: Every external action `uses:` MUST be pinned to a full
-        40-character hexadecimal commit SHA followed by a `# version` comment. No tags or
-        branch names allowed.
+      instructions: |
+        Verify CI/CD supply chain and workflow security:
+        - Ensure least-privilege token permissions (`permissions:` explicitly defined at workflow and job level).
+        - Flag unpinned actions or untrusted script execution.
+        - Ensure workflows do not introduce unauthorized public release publication paths before B8.
 
-    - path: "**"
-      instructions: >
-        1. Product boundary: "Fasti records. Players play." Reject any playback, stream decoding,
-           stream selection, or player controls.
-        2. Verify Developer Certificate of Origin (DCO) commit sign-off and AGPL-3.0 compliance.
-        3. Reject any hardcoded secrets, test credentials, or auth tokens in code or fixtures.
-        4. Respect bounded memory budgets (64 MiB idle, 192 MiB ceiling).
-
-chat:
-  auto_reply: true
+    - path: "tests/**"
+      instructions: |
+        Verify test assertions:
+        - Ensure tests verify observable behavior, failure modes, and invariant boundaries rather than internal mock implementation details.
