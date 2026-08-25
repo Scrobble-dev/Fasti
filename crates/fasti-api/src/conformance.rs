@@ -790,7 +790,7 @@ mod tests {
     use super::*;
     use axum::{
         body::{to_bytes, Body},
-        http::{Request, Response},
+        http::{Request, Response, StatusCode},
     };
     use fasti_contracts::{DurabilityDto, RuntimeAvailabilityDto};
     use fasti_domain::{EvidenceId, OperationId, ReceiptId};

@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn reserved_problem_codes_stay_out_of_the_b1_registry() {
+    fn staged_authentication_problem_stays_out_of_the_public_registry() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask lives under workspace root");
@@ -789,10 +789,14 @@ mod tests {
         let rendered = serde_json::to_string(&public).expect("serialize public registry");
 
         assert!(!rendered.contains(ProblemCode::AuthenticationFailed.as_str()));
-        assert!(!rendered.contains(ProblemCode::StorageUnavailable.as_str()));
+        assert!(rendered.contains(ProblemCode::StorageUnavailable.as_str()));
         assert_eq!(
             ProblemCode::AuthenticationFailed.contract_state(),
             ContractState::Reserved
+        );
+        assert_eq!(
+            ProblemCode::StorageUnavailable.contract_state(),
+            ContractState::Finalized
         );
     }
 

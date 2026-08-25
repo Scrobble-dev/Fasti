@@ -63,6 +63,7 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
+- Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
 
