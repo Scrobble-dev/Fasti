@@ -133,3 +133,11 @@ All color pairings are certified for **WCAG 2.2 AA / AAA** readability.
 ## 8. Interactive Preview
 
 Open `brand/preview.html` in any browser to explore the live interactive theme switcher, vector logos, color swatch tokens, and timeline UI specimens.
+
+---
+
+## 9. Component and Theme Implementation
+
+Use native HTML controls first. Use Tabler icons or a focused Tabler component when the platform primitive does not provide the required meaning. Do not load the full Tabler stylesheet for one or two native controls.
+
+`packages/tokens` owns the semantic browser variables. Light and dark themes reuse the canonical palette through CSS `color-mix()`; they do not create a second palette owner. The active theme is set with `data-bs-theme="light|dark"`. Interactive targets remain at least 44 by 44 CSS pixels, and focus uses a three-pixel indicator with a two-pixel offset.

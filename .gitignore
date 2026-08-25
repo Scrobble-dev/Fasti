@@ -6,6 +6,7 @@ Cargo.lock.backup
 # Node / pnpm / frontend
 node_modules/
 dist/
+.svelte-check/
 !benchmarks/b1/tauri-shell/dist/
 !benchmarks/b1/tauri-shell/dist/index.html
 .pnpm-store/
@@ -45,6 +46,8 @@ Thumbs.db
 # Test and coverage artifacts
 coverage/
 lcov.info
+playwright-report/
+test-results/
 *.profdata
 *.profraw
 /benchmarks/b1/evidence/
