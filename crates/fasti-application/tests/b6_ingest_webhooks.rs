@@ -1,6 +1,6 @@
 #![cfg(feature = "conformance-fixture")]
 
-//! Comprehensive integration tests for Plex, Jellyfin, Emby, and MPRIS webhook ingestion.
+//! Converter and in-memory conformance tests for Plex, Jellyfin/Emby, and Linux MPRIS-shaped input.
 
 use fasti_application::{
     conformance::B1ConformanceFixture,
@@ -506,7 +506,7 @@ fn plex_webhook_redelivered_with_the_same_observed_at_replays_rather_than_duplic
 
     // A genuine redelivery of the exact same webhook: identical payload,
     // and the caller supplies the same observed_at both times (the
-    // documented contract for what "retry" means for this adapter).
+    // documented contract for what "retry" means for this converter).
     let payload = PlexWebhookPayload {
         event: "media.scrobble".to_owned(),
         user: true,
