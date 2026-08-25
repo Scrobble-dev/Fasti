@@ -329,7 +329,7 @@
       "additionalProperties": false,
       "required": ["source", "sensor", "celsius"],
       "properties": {
-        "source": { "type": "string", "pattern": "^/sys/class/thermal/" },
+        "source": { "type": "string", "pattern": "^/sys/class/(thermal|hwmon)/" },
         "sensor": { "$ref": "#/$defs/nonEmptyString" },
         "celsius": { "type": "number", "minimum": -20, "maximum": 125 }
       }
