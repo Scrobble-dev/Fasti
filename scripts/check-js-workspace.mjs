@@ -54,7 +54,6 @@ assert.equal(
   packageEntryPath(repoRoot, "package.json"),
   join(repoRoot, "package.json"),
 );
-
 const actualWorkspaces = globSync("{apps,packages}/*/package.json", {
   cwd: repoRoot,
 })

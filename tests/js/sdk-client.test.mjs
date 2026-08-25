@@ -621,6 +621,7 @@ test("connection endpoints preserve custom domains and expose loopback alternati
   );
   assert.deepEqual(connectionEndpoint("https://fasti.internal", "build"), {
     url: "https://fasti.internal",
+    port: 443,
     source: "build",
     managed: true,
     scheme: "https",
@@ -646,7 +647,6 @@ test("connection endpoints reject unsafe origins", () => {
     assert.throws(() => connectionEndpoint(value));
   }
 });
-
 test("generated public metadata preserves complete registry and surface dispositions", () => {
   assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 22);
   assert.equal(

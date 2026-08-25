@@ -29,3 +29,9 @@ For open questions, feature planning, provider recipes, packaging hypotheses, an
 * **Security Vulnerabilities:** Follow the private disclosure instructions in [`SECURITY.md`](SECURITY.md).
 
 Import, enrichment, replication, Nuvio, player-observation, TV, and package proposals begin in Discussions. Use an issue only after the Discussion identifies an implemented capability and reproducible defect.
+
+---
+
+## 4. Supported Releases
+
+No version is supported for production use yet (see [`SECURITY.md`](SECURITY.md)). Once B8 publishes a release, its notes are generated per-tag from [`CHANGELOG.md`](CHANGELOG.md) via `scripts/generate-release-notes.mjs`. Rollback guidance for a published release lives at [docs/operations/rollback-runbook.md](docs/operations/rollback-runbook.md).

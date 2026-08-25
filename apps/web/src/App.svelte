@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { FastiClient, FastiProtocolError } from "@fasti/sdk";
+  import {
+    FastiClient,
+    FastiProtocolError,
+    connectionEndpoint,
+  } from "@fasti/sdk";
   import type { WorkbenchHost } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
@@ -19,9 +23,30 @@
     readonly proof_cleanup_pending: boolean;
   }
 
+  type BuildEnvironment = Readonly<Record<string, string | undefined>>;
+
+  const buildEnvironment = (
+    import.meta as ImportMeta & { readonly env: BuildEnvironment }
+  ).env;
+  const buildApiUrl = buildEnvironment.VITE_FASTI_API_URL?.trim();
+  const buildPublicUrl = buildEnvironment.VITE_FASTI_PUBLIC_URL?.trim();
+  const configuredFallback =
+    buildEnvironment.VITE_FASTI_PORT_FALLBACK ?? "fail";
+  if (configuredFallback !== "auto" && configuredFallback !== "fail") {
+    throw new TypeError("VITE_FASTI_PORT_FALLBACK must be auto or fail");
+  }
+
+  const endpoint = connectionEndpoint(
+    buildApiUrl || "http://127.0.0.1:8420",
+    buildApiUrl ? "build" : "default",
+  );
+  const publicEndpoint = buildPublicUrl
+    ? connectionEndpoint(buildPublicUrl, "build")
+    : undefined;
+
   const isTauri = "__TAURI_INTERNALS__" in window;
   const client = new FastiClient({
-    baseUrl: window.location.origin,
+    baseUrl: buildApiUrl || window.location.origin,
     timeoutMs: 3_000,
     retryPolicy: { maxAttempts: 1 },
   });
@@ -46,8 +71,9 @@
     }
     return {
       title: "The local service is unavailable",
-      detail: "Fasti did not answer on the configured loopback service.",
-      recovery: "Start the local service, then try again.",
+      detail: "Fasti did not answer on the configured service URL.",
+      recovery:
+        "Check the network settings, start the service, then try again.",
     };
   }
 
@@ -172,6 +198,9 @@
     {status}
     {theme}
     mark={theme === "dark" ? markDark : markLight}
+    {endpoint}
+    {publicEndpoint}
+    portFallback={configuredFallback}
     onRetry={retryHealth}
     onToggleTheme={toggleTheme}
   />

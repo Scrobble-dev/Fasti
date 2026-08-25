@@ -195,7 +195,6 @@ mod tests {
         let error = parse_listen_addr("8420").expect_err("bare ports are ambiguous");
         assert!(error.to_string().contains("IP:PORT"));
     }
-
     #[test]
     fn data_root_is_explicit_and_never_defaults_to_the_working_directory() {
         assert_eq!(parse_data_root(None).expect("absent data root"), None);

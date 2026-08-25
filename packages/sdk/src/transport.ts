@@ -69,6 +69,7 @@ export type ConnectionScheme = "http" | "https";
 
 export interface ConnectionEndpoint {
   readonly url: string;
+  readonly port: number;
   readonly source: ConnectionValueSource;
   readonly managed: boolean;
   readonly scheme: ConnectionScheme;
@@ -85,13 +86,13 @@ export function connectionEndpoint(
   }
   return Object.freeze({
     url: url.origin,
+    port: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
     source,
     managed: source === "environment" || source === "build",
     scheme: url.protocol === "https:" ? "https" : "http",
     loopbackAliases: loopbackAliases(url),
   });
 }
-
 export interface CallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -767,7 +768,6 @@ function loopbackAliases(url: URL): readonly string[] {
     `${url.protocol}//127.0.0.1${port}`,
   ]);
 }
-
 function normalizeRetryPolicy(
   override?: Partial<RetryPolicy>,
   fallback: RetryPolicy = DEFAULT_RETRY_POLICY,

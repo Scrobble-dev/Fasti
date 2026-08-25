@@ -155,7 +155,6 @@ raise SystemExit(0 if valid else 1)
   echo "Native mode requires a user cgroup v2 scope with a ${ceiling_mib} MiB memory ceiling and swap disabled. Start a user systemd session or use --podman." >&2
   return 1
 }
-
 _wait_for_health() {
   local pid="${1:-}"
   for _ in {1..10}; do

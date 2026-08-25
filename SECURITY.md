@@ -25,6 +25,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Evidence upload authorizes before temporary-file creation, enforces concurrent and byte budgets, hashes while streaming, rechecks authorization before durable promotion, and verifies existing content before deduplication.
 - Operation receipts bind workspace, client, operation, capability, and semantic digest. Replay and receipt streams remain profile/client scoped and bounded.
 - Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
+- `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
 These controls make the development baseline and B2 review implementation safer. Production mounts only the durable loopback setup slice when `FASTI_DATA_ROOT` is explicit. This does not make Fasti a supported service.
 
@@ -32,7 +33,16 @@ These controls make the development baseline and B2 review implementation safer.
 
 The desktop crate inherits `glib 0.18.5` and `RUSTSEC-2024-0429` from Tauri 2's GTK3 stack. Fasti does not depend on `glib` directly. The desktop lockfile audit ignores only this advisory and still fails for every other advisory. Remove the exception when the [upstream GTK4 migration](https://github.com/tauri-apps/tauri-docs/issues/3143) is available.
 
-## Current threat model
+## Security Assurance Case
+
+Fasti provides a formal security assurance case structured around four core pillars:
+
+1. **Threat Model & Protected Assets**: Local identity integrity, raw immutable observations, authorization grants, deterministic receipts, and private runner credentials.
+2. **Trust Boundaries & Mediation**: Strict boundary between untrusted network/IPC inputs and the domain kernel. The production daemon binds loopback by default with link-local SSRF guards.
+3. **Secure Design Principles**: Fail-closed authorization, economy of mechanism, complete mediation, least privilege, and zero runtime telemetry.
+4. **Common Weakness Mitigations**: Parameterized SQLite queries (anti-SQLi), 100% safe Rust in Fasti application code (anti-buffer overflow / memory corruption; note that fasti-store's bundled SQLite and zstd-sys dependencies introduce native C/FFI boundaries), bounded request/archive sizes (anti-DoS / decompression bombs), and strict JSON Schema 2020-12 allowlists.
+
+### Current Threat Model
 
 The current source tree protects these assets:
 
@@ -60,7 +70,8 @@ B2-B8 must still prove, rather than merely document:
 - archive traversal, decompression-bomb, Unicode/path ambiguity, SQL injection, header confusion, stale-credential, SSRF, and hostile-JSON defenses;
 - secrets external to images and proof bundles, permission-restricted credential delivery, and no credentials in command arguments or logs;
 - explicit local-origin and browser security policy when B4 adds a UI;
-- dependency, SBOM, signing, trust-root, update, and recovery evidence before B8 publishes a release.
+- dependency license compliance and SBOM generation, now covered in CI by `cargo-deny` and `cargo-cyclonedx`/`cyclonedx-npm` (`.github/workflows/release.yml`, `deny.toml`) — see [B8b release readiness](docs/architecture/b8b-release-readiness.md);
+- signing, trust-root, update, and recovery evidence, still deferred to B8's own release action.
 
 Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. A supported network-exposure guide cannot exist until the access and threat-model gates pass.
 
