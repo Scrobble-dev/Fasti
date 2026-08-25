@@ -191,12 +191,12 @@ touch "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$samples_file"
 cleanup() { rm -rf "$temporary_root"; }
 trap cleanup EXIT
 
-# Allocator arenas and async worker pools both scale with core count. Left
-# unpinned, a many-core runner inflates the footprint for reasons that have
-# nothing to do with the product, and the measurement stops being comparable to
-# a small machine.
-export MALLOC_ARENA_MAX=2
-export TOKIO_WORKER_THREADS=2
+# Allocator arenas and async worker pools both scale with core count. Pass the
+# values as command arguments so a sudo-created scope cannot discard them.
+workload_environment=(env MALLOC_ARENA_MAX=2 TOKIO_WORKER_THREADS=2)
+if [[ "$profile" == "canonical-idle" ]]; then
+  workload_environment+=("FASTI_IDLE_SETTLE_SECONDS=$(( warmup_seconds + measurement_seconds + 30 ))")
+fi
 
 # systemd-run performs its own $VAR and ${VAR} expansion on the command line
 # before the shell sees it, which silently blanks variables and emits warnings.
@@ -249,9 +249,8 @@ INNER
 
 sampler_status=0
 if [[ "$profile" == "canonical-idle" ]]; then
-  export FASTI_IDLE_SETTLE_SECONDS=$(( warmup_seconds + measurement_seconds + 30 ))
   set +e
-  "${runner[@]}" bash "$inner" "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$profile" "$@" &
+  "${runner[@]}" "${workload_environment[@]}" bash "$inner" "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$profile" "$@" &
   runner_pid=$!
   set -e
 
@@ -352,7 +351,7 @@ PY
   set -e
 else
   set +e
-  "${runner[@]}" bash "$inner" "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$profile" "$@"
+  "${runner[@]}" "${workload_environment[@]}" bash "$inner" "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$profile" "$@"
   status=$?
   set -e
 fi
