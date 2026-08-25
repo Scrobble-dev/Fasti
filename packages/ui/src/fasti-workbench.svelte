@@ -654,7 +654,7 @@
     </header>
 
     <!-- Main Viewport Canvas -->
-    <main class="viewport-canvas" id="main-content">
+    <main class="viewport-canvas" id="main-content" tabindex="-1">
       {#if activeSection === "home"}
         {#if records.length === 0}
           <section class="empty-workbench" aria-labelledby="empty-title">
