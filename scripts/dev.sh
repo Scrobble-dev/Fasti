@@ -149,6 +149,7 @@ _start_podman() {
   mkdir -p "$DATADIR"
   _require_podman_image
   if ! podman run -d --name "$CONTAINER_NAME" --rm \
+    --memory 192m --memory-swap 192m \
     --publish "127.0.0.1:$FASTI_PORT:8420" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
