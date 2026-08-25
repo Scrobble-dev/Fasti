@@ -277,6 +277,7 @@
     } else {
       activeSection = "home";
       selectedRecordId = null;
+      if (pathname !== "/") window.history.replaceState({}, "", "/");
     }
   }
 
