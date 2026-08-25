@@ -235,7 +235,8 @@ We are intentionally expanding the maintainer team to improve the project's bus 
 To contribute:
 1. Browse open [Issues](https://github.com/Scrobble-dev/Fasti/issues) or start a [GitHub Discussion](https://github.com/Scrobble-dev/Fasti/discussions) to align on scope.
 2. Follow [CONTRIBUTING.md](CONTRIBUTING.md) and sign your commits with the [Developer Certificate of Origin](https://developercertificate.org/) (`git commit -s`).
-3. Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md).
+3. **All active development and pull requests must target the `dev` branch.**
+4. Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 

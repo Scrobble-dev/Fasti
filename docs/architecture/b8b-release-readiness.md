@@ -25,7 +25,7 @@ B8b sits downstream of B8a, B4, and B6 (`B8a → B6 → B8b`, per the capability
 
 ## 2. Non-publishing boundary
 
-`scripts/check-no-publish.sh` is a real, enforced CI gate (the `B0 repository truth` job, run on every push to `dev`/`release`). It greps every file under `.github/workflows/` and `scripts/` — including comments — for a forbidden-pattern regex that blocks, among others: any Docker/OCI push, `gh release`, the `attest-build-provenance` action, `npm`/`pnpm`/`yarn`/`cargo publish`, `git push`, `gh pr merge/ready/close/edit`, and any `permissions:` line granting `write` on any key.
+`scripts/check-no-publish.sh` is a real, enforced CI gate (the `B0 repository truth` job, run on every push to `dev`/`release`). It greps every file under `.github/workflows/` and `scripts/` — including comments — for a forbidden-pattern regex that blocks, among others: any Docker/OCI push, `gh release`, the `attest-build-provenance` action, `npm`/`pnpm`/`yarn`/`cargo publish`, `git push`, `gh pr merge/ready/close/edit`, and any `permissions:` line granting `write` on any key. The script excludes itself (`scripts/check-no-publish.sh`) and its test (`scripts/test-no-publish-policy.sh`) from scanning, as they contain the forbidden patterns for validation purposes rather than actual publish operations.
 
 The rule this implies for every deliverable below: **prepare the mechanism, never execute the publish.** Concretely:
 
@@ -38,9 +38,9 @@ The rule this implies for every deliverable below: **prepare the mechanism, neve
 
 ## 3. Signed artifacts
 
-**Deferred**: real signing. Fasti's chosen mechanism is Sigstore/cosign **keyless** signing — no long-lived private key is generated or stored. At B8 release time, `cosign sign --yes <image-ref>` signs the artifact using a short-lived certificate tied to the release workflow's GitHub OIDC identity, and the signature is recorded in Sigstore's public Rekor transparency log. That log write is itself a publish action, which is exactly why real signing cannot happen before B8: cosign also needs a resolvable registry digest to attach a signature to, and no image is pushed to any registry before B8 either.
+**Deferred**: real signing. Fasti's chosen mechanism is Sigstore/cosign **keyless** signing — no long-lived private key is generated or stored. At B8 release time, OCI images are signed using an immutable `image@sha256:<digest>` reference (the registry-pushed image digest) via `cosign sign --yes`, not the saved tar archive digest. Native binaries (`fastid`, `fasti`) and docker image `save` tar archives are signed/attested as separate artifacts. The signature uses a short-lived certificate tied to the release workflow's GitHub OIDC identity, and the signature is recorded in Sigstore's public Rekor transparency log. That log write is itself a publish action, which is exactly why real signing cannot happen before B8: cosign needs a resolvable registry digest for OCI images, and no image is pushed to any registry before B8.
 
-**Buildable now**: a per-architecture checksums manifest over the artifacts that already exist without publishing — the native `fastid`/`fasti` binaries and the OCI image's content digest (via `docker image save`, not `push`). This is exactly the byte content a future `cosign sign`/`cosign attest` step signs over. The manifest is self-verified (`sha256sum -c`) in the same CI job, so a stale or hand-edited manifest fails the job instead of silently uploading something wrong.
+**Buildable now**: a per-architecture checksums manifest over the artifacts that already exist without publishing — the native `fastid`/`fasti` binaries and the OCI image saved-archive digest (via `docker image save`, not `push`). At B8, the OCI signing subject will be the pushed image's immutable `image@sha256` digest, distinct from the saved tar archive checksum. The manifest is self-verified (`sha256sum -c`) in the same CI job, so a stale or hand-edited manifest fails the job instead of silently uploading something wrong.
 
 ## 4. SBOM
 
@@ -63,7 +63,7 @@ Two gates, both re-run at release time and captured as B8b evidence:
 - `cargo-audit` (already running weekly in `security.yml`) for known vulnerability advisories.
 - `cargo-deny` (new: `deny.toml` at the workspace root) for license compliance and dependency hygiene — an allowlist consistent with the AGPL-3.0-or-later workspace license and `NOTICE`'s dual-licensing note, a ban on wildcard version requirements, and denial of unknown/yanked sources.
 
-"Final" means both are green against the exact tagged commit, not merely that they passed at some point in `dev`'s history.
+"Final" means both are green against the exact tagged commit, not merely that they passed at some point in `dev`'s history. B8b evidence explicitly records RUSTSEC-2025-0098 (if applicable), including the affected lockfile/artifact, the rationale for its cargo-deny exception, and maintainer acceptance, alongside the green cargo-audit and cargo-deny results.
 
 ## 8. Final accessibility and design review
 
@@ -93,7 +93,7 @@ A GitHub Environment named `production-release`, configured with required review
 |---|---|---|
 | Signed artifacts | Partially — checksums entries verified | Real signing/Rekor submission stays out of scope by design |
 | SBOM | Yes | Files exist, non-empty, CycloneDX-shaped |
-| Provenance/attestations | Yes | Statement exists, source-bound |
+| Provenance/attestations | No | Unsigned output from generate-provenance.mjs is source-bound evidence, not an authenticated attestation |
 | Update/rollback path | No | Doc-only, checked by `check-doc-links.mjs`, not manifest evidence |
 | Final security review | Yes | `cargo-audit` + `cargo-deny` receipt bound as evidence |
 | Final accessibility/design review | No — blocked | `design_review.status` cannot legitimately read `Pass` until B4 ships |

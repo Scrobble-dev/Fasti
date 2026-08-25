@@ -32,7 +32,6 @@ reviews:
     - "!pnpm-lock.yaml"
     - "!target/**"
     - "!benchmarks/b1/fixtures/**"
-    - "!fixtures/**"
     - "!brand/assets/**"
 
   path_instructions:
@@ -90,7 +89,7 @@ reviews:
     - path: ".github/workflows/**"
       instructions: |
         Verify CI/CD supply chain and workflow security:
-        - Ensure least-privilege token permissions (`permissions:` explicitly defined at workflow and job level).
+        - Ensure least-privilege token permissions (`permissions:` explicitly defined at workflow and job level). Before B8, strictly require read-only permissions for every workflow; reject any write or other non-read permission.
         - Flag unpinned actions or untrusted script execution.
         - Ensure workflows do not introduce unauthorized public release publication paths before B8.
 

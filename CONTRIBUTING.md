@@ -209,8 +209,9 @@ Signed-off-by: Jane Developer <jane@example.com>
 
 1. **Target Branch**: Open all PRs against **`dev`** (our integration branch). `release` is reserved for verified release candidates.
 2. **Link Issues / Discussions**: Reference the claimed issue or linked Discussion (Tier 3/4).
-3. **Complete the PR Template**: Ensure all invariant checkboxes and DCO sign-offs are completed in [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
-4. **CI & Verification**: All deterministic checks must pass. Automated AI/SaaS tools provide suggestions but do not block PR merges.
+3. **Run PR Gate**: Execute `cargo xtask test pr` locally before submission to verify all required checks pass.
+4. **Complete the PR Template**: Ensure all invariant checkboxes and DCO sign-offs are completed in [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
+5. **CI & Verification**: All deterministic checks must pass. Automated AI/SaaS tools provide suggestions but do not block PR merges.
 
 ---
 

@@ -52,6 +52,6 @@ body:
     attributes:
       label: Primary Validation Command
       description: Command the contributor should run locally to prove the fix.
-      placeholder: "cargo test -p fasti-cli -- --nocapture"
+      placeholder: "cargo xtask test pr\n\nFocused checks (if applicable):\ncargo test -p fasti-cli -- --nocapture"
     validations:
       required: true

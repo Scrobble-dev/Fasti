@@ -45,7 +45,7 @@ Per `ROADMAP.md` (B4), Fasti explicitly excludes playback controls, a `Chronicle
 | **Local Kernel Status**| Online, daemon unreachable, database locked, sync pending | Contextual failure guidance, zero silent loss, retry trigger |
 | **Interaction States**| Default, hover, keyboard focused, active, disabled | Visible 3px high-contrast focus ring, 44px min touch target |
 | **Display Constraints**| Long strings (256+ chars), narrow viewport (320px), 200% zoom | Text wraps cleanly or truncates with tooltip, zero horizontal overflow |
-| **Accessibility Modes**| Default theme, High Contrast, `prefers-reduced-motion: reduce` | Animations disabled, color contrast >= 7:1 |
+| **Accessibility Modes**| Default theme, High Contrast, `prefers-reduced-motion: reduce` | Animations disabled, color contrast >= 7:1 (B8b enforces minimum 7:1 ratio) |
 
 ---
 
@@ -78,14 +78,22 @@ Automated accessibility audits are integrated directly into Playwright journey s
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-test('Media view has zero WCAG 2.1 AA violations in all states', async ({ page }) => {
+test('Media view has zero WCAG 2.1 AA violations in empty and daemon-offline states', async ({ page }) => {
   await page.goto('/activity');
-  
+
   // Test empty state
   const accessibilityScanResults = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
   expect(accessibilityScanResults.violations).toEqual([]);
+
+  // Verify minimum 7:1 contrast ratio (AAA-level)
+  const contrastResults = await new AxeBuilder({ page })
+    .withTags(['wcag21aaa'])
+    .disableRules(['color-contrast']) // Re-enable with explicit 7:1 threshold
+    .options({ rules: { 'color-contrast-enhanced': { enabled: true } } })
+    .analyze();
+  expect(contrastResults.violations.filter(v => v.id === 'color-contrast-enhanced')).toEqual([]);
 
   // Trigger daemon unreachable state
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fasti:daemon-offline')));

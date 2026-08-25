@@ -34,10 +34,10 @@ _status() {
   fi
 
   echo ""
-  if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
-    echo "  API Probe (8420): HEALTHY ($(curl -s http://127.0.0.1:8420/api/v1/health))"
-  elif curl --silent --fail http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
-    echo "  API Probe (4000): HEALTHY ($(curl -s http://127.0.0.1:4000/api/v1/health))"
+  if curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
+    echo "  API Probe (8420): HEALTHY ($(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:8420/api/v1/health))"
+  elif curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
+    echo "  API Probe (4000): HEALTHY ($(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:4000/api/v1/health))"
   else
     echo "  API Probe:        NOT REACHABLE"
   fi
@@ -55,15 +55,20 @@ _stop() {
 _start_podman() {
   echo "=== Launching Fasti Podman Container ==="
   mkdir -p "$DATADIR"
-  podman run -d --name fasti-dev --rm \
+  if ! podman run -d --name fasti-dev --rm \
     --publish 8420:8420 \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
-    localhost/fasti:test 2>/dev/null || podman restart fasti-dev 2>/dev/null || true
+    localhost/fasti:test 2>/dev/null; then
+    if ! podman restart fasti-dev 2>/dev/null; then
+      echo "Failed to start or restart Podman container fasti-dev"
+      return 1
+    fi
+  fi
 
   sleep 1
   echo "Fasti Podman container running on http://127.0.0.1:8420"
-  echo "API Health: $(curl -s http://127.0.0.1:8420/api/v1/health || echo 'starting...')"
+  echo "API Health: $(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:8420/api/v1/health || echo 'starting...')"
 }
 
 _start_desktop() {
@@ -87,13 +92,13 @@ _start_native() {
 
   echo "Waiting for daemon health probe..."
   for _ in $(seq 1 10); do
-    if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
+    if curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
       break
     fi
     sleep 0.5
   done
 
-  if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
+  if curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
     echo "✓ Fasti daemon is healthy on http://127.0.0.1:8420"
   else
     echo "⚠️ Daemon did not respond in time, check .dev-logs/fastid.log"
