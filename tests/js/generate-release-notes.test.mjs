@@ -60,3 +60,23 @@ test("rejects a tag that isn't a semantic version before it ever reaches RegExp"
     /must be a semantic version/,
   );
 });
+
+test("accepts a tag with build metadata", () => {
+  const notes = extractReleaseNotes(fixtureChangelog, "v0.2.0+build.5");
+  assert.match(notes, /Second release feature\./);
+  assert.match(notes, /Second release fix\./);
+});
+
+test("rejects a tag with leading zero in major version", () => {
+  assert.throws(
+    () => extractReleaseNotes(fixtureChangelog, "v01.2.3"),
+    /must be a semantic version/,
+  );
+});
+
+test("rejects a tag with leading zero in numeric prerelease identifier", () => {
+  assert.throws(
+    () => extractReleaseNotes(fixtureChangelog, "v1.2.3-01"),
+    /must be a semantic version/,
+  );
+});

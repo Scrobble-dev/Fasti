@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SEMVER_TAG_PATTERN =
-  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 export function extractReleaseNotes(changelog, tag) {
   if (typeof tag !== "string" || !SEMVER_TAG_PATTERN.test(tag)) {
@@ -18,7 +18,7 @@ export function extractReleaseNotes(changelog, tag) {
       `tag must be a semantic version like "v1.2.3", got: ${JSON.stringify(tag)}`,
     );
   }
-  const version = tag.replace(/^v/, "");
+  const version = tag.replace(/^v/, "").replace(/\+.*$/, "");
   const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const headingPattern = new RegExp(
     `^##\\s*\\[${escapedVersion}\\][^\\n]*\\n`,
