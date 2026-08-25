@@ -39,7 +39,8 @@ export function extractReleaseNotes(changelog, tag) {
       `CHANGELOG.md has no "## [${version}]" section; rename [Unreleased] to [${version}] before tagging`,
     );
   }
-  const start = headings[index].index + headings[index][0].length;
+  const match = headings[index];
+  const start = match.index + match[0].length;
   const end =
     index + 1 < headings.length ? headings[index + 1].index : changelog.length;
   return changelog.slice(start, end).trim() + "\n";
