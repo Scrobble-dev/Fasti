@@ -237,48 +237,58 @@
     </div>
   </header>
 
-  <!-- Filter & Search Toolbar -->
-  <div class="toolbar">
-    <div class="search-wrap">
-      <IconSearch size={16} stroke={2} class="search-icon" />
-      <input
-        type="search"
-        placeholder="Filter by title, tag, or creator..."
-        bind:value={searchQuery}
-        class="search-input"
-        aria-label="Filter library records"
-      />
-    </div>
+  {#if records.length > 0}
+    <!-- Filter & Search Toolbar -->
+    <div class="toolbar">
+      <div class="search-wrap">
+        <IconSearch size={16} stroke={2} class="search-icon" />
+        <input
+          type="search"
+          placeholder="Filter by title, tag, or creator..."
+          bind:value={searchQuery}
+          class="search-input"
+          aria-label="Filter library records"
+        />
+      </div>
 
-    <div class="filter-pills" role="radiogroup" aria-label="Media kind filter">
-      {#each kinds as k}
-        <button
-          type="button"
-          class="filter-pill"
-          class:active={selectedKind === k.id}
-          onclick={() => (selectedKind = k.id)}
-        >
-          {k.label}
-        </button>
-      {/each}
-    </div>
+      <div
+        class="filter-pills"
+        role="radiogroup"
+        aria-label="Media kind filter"
+      >
+        {#each kinds as k}
+          <button
+            type="button"
+            class="filter-pill"
+            class:active={selectedKind === k.id}
+            onclick={() => (selectedKind = k.id)}
+          >
+            {k.label}
+          </button>
+        {/each}
+      </div>
 
-    <div class="filter-pills" role="radiogroup" aria-label="Status filter">
-      {#each statuses as s}
-        <button
-          type="button"
-          class="filter-pill status"
-          class:active={selectedStatus === s.id}
-          onclick={() => (selectedStatus = s.id)}
-        >
-          {s.label}
-        </button>
-      {/each}
+      <div class="filter-pills" role="radiogroup" aria-label="Status filter">
+        {#each statuses as s}
+          <button
+            type="button"
+            class="filter-pill status"
+            class:active={selectedStatus === s.id}
+            onclick={() => (selectedStatus = s.id)}
+          >
+            {s.label}
+          </button>
+        {/each}
+      </div>
     </div>
-  </div>
+  {/if}
 
   <!-- Records Grid / List -->
-  {#if filteredRecords.length === 0}
+  {#if records.length === 0}
+    <div class="empty-results">
+      <p>No media records are available in this view.</p>
+    </div>
+  {:else if filteredRecords.length === 0}
     <div class="empty-results">
       <p>No media records match the selected filters.</p>
       <button
