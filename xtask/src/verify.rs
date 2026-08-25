@@ -598,16 +598,7 @@ fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> anyhow::Result<St
 }
 
 fn tool_version(root: &Path, gate: &CommandGate) -> anyhow::Result<String> {
-    let version_args: &[&str] = if gate.program == "docker"
-        && gate
-            .args
-            .first()
-            .is_some_and(|argument| argument == "buildx")
-    {
-        &["buildx", "version"]
-    } else {
-        &["--version"]
-    };
+    let version_args = &["--version"];
     let output = Command::new(gate.program)
         .args(version_args)
         .current_dir(root)
