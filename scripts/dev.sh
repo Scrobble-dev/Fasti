@@ -24,6 +24,7 @@ if [[ -z "${FASTI_API_URL:-}" ]]; then
     *) FASTI_API_URL="http://$FASTI_LISTEN" ;;
   esac
 fi
+FASTI_API_URL="${FASTI_API_URL%/}"
 DEV_SCOPE="${FASTI_DEV_SCOPE:-$(basename "$PROJECT_ROOT")}"
 DEV_SCOPE="${DEV_SCOPE//[^A-Za-z0-9_.-]/-}"
 CONTAINER_NAME="fasti-dev-$DEV_SCOPE"
@@ -37,6 +38,29 @@ _validate_port() {
 }
 
 _validate_port FASTI_PORT "$FASTI_PORT"
+
+_validate_origin_url() {
+  local label="$1"
+  local value="$2"
+  local rest=""
+  case "$value" in
+    http://*) rest="${value#http://}" ;;
+    https://*) rest="${value#https://}" ;;
+    *) echo "$label must use http or https" >&2; return 1 ;;
+  esac
+  if [[ -z "$rest" || "$rest" == */* || "$rest" == *"?"* || "$rest" == *"#"* || "$rest" == *"@"* || "$rest" == *[$'\t\r\n ']* ]]; then
+    echo "$label must be an origin URL without credentials, path, query, or fragment" >&2
+    return 1
+  fi
+  if [[ "$value" == http://* ]]; then
+    case "$rest" in
+      localhost|localhost:*|127.0.0.1|127.0.0.1:*|\[::1\]|\[::1\]:*) ;;
+      *) echo "$label must use https for non-loopback hosts" >&2; return 1 ;;
+    esac
+  fi
+}
+
+_validate_origin_url FASTI_API_URL "$FASTI_API_URL"
 
 _wait_for_health() {
   local pid="${1:-}"
@@ -145,6 +169,10 @@ _require_podman_image() {
 }
 
 _start_podman() {
+  if [[ "$FASTI_LISTEN" != "127.0.0.1:$FASTI_PORT" ]]; then
+    echo "Podman mode supports FASTI_LISTEN=127.0.0.1:FASTI_PORT only; the container listens on 0.0.0.0:8420 internally" >&2
+    return 1
+  fi
   echo "=== Launching Fasti Podman Container ($CONTAINER_NAME) ==="
   mkdir -p "$DATADIR"
   _require_podman_image
@@ -217,6 +245,10 @@ _self_test() {
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
+  ! FASTI_API_URL='http://user:secret@127.0.0.1:18421?token=secret' "$0" --status >/dev/null 2>&1
+  status_output="$(FASTI_API_URL=http://127.0.0.1:18421/ "$0" --status)"
+  [[ "$status_output" == *"http://127.0.0.1:18421"* ]]
+  ! FASTI_LISTEN=0.0.0.0:18420 FASTI_PORT=18420 _start_podman >/dev/null 2>&1
   podman() { return 1; }
   ! _require_podman_image >/dev/null 2>&1
   unset -f podman
