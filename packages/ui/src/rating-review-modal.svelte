@@ -18,10 +18,14 @@
   let ratingVal = $state(8);
   let reviewText = $state("");
   let hoverRating = $state<number | null>(null);
+  let syncedRecordId = $state("");
 
   $effect(() => {
-    ratingVal = record.userRating ?? 8;
-    reviewText = record.userNotes ?? "";
+    if (record.id !== syncedRecordId) {
+      syncedRecordId = record.id;
+      ratingVal = record.userRating ?? 8;
+      reviewText = record.userNotes ?? "";
+    }
   });
 
   function handleSave(): void {

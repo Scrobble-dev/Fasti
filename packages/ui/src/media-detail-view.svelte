@@ -10,7 +10,6 @@
     IconStarFilled,
     IconCheck,
     IconBookmark,
-    IconHeart,
     IconCalendar,
     IconRepeat,
     IconExternalLink,
@@ -34,6 +33,7 @@
 
   interface Props {
     record: MediaRecord;
+    availableCollections: string[];
     occurrences?: ChronicleOccurrence[];
     onBack: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
@@ -54,6 +54,7 @@
 
   let {
     record,
+    availableCollections,
     occurrences = [],
     onBack,
     onUpdateStatus,
@@ -73,8 +74,8 @@
   let isEditingNotes = $state(false);
   let editedNotesText = $state("");
   let newTagInput = $state("");
-  let isFavorite = $state(false);
   let activeDisplaySource = $state("tmdb_tv");
+  let syncedRecordId = $state("");
 
   // Modal Dialog States
   let showProgressModal = $state(false);
@@ -89,7 +90,11 @@
   } | null>(null);
 
   $effect(() => {
-    editedNotesText = record.userNotes ?? "";
+    if (record.id !== syncedRecordId) {
+      syncedRecordId = record.id;
+      editedNotesText = record.userNotes ?? "";
+      isEditingNotes = false;
+    }
     activeDisplaySource = record.displaySource;
     const seasonCount = record.seasons?.length ?? 0;
     if (seasonCount === 0) {
@@ -147,12 +152,6 @@
           label: "Add to Collection...",
           icon: IconFolderPlus,
           action: () => (showCollectionModal = true),
-        },
-        {
-          id: "rewatch",
-          label: "Log Occurrence (Rewatch)",
-          icon: IconRepeat,
-          action: () => onUpdateStatus?.(record.id, "completed"),
         },
         { id: "d1", label: "", divider: true, action: () => {} },
         {
@@ -277,16 +276,6 @@
         </div>
 
         <!-- Quick Action Buttons -->
-        <button
-          type="button"
-          class="icon-action-btn"
-          class:active={isFavorite}
-          onclick={() => (isFavorite = !isFavorite)}
-          title="Favorite / Bookmark"
-        >
-          <IconHeart size={18} fill={isFavorite ? "currentColor" : "none"} />
-        </button>
-
         <button
           type="button"
           class="icon-action-btn"
@@ -628,7 +617,8 @@
             <button
               type="button"
               class="ryot-action-btn"
-              onclick={() => onUpdateStatus?.(record.id, "completed")}
+              disabled
+              title="Occurrence logging is not available in this build"
             >
               <div class="action-btn-icon"><IconRepeat size={22} /></div>
               <div class="action-btn-text">
@@ -658,7 +648,8 @@
               <button
                 type="button"
                 class="btn-primary"
-                onclick={() => onUpdateStatus?.(record.id, "completed")}
+                disabled
+                title="Occurrence logging is not available in this build"
               >
                 Log First Occurrence
               </button>
@@ -867,6 +858,7 @@
 {#if showCollectionModal}
   <CollectionModal
     {record}
+    collections={availableCollections}
     onClose={() => (showCollectionModal = false)}
     onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
   />

@@ -26,6 +26,7 @@
 
   interface Props {
     records: MediaRecord[];
+    availableCollections: string[];
     onSelectRecord: (recordId: string) => void;
     onUpdateStatus: (recordId: string, status: WatchStatus) => void;
     onUpdateProgress: (
@@ -42,6 +43,7 @@
 
   let {
     records,
+    availableCollections,
     onSelectRecord,
     onUpdateStatus,
     onUpdateProgress,
@@ -127,7 +129,7 @@
 
   function handleToggleWatchlist(rec: MediaRecord) {
     const newStatus: WatchStatus =
-      rec.status === "plan_to_watch" ? "dropped" : "plan_to_watch";
+      rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
     onUpdateStatus(rec.id, newStatus);
   }
 
@@ -233,16 +235,12 @@
       {#each inProgressRecords as rec (rec.id)}
         {@const KindIcon = getKindIcon(rec.mediaKind)}
         {@const pct = calculateProgress(rec)}
-        <div
-          class="poster-card"
-          tabindex="0"
-          role="button"
-          onkeydown={(e) => {
-            if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
-          }}
-          onclick={() => onSelectRecord(rec.id)}
-        >
-          <div class="artwork-wrapper">
+        <div class="poster-card" role="group" aria-label="{rec.title} card">
+          <button
+            type="button"
+            class="artwork-wrapper"
+            onclick={() => onSelectRecord(rec.id)}
+          >
             {#if rec.posterUrl}
               <img
                 src={rec.posterUrl}
@@ -273,7 +271,7 @@
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
               </div>
             {/if}
-          </div>
+          </button>
 
           <div class="card-info">
             <h3 class="media-title" title={rec.title}>{rec.title}</h3>
@@ -330,16 +328,12 @@
       {#each recentlyRecorded as rec (rec.id)}
         {@const KindIcon = getKindIcon(rec.mediaKind)}
         {@const pct = calculateProgress(rec)}
-        <div
-          class="poster-card"
-          tabindex="0"
-          role="button"
-          onkeydown={(e) => {
-            if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
-          }}
-          onclick={() => onSelectRecord(rec.id)}
-        >
-          <div class="artwork-wrapper">
+        <div class="poster-card" role="group" aria-label="{rec.title} card">
+          <button
+            type="button"
+            class="artwork-wrapper"
+            onclick={() => onSelectRecord(rec.id)}
+          >
             {#if rec.posterUrl}
               <img
                 src={rec.posterUrl}
@@ -370,7 +364,7 @@
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
               </div>
             {/if}
-          </div>
+          </button>
 
           <div class="card-info">
             <h3 class="media-title" title={rec.title}>{rec.title}</h3>
@@ -426,16 +420,12 @@
       {#each upNextRecords as rec (rec.id)}
         {@const KindIcon = getKindIcon(rec.mediaKind)}
         {@const pct = calculateProgress(rec)}
-        <div
-          class="poster-card"
-          tabindex="0"
-          role="button"
-          onkeydown={(e) => {
-            if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
-          }}
-          onclick={() => onSelectRecord(rec.id)}
-        >
-          <div class="artwork-wrapper">
+        <div class="poster-card" role="group" aria-label="{rec.title} card">
+          <button
+            type="button"
+            class="artwork-wrapper"
+            onclick={() => onSelectRecord(rec.id)}
+          >
             {#if rec.posterUrl}
               <img
                 src={rec.posterUrl}
@@ -466,7 +456,7 @@
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
               </div>
             {/if}
-          </div>
+          </button>
 
           <div class="card-info">
             <h3 class="media-title" title={rec.title}>{rec.title}</h3>
@@ -527,6 +517,7 @@
   {#if activeCollectionRecord}
     <CollectionModal
       record={activeCollectionRecord}
+      collections={availableCollections}
       onClose={() => (activeCollectionRecord = null)}
       onSaveCollection={(recId, collections) => {
         onSaveCollection(recId, collections);
@@ -640,6 +631,10 @@
     aspect-ratio: 2 / 3;
     background: var(--fasti-surface-night, #0f172a);
     overflow: hidden;
+    padding: 0;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
   }
 
   .poster-img {

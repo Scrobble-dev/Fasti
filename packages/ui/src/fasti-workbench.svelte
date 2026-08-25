@@ -69,6 +69,11 @@
   const watchingRecords = $derived(
     records.filter((r) => r.status === "watching"),
   );
+  const availableCollections = $derived(
+    [
+      ...new Set(records.flatMap((record) => record.collectionName ?? [])),
+    ].sort(),
+  );
   const openReviewCount = $derived(
     reconciliationCases.filter((c) => c.status === "open").length,
   );
@@ -643,6 +648,7 @@
       {#if activeSection === "home"}
         <HomeView
           {records}
+          {availableCollections}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
           onUpdateStatus={handleUpdateStatus}
@@ -654,6 +660,7 @@
       {:else if activeSection === "discover"}
         <DiscoverView
           trendingRecords={SAMPLE_DISCOVER_TRENDING}
+          {availableCollections}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
           onUpdateStatus={handleUpdateStatus}
@@ -664,6 +671,7 @@
       {:else if activeSection === "detail" && selectedRecord}
         <MediaDetailView
           record={selectedRecord}
+          {availableCollections}
           occurrences={chronicle}
           onBack={handleBackToLibrary}
           onUpdateStatus={handleUpdateStatus}
@@ -707,6 +715,7 @@
         <!-- Media Category Grid (Shows, Movies, Anime, Manga, Games, Books, etc.) -->
         <LibraryView
           records={filteredSectionRecords}
+          {availableCollections}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
           onUpdateStatus={handleUpdateStatus}

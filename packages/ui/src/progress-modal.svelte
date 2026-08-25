@@ -18,18 +18,26 @@
 
   let modalCardRef: HTMLDivElement | null = $state(null);
   let episodeVal = $state(0);
-  let totalEps = $derived(record.totalEpisodes ?? 1);
+  let totalEps = $derived(
+    record.totalEpisodes && record.totalEpisodes > 0 ? record.totalEpisodes : 1,
+  );
   let progressSec = $state(0);
   let totalSec = $derived(
-    record.totalDurationSeconds ??
+    (record.totalDurationSeconds && record.totalDurationSeconds > 0
+      ? record.totalDurationSeconds
+      : undefined) ??
       (record.runtimeMinutes ? record.runtimeMinutes * 60 : 3600),
   );
   let statusVal = $state<WatchStatus>("watching");
+  let syncedRecordId = $state("");
 
   $effect(() => {
-    episodeVal = record.progressEpisodes ?? 0;
-    progressSec = record.progressSeconds ?? 0;
-    statusVal = record.status;
+    if (record.id !== syncedRecordId) {
+      syncedRecordId = record.id;
+      episodeVal = record.progressEpisodes ?? 0;
+      progressSec = record.progressSeconds ?? 0;
+      statusVal = record.status;
+    }
   });
 
   const percentage = $derived(

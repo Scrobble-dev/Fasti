@@ -9,24 +9,23 @@
 
   interface Props {
     record: MediaRecord;
+    collections: string[];
     onClose: () => void;
     onSaveCollection: (recordId: string, collectionNames: string[]) => void;
   }
 
-  let { record, onClose, onSaveCollection }: Props = $props();
-
-  let collections = $state<string[]>([
-    "Favorites",
-    "Must Watch Classics",
-    "Sci-Fi Hall of Fame",
-    "Cyberpunk & Neo-Noir",
-    "High Fantasy Runs",
-  ]);
+  let { record, collections, onClose, onSaveCollection }: Props = $props();
 
   let selected = $state<string[]>([]);
+  let availableCollections = $state<string[]>([]);
+  let syncedRecordId = $state("");
 
   $effect(() => {
-    selected = record.collectionName ? [record.collectionName] : ["Favorites"];
+    if (record.id !== syncedRecordId) {
+      syncedRecordId = record.id;
+      availableCollections = [...collections];
+      selected = record.collectionName ? [record.collectionName] : [];
+    }
   });
   let newCollectionInput = $state("");
 
@@ -42,9 +41,12 @@
     e.preventDefault();
     if (
       newCollectionInput.trim().length > 0 &&
-      !collections.includes(newCollectionInput.trim())
+      !availableCollections.includes(newCollectionInput.trim())
     ) {
-      collections = [...collections, newCollectionInput.trim()];
+      availableCollections = [
+        ...availableCollections,
+        newCollectionInput.trim(),
+      ];
       selected = [...selected, newCollectionInput.trim()];
       newCollectionInput = "";
     }
@@ -83,7 +85,7 @@
       </p>
 
       <div class="collections-list">
-        {#each collections as c}
+        {#each availableCollections as c}
           <label class="collection-item" class:checked={selected.includes(c)}>
             <input
               type="checkbox"

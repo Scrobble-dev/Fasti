@@ -29,6 +29,7 @@
 
   interface Props {
     trendingRecords: MediaRecord[];
+    availableCollections: string[];
     onSelectRecord: (recordId: string) => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateProgress?: (
@@ -44,6 +45,7 @@
 
   let {
     trendingRecords,
+    availableCollections,
     onSelectRecord,
     onUpdateStatus,
     onUpdateProgress,
@@ -425,6 +427,7 @@
 {#if showCollectionModal && activeModalRecord}
   <CollectionModal
     record={activeModalRecord}
+    collections={availableCollections}
     onClose={() => {
       showCollectionModal = false;
       activeModalRecord = null;
