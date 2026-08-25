@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import type { MediaRecord, WatchStatus } from "./types.js";
   import { IconX, IconCheck } from "@tabler/icons-svelte";
 
@@ -16,7 +15,7 @@
 
   let { record, onClose, onSaveProgress }: Props = $props();
 
-  let modalCardRef: HTMLDivElement | null = $state(null);
+  let dialog: HTMLDialogElement | undefined;
   let episodeVal = $state(0);
   let totalEps = $derived(
     record.totalEpisodes && record.totalEpisodes > 0 ? record.totalEpisodes : 1,
@@ -40,28 +39,20 @@
     }
   });
 
+  $effect(() => {
+    if (!dialog?.open) dialog?.showModal();
+  });
+
   const percentage = $derived(
     record.mediaKind === "show" || record.mediaKind === "anime"
       ? Math.min(100, Math.round((episodeVal / totalEps) * 100))
       : Math.min(100, Math.round((progressSec / totalSec) * 100)),
   );
 
-  function handleKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape") {
-      onClose();
-    }
-  }
-
-  onMount(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  });
-
   function handleSave(): void {
     const finalStatus: WatchStatus =
-      percentage >= 100
+      percentage >= 100 &&
+      (statusVal === "watching" || statusVal === "plan_to_watch")
         ? "completed"
         : statusVal === "plan_to_watch"
           ? "watching"
@@ -71,11 +62,14 @@
   }
 </script>
 
-<div
+<dialog
+  bind:this={dialog}
   class="modal-backdrop"
-  role="dialog"
-  aria-modal="true"
   aria-labelledby="prog-title"
+  oncancel={onClose}
+  onclick={(event) => {
+    if (event.target === event.currentTarget) onClose();
+  }}
 >
   <div class="modal-card">
     <div class="modal-header">
@@ -175,18 +169,32 @@
       </button>
     </div>
   </div>
-</div>
+</dialog>
 
 <style>
   .modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    background: rgba(0, 0, 0, 0.5);
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    background: transparent;
     display: grid;
     place-items: center;
     padding: 16px;
     animation: fadeIn 100ms ease-out;
+  }
+
+  .modal-backdrop::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .modal-backdrop:not([open]) {
+    display: none;
   }
 
   .modal-card {

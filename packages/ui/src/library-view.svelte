@@ -372,7 +372,7 @@
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
               <span class="status-indicator {rec.status}"
-                >{rec.status.replace("_", " ")}</span
+                >{rec.status.replaceAll("_", " ")}</span
               >
             </div>
           </div>
@@ -419,7 +419,7 @@
               >
               <td
                 ><span class="status-pill {rec.status}"
-                  >{rec.status.replace("_", " ")}</span
+                  >{rec.status.replaceAll("_", " ")}</span
                 ></td
               >
               <td>

@@ -207,6 +207,11 @@
                         activeSection === "library"))}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
+                  aria-label={collapsed
+                    ? item.id === "reconciliation" && openReviewCount > 0
+                      ? `${item.label}, ${openReviewCount} open reviews`
+                      : item.label
+                    : undefined}
                 >
                   <span
                     class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
@@ -246,6 +251,7 @@
                         activeSection === "library"))}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
+                  aria-label={collapsed ? item.label : undefined}
                 >
                   <span
                     class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
@@ -281,6 +287,7 @@
                   class:active={activeSection === item.id}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
+                  aria-label={collapsed ? item.label : undefined}
                 >
                   <span
                     class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
@@ -316,6 +323,7 @@
                   class:active={activeSection === item.id}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
+                  aria-label={collapsed ? item.label : undefined}
                 >
                   <span
                     class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
@@ -352,6 +360,11 @@
                     (item.id === "sources" && activeSection === "connections")}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
+                  aria-label={collapsed
+                    ? item.id === "reconciliation" && openReviewCount > 0
+                      ? `${item.label}, ${openReviewCount} open reviews`
+                      : item.label
+                    : undefined}
                 >
                   <span
                     class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
@@ -418,6 +431,7 @@
   }
 
   .nav-link {
+    position: relative;
     color: var(--fasti-text-muted);
     font-size: 0.86rem;
     font-weight: 500;

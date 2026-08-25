@@ -183,11 +183,17 @@ pub struct AuthenticateCredentialQuery {
 }
 
 impl AuthenticateCredentialQuery {
-    pub const fn new(
+    pub fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
         capability: crate::CapabilityKey,
         credential: SecretMaterial,
     ) -> Self {
+        assert!(
+            capability
+                .allowed_problem_codes()
+                .contains(&crate::ProblemCode::AuthenticationFailed),
+            "credential authentication requires a capability that permits authentication_failed"
+        );
         Self {
             correlation_id,
             capability,
@@ -1099,5 +1105,15 @@ mod tests {
         );
 
         assert_eq!(query.capability(), crate::CapabilityKey::InspectReview);
+    }
+
+    #[test]
+    #[should_panic(expected = "requires a capability that permits authentication_failed")]
+    fn authentication_query_rejects_a_bootstrap_only_capability() {
+        let _ = AuthenticateCredentialQuery::new(
+            fasti_domain::RequestCorrelationId::new_v7(),
+            crate::CapabilityKey::InitializeNode,
+            SecretMaterial::from_bytes([7_u8; 32]),
+        );
     }
 }

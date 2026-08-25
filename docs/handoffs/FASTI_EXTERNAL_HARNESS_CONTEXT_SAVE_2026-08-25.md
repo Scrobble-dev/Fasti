@@ -8,6 +8,8 @@
 **Active B4 PR:** #44 (`codex/b4-durable-bootstrap`)  
 **Canonical Evergreen Reference:** [`FASTI_MASTER_INTEGRATOR_HANDOFF.md`](FASTI_MASTER_INTEGRATOR_HANDOFF.md)
 
+This file is a historical snapshot. Do not use its PR, branch, or next-step statements as current instructions. Verify live source, pull requests, and exact-head evidence first.
+
 ---
 
 ## 1. Executive Summary & Status
@@ -23,7 +25,7 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 
 ## 2. Pull Request & Branch Topology (2026-08-25)
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │                              GitHub Remote                             │
 │                           Scrobble-dev/Fasti                           │
@@ -65,18 +67,18 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 
 ## 3. Milestone Disposition Matrix (B0–B8 + Goldilocks)
 
-| Milestone      | Scope & Description                                           | Status        | Evidence / Location                                   |
-| :------------- | :------------------------------------------------------------ | :------------ | :---------------------------------------------------- |
-| **B0**         | Foundation, domain vocabulary, invariant enforcement          | **COMPLETE**  | `crates/fasti-domain`                                 |
-| **B1**         | Software contracts, OpenAPI 3.1, AsyncAPI 3.1, JSON-LD, SDK   | **COMPLETE**  | `target/fasti-receipts/b1-contract-verification.json` |
-| **B2**         | Namespace definition registration & identity governance       | **READY**     | Branch `codex/b2-namespace-definition`                |
-| **B3**         | Portability workspace manifest & JCS verification             | **MERGED**    | PR #35 in `dev`                                       |
-| **B4**         | Durable bootstrap, Fasti Workbench UI, Tauri v2, Podman       | **IN REVIEW** | PR #44 (`codex/b4-durable-bootstrap`)                 |
-| **B5**         | Metadata resolution and claims                               | **MERGED**    | PR #39 in `dev`                                       |
-| **B6**         | Ingestion webhooks & desktop observer (Plex, Jellyfin, MPRIS) | **MERGED**    | `crates/fasti-application/src/ingest.rs`               |
-| **B7**         | NuvioTV sync engine, cursor outbox, and catalog projections   | **MERGED**    | `crates/fasti-application/src/nuvio.rs`                |
-| **B8**         | Release candidate stabilization & public gateway              | **PLANNED**   | Release gate scripts ready                            |
-| **Goldilocks** | Custom fields, WebAuthn, PAT tokens, Floppy/Yamtrack import   | **BLUEPRINT** | `fasti_batteries_included_goldilocks_plan.md`         |
+| Milestone      | Scope & Description                                           | Status          | Evidence / Location                                                   |
+| :------------- | :------------------------------------------------------------ | :-------------- | :-------------------------------------------------------------------- |
+| **B0**         | Foundation, domain vocabulary, invariant enforcement          | **COMPLETE**    | `crates/fasti-domain`                                                 |
+| **B1**         | Software contracts, OpenAPI 3.1, AsyncAPI 3.1, JSON-LD, SDK   | **IN PROGRESS** | Contract receipt only; aggregate exact-head evidence was not recorded |
+| **B2**         | Namespace definition registration & identity governance       | **READY**       | Branch `codex/b2-namespace-definition`                                |
+| **B3**         | Portability workspace manifest & JCS verification             | **MERGED**      | PR #35 in `dev`                                                       |
+| **B4**         | Durable bootstrap, Fasti Workbench UI, Tauri v2, Podman       | **IN REVIEW**   | PR #44 (`codex/b4-durable-bootstrap`)                                 |
+| **B5**         | Metadata resolution and claims                                | **MERGED**      | PR #39 in `dev`                                                       |
+| **B6**         | Ingestion webhooks & desktop observer (Plex, Jellyfin, MPRIS) | **MERGED**      | `crates/fasti-application/src/ingest.rs`                              |
+| **B7**         | NuvioTV sync engine, cursor outbox, and catalog projections   | **MERGED**      | `crates/fasti-application/src/nuvio.rs`                               |
+| **B8**         | Release candidate stabilization & public gateway              | **PLANNED**     | Release gate scripts ready                                            |
+| **Goldilocks** | Custom fields, WebAuthn, PAT tokens, Floppy/Yamtrack import   | **BLUEPRINT**   | `fasti_batteries_included_goldilocks_plan.md`                         |
 
 ---
 
@@ -84,7 +86,7 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 
 - **Standard**: `brand/DESIGN.md` (_The Modern Annal / Living Marginalia_)
 - **Typography**: _Newsreader_ (Serif display), _Atkinson Hyperlegible_ (Sans UI), _IBM Plex Mono_ (Evidence)
-- **Color Contrast**: 100% WCAG 2.2 AAA certified (`#181716` on `#FFFDF8` = **15.6:1**)
+- **Measured Color Contrast**: `#181716` on `#FFFDF8` = **15.6:1**. This measurement is not a whole-product conformance claim.
 - **Touch Targets**: Strict 44px minimum touch boundaries with 3px Horological Gold focus rings.
 - **Neurodivergent Standards**: Persistent non-toast error headers, zero gamification guilt, safe `Resolve later` deferrals.
 

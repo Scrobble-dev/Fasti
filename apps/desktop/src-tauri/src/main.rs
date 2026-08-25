@@ -65,11 +65,12 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let data_root = explicit_data_root(std::env::var_os("FASTI_DATA_ROOT"))?;
+            let secrets = KeyringSetupSecretStore::new(&data_root);
             app.manage(DesktopState {
                 data_root,
                 kernel: Mutex::new(None),
                 setup_gate: Mutex::new(()),
-                secrets: KeyringSetupSecretStore,
+                secrets,
             });
             Ok(())
         })

@@ -153,7 +153,6 @@ export interface ScopedApiToken {
 export interface ProviderApiKeyConfig {
   readonly provider: string;
   readonly label: string;
-  readonly apiKey: string;
   readonly isConfigured: boolean;
   readonly docsUrl: string;
 }

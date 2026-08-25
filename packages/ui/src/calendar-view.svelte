@@ -40,7 +40,10 @@
               <h3 class="deck-title">{rec.title}</h3>
               <p class="deck-meta">
                 {#if rec.progressEpisodes !== undefined}
-                  Ep {rec.progressEpisodes + 1} of {rec.totalEpisodes ?? "?"}
+                  Ep {rec.totalEpisodes === undefined
+                    ? rec.progressEpisodes + 1
+                    : Math.min(rec.progressEpisodes + 1, rec.totalEpisodes)} of
+                  {rec.totalEpisodes ?? "?"}
                 {:else}
                   No episode progress recorded
                 {/if}

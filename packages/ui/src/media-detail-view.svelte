@@ -74,7 +74,6 @@
   let isEditingNotes = $state(false);
   let editedNotesText = $state("");
   let newTagInput = $state("");
-  let activeDisplaySource = $state("tmdb_tv");
   let syncedRecordId = $state("");
 
   // Modal Dialog States
@@ -95,7 +94,6 @@
       editedNotesText = record.userNotes ?? "";
       isEditingNotes = false;
     }
-    activeDisplaySource = record.displaySource;
     const seasonCount = record.seasons?.length ?? 0;
     if (seasonCount === 0) {
       selectedSeasonIndex = 0;
@@ -702,27 +700,11 @@
               <p class="banner-desc">
                 Fasti maintains a stable, immutable identity (<code
                   >{record.id}</code
-                >) independent of TMDB, TVDB, or MyAnimeList. You can switch
-                primary metadata projection without breaking your history logs.
+                >) independent of TMDB, TVDB, or MyAnimeList. Provider claims
+                remain evidence. Metadata projection switching is not active in
+                this build.
               </p>
             </div>
-          </div>
-
-          <div class="provider-switcher-row">
-            <label for="display-source-select" class="provider-label"
-              >Active Metadata Projection Provider:</label
-            >
-            <select
-              id="display-source-select"
-              class="provider-select"
-              bind:value={activeDisplaySource}
-            >
-              <option value="tmdb_tv">TheMovieDatabase (TMDB)</option>
-              <option value="tvdb">TheTVDB v4</option>
-              <option value="mal_anime">MyAnimeList (MAL)</option>
-              <option value="anilist_anime">AniList GraphQL</option>
-              <option value="simkl">SIMKL Multi-Crosswalk</option>
-            </select>
           </div>
 
           <table class="assertions-table">
@@ -741,7 +723,7 @@
                   <td class="mono"><strong>{xid.value}</strong></td>
                   <td
                     ><span class="status-pill matched"
-                      >{xid.status.replace("_", " ")}</span
+                      >{xid.status.replaceAll("_", " ")}</span
                     ></td
                   >
                   <td>{xid.source}</td>
@@ -1478,26 +1460,6 @@
     margin: 0;
   }
 
-  .provider-switcher-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-  .provider-label {
-    font-weight: 600;
-    font-size: 0.9rem;
-  }
-  .provider-select {
-    padding: 8px 12px;
-    border-radius: 4px;
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    background: var(--fasti-surface-paper);
-    font-size: 0.9rem;
-    font-weight: 600;
-  }
-
   .assertions-table {
     width: 100%;
     border-collapse: collapse;
@@ -1624,5 +1586,12 @@
     border-radius: 20px;
     background: transparent;
     font-size: 0.85rem;
+  }
+
+  @media (max-width: 47.99rem) {
+    .media-main-header,
+    .details-body-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 </style>

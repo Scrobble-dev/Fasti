@@ -934,6 +934,12 @@
     animation: spin 1.2s linear infinite;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    :global(.spin) {
+      animation: none;
+    }
+  }
+
   .viewport-canvas {
     flex: 1;
     overflow-y: auto;

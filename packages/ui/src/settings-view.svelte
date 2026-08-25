@@ -679,7 +679,7 @@
                     class="prov-status-chip"
                     class:configured={prov.isConfigured}
                   >
-                    {prov.isConfigured ? "Active & Verified" : "Not Configured"}
+                    {prov.isConfigured ? "Configured" : "Not configured"}
                   </span>
                 </div>
 
@@ -687,7 +687,7 @@
                   <input
                     type="password"
                     placeholder="Enter API Key / Access Token..."
-                    value={editingKeyMap[prov.provider] ?? prov.apiKey}
+                    value={editingKeyMap[prov.provider] ?? ""}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
@@ -701,7 +701,7 @@
                       ? "Provider credential storage is not available in this build"
                       : undefined}
                     onclick={() => {
-                      const val = editingKeyMap[prov.provider] ?? prov.apiKey;
+                      const val = editingKeyMap[prov.provider] ?? "";
                       onSaveProviderKey?.(prov.provider, val);
                     }}
                   >
