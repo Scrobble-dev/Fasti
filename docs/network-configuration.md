@@ -3,15 +3,15 @@
 Fasti keeps the listener, client URL, and public URL separate. This prevents a
 reverse-proxy address from changing the daemon bind address.
 
-| Variable | Owner | Purpose |
-| --- | --- | --- |
-| `FASTI_LISTEN` | `fastid` | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`. |
-| `FASTI_PORT` | launcher | Native or container host port. Default: `8420`. |
-| `FASTI_PORT_FALLBACK` | `fastid` and launcher | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`. |
-| `FASTI_API_URL` | launcher or app build | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
-| `FASTI_PUBLIC_URL` | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy. |
-| `FASTI_CONTAINER_RUNTIME` | launcher | `podman` or `docker`. Default: `podman`. |
-| `FASTI_BOUND_ADDR_FILE` | supervisor | Optional file where `fastid` atomically publishes its actual bind address. |
+| Variable                  | Owner                    | Purpose                                                                                              |
+| ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `FASTI_LISTEN`            | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                |
+| `FASTI_PORT`              | launcher                 | Native or container host port. Default: `8420`.                                                      |
+| `FASTI_PORT_FALLBACK`     | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.  |
+| `FASTI_API_URL`           | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
+| `FASTI_PUBLIC_URL`        | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                     |
+| `FASTI_CONTAINER_RUNTIME` | launcher                 | `podman` or `docker`. Default: `podman`.                                                             |
+| `FASTI_BOUND_ADDR_FILE`   | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                           |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
 `127.0.0.1` are interchangeable when local name resolution uses IPv4. `[::1]`
@@ -71,15 +71,44 @@ root certificate, install a certificate authority, or bypass certificate
 validation. Add the issuing root CA through the operating system or managed
 device policy when a private CA is required.
 
-For a managed browser, Tauri, or APK build, project the same values into the
-app at build time:
+For a managed Tauri or APK build, project the app-owned values into the Rust
+build. The trusted host reads the same names at run time first, then falls back
+to the compiled values:
 
 ```bash
-VITE_FASTI_API_URL=https://fasti.internal \
-VITE_FASTI_PUBLIC_URL=https://fasti.internal \
-VITE_FASTI_PORT_FALLBACK=fail \
-pnpm build
+FASTI_API_URL=https://fasti.internal \
+FASTI_PUBLIC_URL=https://fasti.internal \
+cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
+
+The browser health harness deliberately ignores these values and remains on
+its fixed QA proxy. Listener and collision variables belong to `fastid`, not to
+the embedded Tauri or APK kernel.
+
+## Edit desktop settings
+
+The trusted Tauri host exposes its service URL, public URL, and outbound policy
+in **Settings → Advanced Network Access**. Saved values use the app
+configuration directory. Environment values take precedence over app-build
+values, which take precedence over saved values and defaults. Managed values
+remain visible and read-only.
+
+The service URL owns the app's target host and port. With an IPv4 loopback
+service, clients can use `127.0.0.1` or `localhost`. IPv6 `[::1]` remains a
+separate choice. **Test service URL** resolves once, rejects unsafe plain HTTP,
+ignores system proxies, disables redirects, pins the resolved addresses, and
+validates the generated health response. Host lookups have a five-second
+deadline. Only one system lookup can run at a time, so a stalled resolver cannot
+accumulate provider or health-check work.
+
+The Tauri host embeds the local kernel. It does not start or rebind `fastid`.
+The daemon and container launcher therefore remain the only owners of
+`FASTI_LISTEN`, `FASTI_PORT`, `FASTI_PORT_FALLBACK`, and bound-address
+publication. Settings does not present an unconsumed listener control.
+
+Desktop builds still require an explicit, non-empty `FASTI_DATA_ROOT`. Android
+uses an explicit `FASTI_DATA_ROOT` when the launch environment supplies one;
+otherwise it uses the app's sandbox data directory. The explicit override wins.
 
 ## Provider network policy
 
@@ -94,12 +123,18 @@ lookup. Provider credentials must use headers or a platform credential store.
 They must not enter URLs, arguments, logs, browser storage, screenshots,
 fixtures, or proof bundles.
 
-The Google Books review manifest accepts `GOOGLE_BOOKS_API_KEY` and sends it as
-`X-Goog-Api-Key`. It remains a contract until the provider runtime body is
-authorized. The browser does not execute provider requests.
+The Google Books review runtime requires `GOOGLE_BOOKS_API_KEY` or a credential
+saved by the trusted Tauri host. An environment credential takes precedence and
+is read-only in Settings. The host loads the key only after outbound access is
+authorized and sends it as the sensitive `X-Goog-Api-Key` header. Discover
+returns at most ten neutral book candidates and does not create or modify a
+local media record. The browser does not receive credentials or execute
+provider requests.
 
 ## Contract disposition
 
-These values configure startup and client transport. They do not add a public
-Fasti capability, HTTP route, event, domain entity, or linked-data term.
-OpenAPI, AsyncAPI, JSON Schema, and JSON-LD therefore remain unchanged.
+These values and provider searches use local Tauri IPC. They do not add a
+public Fasti HTTP route, event, domain entity, or linked-data term. OpenAPI,
+AsyncAPI, JSON Schema, and JSON-LD therefore remain unchanged. The Tauri command
+types and this document own the local app contract until a public capability is
+authorized.

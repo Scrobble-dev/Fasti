@@ -150,12 +150,95 @@ export interface ScopedApiToken {
   readonly lastUsedAt?: string;
 }
 
-export interface ProviderApiKeyConfig {
+export type ManagedSettingSource =
+  "default" | "saved" | "build" | "environment";
+
+export interface ManagedSetting<T> {
+  readonly value: T;
+  readonly source: ManagedSettingSource;
+  readonly managed: boolean;
+}
+
+export type NetworkClass =
+  | "public"
+  | "loopback"
+  | "private"
+  | "link_local"
+  | "multicast"
+  | "unspecified"
+  | "documentation"
+  | "reserved";
+
+export interface OutboundAccessPolicy {
+  readonly allow_providers: string[];
+  readonly deny_providers: string[];
+  readonly allow_capabilities: string[];
+  readonly deny_capabilities: string[];
+  readonly allow_hosts: string[];
+  readonly deny_hosts: string[];
+  readonly allow_networks: NetworkClass[];
+  readonly deny_networks: NetworkClass[];
+}
+
+export interface ConnectionPreferenceView {
+  readonly service_url: ManagedSetting<string>;
+  readonly public_url: ManagedSetting<string | null>;
+}
+
+export interface NetworkConfiguration {
+  readonly connection: ConnectionPreferenceView;
+  readonly outbound_policy: OutboundAccessPolicy;
+}
+
+export interface SaveNetworkConfigurationRequest {
+  readonly service_url: string;
+  readonly public_url: string | null;
+  readonly outbound_policy: OutboundAccessPolicy;
+}
+
+export interface EndpointConnectionStatus {
+  readonly endpoint: string;
+  readonly scheme: "http" | "https";
+  readonly status: string;
+  readonly version: string;
+}
+
+export interface ProviderCredentialStatus {
   readonly provider: string;
   readonly label: string;
-  readonly apiKey: string;
-  readonly isConfigured: boolean;
-  readonly docsUrl: string;
+  readonly configured: boolean;
+  readonly source: "none" | "environment" | "credential_store";
+  readonly writable: boolean;
+  readonly docs_url: string;
+}
+
+export interface ProviderSearchCandidate {
+  readonly provider: string;
+  readonly provider_id: string;
+  readonly title: string;
+  readonly kind: "book";
+  readonly description: string;
+  readonly image_url: null;
+}
+
+export interface WorkbenchHost {
+  loadNetworkConfiguration(): Promise<NetworkConfiguration>;
+  saveNetworkConfiguration(
+    input: SaveNetworkConfigurationRequest,
+  ): Promise<NetworkConfiguration>;
+  testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
+  providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
+  saveProviderCredential(
+    provider: string,
+    credential: string,
+  ): Promise<ProviderCredentialStatus[]>;
+  deleteProviderCredential(
+    provider: string,
+  ): Promise<ProviderCredentialStatus[]>;
+  searchProvider(
+    provider: string,
+    query: string,
+  ): Promise<ProviderSearchCandidate[]>;
 }
 
 export interface OidcConfiguration {

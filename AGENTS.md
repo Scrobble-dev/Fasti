@@ -66,6 +66,8 @@ Generated files are outputs, not sources of truth.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
 - Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
+- Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
+- Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
 
