@@ -1438,4 +1438,36 @@
     align-items: center;
     gap: 12px;
   }
+
+  @media (max-width: 47.99rem) {
+    .settings-container {
+      padding: 24px 16px;
+    }
+
+    .settings-layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .settings-nav {
+      flex-direction: row;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .nav-tab-btn {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
+    .settings-content-card {
+      min-width: 0;
+      padding: 20px;
+    }
+
+    .options-grid-3,
+    .importers-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
 </style>
