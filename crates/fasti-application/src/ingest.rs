@@ -120,7 +120,10 @@ impl PlexWebhookPayload {
             }
         }
 
-        let account_id = self.account.as_ref().map_or(0, |a| a.id);
+        // Without a real account id, two different users' payloads missing
+        // Account would synthesize the same source identity (0) and could
+        // collide into one lexeme -- fail closed instead of guessing.
+        let account_id = self.account.as_ref()?.id;
         // view_offset distinguishes genuinely separate occurrences of the same
         // event on the same item (a rewatch) from Plex re-delivering the exact
         // same webhook on retry, which repeats view_offset identically.
@@ -229,7 +232,10 @@ impl JellyfinWebhookPayload {
             }
         }
 
-        let user_str = self.user_id.as_deref().unwrap_or("default");
+        // Without a real user id, two different users' payloads missing
+        // UserId would synthesize the same source identity ("default") and
+        // could collide into one lexeme -- fail closed instead of guessing.
+        let user_str = self.user_id.as_deref()?;
         // playback_position_ticks distinguishes a genuine rewatch from Jellyfin
         // re-sending the same notification on retry, which repeats the tick
         // count identically.

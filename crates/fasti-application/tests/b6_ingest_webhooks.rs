@@ -298,3 +298,89 @@ fn jellyfin_webhook_rewatch_at_a_different_position_is_a_distinct_commit() {
         "the rewatch must commit as its own observation, not replay the first watch's receipt"
     );
 }
+
+#[test]
+fn plex_administrative_event_without_metadata_deserializes_and_is_ignored() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+    // A real Plex administrative/library-maintenance payload: no `Metadata`
+    // object at all, since it isn't about a specific media item.
+    let raw = r#"{
+        "event": "admin.database.backup",
+        "user": true,
+        "owner": true,
+        "Account": { "id": 101, "title": "alice" }
+    }"#;
+
+    let payload: PlexWebhookPayload =
+        serde_json::from_str(raw).expect("administrative payload without Metadata deserializes");
+    assert!(payload.metadata.is_none());
+
+    let cmd = payload.to_observation_command(access, sample_observed_at("2026-08-25T11:00:00Z"));
+    assert!(
+        cmd.is_none(),
+        "an administrative event has no media item to record an observation about"
+    );
+}
+
+#[test]
+fn plex_webhook_without_an_account_is_rejected_rather_than_using_a_synthetic_identity() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+    let payload = PlexWebhookPayload {
+        event: "media.scrobble".to_owned(),
+        user: true,
+        owner: true,
+        account: None,
+        metadata: Some(PlexMetadata {
+            rating_key: "plex-no-account".to_owned(),
+            media_type: "movie".to_owned(),
+            title: "Spirited Away".to_owned(),
+            grandparent_title: None,
+            parent_index: None,
+            index: None,
+            year: Some(2001),
+            duration: Some(7500000),
+            view_offset: Some(7500000),
+            guid: None,
+            guids: vec![],
+        }),
+    };
+
+    let cmd = payload.to_observation_command(access, sample_observed_at("2026-08-25T11:00:00Z"));
+    assert!(
+        cmd.is_none(),
+        "a payload with no account must not synthesize a shared source identity"
+    );
+}
+
+#[test]
+fn jellyfin_webhook_without_a_user_id_is_rejected_rather_than_using_a_synthetic_identity() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+    let payload = JellyfinWebhookPayload {
+        notification_type: "PlaybackStop".to_owned(),
+        item_type: "Movie".to_owned(),
+        item_id: "jf-movie-no-user".to_owned(),
+        name: "Spirited Away".to_owned(),
+        series_name: None,
+        season_number: None,
+        episode_number: None,
+        year: Some(2001),
+        provider_tmdb: None,
+        provider_imdb: None,
+        provider_tvdb: None,
+        played_to_completion: true,
+        user_id: None,
+        playback_position_ticks: Some(75_000_000_000),
+    };
+
+    let cmd = payload.to_observation_command(access, sample_observed_at("2026-08-25T11:00:00Z"));
+    assert!(
+        cmd.is_none(),
+        "a payload with no user id must not synthesize a shared source identity"
+    );
+}
