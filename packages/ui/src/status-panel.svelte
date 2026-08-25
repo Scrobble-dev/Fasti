@@ -3,19 +3,28 @@
   import IconCheck from "@tabler/icons-svelte/icons/check";
   import IconMoon from "@tabler/icons-svelte/icons/moon";
   import IconRefresh from "@tabler/icons-svelte/icons/refresh";
+  import IconSettings from "@tabler/icons-svelte/icons/settings";
   import IconSun from "@tabler/icons-svelte/icons/sun";
+  import type { ConnectionEndpoint } from "@fasti/sdk";
+  import NetworkSettingsPanel from "./network-settings-panel.svelte";
   import type { StatusPanelState } from "./status-types.js";
 
   let {
     status,
     theme,
     mark,
+    endpoint,
+    publicEndpoint,
+    portFallback,
     onRetry,
     onToggleTheme,
   }: {
     status: StatusPanelState;
     theme: "light" | "dark";
     mark: string;
+    endpoint: ConnectionEndpoint;
+    publicEndpoint?: ConnectionEndpoint;
+    portFallback: "auto" | "fail";
     onRetry: () => void;
     onToggleTheme: () => void;
   } = $props();
@@ -28,15 +37,25 @@
         <img class="brand-mark" src={mark} alt="" width="36" height="36" />
         <span>Fasti</span>
       </div>
-      <button type="button" class="button theme-toggle" onclick={onToggleTheme}>
-        {#if theme === "dark"}
-          <IconSun size={20} stroke={1.8} aria-hidden="true" />
-          Use light theme
-        {:else}
-          <IconMoon size={20} stroke={1.8} aria-hidden="true" />
-          Use dark theme
-        {/if}
-      </button>
+      <div class="header-actions">
+        <a class="button settings-link" href="#network-settings">
+          <IconSettings size={20} stroke={1.8} aria-hidden="true" />
+          Network settings
+        </a>
+        <button
+          type="button"
+          class="button theme-toggle"
+          onclick={onToggleTheme}
+        >
+          {#if theme === "dark"}
+            <IconSun size={20} stroke={1.8} aria-hidden="true" />
+            Use light theme
+          {:else}
+            <IconMoon size={20} stroke={1.8} aria-hidden="true" />
+            Use dark theme
+          {/if}
+        </button>
+      </div>
     </div>
   </header>
 
@@ -111,6 +130,8 @@
         unavailable until their contracts and milestone gates are active.
       </p>
     </section>
+
+    <NetworkSettingsPanel {endpoint} {publicEndpoint} {portFallback} />
   </main>
 </div>
 
@@ -167,14 +188,23 @@
     font-weight: 700;
     line-height: 1.2;
     cursor: pointer;
+    text-decoration: none;
   }
 
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-link,
   .theme-toggle {
     border-color: var(--fasti-border);
     color: var(--fasti-foreground);
     background: transparent;
   }
 
+  .settings-link:hover,
   .theme-toggle:hover {
     border-color: var(--fasti-action);
     color: var(--fasti-action);
@@ -335,6 +365,15 @@
     }
 
     .theme-toggle {
+      width: 100%;
+    }
+
+    .header-actions {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .settings-link {
       width: 100%;
     }
 

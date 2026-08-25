@@ -12,7 +12,8 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 ## Implemented review controls
 
-- Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value.
+- Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value. Automatic collision recovery stays on the requested loopback address. It never moves a public or wildcard listener.
+- Client and public origins reject credentials, paths, queries, and fragments. Non-loopback origins require HTTPS and platform certificate validation.
 - The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.
@@ -66,5 +67,7 @@ B2-B8 must still prove, rather than merely document:
 - dependency, SBOM, signing, trust-root, update, and recovery evidence before B8 publishes a release.
 
 Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. A supported network-exposure guide cannot exist until the access and threat-model gates pass.
+
+Provider and other governed outbound adapters must evaluate the shared application policy after DNS resolution. Provider declarations are maximum grants; operator allow lists only narrow them and deny rules win. Adapters must reject redirects, system proxies, empty DNS results, any unsafe answer, and DNS rebinding. Provider secrets use request headers or platform credential stores, never URLs or browser storage.
 
 See [the constitution](docs/constitution.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md).
