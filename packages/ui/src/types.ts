@@ -158,6 +158,12 @@ export interface ProviderApiKeyConfig {
   readonly docsUrl: string;
 }
 
+export interface ConnectionTestStatus {
+  readonly endpoint: string;
+  readonly status: "healthy";
+  readonly version: string;
+}
+
 export interface OidcConfiguration {
   readonly enabled: boolean;
   readonly issuerUrl: string;

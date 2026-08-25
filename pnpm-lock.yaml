@@ -44,6 +44,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@fasti/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@fasti/tokens':
         specifier: workspace:*
         version: link:../../packages/tokens
@@ -92,6 +95,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@fasti/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       '@fasti/tokens':
         specifier: workspace:*
         version: link:../tokens

@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
     env.FASTI_API_URL ?? "http://127.0.0.1:8420",
     "FASTI_API_URL",
   );
+  const apiUrlManaged = env.FASTI_API_URL !== undefined;
   const webPort = portNumber(env.FASTI_WEB_PORT ?? "5173", "FASTI_WEB_PORT");
 
   return {
@@ -14,6 +15,8 @@ export default defineConfig(({ mode }) => {
     clearScreen: false,
     define: {
       "import.meta.env.VITE_FASTI_API_URL": JSON.stringify(apiUrl),
+      "import.meta.env.VITE_FASTI_API_URL_MANAGED":
+        JSON.stringify(apiUrlManaged),
     },
     server: {
       port: webPort,

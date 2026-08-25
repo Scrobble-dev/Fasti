@@ -5,6 +5,11 @@
     type DesktopProblem,
     type SetupViewState,
   } from "@fasti/ui";
+  import {
+    FastiClient,
+    connectionEndpoint as defineConnectionEndpoint,
+    type ConnectionEndpoint,
+  } from "@fasti/sdk";
   import { onMount } from "svelte";
 
   interface SetupStatus {
@@ -16,6 +21,56 @@
   let problem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
   let isTauri = $state(false);
+  const managedApiUrl = import.meta.env.VITE_FASTI_API_URL as string;
+  const apiUrlManaged = import.meta.env.VITE_FASTI_API_URL_MANAGED as boolean;
+  let connection = $state<ConnectionEndpoint>(initialConnection());
+
+  function initialConnection(): ConnectionEndpoint {
+    if (apiUrlManaged) {
+      return defineConnectionEndpoint(managedApiUrl, "build");
+    }
+    try {
+      const saved = window.localStorage.getItem("fasti.client-endpoint.v1");
+      return defineConnectionEndpoint(
+        saved ?? managedApiUrl,
+        saved ? "saved" : "default",
+      );
+    } catch {
+      return defineConnectionEndpoint(managedApiUrl, "default");
+    }
+  }
+
+  async function saveConnection(value: string): Promise<ConnectionEndpoint> {
+    if (connection.managed) {
+      throw {
+        code: "managed_endpoint",
+        title: "The endpoint is managed",
+        detail: "This build supplies the node URL.",
+        next_action:
+          "Change FASTI_API_URL in the build environment, then rebuild the client.",
+      } satisfies DesktopProblem;
+    }
+    const saved = defineConnectionEndpoint(value, "saved");
+    window.localStorage.setItem("fasti.client-endpoint.v1", saved.url);
+    connection = saved;
+    return saved;
+  }
+
+  async function testConnection(value: string) {
+    if (isTauri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<{ endpoint: string; status: "healthy"; version: string }>(
+        "test_endpoint_connection",
+        { endpoint: value },
+      );
+    }
+    const health = await new FastiClient({
+      baseUrl: value,
+      timeoutMs: 5_000,
+      retryPolicy: { maxAttempts: 1 },
+    }).health();
+    return { endpoint: value, status: health.status, version: health.version };
+  }
 
   function applyStatus(status: SetupStatus): void {
     console.info("[Fasti UI] Host status:", status);
@@ -81,7 +136,11 @@
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 {#if viewState === "ready"}
-  <FastiWorkbench />
+  <FastiWorkbench
+    connectionEndpoint={connection}
+    onSaveConnection={saveConnection}
+    onTestConnection={testConnection}
+  />
 {:else}
   <SetupPanel state={viewState} {problem} {cleanupPending} onSetup={setup} />
 {/if}

@@ -384,6 +384,9 @@
 <style>
   .fasti-sidebar-vertical {
     width: 240px;
+    position: static !important;
+    inset: auto !important;
+    min-height: 100vh;
     background: var(--fasti-surface-paper);
     border-right: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -430,6 +433,20 @@
     ) !important;
     color: var(--fasti-action-primary) !important;
     font-weight: 600;
+  }
+
+  @media (max-width: 760px) {
+    .fasti-sidebar-vertical,
+    .fasti-sidebar-vertical.navbar-vertical-collapsed {
+      width: 64px;
+    }
+
+    :global(.navbar-brand-title),
+    .nav-link-title,
+    .nav-section-title,
+    .badge:not(.badge-dot) {
+      display: none;
+    }
   }
 
   .navbar-vertical-collapsed .nav-link {

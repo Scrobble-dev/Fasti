@@ -1,5 +1,6 @@
 <script lang="ts">
   import type {
+    ConnectionTestStatus,
     CustomFieldDefinition,
     ScopedApiToken,
     ProviderApiKeyConfig,
@@ -10,6 +11,8 @@
     NavItemConfig,
     ContextMenuItemConfig,
   } from "./types.js";
+  import type { ConnectionEndpoint } from "@fasti/sdk";
+  import ConnectionSettings from "./connection-settings.svelte";
   import { DEFAULT_WORKBENCH_PREFERENCES } from "./mock-data.js";
   import {
     IconKey,
@@ -33,6 +36,7 @@
   } from "@tabler/icons-svelte";
 
   interface Props {
+    connectionEndpoint: ConnectionEndpoint;
     customFields: CustomFieldDefinition[];
     tokens: ScopedApiToken[];
     providerKeys: ProviderApiKeyConfig[];
@@ -44,12 +48,15 @@
     onUpdateWorkbenchPreferences?: (
       prefs: Partial<WorkbenchPreferences>,
     ) => void;
+    onSaveConnection: (value: string) => Promise<ConnectionEndpoint>;
+    onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
     onSaveProviderKey?: (provider: string, key: string) => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
   }
 
   let {
+    connectionEndpoint,
     customFields,
     tokens,
     providerKeys,
@@ -59,12 +66,15 @@
     workbenchPreferences = DEFAULT_WORKBENCH_PREFERENCES,
     onUpdateTheme,
     onUpdateWorkbenchPreferences,
+    onSaveConnection,
+    onTestConnection,
     onSaveProviderKey,
     onSaveOidc,
     onSaveApprise,
   }: Props = $props();
 
   let activeSettingsSection:
+    | "connection"
     | "appearance"
     | "navigation"
     | "providers"
@@ -72,7 +82,7 @@
     | "tokens"
     | "oidc"
     | "notifications"
-    | "importers" = $state("appearance");
+    | "importers" = $state("connection");
 
   // Local state for token generator
   let newTokenName = $state("");
@@ -195,7 +205,22 @@
       <button
         type="button"
         class="nav-tab-btn"
+        class:active={activeSettingsSection === "connection"}
+        aria-current={activeSettingsSection === "connection"
+          ? "page"
+          : undefined}
+        onclick={() => (activeSettingsSection = "connection")}
+      >
+        <IconDevices size={18} /> Connection
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
         class:active={activeSettingsSection === "appearance"}
+        aria-current={activeSettingsSection === "appearance"
+          ? "page"
+          : undefined}
         onclick={() => (activeSettingsSection = "appearance")}
       >
         <IconPalette size={18} /> Appearance & Theme
@@ -205,6 +230,9 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "navigation"}
+        aria-current={activeSettingsSection === "navigation"
+          ? "page"
+          : undefined}
         onclick={() => (activeSettingsSection = "navigation")}
       >
         <IconLayoutSidebar size={18} /> Navigation & Menus
@@ -214,6 +242,9 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "providers"}
+        aria-current={activeSettingsSection === "providers"
+          ? "page"
+          : undefined}
         onclick={() => (activeSettingsSection = "providers")}
       >
         <IconKey size={18} /> Metadata Providers & Keys
@@ -223,6 +254,9 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "connectors"}
+        aria-current={activeSettingsSection === "connectors"
+          ? "page"
+          : undefined}
         onclick={() => (activeSettingsSection = "connectors")}
       >
         <IconDeviceTv size={18} /> Nuvio & Media Connectors
@@ -232,6 +266,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "tokens"}
+        aria-current={activeSettingsSection === "tokens" ? "page" : undefined}
         onclick={() => (activeSettingsSection = "tokens")}
       >
         <IconCode size={18} /> Personal Access Tokens (PAT)
@@ -241,6 +276,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "oidc"}
+        aria-current={activeSettingsSection === "oidc" ? "page" : undefined}
         onclick={() => (activeSettingsSection = "oidc")}
       >
         <IconUserCheck size={18} /> Single Sign-On (OIDC)
@@ -250,6 +286,9 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "notifications"}
+        aria-current={activeSettingsSection === "notifications"
+          ? "page"
+          : undefined}
         onclick={() => (activeSettingsSection = "notifications")}
       >
         <IconBell size={18} /> Notifications & Apprise
@@ -259,6 +298,9 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "importers"}
+        aria-current={activeSettingsSection === "importers"
+          ? "page"
+          : undefined}
         onclick={() => (activeSettingsSection = "importers")}
       >
         <IconDatabaseImport size={18} /> Lossless Importers & Backups
@@ -266,9 +308,15 @@
     </nav>
 
     <!-- Right Settings Content Panel -->
-    <main class="settings-content-card">
+    <section class="settings-content-card" aria-label="Settings details">
       <!-- 1. Appearance & Theme Editor (Tabler Customizer) -->
-      {#if activeSettingsSection === "appearance"}
+      {#if activeSettingsSection === "connection"}
+        <ConnectionSettings
+          endpoint={connectionEndpoint}
+          onSave={onSaveConnection}
+          onTest={onTestConnection}
+        />
+      {:else if activeSettingsSection === "appearance"}
         <section class="section-pane">
           <h2 class="pane-title">Appearance & Theme Editor</h2>
           <p class="pane-desc">
@@ -989,7 +1037,7 @@
           </div>
         </section>
       {/if}
-    </main>
+    </section>
   </div>
 </div>
 
@@ -1027,6 +1075,7 @@
     display: grid;
     grid-template-columns: 260px 1fr;
     gap: 28px;
+    min-width: 0;
   }
 
   .settings-nav {
@@ -1048,6 +1097,7 @@
     color: var(--fasti-text-muted);
     cursor: pointer;
     text-align: left;
+    min-height: var(--fasti-touch-target-min, 44px);
   }
 
   .nav-tab-btn:hover {
@@ -1062,6 +1112,7 @@
   }
 
   .settings-content-card {
+    min-width: 0;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -1423,5 +1474,30 @@
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  @media (max-width: 760px) {
+    .settings-container {
+      padding: 20px 16px;
+      gap: 20px;
+    }
+
+    .view-title {
+      font-size: 2rem;
+    }
+
+    .settings-layout {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .settings-nav {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .settings-content-card {
+      padding: 18px 16px;
+    }
   }
 </style>

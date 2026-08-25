@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import type { ConnectionEndpoint } from "@fasti/sdk";
   import type {
     ActiveNavSection,
     MediaKind,
@@ -11,6 +12,7 @@
     AppriseNotificationConfig,
     ThemeSettings,
     WorkbenchPreferences,
+    ConnectionTestStatus,
   } from "./types.js";
   import {
     SAMPLE_RECORDS,
@@ -44,6 +46,15 @@
     IconAlertCircle,
     IconLoader2,
   } from "@tabler/icons-svelte";
+
+  interface Props {
+    connectionEndpoint: ConnectionEndpoint;
+    onSaveConnection: (value: string) => Promise<ConnectionEndpoint>;
+    onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
+  }
+
+  let { connectionEndpoint, onSaveConnection, onTestConnection }: Props =
+    $props();
 
   let activeSection: ActiveNavSection = $state("home");
   let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
@@ -689,6 +700,7 @@
         <ConnectionsView />
       {:else if activeSection === "settings"}
         <SettingsView
+          {connectionEndpoint}
           customFields={SAMPLE_CUSTOM_FIELDS}
           {tokens}
           {providerKeys}
@@ -699,6 +711,8 @@
           onUpdateTheme={handleUpdateTheme}
           onUpdateWorkbenchPreferences={(prefs) =>
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
+          {onSaveConnection}
+          {onTestConnection}
           onSaveProviderKey={handleSaveProviderKey}
           onSaveOidc={handleSaveOidc}
           onSaveApprise={handleSaveApprise}
@@ -741,6 +755,7 @@
 
   .workbench-main-shell {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     height: 100vh;

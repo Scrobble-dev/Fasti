@@ -10,6 +10,7 @@
     "typecheck": "svelte-check --tsgo --tsconfig ./tsconfig.json"
   },
   "dependencies": {
+    "@fasti/sdk": "workspace:*",
     "@fasti/tokens": "workspace:*",
     "@fasti/ui": "workspace:*",
     "@tabler/core": "^1.4.0",
