@@ -1,3 +1,4 @@
+use crate::secure_storage::{Entry, Error as SecureStorageError};
 use fasti_application::{
     AccessAdministrationPort, AuthenticateCredentialQuery, CapabilityKey, EnrollFirstClientCommand,
     FastiProblem, InitializeNodeCommand, ProblemCode, RequestAccessContext, SecretMaterial,
@@ -122,8 +123,8 @@ pub(crate) trait SetupSecretStore: Send + Sync {
 pub(crate) struct KeyringSetupSecretStore;
 
 impl KeyringSetupSecretStore {
-    fn entry(secret: SetupSecret) -> Result<keyring::Entry, DesktopProblem> {
-        keyring::Entry::new(KEYRING_SERVICE, secret.account()).map_err(|_| {
+    fn entry(secret: SetupSecret) -> Result<Entry, DesktopProblem> {
+        Entry::new(KEYRING_SERVICE, secret.account()).map_err(|_| {
             DesktopProblem::secure_storage("Fasti could not open the system credential store.")
         })
     }
@@ -141,7 +142,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
                 })?;
                 Ok(Some(SecretMaterial::from_bytes(bytes)))
             }
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(SecureStorageError::NoEntry) => Ok(None),
             Err(_) => Err(DesktopProblem::secure_storage(
                 "Fasti could not read the system credential store.",
             )),
@@ -167,7 +168,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem> {
         let entry = Self::entry(secret)?;
         match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(SecureStorageError::NoEntry) => Ok(()),
             Err(_) => Err(DesktopProblem::secure_storage(
                 "Fasti could not remove the consumed setup proof.",
             )),

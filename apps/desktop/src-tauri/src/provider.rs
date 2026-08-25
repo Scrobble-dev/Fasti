@@ -1,4 +1,5 @@
 use crate::outbound_http::bounded_body;
+use crate::secure_storage::{Entry, Error as SecureStorageError};
 use crate::setup::{DesktopProblem, KEYRING_SERVICE};
 use fasti_application::{
     authorize_outbound, NetworkClass, OutboundAccessPolicy, ProviderAccessDeclaration,
@@ -69,7 +70,7 @@ pub(crate) fn save_key(provider: &str, key: Option<String>) -> Result<(), Deskto
             })?;
         }
         _ => match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Ok(()) | Err(SecureStorageError::NoEntry) => {}
             Err(_) => {
                 return Err(DesktopProblem::secure_storage(
                     "Fasti could not remove the Google Books key.",
@@ -208,8 +209,8 @@ async fn resolve_provider() -> Result<Vec<IpAddr>, DesktopProblem> {
     Ok(addresses)
 }
 
-fn provider_entry() -> Result<keyring::Entry, DesktopProblem> {
-    keyring::Entry::new(KEYRING_SERVICE, PROVIDER_KEY_ACCOUNT).map_err(|_| {
+fn provider_entry() -> Result<Entry, DesktopProblem> {
+    Entry::new(KEYRING_SERVICE, PROVIDER_KEY_ACCOUNT).map_err(|_| {
         DesktopProblem::secure_storage("Fasti could not open the system credential store.")
     })
 }
@@ -235,7 +236,7 @@ fn credential_source() -> Result<Option<&'static str>, DesktopProblem> {
             validate_key(&value)?;
             Ok(Some("keyring"))
         }
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(SecureStorageError::NoEntry) => Ok(None),
         Err(_) => Err(DesktopProblem::secure_storage(
             "Fasti could not read provider credential status.",
         )),
@@ -252,7 +253,7 @@ fn load_key() -> Result<Option<String>, DesktopProblem> {
             validate_key(&value)?;
             Ok(Some(value))
         }
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(SecureStorageError::NoEntry) => Ok(None),
         Err(_) => Err(DesktopProblem::secure_storage(
             "Fasti could not read the Google Books key.",
         )),

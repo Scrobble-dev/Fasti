@@ -1,0 +1,13 @@
+{
+  "name": "@fasti/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --dir ../web build && tauri build",
+    "android:init": "tauri android init",
+    "android:build": "pnpm --dir ../web build && tauri android build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

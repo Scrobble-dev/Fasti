@@ -9,6 +9,10 @@ dist/
 !benchmarks/b1/tauri-shell/dist/
 !benchmarks/b1/tauri-shell/dist/index.html
 gen/
+!apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/gen/*
+!apps/desktop/src-tauri/gen/android/
+!apps/desktop/src-tauri/gen/android/**
 !benchmarks/b1/tauri-shell/src-tauri/gen/
 .svelte-check/
 .svelte-kit/
