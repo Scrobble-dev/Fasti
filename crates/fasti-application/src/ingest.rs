@@ -5,7 +5,7 @@
 //! **Fasti records. Players play.**
 //!
 //! Fasti accepts media observations from any player or scrobbling companion
-//! (Plex, Jellyfin, Emby, Scrob WebExtension, MPRIS Linux/macOS/Windows desktop players).
+//! (Plex, Jellyfin, Emby, MPRIS Linux/macOS/Windows desktop players).
 //! These adapters map vendor-specific payloads into canonical [`AcceptObservationCommand`]
 //! instances with deterministically derived operation IDs.
 
@@ -19,6 +19,10 @@ use fasti_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+/// Upper bound on GUIDs processed from one Plex webhook payload, so an
+/// oversized or hostile payload cannot force unbounded claim-construction work.
+const MAX_INGEST_GUIDS: usize = 16;
+
 // ---------------------------------------------------------------------------
 // 1. Plex Webhook Adapter
 // ---------------------------------------------------------------------------
@@ -31,8 +35,10 @@ pub struct PlexWebhookPayload {
     pub owner: bool,
     #[serde(rename = "Account")]
     pub account: Option<PlexAccount>,
+    /// Absent for administrative/library-maintenance events (e.g. database
+    /// backup), which are not about a specific media item.
     #[serde(rename = "Metadata")]
-    pub metadata: PlexMetadata,
+    pub metadata: Option<PlexMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,7 +88,11 @@ impl PlexWebhookPayload {
             return None;
         }
 
-        let grain = match self.metadata.media_type.as_str() {
+        // Administrative/library-maintenance events omit Metadata entirely;
+        // there is no media item to record an observation about.
+        let metadata = self.metadata.as_ref()?;
+
+        let grain = match metadata.media_type.as_str() {
             "movie" => Grain::Film,
             "episode" => Grain::Episode,
             "track" => Grain::Track,
@@ -90,7 +100,7 @@ impl PlexWebhookPayload {
         };
 
         let mut claims = Vec::new();
-        for guid in &self.metadata.guids {
+        for guid in metadata.guids.iter().take(MAX_INGEST_GUIDS) {
             if let Some((scheme, value)) = guid.id.split_once("://") {
                 let ns_str = match scheme {
                     "tmdb" => match grain {
@@ -99,7 +109,10 @@ impl PlexWebhookPayload {
                     },
                     "imdb" => "imdb.title",
                     "tvdb" => "tvdb.series",
-                    other => other,
+                    // Reject GUID schemes Fasti does not have a mapped
+                    // namespace for, rather than minting a domain claim in an
+                    // attacker- or vendor-controlled namespace string.
+                    _ => continue,
                 };
                 if let Ok(claim) = ExternalIdentifierClaim::try_new(ns_str, grain, value) {
                     claims.push(claim);
@@ -108,9 +121,13 @@ impl PlexWebhookPayload {
         }
 
         let account_id = self.account.as_ref().map_or(0, |a| a.id);
+        // view_offset distinguishes genuinely separate occurrences of the same
+        // event on the same item (a rewatch) from Plex re-delivering the exact
+        // same webhook on retry, which repeats view_offset identically.
+        let view_offset = metadata.view_offset.unwrap_or(0);
         let lexeme = format!(
-            "plex:account:{account_id}:key:{}:event:{}",
-            self.metadata.rating_key, self.event
+            "plex:account:{account_id}:key:{}:event:{}:offset:{view_offset}",
+            metadata.rating_key, self.event
         );
         let op_id = derive_ingest_operation_id(&lexeme);
         let evidence_digest = derive_ingest_evidence_digest(&lexeme);
@@ -164,6 +181,8 @@ pub struct JellyfinWebhookPayload {
     pub played_to_completion: bool,
     #[serde(rename = "UserId")]
     pub user_id: Option<String>,
+    #[serde(rename = "PlaybackPositionTicks")]
+    pub playback_position_ticks: Option<i64>,
 }
 
 impl JellyfinWebhookPayload {
@@ -204,10 +223,19 @@ impl JellyfinWebhookPayload {
                 claims.push(claim);
             }
         }
+        if let Some(tvdb_id) = &self.provider_tvdb {
+            if let Ok(claim) = ExternalIdentifierClaim::try_new("tvdb.series", grain, tvdb_id) {
+                claims.push(claim);
+            }
+        }
 
         let user_str = self.user_id.as_deref().unwrap_or("default");
+        // playback_position_ticks distinguishes a genuine rewatch from Jellyfin
+        // re-sending the same notification on retry, which repeats the tick
+        // count identically.
+        let position = self.playback_position_ticks.unwrap_or(0);
         let lexeme = format!(
-            "jellyfin:user:{user_str}:item:{}:event:{}",
+            "jellyfin:user:{user_str}:item:{}:event:{}:position:{position}",
             self.item_id, self.notification_type
         );
         let op_id = derive_ingest_operation_id(&lexeme);
@@ -253,14 +281,28 @@ impl MprisMediaEvent {
         access: RequestAccessContext,
         observed_at: ObservedAt,
     ) -> AcceptObservationCommand {
+        // position_micros distinguishes a genuine second play of the same
+        // track from the desktop client re-sending the same event on retry,
+        // which repeats the position identically. Without it, every
+        // intermediate progress tick and every rewatch of a track collapses
+        // into the first-ever event for that track_id/completed pair.
+        let position = self.position_micros.unwrap_or(0);
         let lexeme = format!(
-            "mpris:player:{}:track:{}:completed:{}",
+            "mpris:player:{}:track:{}:completed:{}:position:{position}",
             self.player_identity, self.track_id, self.is_completed
         );
         let op_id = derive_ingest_operation_id(&lexeme);
         let evidence_digest = derive_ingest_evidence_digest(&lexeme);
         let evidence =
             EvidenceReference::new(EvidenceId::new_v7(), evidence_digest, lexeme.len() as u64);
+
+        // track_id is a local player-session identifier (e.g. a DBus object
+        // path), not a stable cross-device identity -- record it as
+        // provider-scoped evidence only, never as canonical identity.
+        let claims =
+            ExternalIdentifierClaim::try_new("mpris.trackid", Grain::Track, &self.track_id)
+                .map(|claim| vec![claim])
+                .unwrap_or_default();
 
         AcceptObservationCommand::new(
             RequestCorrelationId::new_v7(),
@@ -270,7 +312,7 @@ impl MprisMediaEvent {
             observed_at,
             evidence,
         )
-        .with_identity_clues(vec![], Some(Grain::Track))
+        .with_identity_clues(claims, Some(Grain::Track))
     }
 }
 
@@ -306,7 +348,7 @@ mod tests {
                 id: 42,
                 title: "ryan".to_owned(),
             }),
-            metadata: PlexMetadata {
+            metadata: Some(PlexMetadata {
                 rating_key: "99182".to_owned(),
                 media_type: "movie".to_owned(),
                 title: "Princess Mononoke".to_owned(),
@@ -325,7 +367,7 @@ mod tests {
                         id: "imdb://tt0119698".to_owned(),
                     },
                 ],
-            },
+            }),
         };
 
         let cmd = payload
@@ -356,6 +398,7 @@ mod tests {
             provider_tvdb: Some("76142".to_owned()),
             played_to_completion: true,
             user_id: Some("usr-1".to_owned()),
+            playback_position_ticks: Some(14_400_000_000),
         };
 
         let cmd = payload
@@ -363,9 +406,12 @@ mod tests {
             .expect("maps to command");
 
         assert_eq!(cmd.target_grain(), Some(Grain::Episode));
-        assert_eq!(cmd.identity_clues().len(), 2);
+        assert_eq!(cmd.identity_clues().len(), 3);
         assert_eq!(cmd.identity_clues()[0].namespace(), "tmdb.tv");
         assert_eq!(cmd.identity_clues()[0].value(), "2490");
+        assert_eq!(cmd.identity_clues()[1].namespace(), "imdb.title");
+        assert_eq!(cmd.identity_clues()[2].namespace(), "tvdb.series");
+        assert_eq!(cmd.identity_clues()[2].value(), "76142");
     }
 
     #[test]
@@ -383,5 +429,54 @@ mod tests {
 
         let cmd = event.to_observation_command(sample_access(), sample_observed_at());
         assert_eq!(cmd.target_grain(), Some(Grain::Track));
+        assert_eq!(cmd.identity_clues().len(), 1);
+        assert_eq!(cmd.identity_clues()[0].namespace(), "mpris.trackid");
+        assert_eq!(
+            cmd.identity_clues()[0].value(),
+            "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp"
+        );
+    }
+
+    #[test]
+    fn mpris_replay_of_the_same_track_produces_the_same_operation_id() {
+        let event = MprisMediaEvent {
+            player_identity: "Spotify".to_owned(),
+            track_id: "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp".to_owned(),
+            title: "Mr. Brightside".to_owned(),
+            artist: None,
+            album: None,
+            duration_micros: Some(222_000_000),
+            position_micros: Some(222_000_000),
+            is_completed: true,
+        };
+        let cmd_a = event.to_observation_command(sample_access(), sample_observed_at());
+        let cmd_b = event.to_observation_command(sample_access(), sample_observed_at());
+        assert_eq!(cmd_a.operation_id(), cmd_b.operation_id());
+    }
+
+    #[test]
+    fn mpris_second_play_of_the_same_track_is_a_distinct_operation() {
+        let first_play = MprisMediaEvent {
+            player_identity: "Spotify".to_owned(),
+            track_id: "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp".to_owned(),
+            title: "Mr. Brightside".to_owned(),
+            artist: None,
+            album: None,
+            duration_micros: Some(222_000_000),
+            position_micros: Some(222_000_000),
+            is_completed: true,
+        };
+        let second_play = MprisMediaEvent {
+            position_micros: Some(1_000_000),
+            ..first_play.clone()
+        };
+
+        let first_cmd = first_play.to_observation_command(sample_access(), sample_observed_at());
+        let second_cmd = second_play.to_observation_command(sample_access(), sample_observed_at());
+        assert_ne!(
+            first_cmd.operation_id(),
+            second_cmd.operation_id(),
+            "a rewatch must not be silently deduplicated against the prior play"
+        );
     }
 }

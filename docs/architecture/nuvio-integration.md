@@ -51,18 +51,21 @@ Fasti does not decode, transcode, manage streams, or function as a media player.
 
 The Nuvio integration is partitioned into three strictly sequenced lanes:
 
-- **B7a — Observation Ingress & Pairing (Current):**
+- **B7a — Observation Ingress & Pairing (Implemented):**
   - Device pairing and client enrollment with workspace/profile attribution.
   - Periodic progress heartbeats and completion events.
-  - Durable client-side outbox with exponential backoff and replay deduplication.
+  - Durable client-side outbox with FIFO buffering and transient-failure
+    requeue on reconnect (no backoff scheduling yet -- `drain()` is one
+    attempt per call, left to the caller to space out).
   - Transparent error visibility with RFC 9457 structured problems.
-- **B7b — Two-Way Watched State Synchronization (Later):**
-  - Watched-state snapshots and ordered change feeds.
-  - Cursor-based delta synchronization and loop prevention.
-  - Reconciliation workbench diagnostics.
-- **B7c — Shared Catalogs & Media Metadata (Later):**
-  - Collection projections and Stremio/Nuvio catalog publication.
-  - Normalized metadata claims and provider resolution.
+- **B7b — Two-Way Watched State Synchronization (Implemented):**
+  - Watched-state snapshots and ordered change feeds via `NuvioStateSyncEngine`.
+  - Cursor-based delta synchronization and self-origin loop prevention.
+  - Reconciliation workbench diagnostics remain unimplemented.
+- **B7c — Shared Catalogs & Media Metadata (Implemented):**
+  - Collection projections via `NuvioCatalogProjectionStore`.
+  - Stremio/Nuvio catalog publication and provider resolution remain
+    unimplemented; only the local projection/filter surface exists.
 
 ---
 

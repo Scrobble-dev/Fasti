@@ -24,7 +24,7 @@
 use crate::{
     derive_deterministic_evidence_digest, derive_deterministic_operation_id,
     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt, FastiProblem,
-    ObservationAcceptancePort, RequestAccessContext,
+    ObservationAcceptancePort, RequestAccessContext, Retryability,
 };
 use fasti_domain::{
     EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt, OccurredAt,
@@ -257,7 +257,10 @@ impl NuvioOutbox {
         self.queue.is_empty()
     }
 
-    /// Enqueue a command. If the outbox is full, discards the oldest uncommitted heartbeat.
+    /// Enqueue a command. If the outbox is full, discards the oldest queued
+    /// entry (FIFO eviction) regardless of whether it is a heartbeat or a
+    /// completion -- an outage long enough to fill `max_entries` has already
+    /// lost history, and the alternative (unbounded growth) is worse.
     pub fn enqueue(&mut self, command: AcceptObservationCommand) {
         if self.queue.len() >= self.max_entries {
             self.queue.pop_front();
@@ -282,7 +285,13 @@ impl NuvioOutbox {
         }
     }
 
-    /// Drain all buffered entries against the provided acceptance port.
+    /// Drain buffered entries against the provided acceptance port, in order.
+    ///
+    /// A transient (`RetrySafe`) failure requeues the entry and stops the
+    /// drain rather than discarding the observation: if the daemon is
+    /// unreachable, every later entry would fail the same way, and popping
+    /// them anyway would permanently lose observations that were never the
+    /// player's fault. Only terminal rejections are removed from the queue.
     pub fn drain(&mut self, port: &dyn ObservationAcceptancePort) -> Vec<NuvioDrainOutcome> {
         let mut results = Vec::new();
         while let Some(mut entry) = self.queue.pop_front() {
@@ -295,6 +304,10 @@ impl NuvioOutbox {
                     results.push(NuvioDrainOutcome::Replayed(receipt));
                 }
                 Err(problem) => {
+                    if problem.code().contract().retryability() == Retryability::RetrySafe {
+                        self.queue.push_front(entry);
+                        break;
+                    }
                     results.push(NuvioDrainOutcome::Rejected(problem));
                 }
             }
@@ -574,10 +587,12 @@ impl NuvioCatalogProjectionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "conformance-fixture")]
     use crate::conformance::B1ConformanceFixture;
+    #[cfg(feature = "conformance-fixture")]
+    use fasti_domain::RequestCorrelationId;
     use fasti_domain::{
-        ClaimedTrust, ClientId, CredentialId, Grain, ProfileGrantId, ProfileId,
-        RequestCorrelationId, WorkspaceId,
+        ClaimedTrust, ClientId, CredentialId, Grain, ProfileGrantId, ProfileId, WorkspaceId,
     };
 
     fn sample_access() -> RequestAccessContext {
@@ -638,6 +653,7 @@ mod tests {
         assert_ne!(cmd2.operation_id(), cmd_complete.operation_id());
     }
 
+    #[cfg(feature = "conformance-fixture")]
     #[test]
     fn outbox_buffers_when_offline_and_drains_cleanly() {
         let fixture = B1ConformanceFixture::new();

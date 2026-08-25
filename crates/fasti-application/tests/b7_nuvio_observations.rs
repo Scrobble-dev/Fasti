@@ -14,8 +14,10 @@
 use fasti_application::{
     conformance::{B1ConformanceFixture, FixtureEnrollment},
     derive_deterministic_evidence_digest, derive_deterministic_operation_id,
-    nuvio_heartbeat_lexeme, AcceptObservationCommand, AcceptObservationOutcome, NuvioDrainOutcome,
-    NuvioOutbox, NuvioPlaybackSession, ProblemCode, RequestAccessContext,
+    nuvio_heartbeat_lexeme, AcceptObservationCommand, AcceptObservationOutcome,
+    AcceptObservationReceipt, ApplicationResult, CapabilityKey, FastiProblem, NuvioDrainOutcome,
+    NuvioOutbox, NuvioPlaybackSession, ObservationAcceptancePort, ProblemCode, ReplayReceiptQuery,
+    RequestAccessContext,
 };
 use fasti_domain::{
     ClaimedTrust, EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt,
@@ -588,4 +590,73 @@ fn nuvio_catalog_projection_store_filtering_and_pagination() {
     let page = store.query(&film_filter, 1, 1);
     assert_eq!(page.len(), 1);
     assert_eq!(page[0].item_key, "movie:2");
+}
+
+/// A port that fails its first call with a `RetrySafe` problem, proving
+/// `NuvioOutbox::drain` requeues on transient failure instead of discarding
+/// the observation. Any further call is a test bug, not real drain behavior.
+struct FlakyStoragePort {
+    remaining_failures: std::sync::atomic::AtomicU32,
+}
+
+impl ObservationAcceptancePort for FlakyStoragePort {
+    fn authorize_and_accept(
+        &self,
+        _command: AcceptObservationCommand,
+    ) -> ApplicationResult<AcceptObservationOutcome> {
+        use std::sync::atomic::Ordering;
+        if self.remaining_failures.load(Ordering::SeqCst) > 0 {
+            self.remaining_failures.fetch_sub(1, Ordering::SeqCst);
+            return Err(Box::new(FastiProblem::storage_unavailable(
+                CapabilityKey::AcceptObservation,
+                RequestCorrelationId::new_v7(),
+            )));
+        }
+        panic!("drain() must stop after the first transient failure, not retry within one call");
+    }
+
+    fn authorize_and_replay(
+        &self,
+        _query: ReplayReceiptQuery,
+    ) -> ApplicationResult<AcceptObservationReceipt> {
+        unreachable!("not exercised by this test")
+    }
+}
+
+#[test]
+fn nuvio_outbox_requeues_a_transient_storage_failure_instead_of_discarding_it() {
+    let mut session = NuvioPlaybackSession::new(
+        "sess-flaky-storage",
+        Grain::Film,
+        "Flaky Storage Film",
+        vec![],
+        3600,
+    );
+    let access = RequestAccessContext::new(
+        fasti_domain::WorkspaceId::new_v7(),
+        fasti_domain::ProfileId::new_v7(),
+        fasti_domain::ClientId::new_v7(),
+        fasti_domain::CredentialId::new_v7(),
+        fasti_domain::ProfileGrantId::new_v7(),
+        1,
+    );
+
+    let mut outbox = NuvioOutbox::default();
+    outbox.enqueue(session.tick_heartbeat(access, 600, sample_observed_at("2026-08-25T20:00:00Z")));
+    assert_eq!(outbox.len(), 1);
+
+    let port = FlakyStoragePort {
+        remaining_failures: std::sync::atomic::AtomicU32::new(1),
+    };
+    let results = outbox.drain(&port);
+
+    assert!(
+        results.is_empty(),
+        "a transient failure must not surface as a terminal drain outcome"
+    );
+    assert_eq!(
+        outbox.len(),
+        1,
+        "the observation must be requeued for the next drain, not discarded"
+    );
 }

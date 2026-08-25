@@ -9,7 +9,7 @@
 - B3 (Portability Archive v1 & Restore): Complete (PR #35 merged into `dev` at `fd6bdd60`)
 - B4 (UI / Fasti Workbench): In progress by ChatGPT
 - B5 (Metadata Resolution & Claims): Single-pass $O(1)$ space optimization implemented in PR #39
-- B6 (Multi-Client Conformance & Ingest): Archetypes verified; Plex, Jellyfin/Emby, Scrob, MPRIS webhook adapters implemented in `crates/fasti-application/src/ingest.rs`
+- B6 (Multi-Client Conformance & Ingest): Archetypes verified; Plex, Jellyfin/Emby, MPRIS webhook adapters implemented in `crates/fasti-application/src/ingest.rs`
 - B7 (Nuvio Deep Integration): B7a (Observation Ingress & Pairing), B7b (State Sync & Loop Suppression), B7c (Shared Catalogs & Projections) implemented and verified with 13 passing integration tests in `crates/fasti-application/tests/b7_nuvio_observations.rs`
 - B8 (Packaging & Platform Readiness): Clean compilation and zero-network reproducible contract verification
 

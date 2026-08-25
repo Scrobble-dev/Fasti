@@ -41,7 +41,7 @@ fn plex_webhook_movie_scrobble_commits_and_replays() {
             id: 101,
             title: "alice".to_owned(),
         }),
-        metadata: PlexMetadata {
+        metadata: Some(PlexMetadata {
             rating_key: "plex-12345".to_owned(),
             media_type: "movie".to_owned(),
             title: "Spirited Away".to_owned(),
@@ -60,7 +60,7 @@ fn plex_webhook_movie_scrobble_commits_and_replays() {
                     id: "imdb://tt0245429".to_owned(),
                 },
             ],
-        },
+        }),
     };
 
     let cmd = payload
@@ -108,7 +108,7 @@ fn plex_webhook_pause_event_is_ignored() {
             id: 101,
             title: "alice".to_owned(),
         }),
-        metadata: PlexMetadata {
+        metadata: Some(PlexMetadata {
             rating_key: "plex-12345".to_owned(),
             media_type: "movie".to_owned(),
             title: "Spirited Away".to_owned(),
@@ -120,7 +120,7 @@ fn plex_webhook_pause_event_is_ignored() {
             view_offset: Some(3000000),
             guid: None,
             guids: vec![],
-        },
+        }),
     };
 
     let cmd = payload.to_observation_command(access, sample_observed_at("2026-08-25T11:05:00Z"));
@@ -150,6 +150,7 @@ fn jellyfin_webhook_playback_stop_commits_and_preserves_identifiers() {
         provider_tvdb: Some("76142".to_owned()),
         played_to_completion: true,
         user_id: Some("user-jellyfin-1".to_owned()),
+        playback_position_ticks: Some(12_600_000_000),
     };
 
     let cmd = payload
@@ -157,7 +158,11 @@ fn jellyfin_webhook_playback_stop_commits_and_preserves_identifiers() {
         .expect("generates valid command");
 
     assert_eq!(cmd.target_grain(), Some(Grain::Episode));
-    assert_eq!(cmd.identity_clues().len(), 2);
+    assert_eq!(
+        cmd.identity_clues().len(),
+        3,
+        "tmdb, imdb, and tvdb must all reach the command"
+    );
 
     let outcome = fixture.authorize_and_accept(cmd).expect("accepts");
     assert!(matches!(outcome, AcceptObservationOutcome::Committed(_)));
@@ -188,4 +193,108 @@ fn mpris_desktop_track_completion_commits_and_deduplicates() {
 
     let outcome2 = fixture.authorize_and_accept(cmd).expect("replays");
     assert!(matches!(outcome2, AcceptObservationOutcome::Replayed(_)));
+}
+
+#[test]
+fn plex_webhook_rewatch_at_a_different_offset_is_a_distinct_commit() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    let base = PlexWebhookPayload {
+        event: "media.scrobble".to_owned(),
+        user: true,
+        owner: true,
+        account: Some(PlexAccount {
+            id: 101,
+            title: "alice".to_owned(),
+        }),
+        metadata: Some(PlexMetadata {
+            rating_key: "plex-99999".to_owned(),
+            media_type: "movie".to_owned(),
+            title: "Spirited Away".to_owned(),
+            grandparent_title: None,
+            parent_index: None,
+            index: None,
+            year: Some(2001),
+            duration: Some(7500000),
+            view_offset: Some(7500000),
+            guid: None,
+            guids: vec![],
+        }),
+    };
+    let first_watch = base.clone();
+    let mut second_watch = base;
+    second_watch.metadata.as_mut().unwrap().view_offset = Some(7480000);
+
+    let first_cmd = first_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T11:00:00Z"))
+        .expect("generates valid command");
+    let second_cmd = second_watch
+        .to_observation_command(access, sample_observed_at("2026-08-26T11:00:00Z"))
+        .expect("generates valid command");
+
+    assert_ne!(
+        first_cmd.operation_id(),
+        second_cmd.operation_id(),
+        "a rewatch must not be silently deduplicated against the prior play"
+    );
+
+    let outcome1 = fixture.authorize_and_accept(first_cmd).expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(second_cmd).expect("accepts");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Committed(_)),
+        "the rewatch must commit as its own observation, not replay the first watch's receipt"
+    );
+}
+
+#[test]
+fn jellyfin_webhook_rewatch_at_a_different_position_is_a_distinct_commit() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    let base = JellyfinWebhookPayload {
+        notification_type: "PlaybackStop".to_owned(),
+        item_type: "Movie".to_owned(),
+        item_id: "jf-movie-1".to_owned(),
+        name: "Spirited Away".to_owned(),
+        series_name: None,
+        season_number: None,
+        episode_number: None,
+        year: Some(2001),
+        provider_tmdb: None,
+        provider_imdb: None,
+        provider_tvdb: None,
+        played_to_completion: true,
+        user_id: Some("user-jellyfin-1".to_owned()),
+        playback_position_ticks: Some(75_000_000_000),
+    };
+    let first_watch = base.clone();
+    let second_watch = JellyfinWebhookPayload {
+        playback_position_ticks: Some(74_800_000_000),
+        ..base
+    };
+
+    let first_cmd = first_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T11:00:00Z"))
+        .expect("generates valid command");
+    let second_cmd = second_watch
+        .to_observation_command(access, sample_observed_at("2026-08-26T11:00:00Z"))
+        .expect("generates valid command");
+
+    assert_ne!(
+        first_cmd.operation_id(),
+        second_cmd.operation_id(),
+        "a rewatch must not be silently deduplicated against the prior play"
+    );
+
+    let outcome1 = fixture.authorize_and_accept(first_cmd).expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(second_cmd).expect("accepts");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Committed(_)),
+        "the rewatch must commit as its own observation, not replay the first watch's receipt"
+    );
 }
