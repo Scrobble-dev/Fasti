@@ -741,6 +741,22 @@ fn verify_b8b_manifest_requirements(
     root: &Path,
     manifest: &EvidenceManifest,
 ) -> anyhow::Result<()> {
+    // Enforced here, not only by the `test milestone --body B8b` CLI wrapper,
+    // so any caller reaching this function (including a bare
+    // `cargo xtask evidence verify <path>`) stays fail-closed on the same
+    // prerequisite.
+    let b8a_manifest_path = root.join("target/fasti-evidence/b8a-manifest.json");
+    ensure!(
+        b8a_manifest_path.is_file(),
+        "B8b requires a passing B8a manifest at {}; none exists yet",
+        b8a_manifest_path.display()
+    );
+    verify(root, &b8a_manifest_path).with_context(|| {
+        format!(
+            "B8b requires a passing B8a manifest at {}",
+            b8a_manifest_path.display()
+        )
+    })?;
     ensure!(
         manifest.command == "cargo xtask test milestone --body B8b",
         "B8b evidence manifest must bind the exact milestone command"
@@ -1799,7 +1815,39 @@ fn validate_entry_semantics(
         }
         EvidenceKind::B8bReceipt => {
             let value = read_json(evidence_root.join(&entry.path))?;
-            ensure_receipt_source(&value, source)
+            ensure_receipt_source(&value, source)?;
+            if entry.id == "b8b-security-review" {
+                let cargo_deny = value
+                    .get("cargo_deny")
+                    .context("b8b-security-review receipt is missing cargo_deny")?;
+                let mut deny_errors = 0i64;
+                for key in [
+                    "advisories_errors",
+                    "bans_errors",
+                    "licenses_errors",
+                    "sources_errors",
+                ] {
+                    deny_errors += cargo_deny
+                        .get(key)
+                        .and_then(Value::as_i64)
+                        .with_context(|| format!("cargo_deny.{key} is missing or not a number"))?;
+                }
+                ensure!(
+                    deny_errors == 0,
+                    "cargo-deny security review reported {deny_errors} policy error(s)"
+                );
+                let vulnerabilities = value
+                    .pointer("/cargo_audit/vulnerabilities_found")
+                    .and_then(Value::as_i64)
+                    .context(
+                        "b8b-security-review receipt is missing cargo_audit.vulnerabilities_found",
+                    )?;
+                ensure!(
+                    vulnerabilities == 0,
+                    "cargo-audit reported {vulnerabilities} vulnerability finding(s)"
+                );
+            }
+            Ok(())
         }
         EvidenceKind::B1ArtifactBudgets | EvidenceKind::QaReview | EvidenceKind::BuiltArtifact => {
             Ok(())
@@ -4780,6 +4828,51 @@ mod tests {
         let error =
             validate_receipt_ci(&receipt, &expected).expect_err("substituted receipt CI must fail");
         assert!(error.to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn b8b_security_review_rejects_nonzero_cargo_deny_errors() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let source = current_source_binding(root.path()).expect("source binding");
+        let ci = current_ci_binding().expect("ci binding");
+
+        let receipt_dir = root
+            .path()
+            .join("target/fasti-evidence/b8b/security-review");
+        fs::create_dir_all(&receipt_dir).expect("create security-review dir");
+        let relative_path =
+            PathBuf::from("target/fasti-evidence/b8b/security-review/b8b-security-review.json");
+        let receipt_path = root.path().join(&relative_path);
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec(&serde_json::json!({
+                "source": {"git_commit": source.git_commit, "git_tree": source.git_tree},
+                "cargo_deny": {
+                    "advisories_errors": 0,
+                    "bans_errors": 0,
+                    "licenses_errors": 1,
+                    "sources_errors": 0
+                },
+                "cargo_audit": {"vulnerabilities_found": 0}
+            }))
+            .expect("serialize fixture receipt"),
+        )
+        .expect("write fixture receipt");
+
+        let entry = EvidenceEntry {
+            id: "b8b-security-review".to_owned(),
+            kind: EvidenceKind::B8bReceipt,
+            path: relative_path,
+            sha256: sha256_bytes(&fs::read(&receipt_path).expect("read fixture receipt")),
+            status: ResultStatus::Pass,
+        };
+
+        let error = validate_entry_semantics(root.path(), root.path(), &entry, &source, &ci)
+            .expect_err("nonzero cargo-deny error count must be rejected");
+        assert!(error
+            .to_string()
+            .contains("cargo-deny security review reported"));
     }
 
     #[test]

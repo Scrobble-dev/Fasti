@@ -165,6 +165,7 @@ fn run_milestone(
             "B8a milestone evidence formalization is not implemented; B8a is a prerequisite for B8b and is out of scope for this gate"
         ),
         BodyArg::B8b => {
+            run_deep(root)?;
             let b8a_manifest = root.join("target/fasti-evidence/b8a-manifest.json");
             anyhow::ensure!(
                 b8a_manifest.is_file(),

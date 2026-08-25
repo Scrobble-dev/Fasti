@@ -11,8 +11,9 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function extractReleaseNotes(changelog, tag) {
   const version = tag.replace(/^v/, "");
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const headingPattern = new RegExp(
-    `^##\\s*\\[${version.replace(/\./g, "\\.")}\\][^\\n]*\\n`,
+    `^##\\s*\\[${escapedVersion}\\][^\\n]*\\n`,
     "m",
   );
   const startMatch = headingPattern.exec(changelog);
