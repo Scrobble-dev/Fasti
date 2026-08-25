@@ -168,7 +168,7 @@ FASTI_PORT=19420 ./scripts/dev.sh --podman
 ./scripts/dev.sh --stop
 ```
 
-`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. The Podman path uses the documented `fasti:b0` image, a 192 MiB memory ceiling, and no additional swap; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
+`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. Native mode requires a user cgroup v2 scope. Native and Podman modes read the 192 MiB ceiling from the governed performance budget and disable swap. The canonical benchmark remains the owner of the separate 64 MiB idle measurement. The Podman path uses the documented `fasti:b0` image; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
 
 With `fastid` still running on its default port, the local browser QA harness uses that same health contract:
 
