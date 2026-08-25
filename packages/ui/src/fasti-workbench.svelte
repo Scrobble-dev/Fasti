@@ -572,9 +572,12 @@
           <input
             type="search"
             class="global-search-input"
-            placeholder="Search your media..."
+            placeholder={records.length === 0
+              ? "No media records to search"
+              : "Search your media..."}
             bind:value={searchQuery}
             aria-label="Search media collection"
+            disabled={records.length === 0}
           />
         </div>
       </div>
@@ -585,6 +588,7 @@
           class="scope-select"
           bind:value={mediaScope}
           aria-label="Filter media scope"
+          disabled={records.length === 0}
         >
           <option value="all">All media</option>
           <option value="shows">TV Shows</option>
