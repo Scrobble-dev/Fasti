@@ -129,7 +129,7 @@ _write_bound_addr() {
 }
 
 _process_identity() {
-  ps -p "$1" -o lstart= -o args= 2>/dev/null | sed 's/^ *//'
+  ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//'
 }
 
 _write_pidfile() {
@@ -386,8 +386,8 @@ _start_native() {
 _self_test() {
   local old_rundir="$RUNDIR"
   RUNDIR="$(mktemp -d)"
-  trap '_stop_pidfile child; rm -f "$RUNDIR/stale.pid"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
-  setsid bash -c 'trap "" TERM; sleep 30 & wait' &
+  trap 'rm -rf "$RUNDIR"' EXIT
+  bash -c 'trap "" TERM; sleep 10 & wait' &
   local leader=$!
   _write_pidfile child "$leader"
   [[ "$(_tracked_pid child)" == "$leader" ]]
@@ -410,7 +410,7 @@ _self_test() {
   _validate_origin_url FASTI_API_URL http://localhost:8420
   ! _validate_origin_url FASTI_PUBLIC_URL http://fasti.internal >/dev/null 2>&1
   ! _validate_origin_url FASTI_API_URL 'https://user:secret@fasti.internal' >/dev/null 2>&1
-  rmdir "$RUNDIR"
+  rm -rf "$RUNDIR"
   RUNDIR="$old_rundir"
   trap - EXIT
   echo "dev launcher self-test passed"
