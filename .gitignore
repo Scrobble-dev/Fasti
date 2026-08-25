@@ -60,3 +60,10 @@ __pycache__/
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+
+# Local tools & dev runtime
+.air/
+.codex/
+.dev-logs/
+.dev-data/
+.dev-run/

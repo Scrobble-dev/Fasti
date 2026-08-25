@@ -39,6 +39,15 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         page.getByRole("heading", { name: "Local service available" }),
       ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Network settings" }),
+      ).toBeVisible();
+      await expect(
+        page
+          .locator("#network-settings dd")
+          .filter({ hasText: "http://127.0.0.1:8420" }),
+      ).toBeVisible();
+      await expect(page.getByText("http://localhost:8420")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute(
         "data-bs-theme",
         theme,
@@ -298,18 +307,23 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
 
 test("reduced motion stops the loading animation", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
+  let releaseHealth = () => {};
+  const pendingHealth = new Promise<void>((resolve) => {
+    releaseHealth = resolve;
+  });
   await page.route(healthEndpoint, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await pendingHealth;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.locator(".spinner")).toHaveCSS("animation-name", "none");
+  releaseHealth();
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();

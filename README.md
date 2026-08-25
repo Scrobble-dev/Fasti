@@ -14,6 +14,7 @@
 <br/>
 
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14234/badge)](https://www.bestpractices.dev/projects/14234)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 <br/>
@@ -51,7 +52,7 @@ The production daemon deliberately exposes only behavior it can prove:
 | `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
 | `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
 | `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
-| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                         |
+| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                        |
 | Product web UI                          | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
 | Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
 | Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
@@ -99,7 +100,7 @@ xtask                deterministic generation and fail-closed verification
 
 Player, replication, connector, provider-keyed projection, desktop, and placeholder catalogue packages are not active workspace boundaries. The browser harness is evidence tooling over the generated `system.health` SDK binding; it does not activate a product presentation boundary or later capability. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
 
-Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
+Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. An occupied loopback port can recover to an OS-assigned port; public and wildcard listeners fail closed. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately. See [network configuration](docs/network-configuration.md) for custom domains, `.internal`, system CA trust, public URLs, loopback aliases, Docker, Podman, and collision behavior.
 
 ## Contract gates
 
@@ -148,7 +149,19 @@ The exact response is `{"status":"healthy","version":"0.1.0"}`.
 
 That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
 
-With `fastid` still running, the local browser QA harness uses that same health contract:
+The scoped launcher provides the same health-only native path and an optional Podman path:
+
+```bash
+FASTI_PORT=19420 ./scripts/dev.sh
+FASTI_PORT=19420 ./scripts/dev.sh --podman
+FASTI_PORT=19420 ./scripts/dev.sh --docker
+./scripts/dev.sh --status
+./scripts/dev.sh --stop
+```
+
+`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. `FASTI_PUBLIC_URL` records a separate reverse-proxy origin and can omit the port when HTTPS uses port 443. `FASTI_PORT_FALLBACK=auto|fail` controls safe loopback collision recovery. Container mode uses the documented `fasti:b0` image, a 192 MiB memory ceiling, and no additional swap; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
+
+With `fastid` still running on its default port, the local browser QA harness uses that same health contract:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -235,11 +248,20 @@ Nuvio adaptation does not begin before the B7 provider gate, applicable B8 evide
 
 ## Contributing
 
-Fasti is an open community project under AGPL-3.0-or-later and DCO 1.1. Collaboration on code, documentation, fixtures, accessibility, security, provider patterns, recipes, and design is encouraged.
+Fasti is an independent, community-driven project under AGPL-3.0-or-later and DCO 1.1. We are **actively seeking co-maintainers, code reviewers, and contributors** across Rust systems engineering, TypeScript/UI presentation, OpenAPI contracts, and hardware benchmarks.
 
-Before writing code or opening a pull request, begin or join a GitHub Discussion and align the problem, bounded context, scope, and required review gates. This is technical and product scope alignment, not legal approval. A CLA or legal review is not required.
+### 🤝 Maintainers & Contributors Wanted
 
-Then follow [CONTRIBUTING.md](CONTRIBUTING.md), sign commits with the [Developer Certificate of Origin](https://developercertificate.org/) using `git commit -s`, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+We are intentionally expanding the maintainer team to improve the project's bus factor and code-review coverage:
+* **Co-Maintainers & Reviewers**: We welcome maintainers familiar with async Rust (`axum`, `rusqlite`), Domain-Driven Design, OpenAPI 3.1 / AsyncAPI 3.x schema validation, and Svelte / Tauri presentation.
+* **Good First Issues**: Check out our curated list of [Good First Issues](https://github.com/Scrobble-dev/Fasti/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for well-scoped onboarding tasks with step-by-step instructions and test commands.
+* **Hardware Receipts**: Help us test and benchmark Milestone B1 memory envelopes (<= 64 MiB idle) on diverse physical hardware (Raspberry Pi 5, Intel J4125, Apple Silicon, TV boxes per [#49](https://github.com/Scrobble-dev/Fasti/issues/49) and [#50](https://github.com/Scrobble-dev/Fasti/issues/50)).
+
+To contribute:
+1. Browse open [Issues](https://github.com/Scrobble-dev/Fasti/issues) or start a [GitHub Discussion](https://github.com/Scrobble-dev/Fasti/discussions) to align on scope.
+2. Follow [CONTRIBUTING.md](CONTRIBUTING.md) and sign your commits with the [Developer Certificate of Origin](https://developercertificate.org/) (`git commit -s`).
+3. **All active development and pull requests must target the `dev` branch.**
+4. Adhere to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 

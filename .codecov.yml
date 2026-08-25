@@ -1,0 +1,65 @@
+# Codecov configuration for Fasti
+codecov:
+  require_ci_to_pass: true
+  notify:
+    after_n_builds: 1
+    wait_for_ci: false
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 0.5%
+        informational: true
+    patch:
+      default:
+        target: 90%
+        threshold: 1.0%
+        informational: true
+
+component_management:
+  individual_components:
+    - component_id: fasti_domain
+      name: "Domain Invariants"
+      paths:
+        - "crates/fasti-domain/**"
+    - component_id: fasti_application
+      name: "Application Capabilities"
+      paths:
+        - "crates/fasti-application/**"
+    - component_id: fasti_store
+      name: "Persistence & Kernel"
+      paths:
+        - "crates/fasti-store/**"
+    - component_id: fasti_api
+      name: "REST API & Handlers"
+      paths:
+        - "crates/fasti-api/**"
+    - component_id: fasti_contracts
+      name: "Rust DTO Contracts"
+      paths:
+        - "crates/fasti-contracts/**"
+    - component_id: fasti_cli
+      name: "CLI Surface"
+      paths:
+        - "crates/fasti-cli/**"
+    - component_id: fasti_daemon
+      name: "Daemon Runtime"
+      paths:
+        - "apps/fastid/**"
+    - component_id: fasti_sdk
+      name: "TypeScript Client SDK"
+      paths:
+        - "packages/sdk/**"
+
+ignore:
+  - "contracts/generated/**"
+  - "packages/sdk/src/generated/**"
+  - "target/**"
+  - "benchmarks/**"
+  - "tests/conformance/**"
+  - "brand/**"

@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * B2 application ports and local SQLite/filesystem adapters for node initialization, first-client enrollment, credential lifecycle, profile selection, evidence upload, provider-neutral records, observations, review state, idempotent receipts, replay, and bounded receipt streaming.
 * Regression coverage for consumed bootstrap proofs, explicit profile-bound credential authentication, ambiguous active grants, ungranted profiles, and cross-workspace grant rejection.
 * Retained B1 daemon, OCI image, contract pack, source snapshot, and raw one-second performance observations with verifier-owned integrity checks.
+* B8b non-publishing release-readiness evidence: per-architecture checksums, CycloneDX SBOM (Rust and npm), an in-toto/SLSA-shaped provenance statement, a `cargo-deny` final security review, a manual rollback runbook, and mechanical release-notes extraction, gated behind a fail-closed `cargo xtask test milestone --body B8b`.
+* `cargo-deny` (`deny.toml`) license, advisory, and source policy for the main workspace and the isolated Tauri benchmark shell.
 
 ### Changed
 

@@ -78,6 +78,19 @@ if [[ "$post_status" != "404" ]]; then
   exit 1
 fi
 
+bootstrap_status="$(
+  curl --silent --output /dev/null --write-out '%{http_code}' \
+    --request POST \
+    --header 'content-type: application/json' \
+    --data '{}' \
+    "http://127.0.0.1:${host_port}/api/v1/node/initialization"
+)"
+
+if [[ "$bootstrap_status" != "404" ]]; then
+  echo "Remote bootstrap returned HTTP $bootstrap_status instead of 404" >&2
+  exit 1
+fi
+
 cli_stdout="$(mktemp)"
 cli_stderr="$(mktemp)"
 

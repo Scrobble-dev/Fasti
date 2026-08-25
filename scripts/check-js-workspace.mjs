@@ -1,5 +1,6 @@
+import assert from "node:assert/strict";
 import { existsSync, globSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,6 +23,34 @@ const entrypointWorkspaces = new Set([
   "packages/ui",
 ]);
 const failures = [];
+
+function packageEntryPath(packageRoot, entry) {
+  if (typeof entry !== "string" || isAbsolute(entry)) return undefined;
+  const path = resolve(packageRoot, entry);
+  const fromRoot = relative(packageRoot, path);
+  if (
+    fromRoot === "" ||
+    fromRoot === ".." ||
+    fromRoot.startsWith(`..${sep}`) ||
+    isAbsolute(fromRoot)
+  ) {
+    return undefined;
+  }
+  return path;
+}
+
+function packageEntryExists(packageRoot, entry) {
+  const entryPath = packageEntryPath(packageRoot, entry);
+  return entryPath !== undefined && existsSync(entryPath);
+}
+
+assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);
+assert.equal(packageEntryPath(repoRoot, "../outside"), undefined);
+assert.equal(packageEntryPath(repoRoot, "."), undefined);
+assert.equal(
+  packageEntryPath(repoRoot, "package.json"),
+  join(repoRoot, "package.json"),
+);
 
 const actualWorkspaces = globSync("{apps,packages}/*/package.json", {
   cwd: repoRoot,
@@ -65,16 +94,16 @@ for (const [directory, expectedName] of expectedWorkspaces) {
     ["primary", manifest.main ?? manifest.svelte],
     ["types", manifest.types],
   ]) {
-    if (typeof target !== "string" || !existsSync(join(packageRoot, target))) {
+    if (!packageEntryExists(packageRoot, target)) {
       failures.push(
-        `${directory}: ${field} does not resolve to a built entrypoint`,
+        `${directory}: ${field} does not resolve to a confined built entrypoint`,
       );
     }
   }
 
-  if (manifest.module && !existsSync(join(packageRoot, manifest.module))) {
+  if (manifest.module && !packageEntryExists(packageRoot, manifest.module)) {
     failures.push(
-      `${directory}: module does not resolve to a built entrypoint`,
+      `${directory}: module does not resolve to a confined built entrypoint`,
     );
   }
 }
