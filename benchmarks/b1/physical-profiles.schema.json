@@ -1,18 +1,21 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/physical-profiles.schema.json",
-  "title": "Fasti B1 canonical physical runner profiles",
+  "title": "Fasti optional physical benchmark target profiles",
+  "description": "Non-gating specifications retained for optional comparison runs; B1 milestone evidence uses the kernel-enforced low-hardware envelope.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "$schema",
     "schema_version",
+    "milestone_role",
     "hardware_profile_derivation",
     "profiles"
   ],
   "properties": {
     "$schema": { "const": "./physical-profiles.schema.json" },
-    "schema_version": { "const": "fasti.b1.physical-profiles.v1" },
+    "schema_version": { "const": "fasti.b1.physical-profiles.v2" },
+    "milestone_role": { "const": "optional_non_gating_spec_targets" },
     "hardware_profile_derivation": { "const": "physical_profile_policy_v1" },
     "profiles": {
       "type": "object",

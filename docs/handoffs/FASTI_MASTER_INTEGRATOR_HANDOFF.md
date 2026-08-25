@@ -1,7 +1,7 @@
 # Fasti Master Integrator Handoff
 
 **Status:** Current onboarding entry point for a new implementation harness  
-**Date:** 2026-08-24  
+**Date:** 2026-08-25<br>
 **Repository:** `Scrobble-dev/Fasti`  
 **Primary active implementation PR:** [#20](https://github.com/Scrobble-dev/Fasti/pull/20)  
 **PR branch:** `dev`  
@@ -106,21 +106,21 @@ The live PR remains the authoritative status source. At the time this handoff wa
 | Body | Outcome | Current state |
 | --- | --- | --- |
 | **B0** | Truth reset and repository alignment | Complete |
-| **B1** | Executable contract foundation | Software scope substantially complete; physical evidence remains open |
+| **B1** | Executable contract foundation | Software scope substantially complete; exact-head aggregate evidence remains open |
 | **B2** | Local identity and observation kernel | Implemented behind review boundaries; public activation and final evidence remain open |
-| **B3** | Correction and portability | Not complete |
+| **B3** | Correction and portability | Implemented behind review boundaries; public activation and final evidence remain open |
 | **B4** | Product experience and review workflows | Not started as a production feature set |
 | **B5** | Metadata claims and projections | Not started |
 | **B6** | Neutral source conformance | Not started |
 | **B7** | Nuvio integration lanes | Not started |
 | **B8** | Distribution and release hardening | Partial foundations only; not complete |
 
-Do not call B1 or B2 complete merely because code exists. A body is complete only when its required exact-head evidence and hardware gates pass.
+Do not call B1, B2, or B3 complete merely because code exists. A body is complete only when its required exact-head evidence and applicable gates pass.
 
 ### Active PR
 
 - PR: [Scrobble-dev/Fasti#20](https://github.com/Scrobble-dev/Fasti/pull/20)
-- Title: `B0-B2: harden the contract foundation and review the local kernel`
+- Title: `B0-B3: contract foundation, local kernel review, and correction slice`
 - State: Draft
 - Base: `release`
 - Head: `dev`
@@ -156,12 +156,11 @@ Production must not claim more than the composition root actually exposes.
 - process crash and restart proof;
 - commit-before-reply replay proof on the final public path;
 - supported power-loss evidence;
-- Raspberry Pi 5 ownership, fingerprint, native-memory, and OCI-memory receipts;
-- J4125 ownership, fingerprint, native-memory, and OCI-memory receipts;
+- a passing exact-head B1 predecessor manifest, including the governed Tauri package and same-workflow-attempt x86_64/aarch64 low-hardware envelope packages from one exact `dev` push;
 - final public DTO and transport activation as one governed change;
 - exact-head CI, contracts, security, package, and `/qa` evidence after every final write.
 
-Hosted-runner evidence does not replace the two required physical profiles.
+Pull-request envelope packages are regression artifacts only. Qualifying B1 performance evidence declares the same workflow run attempt for one exact `dev` push on x86_64 and aarch64. Each architecture completes the governed 600-second warm-up and 900-second route-less idle window and binds the kernel-applied 192 MiB, one-vCPU, zero-swap cgroup v2 envelope.
 
 ---
 
@@ -427,7 +426,7 @@ Review for:
 - no provider call inside a local write transaction;
 - no one-task-per-item explosion without measured justification.
 
-Physical Pi 5 and J4125 receipts remain mandatory where the approved plan says they are.
+Raspberry Pi 5 and J4125 profiles are optional B8 comparison targets. They do not gate B1. B1 performance closure uses the governed two-architecture cgroup v2 envelope receipts.
 
 ---
 
@@ -791,7 +790,7 @@ Rollback:
 Related issues/upstream:
 ```
 
-Do not write `PASS` without an artifact, command result, CI result, or physical receipt that supports it.
+Do not write `PASS` without an artifact, command result, CI result, or governed receipt that supports it.
 
 ---
 

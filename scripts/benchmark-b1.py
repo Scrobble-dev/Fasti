@@ -21,11 +21,12 @@ import stat
 import statistics
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -2162,17 +2163,79 @@ def publish_content_addressed_artifact(
     }
 
 
+def saved_oci_layer_bytes(
+    archive_path: Path, image_id: str, source: dict[str, Any]
+) -> int:
+    expected_config = f"{image_id.removeprefix('sha256:')}.json"
+    with tarfile.open(archive_path, "r:gz") as archive:
+        members: dict[str, tarfile.TarInfo] = {}
+        for member in archive.getmembers():
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or not path.parts or any(
+                part in {"", ".", ".."} for part in path.parts
+            ):
+                raise CaptureError(f"Docker save contains an unsafe path: {member.name!r}")
+            if member.name in members:
+                raise CaptureError(f"Docker save contains a duplicate path: {member.name}")
+            members[member.name] = member
+
+        def read_member(name: str) -> bytes:
+            member = members.get(name)
+            if member is None or not member.isfile() or member.size > 1024 * 1024:
+                raise CaptureError(f"Docker save omits a bounded regular {name}")
+            stream = archive.extractfile(member)
+            if stream is None:
+                raise CaptureError(f"Docker save cannot read {name}")
+            return stream.read()
+
+        manifest = json.loads(read_member("manifest.json").decode("utf-8"))
+        if not isinstance(manifest, list) or len(manifest) != 1:
+            raise CaptureError("Docker save must contain exactly one image manifest")
+        image = manifest[0]
+        if image.get("Config") != expected_config:
+            raise CaptureError("Docker save config does not match the immutable image ID")
+        layers = image.get("Layers")
+        if (
+            not isinstance(layers, list)
+            or not layers
+            or not all(isinstance(layer, str) for layer in layers)
+            or len(layers) != len(set(layers))
+        ):
+            raise CaptureError("Docker save layer inventory is empty or duplicated")
+        layer_members = {
+            name
+            for name, member in members.items()
+            if name.endswith(".tar") and member.isfile()
+        }
+        if layer_members != set(layers):
+            raise CaptureError("Docker save layer files do not match its manifest")
+
+        config_bytes = read_member(expected_config)
+        if hashlib.sha256(config_bytes).hexdigest() != image_id.removeprefix("sha256:"):
+            raise CaptureError("Docker save config digest does not match the image ID")
+        config = json.loads(config_bytes.decode("utf-8"))
+        labels = config.get("config", {}).get("Labels", {})
+        for source_key, label in IMAGE_SOURCE_LABELS.items():
+            if labels.get(label) != source[source_key]:
+                raise CaptureError(f"Docker save config label is stale: {label}")
+        diff_ids = config.get("rootfs", {}).get("diff_ids")
+        if not isinstance(diff_ids, list) or len(diff_ids) != len(layers):
+            raise CaptureError("Docker save config layer identity does not match its manifest")
+        for layer, diff_id in zip(layers, diff_ids, strict=True):
+            stream = archive.extractfile(members[layer])
+            if stream is None:
+                raise CaptureError(f"Docker save cannot read layer {layer}")
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+            if diff_id != f"sha256:{digest.hexdigest()}":
+                raise CaptureError("Docker save layer bytes do not match the image config")
+        return sum(members[name].size for name in layers)
+
+
 def artifact_sizes(
-    args: argparse.Namespace,
+    args: argparse.Namespace, context: dict[str, Any]
 ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
-    image_size_command = [
-        "docker",
-        "image",
-        "inspect",
-        "--format",
-        "{{.Size}}",
-        args.immutable_image,
-    ]
     binary_size_command = [
         "docker",
         "run",
@@ -2249,6 +2312,9 @@ def artifact_sizes(
                     )
 
         gzip_pipeline(docker_save, oci_archive)
+        oci_image_bytes = saved_oci_layer_bytes(
+            oci_archive, context["source"]["oci_image_id"], context["source"]
+        )
         gzip_pipeline(contract_archive, contract_pack, source_cwd=contract_context)
         retained_artifacts = {
             "oci_image_compressed": publish_content_addressed_artifact(
@@ -2269,7 +2335,7 @@ def artifact_sizes(
         "native_fastid_binary_bytes": args.native_binary.stat().st_size,
         "oci_fastid_binary_bytes": int(binary_values[0]),
         "oci_fasti_cli_binary_bytes": int(binary_values[1]),
-        "oci_image_bytes": int(run_checked(image_size_command)),
+        "oci_image_bytes": oci_image_bytes,
         "native_runtime_installed_bytes": None,
         "native_archive_compressed_bytes": None,
         **compressed_sizes,
@@ -2279,7 +2345,6 @@ def artifact_sizes(
     commands = [
         command_text(["stat", "-c", "%s", str(args.native_binary)]),
         command_text(binary_size_command),
-        command_text(image_size_command),
         f"{command_text(docker_save)} | gzip -n -9",
         contract_context_provenance["archive_command"],
         f"(cd verifier-owned-git-archive && {command_text(sdk_install_command)})",
@@ -2468,7 +2533,7 @@ def capture_bound(
     memory_budgets = budgets_document["memory_bytes"]
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    sizes, size_commands, retained_artifacts = artifact_sizes(args)
+    sizes, size_commands, retained_artifacts = artifact_sizes(args, context)
     scenarios = [capture_scenario(scenario_id, args) for scenario_id in SCENARIO_IDS]
     post_governor = parse_cpu_governors()
     if post_governor != context["runner"]["cpu_governor"]:
@@ -2577,6 +2642,86 @@ def self_test() -> None:
     print("PASS: B1 benchmark harness validator self-test")
 
 
+def capture_artifact_budgets(args: argparse.Namespace) -> None:
+    if platform.system() != "Linux":
+        raise CaptureError("B1 artifact budget capture is Linux-only")
+    for command in ["docker", "git", "gzip", "node", "pnpm", "tar"]:
+        require_command(command)
+    if args.output.exists() or args.output.is_symlink():
+        raise CaptureError(f"refusing to overwrite existing evidence: {args.output}")
+    if not args.native_binary.is_file() or args.native_binary.is_symlink():
+        raise CaptureError(f"native release binary is not a regular file: {args.native_binary}")
+
+    commit, tree, contract_ref = ensure_clean_tree()
+    docker_locality = verify_local_docker()
+    if run_checked(["docker", "info", "--format", "{{.CgroupVersion}}"]) != "2":
+        raise CaptureError("Docker must use cgroup v2 for B1 artifact capture")
+    architecture = {
+        "AMD64": "x86_64",
+        "x86_64": "x86_64",
+        "aarch64": "aarch64",
+        "arm64": "aarch64",
+    }.get(platform.machine())
+    if architecture is None:
+        raise CaptureError(f"unsupported artifact capture architecture: {platform.machine()}")
+
+    context: dict[str, Any] = {
+        "docker_locality": docker_locality,
+        "source": {
+            "git_commit": commit,
+            "git_tree": tree,
+            "contract_ref": contract_ref,
+            "build_recipe_sha256": sha256_file(GOVERNED_DOCKERFILE),
+            "native_fastid_sha256": sha256_file(args.native_binary),
+        },
+    }
+    governed_build_image(args, context)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    sizes, commands, retained_artifacts = artifact_sizes(args, context)
+    verdicts = artifact_budget_verdicts(sizes)
+    failures = [verdict["budget"] for verdict in verdicts if verdict["status"] == "fail"]
+    if failures:
+        raise CaptureError(f"artifact budgets failed: {', '.join(failures)}")
+    verify_capture_inputs_unchanged(args, context)
+
+    evidence = {
+        "schema_version": "fasti.b1.artifact-budgets.v1",
+        "kind": "fasti.b1.artifact-budgets",
+        "status": "pass",
+        "source": {
+            "git_commit": commit,
+            "git_tree": tree,
+            "contract_ref": contract_ref,
+            "build_recipe_sha256": context["source"]["build_recipe_sha256"],
+            "build_context_archive_sha256": context["source"][
+                "build_context_archive_sha256"
+            ],
+            "dirty": False,
+        },
+        "runner": {"architecture": architecture},
+        "policy": {
+            "budgets_sha256": sha256_file(BUDGETS_PATH),
+            "harness_sha256": sha256_file(Path(__file__)),
+        },
+        "oci_image_id": context["source"]["oci_image_id"],
+        "artifact_sizes": sizes,
+        "artifact_budget_verdicts": verdicts,
+        "retained_artifacts": retained_artifacts,
+        "commands": commands,
+    }
+    descriptor = os.open(
+        args.output,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump(evidence, output, indent=2, sort_keys=True)
+        output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
+    print(f"PASS: validated B1 artifact budgets written to {args.output}")
+
+
 def add_runner_arguments(command_parser: argparse.ArgumentParser, *, with_output: bool) -> None:
     command_parser.add_argument(
         "--image",
@@ -2636,6 +2781,15 @@ def parser() -> argparse.ArgumentParser:
     subcommands = root.add_subparsers(dest="command", required=True)
     subcommands.add_parser("self-test", help="run portable schema and negative-sentinel tests")
 
+    artifact_parser = subcommands.add_parser(
+        "artifact-capture",
+        help="build exact-source OCI and contract artifacts and capture their governed sizes",
+    )
+    artifact_parser.add_argument("--image", required=True)
+    artifact_parser.add_argument("--native-binary", type=Path, required=True)
+    artifact_parser.add_argument("--output", type=Path, required=True)
+    artifact_parser.add_argument("--build-timeout-seconds", type=float, default=1800.0)
+
     preflight_parser = subcommands.add_parser(
         "preflight",
         help="emit a non-mutating JSON prerequisite result for a physical B1 runner",
@@ -2651,6 +2805,12 @@ def parser() -> argparse.ArgumentParser:
 
 
 def validate_arguments(args: argparse.Namespace) -> None:
+    if args.command == "artifact-capture":
+        args.output = args.output.resolve()
+        args.native_binary = args.native_binary.resolve()
+        if not args.image.strip() or args.build_timeout_seconds <= 0:
+            raise CaptureError("artifact capture image and build timeout must be valid")
+        return
     if args.command not in {"capture", "preflight"}:
         return
     args.runner_id = reject_placeholder("runner ID", args.runner_id)
@@ -2743,6 +2903,8 @@ def main() -> None:
         validate_arguments(args)
         if args.command == "self-test":
             self_test()
+        elif args.command == "artifact-capture":
+            capture_artifact_budgets(args)
         elif args.command == "preflight":
             preflight_json(args)
         else:

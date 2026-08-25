@@ -1,6 +1,26 @@
-# B1 native and OCI performance evidence
+# B1 performance policy and evidence
 
-This suite captures the B1 headless baseline without turning a desktop sample into constrained-hardware proof. Capture is Linux-only and requires a clean Git tree, a source-labeled local OCI image, route-less user/network namespaces, a demonstrably local Docker daemon on a Unix socket, Docker network mode `none`, and cgroup v2.
+The B1 milestone performance gate runs the exact release daemon inside a kernel-enforced 192 MiB, one-vCPU, zero-swap cgroup-v2 envelope on x86_64 and aarch64. Each architecture performs one 600-second warm-up followed by 900 one-second observations in a route-less network namespace. Every absolute sample deadline permits at most 500 ms of scheduler lateness; a delayed sample fails instead of diluting CPU or widening the memory gaps. The receipt retains the raw observations, measured binary, exact-source OCI image, and contract pack. The verifier recomputes steady memory, idle CPU average and p95, artifact sizes, digests, and applied controls.
+
+Download the two qualifying workflow artifacts into the governed evidence root before assembling the B1 manifest:
+
+```bash
+ATTEMPT="$(gh run view RUN_ID --json attempt --jq .attempt)"
+gh run download RUN_ID \
+  -n "fasti-b1-envelope-x86_64-attempt-${ATTEMPT}" \
+  -D target/fasti-evidence/envelope/x86_64
+gh run download RUN_ID \
+  -n "fasti-b1-envelope-aarch64-attempt-${ATTEMPT}" \
+  -D target/fasti-evidence/envelope/aarch64
+
+cargo xtask test milestone --body B1
+```
+
+The artifact names include the workflow attempt so a rerun cannot silently mix old and new packages. The milestone command requires both packages to declare one exact `dev` push and workflow attempt. It rejects pull-request, stale-source, dirty-source, shortened-window, over-budget, OOM, wrong-architecture, substituted-binary, loose-limit, or incomplete artifact evidence. It also fails if another required B1 artifact, such as the governed Tauri or QA receipt, is missing or stale.
+
+The offline verifier integrity-binds the declared GitHub metadata; it does not authenticate GitHub as the publisher. Download the packages directly from the selected run with `gh run download` to preserve that transport boundary.
+
+The longer native/OCI harness below remains available for optional physical-device comparison and future performance investigation. It is not a B1 milestone gate. Capture is Linux-only and requires a clean Git tree, a source-labeled local OCI image, route-less user/network namespaces, a demonstrably local Docker daemon on a Unix socket, Docker network mode `none`, and cgroup v2.
 
 The harness builds the governed image itself from a verifier-owned `git archive HEAD` extraction, never from the live checkout. Ignored files, uncommitted files, and files changed while Docker is building cannot enter the context. The resulting image labels bind exact `HEAD`, `HEAD^{tree}`, `HEAD:contracts`, the Dockerfile digest, and the exact Git-archive digest. It then runs only the immutable `sha256:...` image ID and extracts `/usr/local/bin/fastid` from those same image bytes; an unrelated prebuilt binary cannot enter a qualifying run. Every measured container uses `--network none`. Before sampling, the reported `State.Pid` must exist in a local cgroup-v2 path containing the exact container ID; a Unix-socket proxy to a remote daemon therefore cannot masquerade as local cgroup evidence.
 
@@ -10,7 +30,7 @@ The harness builds the governed image itself from a verifier-owned `git archive 
 
 | Budget           |       Bytes | MiB | B1 disposition                                                                      |
 | ---------------- | ----------: | --: | ----------------------------------------------------------------------------------- |
-| Idle target      |  67,108,864 |  64 | Evaluated against the largest steady observation within any run, then the worst run |
+| Idle target      |  67,108,864 |  64 | Evaluated against the largest steady observation, then the worse architecture       |
 | Normal target    | 100,663,296 |  96 | `not_applicable`; B1 has no implemented normal-operation workload                   |
 | Heavy target     | 167,772,160 | 160 | `not_applicable`; B1 has no implemented heavy-operation workload                    |
 | Absolute ceiling | 201,326,592 | 192 | Evaluated against the worst Fasti daemon or guarded-CLI process-tree/cgroup peak    |
@@ -32,9 +52,9 @@ The same document locks the idle CPU, measurement-duration, and distribution-art
 | Unpacked OCI image              |          100 MiB |
 | Compressed contract pack        |            5 MiB |
 
-Idle CPU is derived independently for native and OCI daemon runs and evaluated against the worst of at least five runs. Artifact results are first-class verdicts; an omitted or hand-entered result cannot close B1.
+The qualifying CI path evaluates one canonical idle run per architecture. It recomputes CPU from the 900 raw cgroup observations and checks the governed OCI and contract-pack sizes. The unpacked OCI measurement is the sum of the unique layer-tar member sizes referenced by the retained Docker-save manifest. The verifier hashes every layer against the ordered image `diff_ids`, checks the config digest and architecture, and derives the contracts tree, Dockerfile digest, and exact Git-archive digest from the bound commit before accepting the image labels. The native installed-runtime and native archive budgets remain `not_applicable` until B8 produces those distributions. The optional comparison harness below continues to use at least five independent native and OCI runs. An omitted or hand-entered result cannot close B1.
 
-## Measured scenarios
+## Optional comparison scenarios
 
 Every complete receipt contains exactly five scenarios in this order:
 
@@ -50,7 +70,7 @@ The retained CLI wrapper keeps the cgroup alive long enough to read `memory.peak
 
 For native subjects the harness records startup, steady and peak process-tree RSS, process-tree CPU, process count, binary size, and exact commands. Native CPU comes from `/proc/<pid>/schedstat` runtime nanoseconds, so the 0.5% and 1% gates are measurable instead of being rounded to scheduler jiffies. OCI subjects add raw cgroup `memory.current`, `memory.peak`, and `cpu.stat usage_usec` counters, plus image and in-image binary sizes. Every named observation is retained in the receipt with a monotonic elapsed nanosecond, steady-window marker, memory, CPU-runtime counter, and process count. The validator independently recomputes sample summaries, scenario summaries, idle CPU, and verdicts and rejects duplicated observations. Empty-process results are never subtracted.
 
-## Run
+## Run the optional comparison harness
 
 Install the locked workspace dependencies from a clean checkout:
 
@@ -119,7 +139,7 @@ The script does not fabricate a partial JSON document for any of those cases.
 
 ## Device qualification ledger
 
-[`device-hypotheses.json`](device-hypotheses.json) names Ryan Winkler as the performance-gate owner and separately tracks the Raspberry Pi 5 champion, calibrated J4125 secondary, and four packaging hypotheses. Performance-gate ownership does not assign a physical runner: the Pi and J4125 custodians, exact runner fingerprints, artifact and contract references, evidence references, and results remain `null`. Every profile therefore remains honestly `blocking_unassigned` until a real custodian performs a validated run.
+[`device-hypotheses.json`](device-hypotheses.json) names Ryan Winkler as the comparison owner and separately tracks the Raspberry Pi 5 target, calibrated J4125 secondary, and four packaging hypotheses. This does not assign a physical runner: the Pi and J4125 custodians, exact runner fingerprints, artifact and contract references, evidence references, and results remain `null`. Each optional profile therefore remains honestly `blocking_unassigned` within the comparison ledger until a real custodian performs a validated run; that ledger state does not block B1.
 
 The four structured B4/B8 spikes are research inputs, not compatibility claims or qualification evidence:
 
@@ -134,7 +154,7 @@ Each packaging spike hypothesizes a locally signed APK installed through ADB ove
 
 The v3 ledger can represent `assigned_pending_evidence`, `evidence_validated`, `qualified`, and `calibrated` without weakening that checked-in state. For any evidence-backed state, the validator loads the referenced receipt, verifies its SHA-256, validates the receipt, and correlates custodian, physical fingerprint, source artifacts, contract object, and derived budget results. `qualified` requires both applicable B1 budgets to pass. `calibrated` additionally requires the exact evidence reference owned by a qualified Raspberry Pi 5 entry, matching git tree, contracts, harness, budgets, workload/scenario settings, and measured J4125-to-champion idle and absolute-memory ratios.
 
-J4125 evidence does not stand in for the champion result. Its calibration relationship to the Raspberry Pi 5 must be defined and measured before it becomes a calibrated secondary signal.
+J4125 comparison evidence does not stand in for a Raspberry Pi result. Its relationship to the Raspberry Pi 5 specification must be measured before it becomes a calibrated secondary comparison.
 
 ## Governed empty Tauri packaging receipt
 
@@ -174,8 +194,8 @@ Verification rejects prerequisite-dependent bundles, extra refs, digest or objec
 - [`evidence.schema.json`](evidence.schema.json): JSON Schema 2020-12 receipt shape.
 - [`budgets.json`](budgets.json): canonical budget values.
 - [`budgets.schema.json`](budgets.schema.json): locked budget contract.
-- [`physical-profiles.json`](physical-profiles.json): canonical Raspberry Pi 5 and J4125 physical-profile policy.
-- [`physical-profiles.schema.json`](physical-profiles.schema.json): policy shape and locked semantics.
+- [`physical-profiles.json`](physical-profiles.json): optional Raspberry Pi 5 and J4125 comparison specifications; explicitly non-gating.
+- [`physical-profiles.schema.json`](physical-profiles.schema.json): comparison-policy shape and locked non-gating role.
 - [`device-hypotheses.json`](device-hypotheses.json): explicitly unassigned hardware ledger.
 - [`device-hypotheses.schema.json`](device-hypotheses.schema.json): assignable ledger and calibration-state contract.
 - [`validate-evidence.mjs`](validate-evidence.mjs): JSON Schema and semantic validation, including negative sentinels.

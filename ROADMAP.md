@@ -33,7 +33,7 @@ flowchart LR
 - Author transport-only AsyncAPI 3.x behavior and JSON-LD 1.1 vocabularies/contexts.
 - Deterministically generate and validate JSON Schema 2020-12, OpenAPI, AsyncAPI, JSON-LD, OKF, examples, errors, and the TypeScript HTTP/SSE SDK.
 - Prove deliberate drift fails and the headless sandbox contract has no authorization bypass.
-- Fingerprint the Raspberry Pi 5 and J4125-class runners and capture honest empty-process baselines.
+- Capture exact-source x86_64 and aarch64 release-daemon receipts inside the kernel-enforced low-hardware envelope.
 
 ## B2: Implement the local kernel
 
@@ -42,7 +42,7 @@ flowchart LR
 - Add bounded streaming evidence hashing and same-filesystem durable promotion.
 - Add the bounded SQLite writer with verified durability settings and durable receipt replay over authenticated cursor SSE.
 - Ship the real network-denied `fasti sandbox --headless` journey.
-- Pass crash, power-cut, quota, concurrency, fuzz, restart, offline, performance, and contract parity gates on both required profiles.
+- Pass crash, power-cut, quota, concurrency, fuzz, restart, offline, performance, and contract parity gates under each applicable governed environment.
 
 ## B3: Add correction and complete portability
 
@@ -85,7 +85,7 @@ The first authorized slice can report observations through public capabilities. 
 
 - Own native-first bundles, OCI parity, desktop/package lifecycle, signing, trust roots, updates, SBOMs, and explicit public release actions.
 - Prove macOS and Windows restore activation or keep it explicitly unsupported without mutation.
-- Qualify the Raspberry Pi 5 and J4125-class profiles and resolve the Ugoos AM6B+, Xiaomi Box M3, Nvidia Shield, and representative TV hypotheses.
+- Run optional Raspberry Pi 5 and J4125 comparison profiles and resolve the Ugoos AM6B+, Xiaomi Box M3, Nvidia Shield, and representative TV packaging hypotheses.
 - Run final install, upgrade, recovery, accessibility, security, performance, QA, design, and developer-experience gates before publishing.
 
 ## Product non-goals

@@ -73,7 +73,7 @@ Performance targets remain:
 - 160 MiB heavy operation;
 - 192 MiB absolute ceiling.
 
-Physical Pi 5 and J4125 evidence cannot be replaced by hosted runners.
+Qualifying B1 performance receipts must bind the exact release daemon and declare the same CI workflow run attempt for one exact `dev` push on x86_64 and aarch64. Each architecture must complete the governed 600-second warm-up and 900-second route-less idle measurement. The verifier recomputes memory, CPU, artifact sizes, architecture, and the kernel-applied 192 MiB, one-vCPU, zero-swap controls. Pi 5 and J4125 profiles are optional comparison specifications, not milestone gates.
 
 ## QA
 

@@ -125,17 +125,49 @@ jobs:
             runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
       - name: Build the daemon under test
         run: cargo build --locked --release --bin fastid
+      - name: Capture exact-source OCI and contract artifact budgets
+        run: |
+          pnpm install --frozen-lockfile
+          python3 -B scripts/benchmark-b1.py artifact-capture \
+            --image "fasti:b1-${{ matrix.arch }}" \
+            --native-binary target/release/fastid \
+            --output "target/fasti-artifact-stage/${{ matrix.arch }}/receipt.json"
       # The self-test runs first on purpose. A memory gate that cannot fail
       # would report success forever, so the envelope proves it enforces its
       # limits before any measurement taken with it is trusted.
       - name: Prove the envelope enforces its limits
         run: bash scripts/test-bench-envelope.sh
-      - name: Measure daemon idle memory inside the enforced envelope
-        run: bash scripts/bench-envelope.sh --target idle -- bash scripts/bench-daemon-idle.sh target/release/fastid
+      - name: Measure the canonical daemon idle window inside the enforced envelope
+        env:
+          FASTI_ENVELOPE_ARCH: ${{ matrix.arch }}
+        run: |
+          bash scripts/bench-envelope.sh \
+            --target idle \
+            --profile canonical-idle \
+            --receipt "target/fasti-evidence/envelope/${{ matrix.arch }}/receipt.json" \
+            --artifact target/release/fastid \
+            --build-profile release \
+            --artifact-budget-receipt "target/fasti-artifact-stage/${{ matrix.arch }}/receipt.json" \
+            -- bash scripts/bench-daemon-idle.sh target/release/fastid
+      - name: Retain the exact envelope receipt and measured daemon
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fasti-b1-envelope-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/envelope/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 30
 
   review-source-snapshot:
     name: Exact tracked source snapshot
@@ -188,4 +220,3 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/rust-lcov.info,coverage/js-lcov.info
           fail_ci_if_error: false
-

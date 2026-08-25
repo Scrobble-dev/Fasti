@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import socket
 import stat
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -150,6 +152,300 @@ class ImmutableSourceTests(unittest.TestCase):
             "dev.scrobble.fasti.build.recipe.sha256": self.recipe,
             "dev.scrobble.fasti.build.context.archive.sha256": self.context_archive,
         }
+
+    def _source(self) -> dict[str, str]:
+        return {
+            "git_commit": self.commit,
+            "git_tree": self.tree,
+            "contract_ref": self.contract,
+            "build_recipe_sha256": self.recipe,
+            "build_context_archive_sha256": self.context_archive,
+        }
+
+    def _saved_oci_fixture(
+        self,
+        *,
+        layers: list[tuple[str, bytes]] | None = None,
+        config: dict[str, object] | bytes | None = None,
+        manifest: list[dict[str, object]] | bytes | None = None,
+    ) -> tuple[str, list[tuple[str, bytes, bytes]]]:
+        layers = layers or [("layer/layer.tar", b"layer bytes")]
+        if config is None:
+            config = {
+                "architecture": "amd64",
+                "config": {"Labels": self.labels},
+                "rootfs": {
+                    "diff_ids": [
+                        "sha256:" + hashlib.sha256(payload).hexdigest()
+                        for _, payload in layers
+                    ]
+                },
+            }
+        config_bytes = (
+            config
+            if isinstance(config, bytes)
+            else json.dumps(config, separators=(",", ":")).encode()
+        )
+        image_id = "sha256:" + hashlib.sha256(config_bytes).hexdigest()
+        config_path = image_id.removeprefix("sha256:") + ".json"
+        if manifest is None:
+            manifest = [{"Config": config_path, "Layers": [name for name, _ in layers]}]
+        manifest_bytes = (
+            manifest
+            if isinstance(manifest, bytes)
+            else json.dumps(manifest, separators=(",", ":")).encode()
+        )
+        members = [
+            ("manifest.json", manifest_bytes, tarfile.REGTYPE),
+            (config_path, config_bytes, tarfile.REGTYPE),
+            *((name, payload, tarfile.REGTYPE) for name, payload in layers),
+        ]
+        return image_id, members
+
+    @staticmethod
+    def _write_saved_oci_archive(
+        path: Path, members: list[tuple[str, bytes, bytes]]
+    ) -> None:
+        with tarfile.open(path, "w:gz") as archive:
+            for member_name, payload, member_type in members:
+                info = tarfile.TarInfo(member_name)
+                info.type = member_type
+                info.size = len(payload) if member_type == tarfile.REGTYPE else 0
+                archive.addfile(info, io.BytesIO(payload) if info.size else None)
+
+    def _assert_saved_oci_rejected(
+        self,
+        image_id: str,
+        members: list[tuple[str, bytes, bytes]],
+        message: str,
+        exception: type[BaseException] = benchmark.CaptureError,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            archive_path = Path(temp_name) / "image.tar.gz"
+            self._write_saved_oci_archive(archive_path, members)
+            with self.assertRaisesRegex(exception, message):
+                benchmark.saved_oci_layer_bytes(
+                    archive_path, image_id, self._source()
+                )
+
+    def test_saved_oci_size_comes_from_bound_manifest_layers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            archive_path = Path(temp_name) / "image.tar.gz"
+            image_id, members = self._saved_oci_fixture()
+            self._write_saved_oci_archive(archive_path, members)
+            self.assertEqual(
+                benchmark.saved_oci_layer_bytes(archive_path, image_id, self._source()),
+                len(b"layer bytes"),
+            )
+            members[-1] = ("layer/layer.tar", b"substituted", tarfile.REGTYPE)
+            self._write_saved_oci_archive(archive_path, members)
+            with self.assertRaisesRegex(benchmark.CaptureError, "layer bytes"):
+                benchmark.saved_oci_layer_bytes(
+                    archive_path, image_id, self._source()
+                )
+
+    def test_saved_oci_rejects_unsafe_and_duplicate_tar_paths(self) -> None:
+        image_id, members = self._saved_oci_fixture()
+        cases = [
+            (
+                "parent traversal",
+                [*members, ("../escape", b"x", tarfile.REGTYPE)],
+                "unsafe path",
+            ),
+            (
+                "absolute path",
+                [*members, ("/escape", b"x", tarfile.REGTYPE)],
+                "unsafe path",
+            ),
+            ("duplicate path", [*members, members[0]], "duplicate path"),
+        ]
+        for name, candidate, message in cases:
+            with self.subTest(name=name):
+                self._assert_saved_oci_rejected(image_id, candidate, message)
+
+    def test_saved_oci_requires_bounded_regular_manifest_and_config(self) -> None:
+        image_id, members = self._saved_oci_fixture()
+        config_path = image_id.removeprefix("sha256:") + ".json"
+        oversized = b"x" * (1024 * 1024 + 1)
+        cases = [
+            (
+                "missing manifest",
+                [member for member in members if member[0] != "manifest.json"],
+                "manifest.json",
+            ),
+            (
+                "non-regular manifest",
+                [("manifest.json", b"", tarfile.DIRTYPE), *members[1:]],
+                "manifest.json",
+            ),
+            (
+                "oversized manifest",
+                [("manifest.json", oversized, tarfile.REGTYPE), *members[1:]],
+                "manifest.json",
+            ),
+            (
+                "missing config",
+                [member for member in members if member[0] != config_path],
+                config_path,
+            ),
+            (
+                "non-regular config",
+                [
+                    members[0],
+                    (config_path, b"", tarfile.DIRTYPE),
+                    *members[2:],
+                ],
+                config_path,
+            ),
+            (
+                "oversized config",
+                [
+                    members[0],
+                    (config_path, oversized, tarfile.REGTYPE),
+                    *members[2:],
+                ],
+                config_path,
+            ),
+        ]
+        for name, candidate, message in cases:
+            with self.subTest(name=name):
+                self._assert_saved_oci_rejected(image_id, candidate, message)
+
+    def test_saved_oci_rejects_malformed_or_mismatched_manifest(self) -> None:
+        image_id, members = self._saved_oci_fixture()
+        cases = [
+            (
+                "malformed JSON",
+                [("manifest.json", b"{", tarfile.REGTYPE), *members[1:]],
+                json.JSONDecodeError,
+                "property name",
+            ),
+            (
+                "multiple images",
+                [
+                    (
+                        "manifest.json",
+                        json.dumps([{}, {}]).encode(),
+                        tarfile.REGTYPE,
+                    ),
+                    *members[1:],
+                ],
+                benchmark.CaptureError,
+                "exactly one image manifest",
+            ),
+            (
+                "config mismatch",
+                [
+                    (
+                        "manifest.json",
+                        json.dumps(
+                            [{"Config": "other.json", "Layers": ["layer/layer.tar"]}]
+                        ).encode(),
+                        tarfile.REGTYPE,
+                    ),
+                    *members[1:],
+                ],
+                benchmark.CaptureError,
+                "config does not match",
+            ),
+        ]
+        for name, candidate, exception, message in cases:
+            with self.subTest(name=name):
+                self._assert_saved_oci_rejected(
+                    image_id, candidate, message, exception
+                )
+
+    def test_saved_oci_rejects_invalid_layer_inventory(self) -> None:
+        image_id, members = self._saved_oci_fixture()
+        config_path = image_id.removeprefix("sha256:") + ".json"
+
+        def manifest(layers: list[str]) -> tuple[str, bytes, bytes]:
+            return (
+                "manifest.json",
+                json.dumps([{"Config": config_path, "Layers": layers}]).encode(),
+                tarfile.REGTYPE,
+            )
+
+        cases = [
+            ("empty", [manifest([]), *members[1:]], "empty or duplicated"),
+            (
+                "duplicate",
+                [
+                    manifest(["layer/layer.tar", "layer/layer.tar"]),
+                    *members[1:],
+                ],
+                "empty or duplicated",
+            ),
+            (
+                "extra layer",
+                [*members, ("extra/layer.tar", b"extra", tarfile.REGTYPE)],
+                "layer files do not match",
+            ),
+        ]
+        for name, candidate, message in cases:
+            with self.subTest(name=name):
+                self._assert_saved_oci_rejected(image_id, candidate, message)
+
+    def test_saved_oci_rejects_invalid_config_digest_json_and_labels(self) -> None:
+        image_id, members = self._saved_oci_fixture()
+        config_path = image_id.removeprefix("sha256:") + ".json"
+        self._assert_saved_oci_rejected(
+            image_id,
+            [members[0], (config_path, b"{}", tarfile.REGTYPE), *members[2:]],
+            "config digest",
+        )
+
+        malformed_id, malformed = self._saved_oci_fixture(config=b"{")
+        self._assert_saved_oci_rejected(
+            malformed_id,
+            malformed,
+            "property name",
+            json.JSONDecodeError,
+        )
+
+        stale_labels = {**self.labels, "org.opencontainers.image.revision": "9" * 40}
+        stale_id, stale = self._saved_oci_fixture(
+            config={
+                "architecture": "amd64",
+                "config": {"Labels": stale_labels},
+                "rootfs": {
+                    "diff_ids": [
+                        "sha256:" + hashlib.sha256(b"layer bytes").hexdigest()
+                    ]
+                },
+            }
+        )
+        self._assert_saved_oci_rejected(stale_id, stale, "config label is stale")
+
+    def test_saved_oci_rejects_invalid_diff_ids_and_multilayer_binding(self) -> None:
+        layer_one = ("layer/one.tar", b"one")
+        layer_two = ("layer/two.tar", b"two")
+        layers = [layer_one, layer_two]
+        valid_ids = [
+            "sha256:" + hashlib.sha256(payload).hexdigest()
+            for _, payload in layers
+        ]
+        configs = [
+            ("non-list", "invalid", "layer identity"),
+            ("wrong count", valid_ids[:1], "layer identity"),
+            ("multi-layer missing identity", [], "layer identity"),
+            (
+                "multi-layer wrong second digest",
+                [valid_ids[0], "sha256:" + "0" * 64],
+                "layer bytes",
+            ),
+        ]
+        for name, diff_ids, message in configs:
+            with self.subTest(name=name):
+                image_id, members = self._saved_oci_fixture(
+                    layers=layers,
+                    config={
+                        "architecture": "amd64",
+                        "config": {"Labels": self.labels},
+                        "rootfs": {"diff_ids": diff_ids},
+                    },
+                )
+                self._assert_saved_oci_rejected(image_id, members, message)
 
     def test_unlabeled_or_mismatched_image_is_refused(self) -> None:
         inspection = json.dumps(
