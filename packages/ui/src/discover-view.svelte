@@ -75,7 +75,12 @@
   {:else if hostProblem && providerCredentials === undefined}
     <div class="unavailable">
       <p class="problem" role="alert">{hostProblem}</p>
-      <button id="provider-retry" type="button" onclick={onRetry}>
+      <button
+        id="provider-retry"
+        type="button"
+        class="btn btn-outline-secondary"
+        onclick={onRetry}
+      >
         Retry host connection
       </button>
     </div>
@@ -85,7 +90,7 @@
       <p>
         Add a key in Settings. Fasti stores it in the platform credential store.
       </p>
-      <button type="button" onclick={onOpenSettings}
+      <button type="button" class="btn btn-primary" onclick={onOpenSettings}
         >Open provider settings</button
       >
     </section>
@@ -96,6 +101,7 @@
         <input
           id="provider-search"
           type="search"
+          class="form-control"
           required
           maxlength="256"
           bind:value={query}
@@ -103,7 +109,11 @@
           placeholder="Title, author, or ISBN"
           autocomplete="off"
         />
-        <button type="submit" disabled={searching || !query.trim()}>
+        <button
+          type="submit"
+          class="btn btn-primary"
+          disabled={searching || !query.trim()}
+        >
           <IconSearch size={18} aria-hidden="true" />
           {searching ? "Searching…" : "Search"}
         </button>
@@ -132,7 +142,9 @@
           {#each results as result (result.provider_id)}
             <li>
               <h3>{result.title}</h3>
-              {#if result.description}<p>{result.description}</p>{/if}
+              {#if result.authors.length > 0}
+                <p>By {result.authors.join(", ")}</p>
+              {/if}
               <dl>
                 <div>
                   <dt>Provider</dt>

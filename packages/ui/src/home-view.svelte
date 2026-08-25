@@ -259,13 +259,6 @@
               <KindIcon size={14} />
             </div>
 
-            <div
-              class="top-badge top-right-badge verified"
-              title="Identity Verified"
-            >
-              <IconShieldCheck size={14} />
-            </div>
-
             {#if pct > 0}
               <div class="progress-bar-track">
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
@@ -352,13 +345,6 @@
               <KindIcon size={14} />
             </div>
 
-            <div
-              class="top-badge top-right-badge verified"
-              title="Identity Verified"
-            >
-              <IconShieldCheck size={14} />
-            </div>
-
             {#if pct > 0}
               <div class="progress-bar-track">
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
@@ -442,13 +428,6 @@
 
             <div class="top-badge top-left-badge" title={rec.mediaKind}>
               <KindIcon size={14} />
-            </div>
-
-            <div
-              class="top-badge top-right-badge verified"
-              title="Identity Verified"
-            >
-              <IconShieldCheck size={14} />
             </div>
 
             {#if pct > 0}
@@ -687,14 +666,6 @@
 
   .top-left-badge {
     left: 8px;
-  }
-
-  .top-right-badge {
-    right: 8px;
-  }
-
-  .top-right-badge.verified {
-    color: #4ade80;
   }
 
   .progress-bar-track {

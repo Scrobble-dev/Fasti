@@ -5,6 +5,9 @@ use fasti_application::{
 use fasti_domain::RequestCorrelationId;
 use fasti_store::SqliteKernel;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
+use std::path::Path;
 
 pub(crate) const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
@@ -15,7 +18,7 @@ pub(crate) enum SetupSecret {
 }
 
 impl SetupSecret {
-    const fn account(self) -> &'static str {
+    const fn label(self) -> &'static str {
         match self {
             Self::Proof => "local-bootstrap-proof-v1",
             Self::Credential => "local-admin-credential-v1",
@@ -86,6 +89,16 @@ impl DesktopProblem {
         }
     }
 
+    pub(crate) fn provider_credential(detail: impl Into<String>) -> Self {
+        Self {
+            code: "provider.credential_invalid",
+            title: "Provider credential is invalid",
+            detail: detail.into(),
+            next_action:
+                "Replace or remove the provider credential. Fasti local data is unchanged.",
+        }
+    }
+
     fn application(problem: &FastiProblem) -> Self {
         let contract = problem.code().contract();
         Self {
@@ -132,11 +145,26 @@ pub(crate) trait SetupSecretStore: Send + Sync {
     fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem>;
 }
 
-pub(crate) struct KeyringSetupSecretStore;
+pub(crate) struct KeyringSetupSecretStore {
+    account_scope: String,
+}
 
 impl KeyringSetupSecretStore {
-    fn entry(secret: SetupSecret) -> Result<crate::secure_storage::Entry, DesktopProblem> {
-        crate::secure_storage::Entry::new(KEYRING_SERVICE, secret.account()).map_err(|_| {
+    pub(crate) fn new(data_root: &Path) -> Self {
+        let digest = Sha256::digest(data_root.as_os_str().as_encoded_bytes());
+        let mut account_scope = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            write!(account_scope, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        Self { account_scope }
+    }
+
+    fn account(&self, secret: SetupSecret) -> String {
+        format!("{}-{}", secret.label(), self.account_scope)
+    }
+
+    fn entry(&self, secret: SetupSecret) -> Result<crate::secure_storage::Entry, DesktopProblem> {
+        crate::secure_storage::Entry::new(KEYRING_SERVICE, &self.account(secret)).map_err(|_| {
             DesktopProblem::secure_storage("Fasti could not open the system credential store.")
         })
     }
@@ -144,7 +172,7 @@ impl KeyringSetupSecretStore {
 
 impl SetupSecretStore for KeyringSetupSecretStore {
     fn load(&self, secret: SetupSecret) -> Result<Option<SecretMaterial>, DesktopProblem> {
-        let entry = Self::entry(secret)?;
+        let entry = self.entry(secret)?;
         match entry.get_secret() {
             Ok(value) => {
                 let bytes: [u8; 32] = value.try_into().map_err(|_| {
@@ -162,7 +190,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     }
 
     fn store(&self, secret: SetupSecret, value: &SecretMaterial) -> Result<(), DesktopProblem> {
-        let entry = Self::entry(secret)?;
+        let entry = self.entry(secret)?;
         entry.set_secret(value.expose_bytes()).map_err(|_| {
             DesktopProblem::secure_storage("Fasti could not save setup secrets securely.")
         })?;
@@ -178,7 +206,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     }
 
     fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem> {
-        let entry = Self::entry(secret)?;
+        let entry = self.entry(secret)?;
         match entry.delete_credential() {
             Ok(()) | Err(crate::secure_storage::Error::NoEntry) => Ok(()),
             Err(_) => Err(DesktopProblem::secure_storage(
@@ -342,6 +370,23 @@ mod tests {
         assert_eq!(
             inspect_setup(&kernel, &store).expect("ready status"),
             SetupStatus::ready(false)
+        );
+    }
+
+    #[test]
+    fn keyring_accounts_are_scoped_to_the_data_root() {
+        let root_a = tempfile::tempdir().expect("first data root");
+        let root_b = tempfile::tempdir().expect("second data root");
+        let store_a = KeyringSetupSecretStore::new(root_a.path());
+        let store_b = KeyringSetupSecretStore::new(root_b.path());
+
+        assert_ne!(
+            store_a.account(SetupSecret::Credential),
+            store_b.account(SetupSecret::Credential)
+        );
+        assert_ne!(
+            store_a.account(SetupSecret::Proof),
+            store_a.account(SetupSecret::Credential)
         );
     }
 }

@@ -173,7 +173,12 @@
   {:else if loadProblem}
     <p class="problem" role="alert">{loadProblem}</p>
     {#if onRetry}
-      <button id="network-retry" type="button" onclick={onRetry}>
+      <button
+        id="network-retry"
+        type="button"
+        class="btn btn-outline-secondary"
+        onclick={onRetry}
+      >
         Retry host connection
       </button>
     {/if}
@@ -190,6 +195,7 @@
             Service URL
             <input
               type="url"
+              class="form-control"
               required
               bind:value={draft.service_url}
               disabled={configuration.connection.service_url.managed}
@@ -203,6 +209,7 @@
             Public URL (optional)
             <input
               type="url"
+              class="form-control"
               bind:value={draft.public_url}
               disabled={configuration.connection.public_url.managed}
               placeholder="https://fasti.example.internal"
@@ -243,6 +250,7 @@
             <label>
               {item[1]}
               <textarea
+                class="form-control"
                 rows="3"
                 value={listText(
                   draft.outbound_policy[
@@ -269,6 +277,7 @@
               <label class="check-label">
                 <input
                   type="checkbox"
+                  class="form-check-input"
                   checked={draft.outbound_policy.allow_networks.includes(
                     network,
                   )}
@@ -289,6 +298,7 @@
               <label class="check-label">
                 <input
                   type="checkbox"
+                  class="form-check-input"
                   checked={draft.outbound_policy.deny_networks.includes(
                     network,
                   )}
@@ -307,10 +317,15 @@
       </fieldset>
 
       <div class="actions">
-        <button type="submit" class="primary" disabled={!!busy}>
+        <button type="submit" class="btn btn-primary primary" disabled={!!busy}>
           {busy === "save" ? "Saving…" : "Save network settings"}
         </button>
-        <button type="button" disabled={!!busy} onclick={testConnection}>
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          disabled={!!busy}
+          onclick={testConnection}
+        >
           {busy === "test" ? "Testing…" : "Test service URL"}
         </button>
       </div>

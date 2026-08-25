@@ -17,6 +17,7 @@
   let { record, collections, onClose, onSaveCollection }: Props = $props();
 
   let selected = $state<string>();
+  let dialog: HTMLDialogElement | undefined;
   let availableCollections = $state<string[]>([]);
   let syncedRecordId = $state("");
 
@@ -29,6 +30,10 @@
       syncedRecordId = record.id;
       selected = record.collectionName;
     }
+  });
+
+  $effect(() => {
+    if (!dialog?.open) dialog?.showModal();
   });
   let newCollectionInput = $state("");
 
@@ -57,11 +62,14 @@
   }
 </script>
 
-<div
+<dialog
+  bind:this={dialog}
   class="modal-backdrop"
-  role="dialog"
-  aria-modal="true"
   aria-labelledby="coll-title"
+  oncancel={onClose}
+  onclick={(event) => {
+    if (event.target === event.currentTarget) onClose();
+  }}
 >
   <div class="modal-card">
     <div class="modal-header">
@@ -128,17 +136,31 @@
       </button>
     </div>
   </div>
-</div>
+</dialog>
 
 <style>
   .modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    background: rgba(0, 0, 0, 0.5);
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    background: transparent;
     display: grid;
     place-items: center;
     padding: 16px;
+  }
+
+  .modal-backdrop::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .modal-backdrop:not([open]) {
+    display: none;
   }
 
   .modal-card {

@@ -222,8 +222,8 @@
     providerNotice = "";
     providerProblem = "";
     try {
-      editingKeyMap[provider] = "";
       await onSaveProviderKey(provider, credential);
+      editingKeyMap[provider] = "";
       providerNotice = "Credential saved in the platform credential store.";
     } catch (error) {
       providerProblem = hostProblemText(

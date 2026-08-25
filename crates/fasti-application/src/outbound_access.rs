@@ -8,6 +8,9 @@
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+const POLICY_IDENTIFIER_LIMIT: usize = 253;
+const POLICY_LIST_LIMIT: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkClass {
@@ -42,6 +45,34 @@ pub struct OutboundAccessPolicy {
     pub deny_networks: Vec<NetworkClass>,
 }
 
+impl OutboundAccessPolicy {
+    pub fn validate_identifiers(&self) -> Result<(), AccessDenial> {
+        for (dimension, values) in [
+            ("provider", &self.allow_providers),
+            ("provider", &self.deny_providers),
+            ("capability", &self.allow_capabilities),
+            ("capability", &self.deny_capabilities),
+        ] {
+            if values.len() > POLICY_LIST_LIMIT {
+                return Err(denial(dimension, "too many policy values"));
+            }
+            for value in values {
+                if value.is_empty()
+                    || value.len() > POLICY_IDENTIFIER_LIMIT
+                    || value.trim() != value
+                    || value.bytes().any(|byte| {
+                        byte.is_ascii_uppercase()
+                            || !(byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+                    })
+                {
+                    return Err(denial(dimension, "invalid policy identifier"));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct OutboundAccessDeclaration<'a> {
     pub provider: &'a str,
@@ -73,6 +104,7 @@ pub fn authorize_outbound(
     host: &str,
     addresses: &[IpAddr],
 ) -> Result<(), AccessDenial> {
+    policy.validate_identifiers()?;
     require_value("provider", declaration.provider)?;
     require_value("capability", capability)?;
     canonical_host(host).map_err(|()| denial("host", host))?;
@@ -404,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn identifiers_are_exact_and_hosts_accept_one_terminal_dot() {
+    fn identifiers_and_policy_values_are_canonical() {
         for (capability, host) in [
             ("METADATA.SEARCH", "www.googleapis.com"),
             ("metadata.search", "www.googleapis.com.."),
@@ -429,7 +461,7 @@ mod tests {
             "www.googleapis.com",
             &public_addresses(),
         )
-        .is_ok());
+        .is_err());
     }
 
     #[test]

@@ -395,8 +395,12 @@ pub(crate) fn parse_origin(value: &str, label: &str) -> Result<reqwest::Url, Des
         )));
     }
     let loopback = url.host_str().is_some_and(|host| {
+        let address = host
+            .strip_prefix('[')
+            .and_then(|value| value.strip_suffix(']'))
+            .unwrap_or(host);
         host.eq_ignore_ascii_case("localhost")
-            || host
+            || address
                 .parse::<IpAddr>()
                 .is_ok_and(|address| address.is_loopback())
     });
@@ -409,13 +413,14 @@ pub(crate) fn parse_origin(value: &str, label: &str) -> Result<reqwest::Url, Des
 }
 
 fn validate_policy(policy: &OutboundAccessPolicy) -> Result<(), DesktopProblem> {
-    for (label, values, host) in [
-        ("allowed providers", &policy.allow_providers, false),
-        ("denied providers", &policy.deny_providers, false),
-        ("allowed capabilities", &policy.allow_capabilities, false),
-        ("denied capabilities", &policy.deny_capabilities, false),
-        ("allowed hosts", &policy.allow_hosts, true),
-        ("denied hosts", &policy.deny_hosts, true),
+    policy.validate_identifiers().map_err(|_| {
+        DesktopProblem::configuration(
+            "Provider and capability policy values must use canonical lowercase identifiers.",
+        )
+    })?;
+    for (label, values) in [
+        ("allowed hosts", &policy.allow_hosts),
+        ("denied hosts", &policy.deny_hosts),
     ] {
         if values.len() > POLICY_LIST_LIMIT {
             return Err(DesktopProblem::configuration(format!(
@@ -427,11 +432,7 @@ fn validate_policy(policy: &OutboundAccessPolicy) -> Result<(), DesktopProblem> 
                 || value.len() > POLICY_VALUE_LIMIT
                 || value.trim() != value
                 || value.chars().any(char::is_control)
-                || (!host
-                    && !value
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)))
-                || (host && !valid_policy_host(value))
+                || !valid_policy_host(value)
             {
                 return Err(DesktopProblem::configuration(format!(
                     "The {label} list contains an invalid value."
@@ -519,13 +520,33 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
 
 #[cfg(windows)]
 fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
-    match fs::rename(source, destination) {
-        Ok(()) => Ok(()),
-        Err(error) if destination.exists() => {
-            fs::remove_file(destination)?;
-            fs::rename(source, destination).map_err(|_| error)
-        }
-        Err(error) => Err(error),
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    // SAFETY: both buffers are live, NUL-terminated Windows paths.
+    if unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    } == 0
+    {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 
@@ -570,8 +591,10 @@ mod tests {
 
     #[test]
     fn managed_values_are_read_only_and_remain_visible() {
-        let mut saved = PersistedNetworkConfiguration::default();
-        saved.service_url = "http://127.0.0.1:9000".to_owned();
+        let saved = PersistedNetworkConfiguration {
+            service_url: "http://127.0.0.1:9000".to_owned(),
+            ..PersistedNetworkConfiguration::default()
+        };
         let overrides = ManagedOverrides {
             service_url: Some((
                 "https://fasti.internal".to_owned(),
@@ -615,6 +638,7 @@ mod tests {
         assert!(validate_origin("http://fasti.internal", "service URL").is_err());
         assert!(validate_origin("http://localhost:0", "service URL").is_err());
         assert!(validate_origin("http://127.0.0.1:8420", "service URL").is_ok());
+        assert!(validate_origin("http://[::1]:8420", "service URL").is_ok());
         assert!(validate_origin("https://fasti.internal", "service URL").is_ok());
     }
 
@@ -632,5 +656,7 @@ mod tests {
         assert!(validate_input(&value).is_err());
         value.outbound_policy.allow_hosts = vec!["www.googleapis.com".to_owned()];
         assert!(validate_input(&value).is_ok());
+        value.outbound_policy.deny_providers = vec!["GOOGLE-BOOKS".to_owned()];
+        assert!(validate_input(&value).is_err());
     }
 }

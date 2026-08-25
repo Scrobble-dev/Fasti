@@ -1592,7 +1592,7 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
                     expected_ref,
                     actual_ref
                 );
-                expected_request
+                Some(expected_request)
             }
             None => {
                 ensure!(
@@ -1601,7 +1601,7 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
                     expected.method,
                     expected.path
                 );
-                "undefined"
+                None
             }
         };
 
@@ -1621,15 +1621,24 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
                     expected_ref,
                     actual_ref
                 );
-                expected_response
+                Some(expected_response)
             }
-            None => "undefined",
+            None => None,
         };
 
         // Bootstrap proofs stay in request bodies. Existing bearer credentials must not
         // be attached to either one-time setup operation.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
+        let has_security = operation
+            .get("security")
+            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
+        ensure!(
+            has_security == authenticated,
+            "production security declaration changed for {} {}",
+            expected.method,
+            expected.path
+        );
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
@@ -1649,8 +1658,14 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
                 operation,
                 "/x-fasti-runtime-availability"
             )?)?,
-            json_string(request_name)?,
-            json_string(response_name)?,
+            request_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+            response_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
         )?;
     }
     output.push_str("} as const;\n\n");

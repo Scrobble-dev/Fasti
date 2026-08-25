@@ -195,11 +195,12 @@ pub fn run() {
                 )
             })?;
             let config_root = app.path().app_config_dir()?;
+            let data_root = data_root(app)?;
             app.manage(DesktopState {
-                data_root: data_root(app)?,
+                secrets: KeyringSetupSecretStore::new(&data_root),
+                data_root,
                 kernel: Mutex::new(None),
                 setup_gate: Mutex::new(()),
-                secrets: KeyringSetupSecretStore,
                 network: NetworkConfigStore::new(&config_root),
             });
             Ok(())

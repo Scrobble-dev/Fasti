@@ -449,6 +449,7 @@
     handleSelectSection("settings");
     await tick();
     document.getElementById("provider-settings-title")?.focus();
+    settingsTarget = undefined;
   }
 
   onMount(() => {
@@ -1029,6 +1030,12 @@
 
   :global(.spin) {
     animation: spin 1.2s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.spin) {
+      animation: none;
+    }
   }
 
   .viewport-canvas {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ThemeSettings } from "./types.js";
+  import { DEFAULT_THEME_SETTINGS } from "./defaults.js";
   import {
     IconSun,
     IconMoon,
@@ -53,15 +54,7 @@
   ];
 
   function handleReset(): void {
-    onUpdateTheme({
-      mode: "dark",
-      accentColor: "#066fd1",
-      fontFamily: "sans-serif",
-      themeBase: "slate",
-      cornerRadius: 1,
-      density: "normal",
-      fontSize: "md",
-    });
+    onUpdateTheme(DEFAULT_THEME_SETTINGS);
   }
 </script>
 

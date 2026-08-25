@@ -114,12 +114,8 @@ _api_url_for_addr() {
   esac
 }
 
-_preferred_addr() {
-  case "$FASTI_LISTEN" in
-    0.0.0.0:*) printf '127.0.0.1:%s\n' "${FASTI_LISTEN##*:}" ;;
-    \[::\]:*) printf '[::1]:%s\n' "${FASTI_LISTEN##*:}" ;;
-    *) printf '%s\n' "$FASTI_LISTEN" ;;
-  esac
+_listener_fell_back() {
+  [[ "$1" != "$FASTI_LISTEN" ]]
 }
 
 _memory_ceiling_mib() {
@@ -374,6 +370,10 @@ _start_container() {
     publish="127.0.0.1::8420"
     used_fallback=1
   fi
+  if ((used_fallback)) && { ((FASTI_API_URL_EXPLICIT)) || [[ -n "$FASTI_PUBLIC_URL" ]]; }; then
+    echo "The preferred port is occupied. Automatic fallback is unsafe with FASTI_API_URL or FASTI_PUBLIC_URL configured." >&2
+    return 1
+  fi
 
   echo "=== Launching Fasti $FASTI_CONTAINER_RUNTIME container ($CONTAINER_NAME) ==="
   mkdir -p "$DATADIR"
@@ -390,11 +390,6 @@ _start_container() {
       "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
       return 1
     }
-    if ((FASTI_API_URL_EXPLICIT)) || [[ -n "$FASTI_PUBLIC_URL" ]]; then
-      echo "The preferred port is occupied. Automatic fallback is unsafe with FASTI_API_URL or FASTI_PUBLIC_URL configured." >&2
-      "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-      return 1
-    fi
     FASTI_API_URL="http://127.0.0.1:$actual_port"
     echo "Preferred port $FASTI_PORT was occupied; using $actual_port on 127.0.0.1."
   fi
@@ -435,7 +430,7 @@ _start_native() {
     echo "Fasti daemon did not publish its bound address; see .dev-logs/fastid.log" >&2
     return 1
   }
-  if [[ "$actual_addr" != "$(_preferred_addr)" ]]; then
+  if _listener_fell_back "$actual_addr"; then
     if ((FASTI_API_URL_EXPLICIT)) || [[ -n "$FASTI_PUBLIC_URL" ]]; then
       echo "The preferred port is occupied. Automatic fallback is unsafe with FASTI_API_URL or FASTI_PUBLIC_URL configured." >&2
       return 1
@@ -526,6 +521,14 @@ _self_test() {
   local status_output
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 "$0" --status)"
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
+  if FASTI_LISTEN=0.0.0.0:18420 _listener_fell_back 0.0.0.0:18420; then
+    echo "self-test treated the requested wildcard listener as a fallback" >&2
+    return 1
+  fi
+  if ! FASTI_LISTEN=0.0.0.0:18420 _listener_fell_back 127.0.0.1:18420; then
+    echo "self-test missed a changed listener" >&2
+    return 1
+  fi
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
   if FASTI_API_URL='http://userinfo-marker@127.0.0.1:18421?query-marker' "$0" --status >/dev/null 2>&1; then

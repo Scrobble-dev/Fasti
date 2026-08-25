@@ -48,73 +48,80 @@
   <section class="timeline-section" aria-label="Recent Media Occurrences">
     <h2 class="section-heading">Recent Timeline</h2>
 
-    <div class="timeline-feed">
-      {#each occurrences as occ (occ.id)}
-        <article class="timeline-card">
-          <div class="card-art">
-            {#if occ.posterUrl}
-              <img
-                src={occ.posterUrl}
-                alt=""
-                class="poster-img"
-                loading="lazy"
-              />
-            {:else}
-              <div class="poster-fallback">{occ.mediaKind}</div>
-            {/if}
-          </div>
-
-          <div class="card-main">
-            <div class="card-header-row">
-              <span class="kind-tag {occ.mediaKind}">{occ.mediaKind}</span>
-              {#if occ.isRewatch}
-                <span class="rewatch-tag" title="Rewatch">
-                  <IconRepeat size={12} stroke={2.5} /> Rewatch
-                </span>
+    {#if occurrences.length === 0}
+      <div class="timeline-empty">
+        <h3>No Chronicle entries</h3>
+        <p>Entries appear after Fasti receives real media activity.</p>
+      </div>
+    {:else}
+      <div class="timeline-feed">
+        {#each occurrences as occ (occ.id)}
+          <article class="timeline-card">
+            <div class="card-art">
+              {#if occ.posterUrl}
+                <img
+                  src={occ.posterUrl}
+                  alt=""
+                  class="poster-img"
+                  loading="lazy"
+                />
+              {:else}
+                <div class="poster-fallback">{occ.mediaKind}</div>
               {/if}
-              <time class="event-time" datetime={occ.timestamp}>
-                {new Date(occ.timestamp).toLocaleDateString("en-IE", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </time>
             </div>
 
-            <button
-              type="button"
-              class="title-link-button"
-              onclick={() => onSelectRecord(occ.recordId)}
-            >
-              <h3 class="event-title">{occ.title}</h3>
-            </button>
-
-            {#if occ.episodeTitle}
-              <p class="episode-title">
-                S{occ.seasonNumber} E{occ.episodeNumber} · {occ.episodeTitle}
-              </p>
-            {/if}
-
-            <div class="card-footer-row">
-              <div class="client-info">
-                <IconDeviceTv size={14} stroke={1.75} />
-                <span>{occ.deviceName}</span>
-                <span class="bullet">·</span>
-                <span class="client-badge">{occ.clientName}</span>
+            <div class="card-main">
+              <div class="card-header-row">
+                <span class="kind-tag {occ.mediaKind}">{occ.mediaKind}</span>
+                {#if occ.isRewatch}
+                  <span class="rewatch-tag" title="Rewatch">
+                    <IconRepeat size={12} stroke={2.5} /> Rewatch
+                  </span>
+                {/if}
+                <time class="event-time" datetime={occ.timestamp}>
+                  {new Date(occ.timestamp).toLocaleDateString("en-IE", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </time>
               </div>
 
-              {#if occ.userRating}
-                <div class="rating-badge">
-                  <IconStarFilled size={13} class="star-icon" />
-                  <span>{occ.userRating}/10</span>
-                </div>
+              <button
+                type="button"
+                class="title-link-button"
+                onclick={() => onSelectRecord(occ.recordId)}
+              >
+                <h3 class="event-title">{occ.title}</h3>
+              </button>
+
+              {#if occ.episodeTitle}
+                <p class="episode-title">
+                  S{occ.seasonNumber} E{occ.episodeNumber} · {occ.episodeTitle}
+                </p>
               {/if}
+
+              <div class="card-footer-row">
+                <div class="client-info">
+                  <IconDeviceTv size={14} stroke={1.75} />
+                  <span>{occ.deviceName}</span>
+                  <span class="bullet">·</span>
+                  <span class="client-badge">{occ.clientName}</span>
+                </div>
+
+                {#if occ.userRating}
+                  <div class="rating-badge">
+                    <IconStarFilled size={13} class="star-icon" />
+                    <span>{occ.userRating}/10</span>
+                  </div>
+                {/if}
+              </div>
             </div>
-          </div>
-        </article>
-      {/each}
-    </div>
+          </article>
+        {/each}
+      </div>
+    {/if}
   </section>
 </div>
 
@@ -359,5 +366,20 @@
 
   .star-icon {
     color: var(--fasti-brand-gold);
+  }
+
+  .timeline-empty {
+    padding: 24px;
+    border: 1px solid var(--fasti-border-subtle);
+    background: var(--fasti-surface-paper);
+  }
+
+  .timeline-empty :is(h3, p) {
+    margin: 0;
+  }
+
+  .timeline-empty p {
+    margin-top: 8px;
+    color: var(--fasti-text-muted);
   }
 </style>

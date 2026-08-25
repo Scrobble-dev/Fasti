@@ -217,7 +217,7 @@ export interface ProviderSearchCandidate {
   readonly provider_id: string;
   readonly title: string;
   readonly kind: "book";
-  readonly description: string;
+  readonly authors: string[];
   readonly image_url: null;
 }
 

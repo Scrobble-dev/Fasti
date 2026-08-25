@@ -1,5 +1,5 @@
 export function hostProblemText(error: unknown, fallback: string): string {
-  if (typeof error === "string" && error.trim()) return error;
+  if (typeof error === "string") return safeText(error) || fallback;
   if (!error || typeof error !== "object") return fallback;
   const candidate = error as { detail?: unknown; next_action?: unknown };
   const detail = safeText(candidate.detail);

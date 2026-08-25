@@ -6,6 +6,7 @@ use fasti_application::{
 };
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::time::Duration;
 use zeroize::Zeroize;
 
@@ -74,7 +75,7 @@ pub(crate) struct ProviderCandidate {
     provider_id: String,
     title: String,
     kind: &'static str,
-    description: String,
+    authors: Vec<String>,
     image_url: Option<String>,
 }
 
@@ -200,6 +201,16 @@ pub(crate) async fn search(
         .send()
         .await
         .map_err(|_| DesktopProblem::provider("Google Books could not be reached."))?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::BAD_REQUEST
+            | reqwest::StatusCode::UNAUTHORIZED
+            | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err(DesktopProblem::provider_credential(
+            "Google Books rejected the configured API key.",
+        ));
+    }
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
         return Err(DesktopProblem::provider(
             "Google Books rate limited the request. Wait, then retry.",
@@ -235,12 +246,7 @@ fn google_books_status() -> Result<ProviderCredentialStatus, DesktopProblem> {
         Ok(mut secret) => {
             let valid = validate_credential_bytes(&secret).is_ok();
             secret.zeroize();
-            if !valid {
-                return Err(DesktopProblem::secure_storage(
-                    "The saved Google Books credential is invalid.",
-                ));
-            }
-            true
+            valid
         }
         Err(KeyringError::NoEntry) => false,
         Err(_) => {
@@ -323,7 +329,7 @@ fn load_credential() -> Result<Option<String>, DesktopProblem> {
             Err(error) => {
                 let mut bytes = error.into_bytes();
                 bytes.zeroize();
-                Err(DesktopProblem::secure_storage(
+                Err(DesktopProblem::provider_credential(
                     "The saved Google Books credential is invalid.",
                 ))
             }
@@ -341,14 +347,15 @@ fn authenticated_request(
     credential: Option<String>,
 ) -> Result<reqwest::RequestBuilder, DesktopProblem> {
     let mut secret = credential.ok_or_else(|| {
-        DesktopProblem::secure_storage(
+        DesktopProblem::provider_credential(
             "Add a Google Books API key in Settings before searching Google Books.",
         )
     })?;
     let header_result = HeaderValue::from_str(&secret);
     secret.zeroize();
-    let mut header = header_result
-        .map_err(|_| DesktopProblem::secure_storage("The Google Books credential is invalid."))?;
+    let mut header = header_result.map_err(|_| {
+        DesktopProblem::provider_credential("The Google Books credential is invalid.")
+    })?;
     header.set_sensitive(true);
     Ok(client.get(url).header("X-Goog-Api-Key", header))
 }
@@ -385,7 +392,7 @@ fn validate_credential_bytes(value: &[u8]) -> Result<(), DesktopProblem> {
         || value.len() > CREDENTIAL_LIMIT
         || !value.iter().all(|byte| byte.is_ascii_graphic())
     {
-        return Err(DesktopProblem::secure_storage(
+        return Err(DesktopProblem::provider_credential(
             "The Google Books credential must contain 1 to 512 visible ASCII characters.",
         ));
     }
@@ -395,11 +402,15 @@ fn validate_credential_bytes(value: &[u8]) -> Result<(), DesktopProblem> {
 fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
     let response: GoogleVolumesResponse = serde_json::from_slice(body)
         .map_err(|_| DesktopProblem::provider("Google Books returned invalid JSON."))?;
+    let mut seen = BTreeSet::new();
     Ok(response
         .items
         .into_iter()
         .filter_map(|item| {
             let id = item.id?;
+            if !seen.insert(id.clone()) {
+                return None;
+            }
             let volume_info = item.volume_info?;
             let title = volume_info.title?;
             if !valid_candidate_text(&id, 256)
@@ -417,7 +428,7 @@ fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProble
                 provider_id: id,
                 title,
                 kind: "book",
-                description: volume_info.authors.join(", "),
+                authors: volume_info.authors,
                 image_url: None,
             })
         })
@@ -468,6 +479,20 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider_id, "valid");
+    }
+
+    #[test]
+    fn duplicate_provider_ids_are_removed_before_the_ui() {
+        let body = br#"{
+          "items": [
+            {"id":"same","volumeInfo":{"title":"First","authors":["Author"]}},
+            {"id":"same","volumeInfo":{"title":"Second","authors":["Author"]}}
+          ]
+        }"#;
+        let candidates = parse_candidates(body).expect("deduplicated response");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].title, "First");
     }
 
     #[test]
