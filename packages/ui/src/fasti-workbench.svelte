@@ -362,6 +362,20 @@
 
   onMount(() => {
     syncFromUrl();
+    const narrowViewport = window.matchMedia("(max-width: 47.99rem)");
+    if (narrowViewport.matches) {
+      workbenchPreferences = {
+        ...workbenchPreferences,
+        sidebarHidden: true,
+      };
+    }
+    const handleViewportChange = (event: MediaQueryListEvent): void => {
+      workbenchPreferences = {
+        ...workbenchPreferences,
+        sidebarHidden: event.matches,
+      };
+    };
+    narrowViewport.addEventListener("change", handleViewportChange);
     void checkNodeHealth();
     const healthInterval = window.setInterval(() => {
       void checkNodeHealth();
@@ -370,6 +384,7 @@
     return () => {
       window.clearInterval(healthInterval);
       window.removeEventListener("popstate", syncFromUrl);
+      narrowViewport.removeEventListener("change", handleViewportChange);
     };
   });
 
@@ -900,5 +915,30 @@
 
   .empty-workbench h1 {
     margin-top: 0;
+  }
+
+  @media (max-width: 47.99rem) {
+    .top-nav-bar {
+      padding: 8px;
+      gap: 8px;
+    }
+
+    .top-nav-bar > div:first-child,
+    .search-field-wrapper {
+      min-width: 0;
+    }
+
+    .top-actions-right {
+      gap: 4px;
+    }
+
+    .scope-select {
+      max-width: 7rem;
+    }
+
+    .empty-workbench {
+      margin: 1.5rem 1rem;
+      padding: 1.5rem;
+    }
   }
 </style>

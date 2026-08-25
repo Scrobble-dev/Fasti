@@ -441,4 +441,13 @@
   .navbar-vertical-collapsed .nav-link-icon {
     margin-right: 0 !important;
   }
+
+  @media (max-width: 47.99rem) {
+    .fasti-sidebar-vertical {
+      position: fixed !important;
+      inset: 0 auto 0 0;
+      z-index: 30;
+      box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+    }
+  }
 </style>
