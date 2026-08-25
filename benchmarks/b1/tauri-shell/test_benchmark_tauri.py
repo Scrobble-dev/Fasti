@@ -34,6 +34,27 @@ class CgroupBoundaryTests(unittest.TestCase):
                 with self.assertRaises(benchmark.CaptureError):
                     benchmark.validate_control_group(value, unit)
 
+    def test_dotdot_component_is_refused_even_when_resolution_stays_inside_root(
+        self,
+    ) -> None:
+        # validate_control_group has three guards: startswith("/"), a literal
+        # ".." in Path(...).parts check, and a resolve()-based containment
+        # check against the cgroup-v2 root. The existing cases above are both
+        # rejected by the FIRST or the LAST guard, so the middle one -- the
+        # literal ".." check -- was never independently exercised.
+        #
+        # This value is built so only the middle guard fires: it starts with
+        # "/", its final component matches the unit, and its resolved path
+        # ("/sys/fs/cgroup/user.slice/<unit>") stays inside the cgroup root,
+        # so the containment guard would accept it. Removing the ".." check
+        # alone makes this value pass; the two existing cases above do not
+        # detect that removal, because the containment guard still catches
+        # them independently.
+        unit = "fasti-b1-tauri-" + "1" * 32 + ".scope"
+        value = f"/user.slice/foo/../{unit}"
+        with self.assertRaises(benchmark.CaptureError):
+            benchmark.validate_control_group(value, unit)
+
 
 class DerivationTests(unittest.TestCase):
     def test_macos_is_refused_before_linux_capture_requirements(self) -> None:
