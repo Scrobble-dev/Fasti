@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { globSync, readFileSync, statSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,10 +39,12 @@ function packageEntryPath(packageRoot, entry) {
   return path;
 }
 
-function packageEntryExists(packageRoot, entry) {
+function packageEntryExists(packageRoot, packageFiles, entry) {
   const entryPath = packageEntryPath(packageRoot, entry);
-  if (entryPath === undefined) return false;
-  return statSync(entryPath, { throwIfNoEntry: false })?.isFile() === true;
+  return (
+    entryPath !== undefined &&
+    packageFiles.has(relative(packageRoot, entryPath))
+  );
 }
 
 assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);
@@ -87,17 +89,32 @@ for (const [directory, expectedName] of expectedWorkspaces) {
   }
   if (!entrypointWorkspaces.has(directory)) continue;
 
+  const packageFiles = new Set(
+    globSync("**/*", {
+      cwd: packageRoot,
+      exclude: ["node_modules/**"],
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isFile())
+      .map((entry) =>
+        relative(packageRoot, join(entry.parentPath, entry.name)),
+      ),
+  );
+
   for (const [field, target] of [
     ["primary", manifest.main ?? manifest.svelte],
     ["types", manifest.types],
   ]) {
-    if (!packageEntryExists(packageRoot, target)) {
+    if (!packageEntryExists(packageRoot, packageFiles, target)) {
       failures.push(
         `${directory}: ${field} does not resolve to a confined built entrypoint`,
       );
     }
   }
-  if (manifest.module && !packageEntryExists(packageRoot, manifest.module)) {
+  if (
+    manifest.module &&
+    !packageEntryExists(packageRoot, packageFiles, manifest.module)
+  ) {
     failures.push(
       `${directory}: module does not resolve to a confined built entrypoint`,
     );
