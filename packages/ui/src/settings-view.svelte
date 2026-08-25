@@ -52,10 +52,7 @@
     ) => void;
     onSaveConnection: (value: string) => Promise<ConnectionEndpoint>;
     onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
-    onSaveProviderKey: (
-      provider: string,
-      key: string | null,
-    ) => Promise<void>;
+    onSaveProviderKey: (provider: string, key: string | null) => Promise<void>;
     onUpdateProviderPolicy: (policy: OutboundAccessPolicy) => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
@@ -143,7 +140,9 @@
       editingKeyMap[provider] = "";
       providerNotice = {
         kind: "success",
-        message: key ? "The key is stored in the system credential store." : "The saved key was removed.",
+        message: key
+          ? "The key is stored in the system credential store."
+          : "The saved key was removed.",
       };
     } catch (error) {
       providerNotice = { kind: "error", message: providerError(error) };
@@ -168,35 +167,51 @@
       ...providerPolicy,
       allow_providers:
         dimension === "provider"
-          ? allow ? ["google-books"] : []
+          ? allow
+            ? ["google-books"]
+            : []
           : providerPolicy.allow_providers,
       deny_providers:
         dimension === "provider"
-          ? allow ? [] : ["google-books"]
+          ? allow
+            ? []
+            : ["google-books"]
           : providerPolicy.deny_providers,
       allow_capabilities:
         dimension === "capability"
-          ? allow ? ["metadata.search"] : []
+          ? allow
+            ? ["metadata.search"]
+            : []
           : providerPolicy.allow_capabilities,
       deny_capabilities:
         dimension === "capability"
-          ? allow ? [] : ["metadata.search"]
+          ? allow
+            ? []
+            : ["metadata.search"]
           : providerPolicy.deny_capabilities,
       allow_hosts:
         dimension === "host"
-          ? allow ? ["www.googleapis.com"] : []
+          ? allow
+            ? ["www.googleapis.com"]
+            : []
           : providerPolicy.allow_hosts,
       deny_hosts:
         dimension === "host"
-          ? allow ? [] : ["www.googleapis.com"]
+          ? allow
+            ? []
+            : ["www.googleapis.com"]
           : providerPolicy.deny_hosts,
       allow_networks:
         dimension === "network"
-          ? allow ? ["public"] : []
+          ? allow
+            ? ["public"]
+            : []
           : providerPolicy.allow_networks,
       deny_networks:
         dimension === "network"
-          ? allow ? [] : ["public"]
+          ? allow
+            ? []
+            : ["public"]
           : providerPolicy.deny_networks,
     };
     onUpdateProviderPolicy(value);
@@ -792,8 +807,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Provider access</h2>
           <p class="pane-desc">
-            Google Books search is available in Fasti Desktop. A key is optional.
-            Fasti never returns saved keys to this interface.
+            Google Books search is available in Fasti Desktop. A key is
+            optional. Fasti never returns saved keys to this interface.
           </p>
 
           <div class="providers-list">
@@ -832,13 +847,20 @@
                     aria-label="New API key for {prov.label}"
                     autocomplete="off"
                     spellcheck="false"
-                    disabled={!prov.writable || savingProvider === prov.provider}
+                    disabled={!prov.writable ||
+                      savingProvider === prov.provider}
                   />
                   <button
                     type="button"
                     class="save-key-btn"
-                    disabled={!prov.writable || savingProvider === prov.provider || !(editingKeyMap[prov.provider] ?? "").trim()}
-                    onclick={() => void saveCredential(prov.provider, editingKeyMap[prov.provider] ?? "")}
+                    disabled={!prov.writable ||
+                      savingProvider === prov.provider ||
+                      !(editingKeyMap[prov.provider] ?? "").trim()}
+                    onclick={() =>
+                      void saveCredential(
+                        prov.provider,
+                        editingKeyMap[prov.provider] ?? "",
+                      )}
                   >
                     {savingProvider === prov.provider ? "Saving…" : "Save key"}
                   </button>
@@ -848,7 +870,8 @@
                       class="remove-key-btn"
                       disabled={savingProvider === prov.provider}
                       onclick={() => void saveCredential(prov.provider, null)}
-                    >Remove key</button>
+                      >Remove key</button
+                    >
                   {/if}
                 </div>
                 {#if !prov.writable}
@@ -867,48 +890,81 @@
               class="provider-notice"
               class:error={providerNotice.kind === "error"}
               role={providerNotice.kind === "error" ? "alert" : "status"}
-            >{providerNotice.message}</p>
+            >
+              {providerNotice.message}
+            </p>
           {/if}
 
           <div class="policy-section">
             <h3 class="form-title">Effective outbound policy</h3>
             <p class="provider-help">
-              Each allow is limited by the provider manifest. A deny always wins.
-              Private, loopback, link-local, multicast, documentation, and
+              Each allow is limited by the provider manifest. A deny always
+              wins. Private, loopback, link-local, multicast, documentation, and
               unspecified networks remain outside this provider manifest.
             </p>
             <div class="policy-list">
               <label class="policy-row">
-                <span><strong>Provider</strong><small>google-books</small></span>
+                <span><strong>Provider</strong><small>google-books</small></span
+                >
                 <select
                   aria-label="Google Books provider access"
                   value={policyAllows("provider") ? "allow" : "deny"}
-                  onchange={(event) => setPolicy("provider", event.currentTarget.value === "allow")}
-                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+                  onchange={(event) =>
+                    setPolicy(
+                      "provider",
+                      event.currentTarget.value === "allow",
+                    )}
+                  ><option value="allow">Allow</option><option value="deny"
+                    >Deny</option
+                  ></select
+                >
               </label>
               <label class="policy-row">
-                <span><strong>Capability</strong><small>metadata.search</small></span>
+                <span
+                  ><strong>Capability</strong><small>metadata.search</small
+                  ></span
+                >
                 <select
                   aria-label="Metadata search capability access"
                   value={policyAllows("capability") ? "allow" : "deny"}
-                  onchange={(event) => setPolicy("capability", event.currentTarget.value === "allow")}
-                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+                  onchange={(event) =>
+                    setPolicy(
+                      "capability",
+                      event.currentTarget.value === "allow",
+                    )}
+                  ><option value="allow">Allow</option><option value="deny"
+                    >Deny</option
+                  ></select
+                >
               </label>
               <label class="policy-row">
-                <span><strong>Host</strong><small>www.googleapis.com</small></span>
+                <span
+                  ><strong>Host</strong><small>www.googleapis.com</small></span
+                >
                 <select
                   aria-label="Google Books host access"
                   value={policyAllows("host") ? "allow" : "deny"}
-                  onchange={(event) => setPolicy("host", event.currentTarget.value === "allow")}
-                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+                  onchange={(event) =>
+                    setPolicy("host", event.currentTarget.value === "allow")}
+                  ><option value="allow">Allow</option><option value="deny"
+                    >Deny</option
+                  ></select
+                >
               </label>
               <label class="policy-row">
-                <span><strong>Network</strong><small>Public addresses only</small></span>
+                <span
+                  ><strong>Network</strong><small>Public addresses only</small
+                  ></span
+                >
                 <select
                   aria-label="Public network access"
                   value={policyAllows("network") ? "allow" : "deny"}
-                  onchange={(event) => setPolicy("network", event.currentTarget.value === "allow")}
-                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+                  onchange={(event) =>
+                    setPolicy("network", event.currentTarget.value === "allow")}
+                  ><option value="allow">Allow</option><option value="deny"
+                    >Deny</option
+                  ></select
+                >
               </label>
             </div>
           </div>
@@ -1476,7 +1532,8 @@
   .remove-key-btn {
     min-height: 44px;
     padding: 8px 14px;
-    border: 1px solid color-mix(in srgb, var(--fasti-brand-mark) 45%, transparent);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-brand-mark) 45%, transparent);
     border-radius: 4px;
     background: var(--fasti-surface-paper);
     color: var(--fasti-brand-mark);
@@ -1492,19 +1549,20 @@
 
   .provider-notice {
     padding: 12px;
-    border-left: 3px solid var(--fasti-state-verified);
+    border: 1px solid var(--fasti-state-verified);
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
   }
 
   .provider-notice.error {
-    border-left-color: var(--fasti-brand-mark);
+    border-color: var(--fasti-brand-mark);
   }
 
   .policy-section {
     margin-top: 24px;
     padding-top: 20px;
-    border-top: 1px solid color-mix(in srgb, var(--fasti-text-muted) 24%, transparent);
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 24%, transparent);
   }
 
   .policy-list {
@@ -1512,7 +1570,8 @@
     gap: 1px;
     margin-top: 12px;
     background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
   }
 
   .policy-row {

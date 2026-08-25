@@ -64,7 +64,9 @@
   let selectedCategory: MediaKind | "all" = $state("all");
   let searchQuery = $state("");
   let providerResults = $state<ProviderCandidate[]>([]);
-  let providerSearchState = $state<"idle" | "loading" | "results" | "empty" | "error">("idle");
+  let providerSearchState = $state<
+    "idle" | "loading" | "results" | "empty" | "error"
+  >("idle");
   let providerSearchMessage = $state("");
 
   // Modal Dialog States
@@ -115,17 +117,20 @@
         providerPolicy,
       );
       providerSearchState = providerResults.length > 0 ? "results" : "empty";
-      providerSearchMessage = providerResults.length > 0
-        ? `${providerResults.length} Google Books results.`
-        : "Google Books returned no matching titles.";
+      providerSearchMessage =
+        providerResults.length > 0
+          ? `${providerResults.length} Google Books results.`
+          : "Google Books returned no matching titles.";
     } catch (error) {
-      const value = error !== null && typeof error === "object"
-        ? error as { title?: string; detail?: string; next_action?: string }
-        : {};
+      const value =
+        error !== null && typeof error === "object"
+          ? (error as { title?: string; detail?: string; next_action?: string })
+          : {};
       providerSearchState = "error";
-      providerSearchMessage = [value.title, value.detail, value.next_action]
-        .filter(Boolean)
-        .join(" ") || "Fasti could not search Google Books.";
+      providerSearchMessage =
+        [value.title, value.detail, value.next_action]
+          .filter(Boolean)
+          .join(" ") || "Fasti could not search Google Books.";
     }
   }
 
@@ -241,7 +246,8 @@
         type="submit"
         class="provider-search-btn"
         disabled={!searchQuery.trim() || providerSearchState === "loading"}
-      >{providerSearchState === "loading" ? "Searching…" : "Search"}</button>
+        >{providerSearchState === "loading" ? "Searching…" : "Search"}</button
+      >
     </form>
 
     {#if providerSearchState !== "idle"}
@@ -273,7 +279,8 @@
 
     <h2 class="local-heading">Demonstration library</h2>
     <p class="section-tagline">
-      These local sample records demonstrate the interface. They are not live recommendations.
+      These local sample records demonstrate the interface. They are not live
+      recommendations.
     </p>
     <div
       class="categories-bar"
@@ -301,9 +308,7 @@
         <IconFlame size={20} class="trend-flame-icon" />
         <h2 class="section-title">Sample records</h2>
       </div>
-      <span class="section-tagline"
-        >Local demonstration data</span
-      >
+      <span class="section-tagline">Local demonstration data</span>
     </div>
 
     <div class="media-carousel">
@@ -378,9 +383,7 @@
         <IconAward size={20} class="award-icon" />
         <h2 class="section-title">More sample records</h2>
       </div>
-      <span class="section-tagline"
-        >Local demonstration data</span
-      >
+      <span class="section-tagline">Local demonstration data</span>
     </div>
 
     <div class="media-carousel">
@@ -594,18 +597,19 @@
   .provider-search-status {
     margin: 0;
     padding: 10px 12px;
-    border-left: 3px solid var(--fasti-state-verified);
+    border: 1px solid var(--fasti-state-verified);
     background: var(--fasti-surface-paper);
   }
   .provider-search-status.error {
-    border-left-color: var(--fasti-brand-mark);
+    border-color: var(--fasti-brand-mark);
   }
   .provider-results {
     display: grid;
     gap: 1px;
     margin: 0;
     padding: 0;
-    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
     background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
     list-style: none;
   }

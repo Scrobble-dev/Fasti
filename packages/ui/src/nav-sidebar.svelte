@@ -390,7 +390,6 @@
     background: var(--fasti-surface-paper);
     border-right: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    transition: width 150ms cubic-bezier(0.16, 1, 0.3, 1);
     flex-shrink: 0;
   }
 
