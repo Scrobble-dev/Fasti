@@ -5,8 +5,6 @@
     ScopedApiToken,
     OutboundAccessPolicy,
     ProviderCredentialStatus,
-    OidcConfiguration,
-    AppriseNotificationConfig,
     ThemeSettings,
     WorkbenchPreferences,
     NavItemConfig,
@@ -42,8 +40,6 @@
     tokens: ScopedApiToken[];
     providerCredentials: ProviderCredentialStatus[];
     providerPolicy: OutboundAccessPolicy;
-    oidcConfig: OidcConfiguration;
-    appriseConfig: AppriseNotificationConfig;
     themeSettings: ThemeSettings;
     workbenchPreferences?: WorkbenchPreferences;
     onUpdateTheme?: (theme: Partial<ThemeSettings>) => void;
@@ -54,8 +50,6 @@
     onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
     onSaveProviderKey: (provider: string, key: string | null) => Promise<void>;
     onUpdateProviderPolicy: (policy: OutboundAccessPolicy) => void;
-    onSaveOidc?: (config: OidcConfiguration) => void;
-    onSaveApprise?: (config: AppriseNotificationConfig) => void;
   }
 
   let {
@@ -64,8 +58,6 @@
     tokens,
     providerCredentials,
     providerPolicy,
-    oidcConfig,
-    appriseConfig,
     themeSettings,
     workbenchPreferences = DEFAULT_WORKBENCH_PREFERENCES,
     onUpdateTheme,
@@ -74,8 +66,6 @@
     onTestConnection,
     onSaveProviderKey,
     onUpdateProviderPolicy,
-    onSaveOidc,
-    onSaveApprise,
   }: Props = $props();
 
   let activeSettingsSection:
@@ -92,8 +82,6 @@
   // Local state for token generator
   let newTokenName = $state("");
   let selectedScopes: string[] = $state(["chronicle:write", "metadata:read"]);
-  let newAppriseUrl = $state("");
-
   // Local state for keys
   let editingKeyMap: Record<string, string> = $state({});
   let savingProvider = $state<string | null>(null);
@@ -101,26 +89,6 @@
     kind: "success" | "error";
     message: string;
   } | null>(null);
-  let oidcDraft = $state({
-    enabled: false,
-    issuerUrl: "",
-    clientId: "",
-    clientSecret: "",
-    redirectUri: "",
-    autoProvisionUsers: false,
-  });
-  let appriseDraft = $state({
-    enabled: false,
-    urls: [] as string[],
-    notifyOnReviewRequired: false,
-    notifyOnSyncError: false,
-    notifyOnMilestone: false,
-  });
-
-  $effect(() => {
-    oidcDraft = { ...oidcConfig };
-  });
-
   function providerError(error: unknown): string {
     if (error !== null && typeof error === "object") {
       const value = error as { title?: string; detail?: string };
@@ -215,22 +183,6 @@
           : providerPolicy.deny_networks,
     };
     onUpdateProviderPolicy(value);
-  }
-
-  $effect(() => {
-    appriseDraft = { ...appriseConfig, urls: [...appriseConfig.urls] };
-  });
-
-  function handleAddAppriseUrl(e: Event): void {
-    e.preventDefault();
-    if (newAppriseUrl.trim().length > 0) {
-      const updated = {
-        ...appriseDraft,
-        urls: [...appriseDraft.urls, newAppriseUrl.trim()],
-      };
-      appriseDraft = updated;
-      newAppriseUrl = "";
-    }
   }
 
   function handleToggleNavVisible(id: string): void {
@@ -1099,72 +1051,10 @@
         <section class="section-pane">
           <h2 class="pane-title">Single Sign-On & OpenID Connect (OIDC)</h2>
           <p class="pane-desc">
-            Authenticate with Authentik, Authelia, Keycloak, or your identity
-            provider.
+            OIDC setup is not available in this build. Fasti does not collect or
+            store identity-provider credentials until the matching authenticated
+            backend capability is implemented.
           </p>
-
-          <form
-            onsubmit={(e) => {
-              e.preventDefault();
-              onSaveOidc?.(oidcDraft);
-            }}
-            class="oidc-form"
-          >
-            <div class="form-toggle-row">
-              <label class="toggle-label">
-                <input type="checkbox" bind:checked={oidcDraft.enabled} />
-                <strong>Enable Single Sign-On (OIDC)</strong>
-              </label>
-            </div>
-
-            <div class="form-field">
-              <label for="oidc-issuer">OIDC Issuer Discovery URL</label>
-              <input
-                id="oidc-issuer"
-                type="url"
-                bind:value={oidcDraft.issuerUrl}
-                class="form-input"
-              />
-            </div>
-
-            <div class="form-row-2">
-              <div class="form-field">
-                <label for="oidc-client-id">Client ID</label>
-                <input
-                  id="oidc-client-id"
-                  type="text"
-                  bind:value={oidcDraft.clientId}
-                  class="form-input"
-                />
-              </div>
-              <div class="form-field">
-                <label for="oidc-client-secret">Client Secret</label>
-                <input
-                  id="oidc-client-secret"
-                  type="password"
-                  bind:value={oidcDraft.clientSecret}
-                  class="form-input"
-                />
-              </div>
-            </div>
-
-            <div class="form-field">
-              <label for="oidc-redirect-uri"
-                >Authorized Redirect Callback URI</label
-              >
-              <input
-                id="oidc-redirect-uri"
-                type="text"
-                readonly
-                value={oidcDraft.redirectUri}
-                class="form-input mono"
-              />
-            </div>
-
-            <button type="submit" class="btn-save"
-              >Save OIDC Configuration</button
-            >
-          </form>
         </section>
 
         <!-- 6. Notifications & Apprise -->
@@ -1172,75 +1062,10 @@
         <section class="section-pane">
           <h2 class="pane-title">Notifications & Apprise Webhooks</h2>
           <p class="pane-desc">
-            Push notifications to Discord, Telegram, Pushover, Gotify, or Slack.
+            Notification setup is not available in this build. Fasti does not
+            collect webhook URLs until the matching authenticated backend
+            capability is implemented.
           </p>
-
-          <div class="apprise-box">
-            <div class="notify-triggers">
-              <label class="chk-label">
-                <input
-                  type="checkbox"
-                  bind:checked={appriseDraft.notifyOnReviewRequired}
-                />
-                <span>Notify when Review Inbox requires attention</span>
-              </label>
-              <label class="chk-label">
-                <input
-                  type="checkbox"
-                  bind:checked={appriseDraft.notifyOnSyncError}
-                />
-                <span>Notify on sync and ingest connection errors</span>
-              </label>
-              <label class="chk-label">
-                <input
-                  type="checkbox"
-                  bind:checked={appriseDraft.notifyOnMilestone}
-                />
-                <span
-                  >Notify when milestone achievements or backups complete</span
-                >
-              </label>
-            </div>
-
-            <h3 class="sub-heading">Configured Apprise URLs</h3>
-            <ul class="apprise-urls-list">
-              {#each appriseDraft.urls as u}
-                <li class="apprise-url-item">
-                  <code>{u}</code>
-                </li>
-              {/each}
-            </ul>
-
-            <form onsubmit={handleAddAppriseUrl} class="add-url-form">
-              <input
-                type="text"
-                placeholder="discord://webhook_id/webhook_token or telegram://bot_token/chat_id..."
-                bind:value={newAppriseUrl}
-                class="form-input"
-                aria-label="New Apprise URL"
-              />
-              <button type="submit" class="btn-secondary">+ Add Service</button>
-            </form>
-
-            <button
-              type="button"
-              class="btn-save"
-              onclick={() => onSaveApprise?.(appriseDraft)}
-            >
-              Save notification settings
-            </button>
-
-            <div class="test-notify-row">
-              <button
-                type="button"
-                class="btn-test"
-                disabled
-                title="Test notifications are not available in this build"
-              >
-                Send Test Notification
-              </button>
-            </div>
-          </div>
         </section>
 
         <!-- 7. Lossless Importers & Backups -->
@@ -1739,59 +1564,6 @@
   }
   .hidden-file-input {
     display: none;
-  }
-
-  .oidc-form,
-  .apprise-box {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .form-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .form-field label {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: var(--fasti-text-muted);
-  }
-  .form-input {
-    height: 38px;
-    padding: 8px 12px;
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    font-size: 0.9rem;
-    background: var(--fasti-surface-paper);
-  }
-  .btn-save {
-    padding: 10px 20px;
-    background: var(--fasti-action-primary);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
-    align-self: flex-start;
-  }
-  .btn-test {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    background: var(--fasti-surface-archive);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .test-notify-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
   }
 
   @media (max-width: 1100px) {

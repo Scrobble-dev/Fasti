@@ -4,8 +4,6 @@ import type {
   ReconciliationCase,
   CustomFieldDefinition,
   ScopedApiToken,
-  OidcConfiguration,
-  AppriseNotificationConfig,
   ThemeSettings,
   NavItemConfig,
   ContextMenuItemConfig,
@@ -969,23 +967,6 @@ export const SAMPLE_TOKENS: ScopedApiToken[] = [
     lastUsedAt: "2026-08-24T22:00:00Z",
   },
 ];
-
-export const SAMPLE_OIDC_CONFIG: OidcConfiguration = {
-  enabled: false,
-  issuerUrl: "https://auth.internal.scrobble.dev/application/o/fasti/",
-  clientId: "fasti-living-chronicle",
-  clientSecret: "",
-  redirectUri: "http://127.0.0.1:8420/api/v1/auth/oidc/callback",
-  autoProvisionUsers: true,
-};
-
-export const SAMPLE_APPRISE_CONFIG: AppriseNotificationConfig = {
-  enabled: true,
-  urls: ["discord://webhook_id/webhook_token", "pover://user_key@token_key"],
-  notifyOnReviewRequired: true,
-  notifyOnSyncError: true,
-  notifyOnMilestone: true,
-};
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "light",

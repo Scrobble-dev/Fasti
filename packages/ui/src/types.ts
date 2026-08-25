@@ -194,23 +194,6 @@ export interface ConnectionTestStatus {
   readonly version: string;
 }
 
-export interface OidcConfiguration {
-  readonly enabled: boolean;
-  readonly issuerUrl: string;
-  readonly clientId: string;
-  readonly clientSecret: string;
-  readonly redirectUri: string;
-  readonly autoProvisionUsers: boolean;
-}
-
-export interface AppriseNotificationConfig {
-  readonly enabled: boolean;
-  readonly urls: string[];
-  readonly notifyOnReviewRequired: boolean;
-  readonly notifyOnSyncError: boolean;
-  readonly notifyOnMilestone: boolean;
-}
-
 export interface ThemeSettings {
   readonly mode: "light" | "dark" | "night";
   readonly accentColor: string;

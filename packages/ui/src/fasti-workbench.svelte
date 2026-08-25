@@ -11,8 +11,6 @@
     OutboundAccessPolicy,
     ProviderCandidate,
     ProviderCredentialStatus,
-    OidcConfiguration,
-    AppriseNotificationConfig,
     ThemeSettings,
     WorkbenchPreferences,
     ConnectionTestStatus,
@@ -20,8 +18,6 @@
   import {
     SAMPLE_DISCOVER_TRENDING,
     SAMPLE_CUSTOM_FIELDS,
-    SAMPLE_OIDC_CONFIG,
-    SAMPLE_APPRISE_CONFIG,
     DEFAULT_THEME_SETTINGS,
     DEFAULT_WORKBENCH_PREFERENCES,
   } from "./mock-data.js";
@@ -74,8 +70,6 @@
   let reconciliationCases = $state<ReconciliationCase[]>([]);
   let tokens = $state([]);
   let providerPolicy = $state<OutboundAccessPolicy>(initialProviderPolicy());
-  let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
-  let appriseConfig = $state(SAMPLE_APPRISE_CONFIG);
   let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
   let workbenchPreferences = $state<WorkbenchPreferences>(
     DEFAULT_WORKBENCH_PREFERENCES,
@@ -557,14 +551,6 @@
   function handleUpdateTheme(updates: Partial<ThemeSettings>): void {
     themeSettings = { ...themeSettings, ...updates };
   }
-
-  function handleSaveOidc(config: OidcConfiguration): void {
-    oidcConfig = { ...config };
-  }
-
-  function handleSaveApprise(config: AppriseNotificationConfig): void {
-    appriseConfig = { ...config };
-  }
 </script>
 
 <div
@@ -750,8 +736,6 @@
           {tokens}
           {providerCredentials}
           {providerPolicy}
-          {oidcConfig}
-          {appriseConfig}
           {themeSettings}
           {workbenchPreferences}
           onUpdateTheme={handleUpdateTheme}
@@ -761,8 +745,6 @@
           {onTestConnection}
           {onSaveProviderKey}
           onUpdateProviderPolicy={handleUpdateProviderPolicy}
-          onSaveOidc={handleSaveOidc}
-          onSaveApprise={handleSaveApprise}
         />
       {:else}
         <!-- Media Category Grid (Shows, Movies, Anime, Manga, Games, Books, etc.) -->
