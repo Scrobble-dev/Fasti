@@ -181,12 +181,14 @@ else
   exit 1
 fi
 
-peak_file="$(mktemp)"
-events_file="$(mktemp)"
-limits_file="$(mktemp)"
-cgroup_file="$(mktemp)"
-samples_file="$(mktemp)"
-cleanup() { rm -f "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$samples_file"; }
+temporary_root="$(mktemp -d)"
+peak_file="${temporary_root}/peak"
+events_file="${temporary_root}/events"
+limits_file="${temporary_root}/limits"
+cgroup_file="${temporary_root}/cgroup"
+samples_file="${temporary_root}/samples"
+touch "$peak_file" "$events_file" "$limits_file" "$cgroup_file" "$samples_file"
+cleanup() { rm -rf "$temporary_root"; }
 trap cleanup EXIT
 
 # Allocator arenas and async worker pools both scale with core count. Left
@@ -200,9 +202,7 @@ export TOKIO_WORKER_THREADS=2
 # before the shell sees it, which silently blanks variables and emits warnings.
 # Passing a file instead of an inline string removes that whole class of
 # problem.
-inner="$(mktemp)"
-cleanup_inner() { rm -f "$inner"; }
-trap 'cleanup; cleanup_inner' EXIT
+inner="${temporary_root}/inner"
 cat > "$inner" <<'INNER'
 peak_file="$1"; shift
 events_file="$1"; shift
