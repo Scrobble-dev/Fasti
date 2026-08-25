@@ -194,7 +194,14 @@ _write_bound_addr() {
 }
 
 _process_identity() {
-  ps -p "$1" -o lstart= -o args= 2>/dev/null | sed 's/^ *//'
+  local stat=""
+  local fields=()
+  [[ -r "/proc/$1/stat" ]] || return 1
+  IFS= read -r stat < "/proc/$1/stat" || return 1
+  stat="${stat##*) }"
+  read -r -a fields <<< "$stat"
+  [[ ${#fields[@]} -gt 19 ]] || return 1
+  printf '%s\n' "${fields[19]}"
 }
 
 _write_pidfile() {
@@ -454,10 +461,16 @@ _start_native() {
 _self_test() {
   local old_rundir="$RUNDIR"
   local ceiling_mib=""
+  local exec_comm=""
+  local exec_go=""
+  local exec_pid=""
+  local exec_ready=""
   local leader_file=""
   RUNDIR="$(mktemp -d)"
   leader_file="$RUNDIR/leader"
-  trap '_stop_pidfile child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
+  exec_ready="$RUNDIR/exec-ready"
+  exec_go="$RUNDIR/exec-go"
+  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
   # The values expand in the child shell.
   # shellcheck disable=SC2016
   setsid --fork --wait bash -c 'printf "%s\n" "$$" > "$1"; trap "" TERM; sleep 30 & wait' _ "$leader_file" 2>/dev/null &
@@ -482,6 +495,27 @@ _self_test() {
     echo "self-test process group survived forced cleanup" >&2
     return 1
   fi
+  bash -c 'printf "%s\n" "$$" > "$1"; while [[ ! -e "$2" ]]; do sleep 0.01; done; exec sleep 30' _ "$exec_ready" "$exec_go" &
+  exec_pid=$!
+  for _ in {1..20}; do
+    [[ -s "$exec_ready" ]] && break
+    sleep 0.01
+  done
+  [[ "$(<"$exec_ready")" == "$exec_pid" ]]
+  _write_pidfile exec-child "$exec_pid"
+  : > "$exec_go"
+  for _ in {1..20}; do
+    exec_comm="$(ps -p "$exec_pid" -o comm= 2>/dev/null)"
+    exec_comm="${exec_comm//[[:space:]]/}"
+    [[ "$exec_comm" == sleep ]] && break
+    sleep 0.01
+  done
+  if [[ "$(_tracked_pid exec-child 2>/dev/null || true)" != "$exec_pid" ]]; then
+    echo "self-test lost process identity after exec" >&2
+    return 1
+  fi
+  _stop_pidfile exec-child
+  wait "$exec_pid" 2>/dev/null || true
   printf '%s|invalid start time\n' "$$" > "$RUNDIR/stale.pid"
   _stop_pidfile stale
   [[ ! -e "$RUNDIR/stale.pid" ]]
@@ -542,7 +576,7 @@ _self_test() {
   ceiling_mib="$(_memory_ceiling_mib)"
   [[ "${NATIVE_SCOPE_RUNNER[*]}" == *"MemoryMax=$((ceiling_mib * 1024 * 1024))"* ]]
   [[ "${NATIVE_SCOPE_RUNNER[*]}" == *"MemorySwapMax=0"* ]]
-  rm -f "$leader_file"
+  rm -f "$leader_file" "$exec_ready" "$exec_go"
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
   trap - EXIT
