@@ -1080,8 +1080,7 @@ mod tests {
             ["buildx", "build", "--platform", "linux/arm64"],
             "fix",
         );
-        let version =
-            tool_version(Path::new("."), &gate).expect("git --version must succeed");
+        let version = tool_version(Path::new("."), &gate).expect("git --version must succeed");
         assert!(
             version.to_lowercase().contains("git"),
             "unexpected version text: {version}"
