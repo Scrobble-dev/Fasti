@@ -22,10 +22,11 @@ DEV_SCOPE="${DEV_SCOPE//[^A-Za-z0-9_.-]/-}"
 CONTAINER_NAME="fasti-dev-$DEV_SCOPE"
 
 _validate_port() {
-  [[ "$2" =~ ^[0-9]+$ && ${#2} -le 5 ]] && ((10#$2 >= 1 && 10#$2 <= 65535)) || {
-    echo "$1 must be an integer from 1 to 65535" >&2
-    return 1
-  }
+  if [[ "$2" =~ ^[0-9]+$ && ${#2} -le 5 ]] && ((10#$2 >= 1 && 10#$2 <= 65535)); then
+    return 0
+  fi
+  echo "$1 must be an integer from 1 to 65535" >&2
+  return 1
 }
 
 _validate_port FASTI_PORT "$FASTI_PORT"
