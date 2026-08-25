@@ -32,6 +32,7 @@ pub const MAX_PREPARED_EVIDENCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_CONCURRENT_UPLOADS: usize = 4;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum StoreOpenError {
     #[error("this platform does not provide the required data-root locking semantics")]
     UnsupportedPlatform,
@@ -62,6 +63,8 @@ pub struct SqliteKernel {
 ///
 /// The daemon kernel and stopped-node CLI use this same guard so restore can
 /// prove the daemon is stopped before it inspects staging or active data.
+/// The lock follows the opened physical root across a rename; a replacement at
+/// the configured pathname is a distinct root.
 #[derive(Debug)]
 pub struct LockedDataRoot {
     path: PathBuf,
@@ -74,6 +77,12 @@ impl LockedDataRoot {
     #[cfg(target_os = "linux")]
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
         let path = path.as_ref().to_path_buf();
+        if path.file_name().is_none() {
+            return Err(unsafe_path(
+                &path,
+                "data root must have a final path component",
+            ));
+        }
         prepare_private_directory(&path)?;
         let root_directory = open_data_root_directory(&path)?;
         let lock = acquire_data_root_lock(&path, &root_directory)?;
@@ -264,8 +273,15 @@ fn finish_data_root_lock(data_root: &Path, file: File) -> Result<File, StoreOpen
 
 #[cfg(target_os = "linux")]
 fn open_data_root_directory(data_root: &Path) -> Result<File, StoreOpenError> {
+    let directory = open_directory(data_root)?;
+    set_owner_only_open_directory_permissions(&directory)?;
+    Ok(directory)
+}
+
+#[cfg(target_os = "linux")]
+fn open_directory(path: &Path) -> Result<File, StoreOpenError> {
     let fd = rustix::fs::open(
-        data_root,
+        path,
         rustix::fs::OFlags::RDONLY
             | rustix::fs::OFlags::DIRECTORY
             | rustix::fs::OFlags::CLOEXEC
@@ -273,9 +289,7 @@ fn open_data_root_directory(data_root: &Path) -> Result<File, StoreOpenError> {
         rustix::fs::Mode::empty(),
     )
     .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
-    let directory = File::from(fd);
-    set_owner_only_open_directory_permissions(&directory)?;
-    Ok(directory)
+    Ok(File::from(fd))
 }
 
 #[cfg(target_os = "linux")]
@@ -338,7 +352,13 @@ pub(crate) fn harden_private_regular_file(path: &Path) -> Result<(), StoreOpenEr
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
+fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
+    let directory = open_directory(path)?;
+    set_owner_only_open_directory_permissions(&directory)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
 fn set_owner_only_directory_permissions(path: &Path) -> Result<(), StoreOpenError> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     Ok(())
@@ -675,6 +695,18 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn data_root_rejects_a_path_without_a_final_component() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let child = temporary.path().join("child");
+        assert!(matches!(
+            SqliteKernel::open(child.join("..")),
+            Err(StoreOpenError::UnsafePath { .. })
+        ));
+        assert!(!child.exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn data_root_directory_handle_remains_anchored_after_a_path_rename() {
         use std::os::unix::fs::MetadataExt;
 
@@ -697,6 +729,10 @@ mod tests {
             (after.dev(), after.ino()),
             (moved_metadata.dev(), moved_metadata.ino())
         );
+        assert!(matches!(
+            LockedDataRoot::acquire(&moved),
+            Err(StoreOpenError::DataRootLocked)
+        ));
     }
 
     #[cfg(target_os = "linux")]

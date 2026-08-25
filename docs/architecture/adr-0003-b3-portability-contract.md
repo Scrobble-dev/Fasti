@@ -124,11 +124,18 @@ Both online and stopped-node export require the Linux anchored `openat2`
 evidence-read contract. An adapter on another platform must fail before reading
 or disclosing evidence with `unsupported_platform`; it must not weaken the
 time-of-check/time-of-use boundary. Kernel lock acquisition is Linux-only for
-the same reason and fails before creating a data root elsewhere. If the locked
-data-root pathname stops resolving to the live database inode, SQLite's
+the same reason and fails before creating a data root elsewhere. The lock owns
+the opened physical data-root inode and follows that inode across a rename; a
+new directory created at the old pathname is a distinct data root. B3 does not
+reserve a logical pathname across external replacement. If the locked data-root
+pathname stops resolving to the live database inode, SQLite's
 moved-database guard rejects a later sidecar reopen with
 `SQLITE_READONLY_DBMOVED`; B3 does not promise live writes across external
 data-root renames.
+
+`fasti-store` is an unpublished, pre-1.0 staged crate with no supported
+downstream API. B3 therefore extends the explicitly non-exhaustive
+`StoreOpenError` with the typed failures needed by this internal contract.
 
 Caller cancellation is explicit request state. Either export mode aborts and
 removes its partial destination before it returns mode-neutral
@@ -286,11 +293,12 @@ and completion sync boundaries. It proves lock release, no pre-rename `current`,
 validated retry after interrupted staging, digest-proven post-rename recovery,
 and fail-closed partial completion. Recovery tests prove the source credential
 is not restored, the new caller-owned credential authenticates, and the
-recovered workspace verifies. Lock regressions prove
-stopped-node restore and offline verify return `data_root_locked` while a live
-kernel owns the data root. They also prove unsupported platforms fail before
-creating a data root and a moved live database fails closed when its configured
-path no longer resolves to the opened inode. Run the focused crash gate with:
+recovered workspace verifies. Lock regressions prove stopped-node restore and
+offline verify return `data_root_locked` while a live kernel owns the same
+physical data root, including after that root is renamed. They also prove
+unsupported platforms fail before creating a data root and a moved live database
+fails closed when its configured path no longer resolves to the opened inode.
+Run the focused crash gate with:
 
 ```bash
 cargo test -p fasti-store archive::tests::filesystem_destination_sigkill_matrix --locked -- --exact
