@@ -93,13 +93,12 @@ Ownership:
 
 Keep bind and connection settings separate.
 
-| Setting | Purpose | Default | Allowed source |
-|---|---|---|---|
-| `FASTI_LISTEN` | Daemon bind socket | `127.0.0.1:8420` | runtime environment |
-| `FASTI_PUBLIC_URL` | Operator-advertised node URL | unset | runtime environment |
-| `FASTI_API_URL` | Client endpoint | `http://127.0.0.1:8420` | managed build/env, saved client setting |
-| `FASTI_WEB_PORT` | Vite development listener | `5173` | development environment or script option |
-| `FASTI_PORT` | Container host port | `8420` | Compose/Podman environment |
+| Setting          | Purpose                   | Default                 | Allowed source                           |
+| ---------------- | ------------------------- | ----------------------- | ---------------------------------------- |
+| `FASTI_LISTEN`   | Daemon bind socket        | `127.0.0.1:8420`        | runtime environment                      |
+| `FASTI_API_URL`  | Client endpoint           | `http://127.0.0.1:8420` | managed build/env, saved client setting  |
+| `FASTI_WEB_PORT` | Vite development listener | `5173`                  | development environment or script option |
+| `FASTI_PORT`     | Container host port       | `8420`                  | Compose/Podman environment               |
 
 Rules:
 
@@ -202,16 +201,16 @@ Settings endpoint: https://fasti.internal
 
 ### DX review scorecard
 
-| Pass | Initial | Required 10/10 condition |
-|---|---:|---|
-| Getting started | 4 | Three-step native and container quick starts with exact output and no hidden port assumptions |
-| API/CLI/SDK | 5 | One origin validator, explicit value source, typed failures, no raw-HTTP escape for supported operations |
-| Errors and debugging | 3 | Every connection/provider failure states what happened, why, the rejected value, and the next action |
-| Documentation | 4 | One task-led guide for native, container, desktop, `.internal`, CA trust, and Android namespace differences |
-| Upgrade and migration | 7 | Existing defaults remain valid; new config is additive; invalid prior saved endpoints fail with recovery |
-| Environment and tooling | 5 | Script, Vite, OCI, Tauri, and Android build inputs use documented names and focused checks |
-| Community and ecosystem | 6 | Provider contribution recipe uses neutral contracts and does not promise unsupported compatibility |
-| Measurement | 2 | QA records time-to-health, command count, failed-step clarity, and environment tested |
+| Pass                    | Initial | Required 10/10 condition                                                                                    |
+| ----------------------- | ------: | ----------------------------------------------------------------------------------------------------------- |
+| Getting started         |       4 | Three-step native and container quick starts with exact output and no hidden port assumptions               |
+| API/CLI/SDK             |       5 | One origin validator, explicit value source, typed failures, no raw-HTTP escape for supported operations    |
+| Errors and debugging    |       3 | Every connection/provider failure states what happened, why, the rejected value, and the next action        |
+| Documentation           |       4 | One task-led guide for native, container, desktop, `.internal`, CA trust, and Android namespace differences |
+| Upgrade and migration   |       7 | Existing defaults remain valid; new config is additive; invalid prior saved endpoints fail with recovery    |
+| Environment and tooling |       5 | Script, Vite, OCI, Tauri, and Android build inputs use documented names and focused checks                  |
+| Community and ecosystem |       6 | Provider contribution recipe uses neutral contracts and does not promise unsupported compatibility          |
+| Measurement             |       2 | QA records time-to-health, command count, failed-step clarity, and environment tested                       |
 
 All eight passes target 10/10 in this plan. Telemetry is not added to the product. QA receipts provide local DX evidence without phone-home behavior.
 
@@ -232,20 +231,20 @@ The existing PR #44 Settings screen is not a safe base without repair.
 
 ## Failure modes
 
-| Failure | Required behavior |
-|---|---|
-| Invalid URL or port | Reject before save; keep prior valid value; identify the invalid field |
-| `.internal` does not resolve | Keep the saved hostname; report DNS failure; show hosts/DNS next step |
-| Private CA is untrusted | Fail certificate validation; show platform trust guidance; no bypass |
-| `localhost` from Android/container targets itself | Explain network namespace and request the reachable host or gateway name |
-| Managed environment conflicts with saved value | Managed value wins and appears locked with its source |
-| Provider key missing or replaced | Next request uses the current key; UI never sees prior bytes |
-| Provider allow widens declaration | Reject the widening rule |
-| Provider or host denied | Deny before secret lookup or request; show which policy source denied it |
-| DNS rebinding or redirect changes destination | Re-evaluate the resolved address and every hop; stop on a denied destination |
-| Provider timeout, 429, oversized or malformed response | Bound work; return typed partial failure; preserve local Chronicle state |
-| UI closes or navigates during request | Abort or ignore stale completion; preserve the last committed state |
-| Remote daemon bind | Keep capability routes closed until the access threat model is implemented |
+| Failure                                                | Required behavior                                                            |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Invalid URL or port                                    | Reject before save; keep prior valid value; identify the invalid field       |
+| `.internal` does not resolve                           | Keep the saved hostname; report DNS failure; show hosts/DNS next step        |
+| Private CA is untrusted                                | Fail certificate validation; show platform trust guidance; no bypass         |
+| `localhost` from Android/container targets itself      | Explain network namespace and request the reachable host or gateway name     |
+| Managed environment conflicts with saved value         | Managed value wins and appears locked with its source                        |
+| Provider key missing or replaced                       | Next request uses the current key; UI never sees prior bytes                 |
+| Provider allow widens declaration                      | Reject the widening rule                                                     |
+| Provider or host denied                                | Deny before secret lookup or request; show which policy source denied it     |
+| DNS rebinding or redirect changes destination          | Re-evaluate the resolved address and every hop; stop on a denied destination |
+| Provider timeout, 429, oversized or malformed response | Bound work; return typed partial failure; preserve local Chronicle state     |
+| UI closes or navigates during request                  | Abort or ignore stale completion; preserve the last committed state          |
+| Remote daemon bind                                     | Keep capability routes closed until the access threat model is implemented   |
 
 ## Test coverage plan
 
@@ -328,14 +327,14 @@ Cloudflare and PikaPods remain explicit compatibility constraints. PikaPods need
 
 ## Parallelization
 
-| Step | Modules | Depends on |
-|---|---|---|
-| A | governance/workflows/scripts | none |
-| B | application/contracts/provider adapters | A baseline |
-| C | SDK/UI/web | B contracts |
-| D | desktop/mobile | B contracts |
-| E | OCI/dev scripts/docs | B configuration names |
-| F | QA/design/performance/contracts | C, D, E |
+| Step | Modules                                 | Depends on            |
+| ---- | --------------------------------------- | --------------------- |
+| A    | governance/workflows/scripts            | none                  |
+| B    | application/contracts/provider adapters | A baseline            |
+| C    | SDK/UI/web                              | B contracts           |
+| D    | desktop/mobile                          | B contracts           |
+| E    | OCI/dev scripts/docs                    | B configuration names |
+| F    | QA/design/performance/contracts         | C, D, E               |
 
 Lane A runs first. After its clean baseline, lanes C, D, and E may run in parallel around the application contract from lane B. UI and desktop both consume host command types, so their shared interface lands before parallel work. Final QA runs after all lanes merge.
 
@@ -345,11 +344,11 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: PR audit — current canonical gate failure, active review findings, and unsigned commits.
   - Files: governance workflows, benchmark fixture, `scripts/`, governing docs.
   - Verify: `PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr` and exact-head GitHub checks.
-- [ ] **T2 (P1, human: ~6h / CC: ~45min)** — configuration — implement validated bind, public URL, client endpoint, source, alias, and port composition.
+- [x] **T2 (P1, human: ~6h / CC: ~45min)** — configuration — implement validated bind, public URL, client endpoint, source, alias, and port composition.
   - Surfaced by: Architecture review — hardcoded, conflated delivery settings.
   - Files: application/contracts, daemon, SDK, web configuration.
   - Verify: focused Rust and TypeScript parser/precedence tests.
-- [ ] **T3 (P1, human: ~8h / CC: ~60min)** — provider policy — implement declaration-limited, deny-wins composition and bounded destination checks.
+- [x] **T3 (P1, human: ~8h / CC: ~60min)** — provider policy — implement declaration-limited, deny-wins composition and bounded destination checks.
   - Surfaced by: Architecture and security review — provider/network/capability controls have no owner.
   - Files: application/provider adapters, contracts, tests.
   - Verify: policy truth table, network class, redirect, timeout, and byte-limit tests.
@@ -357,7 +356,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: Root cause — sample data is presented as online search.
   - Files: application/provider adapter, desktop host commands, UI Discover.
   - Verify: fake-server integration, key replacement, missing-key, 429, malformed, and partial-result tests.
-- [ ] **T5 (P1, human: ~8h / CC: ~60min)** — Settings — replace fake controls with real endpoint, trust, policy, and write-only credential flows.
+- [x] **T5 (P1, human: ~8h / CC: ~60min)** — Settings — replace fake controls with real endpoint, trust, policy, and write-only credential flows.
   - Surfaced by: Code quality and UX review — local-only callbacks and false success states.
   - Files: UI Settings/workbench, host adapters, component tests.
   - Verify: UI typecheck, accessibility tests, no-secret DOM assertions, false-state regressions.
@@ -365,7 +364,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: UX review — desktop overlay and 390 px reflow failure.
   - Files: UI shell, Settings, design tokens.
   - Verify: keyboard and screen-reader audit; screenshots at 320, 390, 768, and 1440 CSS px.
-- [ ] **T7 (P1, human: ~8h / CC: ~60min)** — delivery — make ports/endpoints configurable in native, Docker/Podman, Tauri, and Android build inputs.
+- [x] **T7 (P1, human: ~8h / CC: ~60min)** — delivery — make ports/endpoints configurable in native, Docker/Podman, Tauri, and Android build inputs.
   - Surfaced by: Distribution review — hardcoded ports and absent mobile entrypoint/config proof.
   - Files: container, scripts, web, desktop/mobile configuration.
   - Verify: native/container smoke, Tauri desktop build, real APK build or an explicit failing gate.
@@ -404,13 +403,13 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
 
 ## GSTACK REVIEW REPORT
 
-| Review | Trigger | Why | Runs | Status | Findings |
-|--------|---------|-----|------|--------|----------|
-| CEO Review | `/plan-ceo-review` | Scope and strategy | 0 | not run | User supplied the scope and selected the complete option |
-| Codex Review | `/codex review` | Independent second opinion | 0 | not run | Not required at plan stage |
-| Eng Review | `/plan-eng-review` | Architecture and tests | 1 | clear | 26 issues and gaps folded; 0 unresolved |
-| Design Review | `/plan-design-review` | UI and UX gaps | 1 | issues folded | 15 verified PR #44 findings define acceptance criteria |
-| DX Review | `/plan-devex-review` | Developer experience gaps | 1 | clear | 31/80 initial to 80/80 planned; TTHW target 2-5 minutes |
+| Review        | Trigger               | Why                        | Runs | Status        | Findings                                                 |
+| ------------- | --------------------- | -------------------------- | ---- | ------------- | -------------------------------------------------------- |
+| CEO Review    | `/plan-ceo-review`    | Scope and strategy         | 0    | not run       | User supplied the scope and selected the complete option |
+| Codex Review  | `/codex review`       | Independent second opinion | 0    | not run       | Not required at plan stage                               |
+| Eng Review    | `/plan-eng-review`    | Architecture and tests     | 1    | clear         | 26 issues and gaps folded; 0 unresolved                  |
+| Design Review | `/plan-design-review` | UI and UX gaps             | 1    | issues folded | 15 verified PR #44 findings define acceptance criteria   |
+| DX Review     | `/plan-devex-review`  | Developer experience gaps  | 1    | clear         | 31/80 initial to 80/80 planned; TTHW target 2-5 minutes  |
 
 **CROSS-MODEL:** Parallel repository, provider, UX, Claude, and Antigravity reviews agreed that PR #44 is sample-only, configurable desktop network calls belong behind Tauri IPC, browser clients cannot store provider secrets, and PR #51 is the first landing dependency.
 

@@ -13,6 +13,7 @@ Before planning or implementation, read these in order:
 7. [`docs/capability-ledger.md`](docs/capability-ledger.md)
 8. [`contracts/README.md`](contracts/README.md)
 9. [`SECURITY.md`](SECURITY.md)
+10. [`docs/network-and-provider-access.md`](docs/network-and-provider-access.md)
 
 The master handoff defines the durable product boundary, source-of-truth order, architecture and security invariants, programme model, required evidence, and the first 48-hour onboarding sequence.
 
@@ -41,6 +42,18 @@ Provider identifiers are evidence, not canonical identity.
 - Reuse existing ownership before creating new abstractions.
 - Keep provider integrations modular.
 
+## Network and provider rules
+
+- Keep node bind sockets, container host ports, web development ports, and client origins separate.
+- `localhost`, `127.0.0.1`, and `[::1]` are loopback aliases only inside one network namespace.
+- Preserve valid `.internal` names. DNS and certificate trust belong to the operator and platform.
+- Use system certificate validation. Never add a certificate bypass or app-owned CA private key.
+- Provider declarations set the maximum. Operator allow lists only narrow that maximum, and a deny always wins.
+- Classify every resolved provider address before connecting. Deny loopback, private, link-local, multicast, unspecified, and documentation networks unless a future provider declaration explicitly permits one.
+- Keep provider credentials in environment secrets or platform credential stores. Return status, never secret bytes, to the UI.
+- The ordinary browser build must not store provider secrets or call provider hosts until an authenticated daemon route exists.
+- Tauri IPC is not an HTTP API. Do not add it to OpenAPI, AsyncAPI, or JSON-LD.
+
 ## Contract changes
 
 Any capability change must consider:
@@ -63,7 +76,7 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
-- Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
+- Mount daemon durable routes only on loopback with an explicit `FASTI_DATA_ROOT`. Tauri mobile uses its platform-owned application data directory when the environment cannot supply one.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
 

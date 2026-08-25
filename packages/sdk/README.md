@@ -38,6 +38,22 @@ Expected output:
 
 Stop the daemon with `Ctrl-C`. This health call does not prove any B1 fixture route or B2 runtime behavior.
 
+## Client origins
+
+Use `connectionEndpoint` when accepting an operator-supplied origin:
+
+```js
+import {
+  connectionEndpoint,
+  FastiClient,
+} from "./packages/sdk/dist/transport.js";
+
+const endpoint = connectionEndpoint("https://fasti.internal:9443", "saved");
+const client = new FastiClient({ baseUrl: endpoint.url });
+```
+
+The helper accepts only an absolute HTTP or HTTPS origin without credentials, a path, a query, or a fragment. It preserves `.internal` names and reports the effective port, source, platform trust mode, and loopback alternatives. `localhost`, `127.0.0.1`, and `[::1]` remain separate origins because a client must select the address that is reachable from its network namespace.
+
 ## Durable local setup
 
 Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry.

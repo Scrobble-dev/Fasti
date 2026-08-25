@@ -4,22 +4,22 @@ The authored registry at [`registry/v1/capabilities.yaml`](registry/v1/capabilit
 
 ## Ownership map
 
-| Location                              | Owner and role                                                                               |
-| ------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `registry/v1/capabilities.yaml`       | Authored capability and surface ownership                                                    |
-| `../crates/fasti-domain/`             | Domain identifiers, time values, vocabulary, and invariants                                  |
-| `../crates/fasti-application/`        | Use cases, authorization, ports, capability ownership, and typed problems                    |
-| `../crates/fasti-contracts/`          | Shared public Rust DTOs and generated capability identifiers                                 |
+| Location                              | Owner and role                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `registry/v1/capabilities.yaml`       | Authored capability and surface ownership                                                          |
+| `../crates/fasti-domain/`             | Domain identifiers, time values, vocabulary, and invariants                                        |
+| `../crates/fasti-application/`        | Use cases, authorization, ports, capability ownership, and typed problems                          |
+| `../crates/fasti-contracts/`          | Shared public Rust DTOs and generated capability identifiers                                       |
 | `../crates/fasti-api/`                | Real Utoipa operations: production health/setup plus a separately feature-gated conformance router |
-| `asyncapi/v1/transport.yaml`          | Authored `receipt.stream` SSE channel and message flow                                       |
-| `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                  |
-| `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                        |
-| `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                  |
-| `portability/v1/`                     | Internal staged B3 archive-v1 manifest schema and example; version-1 stream order is frozen    |
-| `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas    |
-| `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                       |
-| `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                     |
-| `../tests/conformance/uat-matrix.csv` | Acceptance inventory and explicit body relationships                                         |
+| `asyncapi/v1/transport.yaml`          | Authored `receipt.stream` SSE channel and message flow                                             |
+| `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                        |
+| `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                              |
+| `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                        |
+| `portability/v1/`                     | Internal staged B3 archive-v1 manifest schema and example; version-1 stream order is frozen        |
+| `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas          |
+| `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                             |
+| `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                           |
+| `../tests/conformance/uat-matrix.csv` | Acceptance inventory and explicit body relationships                                               |
 
 The production OpenAPI document contains health plus durable node initialization and first-client enrollment. `fastid` mounts the two setup routes only for a loopback bind with an explicit `FASTI_DATA_ROOT`. The separate B1 conformance OpenAPI and router are compiled only with `conformance-fixture`; its server binds only to IPv4 loopback, keeps bounded state in memory, and declares fixture-only, no-durability success. The SSE receipt channel belongs to AsyncAPI rather than being smuggled into the finite OpenAPI document. Fixture behavior does not authorize other B2 runtime behavior.
 
@@ -27,7 +27,9 @@ JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surface
 
 Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until the current aggregate milestone manifest, including Tauri and both low-hardware envelope architectures, passes. B2 is not authorized.
 
-Provider seeds and manifest examples remain future adapter inputs, not working integrations. Durable setup does not make the staged observation, identity, review, or portability paths public. There is no supported install, release, web interface, desktop package, or player.
+The Google Books manifest records the maximum for one working trusted-host search adapter. The adapter returns transient neutral candidates and does not activate record writes, provider-owned identity, an HTTP route, or a general add-on runtime. Other provider seeds remain future inputs. Durable setup does not make the staged observation, identity, review, or portability paths public. There is no supported install, signed release, published desktop or Android package, or player.
+
+Connection tests, provider credential management, and provider search currently use Tauri IPC. OpenAPI is not applicable until an authenticated daemon HTTP route is activated. AsyncAPI is not applicable because these commands add no event transport. JSON-LD is not applicable because transient provider candidates are not linked-data entities.
 
 The [internal staged B3 archive-v1 manifest schema](portability/v1/workspace-manifest.schema.json)
 and [example](portability/v1/workspace-manifest.example.json) freeze the 16

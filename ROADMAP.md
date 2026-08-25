@@ -55,6 +55,8 @@ flowchart LR
 
 ## B4: Implement the approved media interface
 
+Review status: the web workbench, configurable connection settings, responsive navigation fixes, and trusted-host health checks exist on a stacked review branch. Sample records are labeled. Authenticated record operations, complete device evidence, and milestone approval remain open.
+
 - Reintroduce `apps/web` only with real source and a committed lockfile.
 - Reintroduce `packages/ui` only as a presentation boundary consuming generated contracts and Fasti tokens.
 - Consume generated registry, DTO, problem, receipt, cursor, and SDK surfaces; do not redefine domain, retry, or offline behavior in the client.
@@ -64,6 +66,8 @@ flowchart LR
 - Pass keyboard, screen reader, touch, TV remote, responsive, state-continuity, memory, QA, and design-review gates.
 
 ## B5: Declarative provider enrichment
+
+Review status: one Google Books search adapter now proves bounded trusted-host I/O, write-only platform credentials, neutral candidates, and declaration-limited deny-wins policy. This does not authorize a general provider runtime or close B5.
 
 - Add provider-neutral manifests and metadata enrichment through application capabilities.
 - Keep descriptive metadata replaceable without moving local identity or history.
@@ -82,6 +86,8 @@ Nuvio adaptation begins only when all readiness conditions pass: B0-B6 are green
 The first authorized slice can report observations through public capabilities. It cannot import player code, write Fasti storage directly, or make Nuvio metadata canonical.
 
 ## B8: Distribution and platform readiness
+
+Review status: reproducible Tauri desktop and Android source-build projects exist, and an ARM64 debug APK has been produced locally. Signing, release packaging, updates, device runtime evidence, and public distribution remain open.
 
 - Own native-first bundles, OCI parity, desktop/package lifecycle, signing, trust roots, updates, SBOMs, and explicit public release actions.
 - Prove macOS and Windows restore activation or keep it explicitly unsupported without mutation.
