@@ -185,8 +185,8 @@ bash scripts/check-repository-truth.sh
 bash scripts/check-no-publish.sh
 node scripts/check-doc-links.mjs
 
-docker build --tag fasti:b0 .
-bash scripts/smoke-oci.sh fasti:b0
+podman build --tag fasti:b0 .
+bash scripts/smoke-oci.sh fasti:b0 "" podman
 ```
 
 The staged B3 portability slice has runnable internal gates. These commands do not activate the guarded CLI:
@@ -198,7 +198,7 @@ cargo test -p fasti-store restore_import::tests::full_import_activation_survives
 cargo test -p fasti-store stopped_portability::tests::stopped_adapter_restore_refuses_a_live_data_root_before_archive_input --locked -- --exact
 ```
 
-The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. That one-shot container sample is a regression sentinel, not the two-architecture envelope package required by the B1 milestone verifier. Override the default command to inspect a guarded command, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3 public activation.
+The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate accepts Docker or Podman explicitly and verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. The B1 deep gate binds Podman and its exact version in the receipt. That one-shot container sample is a regression sentinel, not the two-architecture envelope package required by the B1 milestone verifier. Override the default command to inspect a guarded command, for example `podman run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3 public activation.
 
 ## Brand and design system
 

@@ -135,6 +135,14 @@ pub(crate) fn run_deep_b1(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Defines the deep B1 validation gates for documentation and arm64 OCI packaging.
+///
+/// # Examples
+///
+/// ```
+/// let gates = deep_b1_gates();
+/// assert_eq!(gates.len(), 3);
+/// ```
 pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
     [
         CommandGate::new(
@@ -145,23 +153,26 @@ pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
         ),
         CommandGate::new(
             "package.arm64_oci_build",
-            "docker",
+            "podman",
             [
-                "buildx",
                 "build",
                 "--platform",
                 "linux/arm64",
-                "--load",
                 "--tag",
                 "fasti:deep-arm64",
                 ".",
             ],
-            "install Docker Buildx with arm64 execution support and repair the locked OCI package",
+            "install Podman with arm64 execution support and repair the locked OCI package",
         ),
         CommandGate::new(
             "package.arm64_oci_smoke",
             "bash",
-            ["scripts/smoke-oci.sh", "fasti:deep-arm64", "arm64"],
+            [
+                "scripts/smoke-oci.sh",
+                "fasti:deep-arm64",
+                "arm64",
+                "podman",
+            ],
             "repair the arm64 daemon/CLI package or its network-denied smoke journey",
         ),
     ]
@@ -213,8 +224,9 @@ mod tests {
             ]
         );
         assert!(gates[1].display().contains("linux/arm64"));
-        assert!(gates[1].display().contains("--load"));
+        assert!(gates[1].display().starts_with("\"podman\" \"build\""));
         assert!(gates[2].display().contains("scripts/smoke-oci.sh"));
         assert!(gates[2].display().contains("arm64"));
+        assert!(gates[2].display().contains("podman"));
     }
 }
