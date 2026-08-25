@@ -163,7 +163,10 @@ scope_properties=(
   -p "CPUQuota=100%"
 )
 
-if systemd-run --user --scope --quiet "${scope_properties[@]}" -- true 2>/dev/null; then
+# Prefer the user scope only when it can also create the required network namespace.
+if systemd-run --user --scope --quiet "${scope_properties[@]}" -- true 2>/dev/null &&
+  { [[ "$profile" != "canonical-idle" ]] || unshare --user --map-root-user --net -- true 2>/dev/null; }
+then
   runner=(systemd-run --user --scope --quiet "${scope_properties[@]}" --)
 elif sudo -n true 2>/dev/null && sudo systemd-run --scope --quiet "${scope_properties[@]}" -- true 2>/dev/null; then
   runner=(sudo systemd-run --scope --quiet "${scope_properties[@]}" --)
