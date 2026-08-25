@@ -1,5 +1,10 @@
 <script lang="ts">
-  import type { MediaRecord, WatchStatus, ExternalId } from "./types.js";
+  import type {
+    MediaRecord,
+    WatchStatus,
+    ExternalId,
+    ChronicleOccurrence,
+  } from "./types.js";
   import {
     IconArrowLeft,
     IconStarFilled,
@@ -12,19 +17,37 @@
     IconExternalLink,
     IconShieldCheck,
     IconNotes,
-    IconTags,
     IconListNumbers,
-    IconPlus,
+    IconHistory,
+    IconAdjustments,
+    IconFolderPlus,
+    IconMessage,
+    IconDotsVertical,
     IconX,
     IconEdit,
+    IconClock,
+    IconDeviceTv,
   } from "@tabler/icons-svelte";
+  import ProgressModal from "./progress-modal.svelte";
+  import RatingReviewModal from "./rating-review-modal.svelte";
+  import CollectionModal from "./collection-modal.svelte";
+  import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
 
   interface Props {
     record: MediaRecord;
+    occurrences?: ChronicleOccurrence[];
     onBack: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
     onToggleEpisode?: (recordId: string, episodeId: string) => void;
+    onUpdateProgress?: (
+      recordId: string,
+      episodes: number,
+      seconds: number,
+      status: WatchStatus,
+    ) => void;
+    onSaveReview?: (recordId: string, rating: number, notes: string) => void;
+    onSaveCollection?: (recordId: string, collections: string[]) => void;
     onUpdateNotes?: (recordId: string, notes: string) => void;
     onAddTag?: (recordId: string, tag: string) => void;
     onRemoveTag?: (recordId: string, tag: string) => void;
@@ -32,16 +55,21 @@
 
   let {
     record,
+    occurrences = [],
     onBack,
     onUpdateStatus,
     onUpdateRating,
     onToggleEpisode,
+    onUpdateProgress,
+    onSaveReview,
+    onSaveCollection,
     onUpdateNotes,
     onAddTag,
     onRemoveTag,
   }: Props = $props();
 
-  let activeTab: "seasons" | "cast" | "sources" | "notes" = $state("seasons");
+  let activeTab: "overview" | "actions" | "history" | "sources" | "reviews" =
+    $state("overview");
   let selectedSeasonIndex = $state(0);
   let isEditingNotes = $state(false);
   let editedNotesText = $state("");
@@ -49,10 +77,26 @@
   let isFavorite = $state(false);
   let activeDisplaySource = $state("tmdb_tv");
 
+  // Modal Dialog States
+  let showProgressModal = $state(false);
+  let showReviewModal = $state(false);
+  let showCollectionModal = $state(false);
+
+  // Context Menu State
+  let contextMenuState = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
   $effect(() => {
     editedNotesText = record.userNotes ?? "";
     activeDisplaySource = record.displaySource;
   });
+
+  const recordOccurrences = $derived(
+    occurrences.filter((occ) => occ.recordId === record.id),
+  );
 
   const statusOptions: Array<{ id: WatchStatus; label: string }> = [
     { id: "watching", label: "In Progress / Watching" },
@@ -74,6 +118,46 @@
       newTagInput = "";
     }
   }
+
+  function handleOpenContextMenu(e: MouseEvent): void {
+    e.preventDefault();
+    contextMenuState = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          id: "prog",
+          label: "Update Progress...",
+          icon: IconAdjustments,
+          action: () => (showProgressModal = true),
+        },
+        {
+          id: "review",
+          label: "Post a Review...",
+          icon: IconMessage,
+          action: () => (showReviewModal = true),
+        },
+        {
+          id: "coll",
+          label: "Add to Collection...",
+          icon: IconFolderPlus,
+          action: () => (showCollectionModal = true),
+        },
+        {
+          id: "rewatch",
+          label: "Log Occurrence (Rewatch)",
+          icon: IconRepeat,
+          action: () => onUpdateStatus?.(record.id, "completed"),
+        },
+        { id: "d1", label: "", divider: true, action: () => {} },
+        {
+          id: "copy_id",
+          label: `Copy Fasti ID (${record.id})`,
+          action: () => navigator.clipboard.writeText(record.id),
+        },
+      ],
+    };
+  }
 </script>
 
 <div class="detail-container">
@@ -85,12 +169,12 @@
     </button>
 
     <div class="top-id-badge">
-      <span class="id-label">Record ID:</span>
+      <span class="id-label">Fasti Entity ID:</span>
       <code>{record.id}</code>
     </div>
   </div>
 
-  <!-- Main Media Header (Floppy / Yamtrack Editorial Style) -->
+  <!-- Main Media Header (Floppy / Yamtrack / Ryot Editorial Style) -->
   <header class="media-main-header">
     <!-- Left Poster Column -->
     <div class="poster-column">
@@ -119,6 +203,10 @@
 
       <!-- Progress & Watched Stats Meta Row -->
       <div class="meta-strip">
+        {#if record.collectionName}
+          <span class="collection-pill">{record.collectionName}</span>
+          <span class="bullet">·</span>
+        {/if}
         {#if record.progressEpisodes !== undefined && record.totalEpisodes !== undefined}
           <span class="meta-item">
             <strong>Progress:</strong>
@@ -194,20 +282,31 @@
           <IconHeart size={18} fill={isFavorite ? "currentColor" : "none"} />
         </button>
 
-        <button type="button" class="icon-action-btn" title="Add to List">
+        <button
+          type="button"
+          class="icon-action-btn"
+          onclick={() => (showCollectionModal = true)}
+          title="Add to Collection"
+        >
           <IconBookmark size={18} />
-        </button>
-
-        <button type="button" class="icon-action-btn" title="View Calendar">
-          <IconCalendar size={18} />
         </button>
 
         <button
           type="button"
           class="icon-action-btn"
-          title="Log Rewatch Occurrence"
+          onclick={() => (showProgressModal = true)}
+          title="Update Progress"
         >
-          <IconRepeat size={18} />
+          <IconAdjustments size={18} />
+        </button>
+
+        <button
+          type="button"
+          class="icon-action-btn"
+          onclick={handleOpenContextMenu}
+          title="More Actions..."
+        >
+          <IconDotsVertical size={18} />
         </button>
 
         <button type="button" class="play-with-btn">
@@ -320,32 +419,36 @@
       </div>
     </aside>
 
-    <!-- Right Main Tabbed Content Area -->
+    <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
     <main class="main-content-pane">
       <!-- Section Tabs -->
       <nav class="content-tabs" aria-label="Media section tabs">
-        {#if record.seasons && record.seasons.length > 0}
-          <button
-            type="button"
-            class="tab-btn"
-            class:active={activeTab === "seasons"}
-            onclick={() => (activeTab = "seasons")}
-          >
-            <IconListNumbers size={16} /> Seasons & Episodes ({record.seasons
-              .length})
-          </button>
-        {/if}
+        <button
+          type="button"
+          class="tab-btn"
+          class:active={activeTab === "overview"}
+          onclick={() => (activeTab = "overview")}
+        >
+          <IconListNumbers size={16} /> Overview & Seasons
+        </button>
 
-        {#if record.cast && record.cast.length > 0}
-          <button
-            type="button"
-            class="tab-btn"
-            class:active={activeTab === "cast"}
-            onclick={() => (activeTab = "cast")}
-          >
-            Cast & Crew ({record.cast.length})
-          </button>
-        {/if}
+        <button
+          type="button"
+          class="tab-btn"
+          class:active={activeTab === "actions"}
+          onclick={() => (activeTab = "actions")}
+        >
+          <IconAdjustments size={16} /> Actions & Progress
+        </button>
+
+        <button
+          type="button"
+          class="tab-btn"
+          class:active={activeTab === "history"}
+          onclick={() => (activeTab = "history")}
+        >
+          <IconHistory size={16} /> History ({recordOccurrences.length})
+        </button>
 
         <button
           type="button"
@@ -353,137 +456,247 @@
           class:active={activeTab === "sources"}
           onclick={() => (activeTab = "sources")}
         >
-          <IconShieldCheck size={16} /> Sources & Identity
+          <IconShieldCheck size={16} /> Sources & Identity ({record.externalIds
+            .length})
         </button>
 
         <button
           type="button"
           class="tab-btn"
-          class:active={activeTab === "notes"}
-          onclick={() => (activeTab = "notes")}
+          class:active={activeTab === "reviews"}
+          onclick={() => (activeTab = "reviews")}
         >
-          <IconNotes size={16} /> Notes & Custom Tags
+          <IconNotes size={16} /> Notes & Reviews
         </button>
       </nav>
 
-      <!-- Tab 1: Seasons & Episodes Accordion -->
-      {#if activeTab === "seasons" && record.seasons}
+      <!-- TAB 1: OVERVIEW & SEASONS -->
+      {#if activeTab === "overview"}
         <section class="tab-pane">
-          <!-- Horizontal Season Selector Cards -->
-          <div class="seasons-cards-row">
-            {#each record.seasons as season, sIdx}
-              <button
-                type="button"
-                class="season-card-btn"
-                class:active={selectedSeasonIndex === sIdx}
-                onclick={() => (selectedSeasonIndex = sIdx)}
-              >
-                {#if season.posterUrl}
-                  <img src={season.posterUrl} alt="" class="season-thumb" />
-                {/if}
-                <div class="season-card-info">
-                  <span class="season-name">{season.title}</span>
-                  <span class="season-count"
-                    >{season.episodeCount} Episodes</span
-                  >
-                </div>
-              </button>
-            {/each}
-          </div>
-
-          <!-- Episode Checklist -->
-          <div class="episodes-deck">
-            <h3 class="deck-title">
-              Episodes — {record.seasons[selectedSeasonIndex].title}
-            </h3>
-            <div class="episodes-table-wrap">
-              {#each record.seasons[selectedSeasonIndex].episodes as ep (ep.id)}
-                <div class="episode-item-row" class:watched={ep.watched}>
-                  <button
-                    type="button"
-                    class="ep-check-btn"
-                    class:checked={ep.watched}
-                    onclick={() => onToggleEpisode?.(record.id, ep.id)}
-                    aria-label="Toggle watched for Episode {ep.number}"
-                  >
-                    {#if ep.watched}
-                      <IconCheck size={16} stroke={3} />
-                    {/if}
-                  </button>
-
-                  <span class="ep-num">#{ep.number}</span>
-
-                  <div class="ep-main-details">
-                    <div class="ep-header-line">
-                      <h4 class="ep-title">{ep.title}</h4>
-                      {#if ep.durationSeconds}
-                        <span class="ep-duration"
-                          >{Math.round(ep.durationSeconds / 60)} min</span
-                        >
-                      {/if}
-                      {#if ep.airDate}
-                        <span class="ep-air-date">{ep.airDate}</span>
-                      {/if}
-                    </div>
-                    {#if ep.overview}
-                      <p class="ep-overview">{ep.overview}</p>
-                    {/if}
-                  </div>
-
-                  {#if ep.watchedAt}
-                    <div class="ep-watched-pill">
-                      Watched {new Date(ep.watchedAt).toLocaleDateString(
-                        "en-IE",
-                        { month: "short", day: "numeric" },
-                      )}
-                    </div>
+          {#if record.seasons && record.seasons.length > 0}
+            <!-- Horizontal Season Selector Cards -->
+            <div class="seasons-cards-row">
+              {#each record.seasons as season, sIdx}
+                <button
+                  type="button"
+                  class="season-card-btn"
+                  class:active={selectedSeasonIndex === sIdx}
+                  onclick={() => (selectedSeasonIndex = sIdx)}
+                >
+                  {#if season.posterUrl}
+                    <img src={season.posterUrl} alt="" class="season-thumb" />
                   {/if}
-                </div>
+                  <div class="season-card-info">
+                    <span class="season-name">{season.title}</span>
+                    <span class="season-count"
+                      >{season.episodeCount} Episodes</span
+                    >
+                  </div>
+                </button>
               {/each}
             </div>
-          </div>
-        </section>
 
-        <!-- Tab 2: Cast & Crew Avatars -->
-      {:else if activeTab === "cast"}
-        <section class="tab-pane">
-          <h3 class="pane-heading">Top Billed Cast</h3>
-          <div class="cast-grid">
-            {#each record.cast ?? [] as actor (actor.id)}
-              <div class="cast-card">
-                <div class="cast-avatar">
-                  {#if actor.profileUrl}
-                    <img
-                      src={actor.profileUrl}
-                      alt={actor.name}
-                      class="avatar-img"
-                    />
-                  {:else}
-                    <div class="avatar-fallback">{actor.name.charAt(0)}</div>
-                  {/if}
-                </div>
-                <div class="cast-text">
-                  <h4 class="actor-name">{actor.name}</h4>
-                  <p class="character-name">{actor.characterName}</p>
-                </div>
+            <!-- Episode Checklist -->
+            <div class="episodes-deck">
+              <h3 class="deck-title">
+                Episodes — {record.seasons[selectedSeasonIndex].title}
+              </h3>
+              <div class="episodes-table-wrap">
+                {#each record.seasons[selectedSeasonIndex].episodes as ep (ep.id)}
+                  <div class="episode-item-row" class:watched={ep.watched}>
+                    <button
+                      type="button"
+                      class="ep-check-btn"
+                      class:checked={ep.watched}
+                      onclick={() => onToggleEpisode?.(record.id, ep.id)}
+                      aria-label="Toggle watched for Episode {ep.number}"
+                    >
+                      {#if ep.watched}
+                        <IconCheck size={16} stroke={3} />
+                      {/if}
+                    </button>
+
+                    <span class="ep-num">#{ep.number}</span>
+
+                    <div class="ep-main-details">
+                      <div class="ep-header-line">
+                        <h4 class="ep-title">{ep.title}</h4>
+                        {#if ep.durationSeconds}
+                          <span class="ep-duration"
+                            >{Math.round(ep.durationSeconds / 60)} min</span
+                          >
+                        {/if}
+                        {#if ep.airDate}
+                          <span class="ep-air-date">{ep.airDate}</span>
+                        {/if}
+                      </div>
+                      {#if ep.overview}
+                        <p class="ep-overview">{ep.overview}</p>
+                      {/if}
+                    </div>
+
+                    {#if ep.watchedAt}
+                      <div class="ep-watched-pill">
+                        Watched {new Date(ep.watchedAt).toLocaleDateString(
+                          "en-IE",
+                          { month: "short", day: "numeric" },
+                        )}
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
               </div>
-            {/each}
-          </div>
+            </div>
+          {/if}
 
-          {#if record.crew && record.crew.length > 0}
-            <h3 class="pane-heading mt-4">Key Crew & Creators</h3>
-            <div class="crew-grid">
-              {#each record.crew as c (c.id)}
-                <div class="crew-card">
-                  <h4 class="crew-name">{c.name}</h4>
-                  <p class="crew-role">{c.role}</p>
+          <!-- Cast & Crew Section -->
+          {#if record.cast && record.cast.length > 0}
+            <h3 class="pane-heading mt-4">Top Billed Cast</h3>
+            <div class="cast-grid">
+              {#each record.cast as actor (actor.id)}
+                <div class="cast-card">
+                  <div class="cast-avatar">
+                    {#if actor.profileUrl}
+                      <img
+                        src={actor.profileUrl}
+                        alt={actor.name}
+                        class="avatar-img"
+                      />
+                    {:else}
+                      <div class="avatar-fallback">{actor.name.charAt(0)}</div>
+                    {/if}
+                  </div>
+                  <div class="cast-text">
+                    <h4 class="actor-name">{actor.name}</h4>
+                    <p class="character-name">{actor.characterName}</p>
+                  </div>
                 </div>
               {/each}
             </div>
           {/if}
         </section>
 
-        <!-- Tab 3: Sources & Provider Identity -->
+        <!-- TAB 2: RYOT-STYLE ACTIONS DASHBOARD -->
+      {:else if activeTab === "actions"}
+        <section class="tab-pane">
+          <h3 class="pane-heading">Media Action Center</h3>
+          <p class="pane-sub">
+            Execute state changes, log manual occurrences, or re-organize
+            collections.
+          </p>
+
+          <div class="ryot-actions-grid">
+            <button
+              type="button"
+              class="ryot-action-btn"
+              onclick={() => (showProgressModal = true)}
+            >
+              <div class="action-btn-icon"><IconAdjustments size={22} /></div>
+              <div class="action-btn-text">
+                <strong>Update Progress</strong>
+                <span>Set current episode, timestamp, or percentage</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="ryot-action-btn"
+              onclick={() => (showReviewModal = true)}
+            >
+              <div class="action-btn-icon"><IconMessage size={22} /></div>
+              <div class="action-btn-text">
+                <strong>Post a Review</strong>
+                <span>Submit 10-star rating and personal critique</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="ryot-action-btn"
+              onclick={() => (showCollectionModal = true)}
+            >
+              <div class="action-btn-icon"><IconFolderPlus size={22} /></div>
+              <div class="action-btn-text">
+                <strong>Add to Collection</strong>
+                <span>Add to custom lists, favorites, or franchise</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              class="ryot-action-btn"
+              onclick={() => onUpdateStatus?.(record.id, "completed")}
+            >
+              <div class="action-btn-icon"><IconRepeat size={22} /></div>
+              <div class="action-btn-text">
+                <strong>Log Rewatch Occurrence</strong>
+                <span>Record a new chronological consumption timestamp</span>
+              </div>
+            </button>
+          </div>
+        </section>
+
+        <!-- TAB 3: OCCURRENCE & PROGRESS HISTORY -->
+      {:else if activeTab === "history"}
+        <section class="tab-pane">
+          <h3 class="pane-heading">Chronicle History for this Entity</h3>
+          <p class="pane-sub">
+            Every recorded observation, rewatch, and device scrobble for {record.title}.
+          </p>
+
+          {#if recordOccurrences.length === 0}
+            <div class="empty-history-box">
+              <IconClock size={32} class="empty-icon" />
+              <h4>No occurrences recorded yet</h4>
+              <p>
+                When you watch or scrobble this title, every occurrence will be
+                preserved here.
+              </p>
+              <button
+                type="button"
+                class="btn-primary"
+                onclick={() => onUpdateStatus?.(record.id, "completed")}
+              >
+                Log First Occurrence
+              </button>
+            </div>
+          {:else}
+            <div class="history-timeline">
+              {#each recordOccurrences as occ (occ.id)}
+                <div class="history-item-card">
+                  <div class="history-left">
+                    <span class="hist-time"
+                      >{new Date(occ.timestamp).toLocaleDateString("en-IE", {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}</span
+                    >
+                    <span class="hist-client">{occ.clientName}</span>
+                  </div>
+                  <div class="history-center">
+                    <h4 class="hist-title">{occ.episodeTitle ?? occ.title}</h4>
+                    <span class="hist-device"
+                      ><IconDeviceTv size={14} /> {occ.deviceName}</span
+                    >
+                  </div>
+                  <div class="history-right">
+                    <span class="hist-dur">{occ.durationMinutes} min</span>
+                    {#if occ.isRewatch}
+                      <span class="rewatch-pill">Rewatch</span>
+                    {/if}
+                    {#if occ.userRating}
+                      <span class="hist-star">★ {occ.userRating}/10</span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+
+        <!-- TAB 4: SOURCES & PROVIDER IDENTITY (UAT ID-001–ID-030) -->
       {:else if activeTab === "sources"}
         <section class="tab-pane">
           <div class="provider-banner">
@@ -493,8 +706,9 @@
                 Provider-Neutral Identity Architecture
               </h4>
               <p class="banner-desc">
-                Fasti maintains a stable, immutable identity (`{record.id}`)
-                independent of TMDB, TVDB, or MyAnimeList. You can switch
+                Fasti maintains a stable, immutable identity (<code
+                  >{record.id}</code
+                >) independent of TMDB, TVDB, or MyAnimeList. You can switch
                 primary metadata projection without breaking your history logs.
               </p>
             </div>
@@ -543,8 +757,8 @@
           </table>
         </section>
 
-        <!-- Tab 4: Personal Notes & Tags Editor -->
-      {:else if activeTab === "notes"}
+        <!-- TAB 5: PERSONAL REVIEWS & NOTES -->
+      {:else if activeTab === "reviews"}
         <section class="tab-pane">
           <div class="notes-header-row">
             <h3 class="pane-heading">Personal Reflections & Review</h3>
@@ -629,6 +843,41 @@
   </div>
 </div>
 
+<!-- Modal Dialogs -->
+{#if showProgressModal}
+  <ProgressModal
+    {record}
+    onClose={() => (showProgressModal = false)}
+    onSaveProgress={(recId, eps, sec, st) =>
+      onUpdateProgress?.(recId, eps, sec, st)}
+  />
+{/if}
+
+{#if showReviewModal}
+  <RatingReviewModal
+    {record}
+    onClose={() => (showReviewModal = false)}
+    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+  />
+{/if}
+
+{#if showCollectionModal}
+  <CollectionModal
+    {record}
+    onClose={() => (showCollectionModal = false)}
+    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+  />
+{/if}
+
+{#if contextMenuState}
+  <ContextMenu
+    x={contextMenuState.x}
+    y={contextMenuState.y}
+    items={contextMenuState.items}
+    onClose={() => (contextMenuState = null)}
+  />
+{/if}
+
 <style>
   .detail-container {
     max-width: 1200px;
@@ -644,7 +893,6 @@
     justify-content: space-between;
     align-items: center;
   }
-
   .back-btn {
     display: inline-flex;
     align-items: center;
@@ -657,7 +905,6 @@
     cursor: pointer;
     padding: 6px 0;
   }
-
   .top-id-badge {
     font-family: var(--fasti-font-mono);
     font-size: 0.78rem;
@@ -684,19 +931,16 @@
     background: var(--fasti-surface-archive);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   }
-
   .main-poster {
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
-
   .header-details-column {
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
-
   .main-title {
     font-family: var(--fasti-font-display);
     font-size: 2.6rem;
@@ -705,7 +949,6 @@
     line-height: 1.1;
     color: var(--fasti-text-primary);
   }
-
   .original-title {
     font-family: var(--fasti-font-display);
     font-size: 1.25rem;
@@ -721,6 +964,14 @@
     font-family: var(--fasti-font-mono);
     font-size: 0.85rem;
     color: var(--fasti-text-muted);
+  }
+  .collection-pill {
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--fasti-brand-gold) 20%, transparent);
+    color: var(--fasti-brand-gold);
+    font-weight: 700;
+    font-size: 0.75rem;
   }
 
   .action-strip {
@@ -746,7 +997,6 @@
     font-family: var(--fasti-font-mono);
     font-weight: 700;
   }
-
   .score-num {
     font-size: 1.05rem;
   }
@@ -763,12 +1013,10 @@
     border-radius: 4px;
     padding: 4px 8px;
   }
-
   .user-star {
     color: var(--fasti-brand-gold);
     margin-right: 4px;
   }
-
   .rating-select {
     border: none;
     background: transparent;
@@ -787,7 +1035,6 @@
     cursor: pointer;
     border: 1px solid transparent;
   }
-
   .status-select.watching {
     background: var(--fasti-action-primary);
     color: white;
@@ -809,7 +1056,6 @@
     color: var(--fasti-text-primary);
     cursor: pointer;
   }
-
   .icon-action-btn.active {
     color: #e11d48;
     border-color: #e11d48;
@@ -829,7 +1075,6 @@
     cursor: pointer;
     margin-left: auto;
   }
-
   .synopsis-prose {
     font-size: 0.95rem;
     line-height: 1.7;
@@ -843,7 +1088,6 @@
     grid-template-columns: 280px 1fr;
     gap: 24px;
   }
-
   .sidebar-details-card {
     background: var(--fasti-surface-paper);
     border: 1px solid
@@ -855,7 +1099,6 @@
     gap: 18px;
     height: fit-content;
   }
-
   .details-sidebar-heading {
     font-family: var(--fasti-font-display);
     font-size: 1.3rem;
@@ -864,27 +1107,23 @@
       color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
     padding-bottom: 8px;
   }
-
   .sidebar-meta-list {
     display: flex;
     flex-direction: column;
     gap: 12px;
     margin: 0;
   }
-
   .meta-pair dt {
     font-family: var(--fasti-font-mono);
     font-size: 0.72rem;
     text-transform: uppercase;
     color: var(--fasti-text-muted);
   }
-
   .meta-pair dd {
     font-size: 0.9rem;
     font-weight: 600;
     margin: 2px 0 0;
   }
-
   .sidebar-subheading {
     font-family: var(--fasti-font-mono);
     font-size: 0.75rem;
@@ -892,13 +1131,11 @@
     color: var(--fasti-text-muted);
     margin: 0 0 8px;
   }
-
   .chips-row {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
   }
-
   .genre-chip {
     padding: 3px 8px;
     border-radius: 4px;
@@ -906,20 +1143,17 @@
     font-size: 0.8rem;
     font-weight: 500;
   }
-
   .studios-list {
     margin: 0;
     padding-left: 18px;
     font-size: 0.85rem;
     color: var(--fasti-text-primary);
   }
-
   .xid-links {
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
-
   .xid-link {
     display: flex;
     align-items: center;
@@ -932,7 +1166,6 @@
     color: var(--fasti-text-primary);
     text-decoration: none;
   }
-
   .xid-link:hover {
     color: var(--fasti-action-primary);
   }
@@ -944,14 +1177,13 @@
     border-radius: 6px;
     overflow: hidden;
   }
-
   .content-tabs {
     display: flex;
     background: var(--fasti-surface-archive);
     border-bottom: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    overflow-x: auto;
   }
-
   .tab-btn {
     display: inline-flex;
     align-items: center;
@@ -964,16 +1196,140 @@
     font-weight: 600;
     color: var(--fasti-text-muted);
     cursor: pointer;
+    white-space: nowrap;
   }
-
   .tab-btn.active {
     color: var(--fasti-action-primary);
     border-bottom-color: var(--fasti-action-primary);
     background: var(--fasti-surface-paper);
   }
-
   .tab-pane {
     padding: 24px;
+  }
+
+  /* Ryot Actions Grid */
+  .ryot-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+  }
+  .ryot-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 120ms ease;
+  }
+  .ryot-action-btn:hover {
+    border-color: var(--fasti-action-primary);
+    background: color-mix(in srgb, var(--fasti-action-primary) 8%, transparent);
+  }
+  .action-btn-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    background: var(--fasti-surface-paper);
+    display: grid;
+    place-items: center;
+    color: var(--fasti-action-primary);
+  }
+  .action-btn-text strong {
+    display: block;
+    font-size: 0.95rem;
+    margin-bottom: 2px;
+  }
+  .action-btn-text span {
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+  }
+
+  /* History Timeline */
+  .history-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .history-item-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+  }
+  .history-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 140px;
+  }
+  .hist-time {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .hist-client {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    color: var(--fasti-text-muted);
+  }
+  .history-center {
+    flex: 1;
+    margin: 0 16px;
+  }
+  .hist-title {
+    margin: 0;
+    font-size: 0.92rem;
+  }
+  .hist-device {
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .history-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .hist-dur {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .rewatch-pill {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    background: var(--fasti-brand-gold);
+    color: black;
+    border-radius: 3px;
+    font-weight: 700;
+  }
+  .hist-star {
+    font-size: 0.8rem;
+    color: var(--fasti-brand-gold);
+    font-weight: 700;
+  }
+
+  .empty-history-box {
+    text-align: center;
+    padding: 40px 20px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+  }
+  :global(.empty-icon) {
+    color: var(--fasti-text-muted);
+    margin-bottom: 8px;
   }
 
   .seasons-cards-row {
@@ -982,7 +1338,6 @@
     margin-bottom: 24px;
     overflow-x: auto;
   }
-
   .season-card-btn {
     display: flex;
     align-items: center;
@@ -994,7 +1349,6 @@
     border-radius: 6px;
     cursor: pointer;
   }
-
   .season-card-btn.active {
     border-color: var(--fasti-action-primary);
     background: color-mix(
@@ -1003,14 +1357,12 @@
       transparent
     );
   }
-
   .season-thumb {
     width: 36px;
     height: 52px;
     object-fit: cover;
     border-radius: 3px;
   }
-
   .season-name {
     font-weight: 700;
     font-size: 0.92rem;
@@ -1026,7 +1378,6 @@
     flex-direction: column;
     gap: 8px;
   }
-
   .episode-item-row {
     display: flex;
     align-items: center;
@@ -1035,11 +1386,9 @@
     background: var(--fasti-surface-archive);
     border-radius: 4px;
   }
-
   .episode-item-row.watched {
     opacity: 0.75;
   }
-
   .ep-check-btn {
     width: 28px;
     height: 28px;
@@ -1051,13 +1400,11 @@
     cursor: pointer;
     padding: 0;
   }
-
   .ep-check-btn.checked {
     background: var(--fasti-state-verified);
     border-color: var(--fasti-state-verified);
     color: white;
   }
-
   .ep-num {
     font-family: var(--fasti-font-mono);
     font-weight: 700;
@@ -1091,8 +1438,8 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 16px;
+    margin-top: 14px;
   }
-
   .cast-card {
     display: flex;
     flex-direction: column;
@@ -1102,7 +1449,6 @@
     background: var(--fasti-surface-archive);
     border-radius: 6px;
   }
-
   .cast-avatar {
     width: 72px;
     height: 72px;
@@ -1111,7 +1457,6 @@
     background: color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     margin-bottom: 8px;
   }
-
   .avatar-img {
     width: 100%;
     height: 100%;
@@ -1141,7 +1486,6 @@
     border-radius: 4px;
     margin-bottom: 20px;
   }
-
   .banner-title {
     font-size: 0.95rem;
     font-weight: 700;
@@ -1159,7 +1503,6 @@
     gap: 12px;
     margin-bottom: 20px;
   }
-
   .provider-label {
     font-weight: 600;
     font-size: 0.9rem;
@@ -1180,14 +1523,12 @@
     font-size: 0.88rem;
     text-align: left;
   }
-
   .assertions-table th,
   .assertions-table td {
     padding: 10px 14px;
     border-bottom: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
   }
-
   .mono {
     font-family: var(--fasti-font-mono);
   }
@@ -1211,7 +1552,6 @@
     align-items: center;
     margin-bottom: 12px;
   }
-
   .edit-notes-btn {
     display: inline-flex;
     align-items: center;
@@ -1225,7 +1565,6 @@
     font-weight: 600;
     cursor: pointer;
   }
-
   .notes-textarea {
     width: 100%;
     padding: 12px;
@@ -1237,7 +1576,6 @@
     background: var(--fasti-surface-paper);
     box-sizing: border-box;
   }
-
   .notes-actions {
     display: flex;
     gap: 10px;
@@ -1260,7 +1598,6 @@
     border-radius: 4px;
     cursor: pointer;
   }
-
   .notes-display-box {
     padding: 18px;
     background: var(--fasti-surface-archive);
@@ -1268,7 +1605,6 @@
     font-size: 0.95rem;
     line-height: 1.6;
   }
-
   .tags-editor-row {
     display: flex;
     flex-wrap: wrap;
@@ -1276,7 +1612,6 @@
     gap: 8px;
     margin-top: 10px;
   }
-
   .tag-chip {
     display: inline-flex;
     align-items: center;
@@ -1288,7 +1623,6 @@
     border-radius: 20px;
     font-size: 0.85rem;
   }
-
   .tag-delete-btn {
     background: transparent;
     border: none;
@@ -1298,11 +1632,9 @@
     place-items: center;
     color: var(--fasti-text-muted);
   }
-
   .tag-delete-btn:hover {
     color: #e11d48;
   }
-
   .add-tag-input {
     height: 30px;
     padding: 4px 10px;

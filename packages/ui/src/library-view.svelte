@@ -8,19 +8,62 @@
     IconCheck,
     IconPlayerPlay,
     IconBookmark,
+    IconEye,
+    IconEyeCheck,
+    IconFolder,
+    IconMessage,
+    IconDotsVertical,
+    IconAdjustments,
+    IconRepeat,
   } from "@tabler/icons-svelte";
+  import FastActionBar from "./fast-action-bar.svelte";
+  import ProgressModal from "./progress-modal.svelte";
+  import RatingReviewModal from "./rating-review-modal.svelte";
+  import CollectionModal from "./collection-modal.svelte";
+  import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
 
   interface Props {
     records: MediaRecord[];
     onSelectRecord: (recordId: string) => void;
+    onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
+    onUpdateRating?: (recordId: string, rating: number) => void;
+    onUpdateProgress?: (
+      recordId: string,
+      episodes: number,
+      seconds: number,
+      status: WatchStatus,
+    ) => void;
+    onSaveReview?: (recordId: string, rating: number, notes: string) => void;
+    onSaveCollection?: (recordId: string, collections: string[]) => void;
   }
 
-  let { records, onSelectRecord }: Props = $props();
+  let {
+    records,
+    onSelectRecord,
+    onUpdateStatus,
+    onUpdateRating,
+    onUpdateProgress,
+    onSaveReview,
+    onSaveCollection,
+  }: Props = $props();
 
   let selectedKind: MediaKind | "all" = $state("all");
   let selectedStatus: WatchStatus | "all" = $state("all");
   let searchQuery = $state("");
   let viewMode: "grid" | "list" = $state("grid");
+
+  // Modal Dialog States
+  let activeModalRecord = $state<MediaRecord | null>(null);
+  let showProgressModal = $state(false);
+  let showReviewModal = $state(false);
+  let showCollectionModal = $state(false);
+
+  // Context Menu State
+  let contextMenuState = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
 
   const filteredRecords = $derived(
     records.filter((rec) => {
@@ -54,6 +97,83 @@
     { id: "completed", label: "Completed" },
     { id: "plan_to_watch", label: "Plan to Watch" },
   ];
+
+  function handleToggleWatched(rec: MediaRecord): void {
+    const nextStatus: WatchStatus =
+      rec.status === "completed" ? "watching" : "completed";
+    onUpdateStatus?.(rec.id, nextStatus);
+  }
+
+  function handleToggleWatchlist(rec: MediaRecord): void {
+    const nextStatus: WatchStatus =
+      rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
+    onUpdateStatus?.(rec.id, nextStatus);
+  }
+
+  function handleOpenCollection(rec: MediaRecord): void {
+    activeModalRecord = rec;
+    showCollectionModal = true;
+  }
+
+  function handleOpenReview(rec: MediaRecord): void {
+    activeModalRecord = rec;
+    showReviewModal = true;
+  }
+
+  function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
+    e.preventDefault();
+    contextMenuState = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          id: "open",
+          label: "View Details...",
+          icon: IconPlayerPlay,
+          action: () => onSelectRecord(rec.id),
+        },
+        {
+          id: "prog",
+          label: "Update Progress...",
+          icon: IconAdjustments,
+          action: () => {
+            activeModalRecord = rec;
+            showProgressModal = true;
+          },
+        },
+        {
+          id: "review",
+          label: "Post a Review...",
+          icon: IconMessage,
+          action: () => {
+            activeModalRecord = rec;
+            showReviewModal = true;
+          },
+        },
+        {
+          id: "coll",
+          label: "Add to Collection...",
+          icon: IconFolder,
+          action: () => {
+            activeModalRecord = rec;
+            showCollectionModal = true;
+          },
+        },
+        {
+          id: "rewatch",
+          label: "Log Occurrence (Rewatch)",
+          icon: IconRepeat,
+          action: () => onUpdateStatus?.(rec.id, "completed"),
+        },
+        { id: "d1", label: "", divider: true, action: () => {} },
+        {
+          id: "copy_id",
+          label: `Copy Fasti ID (${rec.id})`,
+          action: () => navigator.clipboard.writeText(rec.id),
+        },
+      ],
+    };
+  }
 </script>
 
 <div class="library-container">
@@ -101,32 +221,28 @@
       />
     </div>
 
-    <div class="pill-group" role="radiogroup" aria-label="Filter by media kind">
-      {#each kinds as kind}
+    <div class="filter-pills" role="radiogroup" aria-label="Media kind filter">
+      {#each kinds as k}
         <button
           type="button"
-          class="pill-btn"
-          class:active={selectedKind === kind.id}
-          onclick={() => (selectedKind = kind.id)}
+          class="filter-pill"
+          class:active={selectedKind === k.id}
+          onclick={() => (selectedKind = k.id)}
         >
-          {kind.label}
+          {k.label}
         </button>
       {/each}
     </div>
 
-    <div
-      class="pill-group"
-      role="radiogroup"
-      aria-label="Filter by watch status"
-    >
-      {#each statuses as status}
+    <div class="filter-pills" role="radiogroup" aria-label="Status filter">
+      {#each statuses as s}
         <button
           type="button"
-          class="pill-btn status-pill"
-          class:active={selectedStatus === status.id}
-          onclick={() => (selectedStatus = status.id)}
+          class="filter-pill status"
+          class:active={selectedStatus === s.id}
+          onclick={() => (selectedStatus = s.id)}
         >
-          {status.label}
+          {s.label}
         </button>
       {/each}
     </div>
@@ -151,93 +267,164 @@
   {:else if viewMode === "grid"}
     <div class="media-grid">
       {#each filteredRecords as rec (rec.id)}
-        <button
-          type="button"
-          class="card-btn"
-          onclick={() => onSelectRecord(rec.id)}
+        <div
+          class="card-wrapper"
+          role="group"
+          aria-label="{rec.title} card"
+          oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
         >
-          <div class="poster-box">
-            {#if rec.posterUrl}
-              <img
-                src={rec.posterUrl}
-                alt=""
-                class="poster-image"
-                loading="lazy"
-              />
-            {:else}
-              <div class="fallback-poster">{rec.mediaKind}</div>
-            {/if}
+          <button
+            type="button"
+            class="card-art-btn"
+            onclick={() => onSelectRecord(rec.id)}
+          >
+            <div class="poster-box">
+              {#if rec.posterUrl}
+                <img
+                  src={rec.posterUrl}
+                  alt=""
+                  class="poster-image"
+                  loading="lazy"
+                />
+              {:else}
+                <div class="fallback-poster">{rec.mediaKind}</div>
+              {/if}
 
-            <span class="kind-badge {rec.mediaKind}">{rec.mediaKind}</span>
+              <span class="kind-badge {rec.mediaKind}">{rec.mediaKind}</span>
 
-            {#if rec.userRating}
-              <div class="card-rating">
-                <IconStarFilled size={12} class="star-icon" />
-                <span>{rec.userRating}</span>
-              </div>
-            {/if}
+              {#if rec.userRating}
+                <div class="card-rating">
+                  <IconStarFilled size={12} class="star-icon" />
+                  <span>{rec.userRating}</span>
+                </div>
+              {/if}
 
-            {#if rec.progressEpisodes && rec.totalEpisodes}
-              <div class="episode-pill">
-                {rec.progressEpisodes}/{rec.totalEpisodes} eps
-              </div>
-            {/if}
+              {#if rec.progressEpisodes && rec.totalEpisodes}
+                <div class="episode-pill">
+                  {rec.progressEpisodes}/{rec.totalEpisodes} eps
+                </div>
+              {/if}
+            </div>
+          </button>
+
+          <!-- Ryot-Style Fast Buttons Toolbar -->
+          <div class="fast-action-toolbar-wrap">
+            <FastActionBar
+              record={rec}
+              onToggleWatched={handleToggleWatched}
+              onToggleWatchlist={handleToggleWatchlist}
+              onOpenCollection={handleOpenCollection}
+              onOpenReview={handleOpenReview}
+              onOpenContextMenu={handleOpenContextMenu}
+            />
           </div>
 
           <div class="card-info">
-            <h3 class="card-title">{rec.title}</h3>
+            <button
+              type="button"
+              class="title-link"
+              onclick={() => onSelectRecord(rec.id)}
+            >
+              <h3 class="card-title">{rec.title}</h3>
+            </button>
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
-              <span class="card-source">{rec.displaySource}</span>
+              <span class="status-indicator {rec.status}"
+                >{rec.status.replace("_", " ")}</span
+              >
             </div>
           </div>
-        </button>
+        </div>
       {/each}
     </div>
   {:else}
-    <div class="table-wrap">
-      <table class="media-table">
+    <!-- List Table View -->
+    <div class="table-frame">
+      <table class="records-table">
         <thead>
           <tr>
             <th scope="col">Title</th>
-            <th scope="col">Type</th>
-            <th scope="col">Year</th>
+            <th scope="col">Kind</th>
             <th scope="col">Status</th>
-            <th scope="col">Progress</th>
             <th scope="col">Rating</th>
-            <th scope="col">Source</th>
+            <th scope="col">Progress</th>
+            <th scope="col">Quick Actions</th>
           </tr>
         </thead>
         <tbody>
           {#each filteredRecords as rec (rec.id)}
-            <tr class="table-row" onclick={() => onSelectRecord(rec.id)}>
-              <td class="td-title"><strong>{rec.title}</strong></td>
+            <tr
+              class="table-row"
+              onclick={() => onSelectRecord(rec.id)}
+              oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+            >
+              <td>
+                <div class="row-title-box">
+                  <strong>{rec.title}</strong>
+                  {#if rec.releaseYear}
+                    <span class="row-year">({rec.releaseYear})</span>
+                  {/if}
+                </div>
+              </td>
               <td
                 ><span class="kind-tag {rec.mediaKind}">{rec.mediaKind}</span
                 ></td
               >
-              <td class="mono-cell">{rec.releaseYear ?? "—"}</td>
               <td
-                ><span class="status-badge {rec.status}"
+                ><span class="status-pill {rec.status}"
                   >{rec.status.replace("_", " ")}</span
                 ></td
               >
-              <td class="mono-cell">
-                {#if rec.progressEpisodes && rec.totalEpisodes}
-                  {rec.progressEpisodes} / {rec.totalEpisodes}
-                {:else}
-                  —
-                {/if}
-              </td>
-              <td class="mono-cell rating-cell">
+              <td>
                 {#if rec.userRating}
-                  <IconStarFilled size={12} class="star-icon" />
-                  {rec.userRating}/10
+                  <span class="table-star">★ {rec.userRating}</span>
                 {:else}
-                  —
+                  <span class="unrated">—</span>
                 {/if}
               </td>
-              <td class="mono-cell text-muted">{rec.displaySource}</td>
+              <td>
+                {#if rec.progressEpisodes && rec.totalEpisodes}
+                  <span class="mono-prog"
+                    >{rec.progressEpisodes}/{rec.totalEpisodes} eps</span
+                  >
+                {:else}
+                  <span class="mono-prog">—</span>
+                {/if}
+              </td>
+              <td onclick={(e) => e.stopPropagation()}>
+                <div class="table-fast-btns">
+                  <button
+                    type="button"
+                    class="table-btn"
+                    class:active={rec.status === "completed"}
+                    onclick={() => handleToggleWatched(rec)}
+                    title="Toggle Seen"
+                  >
+                    {#if rec.status === "completed"}
+                      <IconEyeCheck size={16} />
+                    {:else}
+                      <IconEye size={16} />
+                    {/if}
+                  </button>
+                  <button
+                    type="button"
+                    class="table-btn"
+                    class:active={rec.status === "plan_to_watch"}
+                    onclick={() => handleToggleWatchlist(rec)}
+                    title="Toggle Watchlist"
+                  >
+                    <IconBookmark size={16} />
+                  </button>
+                  <button
+                    type="button"
+                    class="table-btn"
+                    onclick={() => handleOpenCollection(rec)}
+                    title="Collection"
+                  >
+                    <IconFolder size={16} />
+                  </button>
+                </div>
+              </td>
             </tr>
           {/each}
         </tbody>
@@ -246,9 +433,53 @@
   {/if}
 </div>
 
+<!-- Modal Dialogs -->
+{#if showProgressModal && activeModalRecord}
+  <ProgressModal
+    record={activeModalRecord}
+    onClose={() => {
+      showProgressModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveProgress={(recId, eps, sec, st) =>
+      onUpdateProgress?.(recId, eps, sec, st)}
+  />
+{/if}
+
+{#if showReviewModal && activeModalRecord}
+  <RatingReviewModal
+    record={activeModalRecord}
+    onClose={() => {
+      showReviewModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+  />
+{/if}
+
+{#if showCollectionModal && activeModalRecord}
+  <CollectionModal
+    record={activeModalRecord}
+    onClose={() => {
+      showCollectionModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+  />
+{/if}
+
+{#if contextMenuState}
+  <ContextMenu
+    x={contextMenuState.x}
+    y={contextMenuState.y}
+    items={contextMenuState.items}
+    onClose={() => (contextMenuState = null)}
+  />
+{/if}
+
 <style>
   .library-container {
-    max-width: 1100px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 32px 24px;
     display: flex;
@@ -269,42 +500,47 @@
     font-family: var(--fasti-font-display);
     font-size: 2.4rem;
     font-weight: 600;
-    margin: 0 0 4px;
+    margin: 0;
     color: var(--fasti-text-primary);
   }
 
   .view-subtitle {
-    margin: 0;
+    margin: 4px 0 0;
     color: var(--fasti-text-muted);
     font-size: 0.95rem;
   }
 
   .view-controls {
     display: flex;
+    gap: 4px;
+    background: var(--fasti-surface-paper);
     border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    overflow: hidden;
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: 6px;
+    padding: 2px;
   }
 
   .mode-btn {
-    background: var(--fasti-surface-paper);
-    border: none;
-    padding: 8px 12px;
-    color: var(--fasti-text-muted);
-    cursor: pointer;
     display: grid;
     place-items: center;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
   }
 
   .mode-btn.active {
-    background: var(--fasti-action-primary);
+    background: var(--fasti-brand-mark);
     color: white;
   }
 
   .toolbar {
     display: flex;
-    flex-direction: column;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 12px;
   }
 
@@ -312,59 +548,70 @@
     position: relative;
     display: flex;
     align-items: center;
+    min-width: 260px;
+    flex: 1;
   }
 
   :global(.search-icon) {
     position: absolute;
-    left: 14px;
+    left: 12px;
     color: var(--fasti-text-muted);
   }
 
   .search-input {
     width: 100%;
-    height: 44px;
-    padding: 10px 14px 10px 42px;
+    height: 38px;
+    padding: 8px 14px 8px 36px;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    font-size: 0.95rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
     color: var(--fasti-text-primary);
   }
 
-  .search-input:focus {
-    outline: 2px solid var(--fasti-action-primary);
-  }
-
-  .pill-group {
+  .filter-pills {
     display: flex;
-    flex-wrap: wrap;
     gap: 6px;
   }
 
-  .pill-btn {
+  .filter-pill {
+    padding: 6px 12px;
+    border-radius: 20px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 20px;
     background: var(--fasti-surface-paper);
-    padding: 6px 14px;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     font-weight: 500;
     color: var(--fasti-text-muted);
     cursor: pointer;
-    transition: all 120ms ease;
   }
 
-  .pill-btn:hover {
-    border-color: var(--fasti-text-primary);
-    color: var(--fasti-text-primary);
-  }
-
-  .pill-btn.active {
+  .filter-pill.active {
     background: var(--fasti-brand-mark);
     border-color: var(--fasti-brand-mark);
     color: white;
     font-weight: 600;
+  }
+
+  .empty-results {
+    text-align: center;
+    padding: 48px 24px;
+    background: var(--fasti-surface-paper);
+    border-radius: 8px;
+    border: 1px dashed
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+  }
+
+  .reset-btn {
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: var(--fasti-brand-mark);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .media-grid {
@@ -373,45 +620,40 @@
     gap: 20px;
   }
 
-  .card-btn {
+  .card-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .card-art-btn {
     background: transparent;
     border: none;
     padding: 0;
-    text-align: left;
     cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    border-radius: 6px;
-    overflow: hidden;
-    transition:
-      transform 120ms ease,
-      box-shadow 120ms ease;
-  }
-
-  .card-btn:hover {
-    transform: translateY(-3px);
-  }
-
-  .card-btn:focus-visible {
-    outline: 3px solid var(--fasti-brand-gold);
-    outline-offset: 3px;
+    text-align: left;
+    display: block;
   }
 
   .poster-box {
     position: relative;
     width: 100%;
     aspect-ratio: 2 / 3;
-    background: var(--fasti-surface-archive);
     border-radius: 6px;
     overflow: hidden;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+    background: var(--fasti-surface-archive);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transition: transform 120ms ease;
+  }
+
+  .poster-box:hover {
+    transform: translateY(-3px);
   }
 
   .poster-image {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    display: block;
   }
 
   .fallback-poster {
@@ -419,8 +661,8 @@
     height: 100%;
     display: grid;
     place-items: center;
-    text-transform: uppercase;
     font-family: var(--fasti-font-mono);
+    text-transform: uppercase;
     color: var(--fasti-text-muted);
   }
 
@@ -428,12 +670,12 @@
     position: absolute;
     top: 8px;
     left: 8px;
-    padding: 3px 6px;
-    border-radius: 3px;
     font-family: var(--fasti-font-mono);
     font-size: 0.65rem;
     font-weight: 700;
     text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
     background: rgba(0, 0, 0, 0.75);
     color: white;
   }
@@ -445,37 +687,45 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    padding: 3px 6px;
-    border-radius: 3px;
-    background: rgba(0, 0, 0, 0.75);
-    color: var(--fasti-brand-gold);
     font-family: var(--fasti-font-mono);
     font-size: 0.72rem;
     font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.8);
+    color: var(--fasti-brand-gold);
   }
 
   .episode-pill {
     position: absolute;
     bottom: 8px;
     left: 8px;
-    padding: 3px 8px;
-    border-radius: 12px;
-    background: var(--fasti-action-primary);
-    color: white;
     font-family: var(--fasti-font-mono);
     font-size: 0.7rem;
     font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
   }
 
-  .card-info {
-    padding: 8px 2px;
+  .fast-action-toolbar-wrap {
+    margin-top: 2px;
+  }
+
+  .title-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
   }
 
   .card-title {
     font-family: var(--fasti-font-display);
     font-size: 1.05rem;
     font-weight: 600;
-    margin: 0 0 2px;
+    margin: 0;
     color: var(--fasti-text-primary);
     line-height: 1.2;
     white-space: nowrap;
@@ -483,71 +733,79 @@
     text-overflow: ellipsis;
   }
 
+  .title-link:hover .card-title {
+    color: var(--fasti-action-primary);
+  }
+
   .card-sub-row {
     display: flex;
     justify-content: space-between;
-    font-size: 0.78rem;
+    align-items: center;
     font-family: var(--fasti-font-mono);
+    font-size: 0.75rem;
     color: var(--fasti-text-muted);
+    margin-top: 2px;
   }
 
-  .table-wrap {
+  .status-indicator.watching {
+    color: var(--fasti-action-primary);
+    font-weight: 700;
+  }
+  .status-indicator.completed {
+    color: var(--fasti-state-verified);
+    font-weight: 700;
+  }
+
+  /* Table View */
+  .table-frame {
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     border-radius: 6px;
-    overflow-x: auto;
+    overflow: hidden;
   }
 
-  .media-table {
+  .records-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     text-align: left;
   }
 
-  .media-table th,
-  .media-table td {
+  .records-table th,
+  .records-table td {
     padding: 12px 16px;
     border-bottom: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
   }
 
-  .media-table th {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    color: var(--fasti-text-muted);
-    background: var(--fasti-surface-archive);
-  }
-
   .table-row {
     cursor: pointer;
-    transition: background 100ms ease;
+    transition: background 80ms ease;
   }
 
   .table-row:hover {
-    background: color-mix(
-      in srgb,
-      var(--fasti-surface-archive) 60%,
-      transparent
-    );
+    background: var(--fasti-surface-archive);
   }
 
-  .mono-cell {
-    font-family: var(--fasti-font-mono);
-  }
-
-  .status-badge {
+  .kind-tag {
     font-family: var(--fasti-font-mono);
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
     border-radius: 3px;
-    background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    background: var(--fasti-surface-archive);
   }
 
-  .status-badge.watching {
+  .status-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .status-pill.watching {
     background: color-mix(
       in srgb,
       var(--fasti-action-primary) 15%,
@@ -555,7 +813,7 @@
     );
     color: var(--fasti-action-primary);
   }
-  .status-badge.completed {
+  .status-pill.completed {
     background: color-mix(
       in srgb,
       var(--fasti-state-verified) 15%,
@@ -564,24 +822,26 @@
     color: var(--fasti-state-verified);
   }
 
-  .empty-results {
-    padding: 48px;
-    text-align: center;
-    background: var(--fasti-surface-paper);
-    border-radius: 6px;
-    border: 1px dashed
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+  .table-fast-btns {
+    display: flex;
+    gap: 4px;
+  }
+
+  .table-btn {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    background: var(--fasti-surface-archive);
+    border-radius: 4px;
+    cursor: pointer;
     color: var(--fasti-text-muted);
   }
 
-  .reset-btn {
-    margin-top: 12px;
-    background: var(--fasti-action-primary);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 8px 16px;
-    cursor: pointer;
-    font-weight: 600;
+  .table-btn.active {
+    color: var(--fasti-action-primary);
+    border-color: var(--fasti-action-primary);
   }
 </style>

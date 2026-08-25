@@ -3,6 +3,7 @@
     ActiveNavSection,
     MediaRecord,
     WatchStatus,
+    ChronicleOccurrence,
     ProviderApiKeyConfig,
     OidcConfiguration,
     AppriseNotificationConfig,
@@ -32,7 +33,7 @@
 
   let activeSection: ActiveNavSection = $state("chronicle");
   let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
-  let chronicle = $state(SAMPLE_CHRONICLE);
+  let chronicle = $state<ChronicleOccurrence[]>(SAMPLE_CHRONICLE);
   let reconciliationCases = $state(SAMPLE_RECONCILIATION);
   let tokens = $state(SAMPLE_TOKENS);
   let providerKeys = $state(SAMPLE_PROVIDER_KEYS);
@@ -72,11 +73,82 @@
     records = records.map((r) =>
       r.id === recordId ? { ...r, status: newStatus } : r,
     );
+
+    // If marked as completed, record an occurrence in Chronicle
+    if (newStatus === "completed") {
+      const rec = records.find((r) => r.id === recordId);
+      if (rec) {
+        const newOcc: ChronicleOccurrence = {
+          id: `occ_${Date.now()}`,
+          recordId: rec.id,
+          title: rec.title,
+          mediaKind: rec.mediaKind,
+          posterUrl: rec.posterUrl,
+          timestamp: new Date().toISOString(),
+          progressPercentage: 100,
+          durationMinutes: rec.runtimeMinutes ?? 45,
+          deviceName: "Fasti Workbench Web",
+          clientName: "Manual Quick Action",
+          isRewatch: false,
+          userRating: rec.userRating,
+        };
+        chronicle = [newOcc, ...chronicle];
+      }
+    }
   }
 
   function handleUpdateRating(recordId: string, newRating: number): void {
     records = records.map((r) =>
       r.id === recordId ? { ...r, userRating: newRating } : r,
+    );
+  }
+
+  function handleUpdateProgress(
+    recordId: string,
+    episodes: number,
+    seconds: number,
+    status: WatchStatus,
+  ): void {
+    records = records.map((r) =>
+      r.id === recordId
+        ? {
+            ...r,
+            progressEpisodes: episodes,
+            progressSeconds: seconds,
+            status,
+          }
+        : r,
+    );
+  }
+
+  function handleSaveReview(
+    recordId: string,
+    rating: number,
+    notes: string,
+  ): void {
+    records = records.map((r) =>
+      r.id === recordId
+        ? {
+            ...r,
+            userRating: rating,
+            userNotes: notes,
+          }
+        : r,
+    );
+  }
+
+  function handleSaveCollection(
+    recordId: string,
+    collectionNames: string[],
+  ): void {
+    records = records.map((r) =>
+      r.id === recordId
+        ? {
+            ...r,
+            collectionName:
+              collectionNames.length > 0 ? collectionNames[0] : undefined,
+          }
+        : r,
     );
   }
 
@@ -192,16 +264,32 @@
       <DiscoverView
         trendingRecords={SAMPLE_DISCOVER_TRENDING}
         onSelectRecord={handleSelectRecord}
+        onUpdateStatus={handleUpdateStatus}
+        onUpdateProgress={handleUpdateProgress}
+        onSaveReview={handleSaveReview}
+        onSaveCollection={handleSaveCollection}
       />
     {:else if activeSection === "library"}
-      <LibraryView {records} onSelectRecord={handleSelectRecord} />
+      <LibraryView
+        {records}
+        onSelectRecord={handleSelectRecord}
+        onUpdateStatus={handleUpdateStatus}
+        onUpdateRating={handleUpdateRating}
+        onUpdateProgress={handleUpdateProgress}
+        onSaveReview={handleSaveReview}
+        onSaveCollection={handleSaveCollection}
+      />
     {:else if activeSection === "detail" && selectedRecord}
       <MediaDetailView
         record={selectedRecord}
+        occurrences={chronicle}
         onBack={handleBackToLibrary}
         onUpdateStatus={handleUpdateStatus}
         onUpdateRating={handleUpdateRating}
         onToggleEpisode={handleToggleEpisode}
+        onUpdateProgress={handleUpdateProgress}
+        onSaveReview={handleSaveReview}
+        onSaveCollection={handleSaveCollection}
         onUpdateNotes={handleUpdateNotes}
         onAddTag={handleAddTag}
         onRemoveTag={handleRemoveTag}

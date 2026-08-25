@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MediaRecord, MediaKind } from "./types.js";
+  import type { MediaRecord, MediaKind, WatchStatus } from "./types.js";
   import {
     IconCompass,
     IconSearch,
@@ -10,19 +10,56 @@
     IconAward,
     IconCalendarEvent,
     IconRefresh,
+    IconAdjustments,
+    IconMessage,
+    IconFolder,
+    IconRepeat,
+    IconPlayerPlay,
   } from "@tabler/icons-svelte";
+  import FastActionBar from "./fast-action-bar.svelte";
+  import ProgressModal from "./progress-modal.svelte";
+  import RatingReviewModal from "./rating-review-modal.svelte";
+  import CollectionModal from "./collection-modal.svelte";
+  import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
 
   interface Props {
     trendingRecords: MediaRecord[];
     onSelectRecord: (recordId: string) => void;
-    onAddToLibrary?: (record: MediaRecord) => void;
+    onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
+    onUpdateProgress?: (
+      recordId: string,
+      episodes: number,
+      seconds: number,
+      status: WatchStatus,
+    ) => void;
+    onSaveReview?: (recordId: string, rating: number, notes: string) => void;
+    onSaveCollection?: (recordId: string, collections: string[]) => void;
   }
 
-  let { trendingRecords, onSelectRecord, onAddToLibrary }: Props = $props();
+  let {
+    trendingRecords,
+    onSelectRecord,
+    onUpdateStatus,
+    onUpdateProgress,
+    onSaveReview,
+    onSaveCollection,
+  }: Props = $props();
 
   let selectedCategory: MediaKind | "all" = $state("all");
   let searchQuery = $state("");
-  let isSearchingOnline = $state(false);
+
+  // Modal Dialog States
+  let activeModalRecord = $state<MediaRecord | null>(null);
+  let showProgressModal = $state(false);
+  let showReviewModal = $state(false);
+  let showCollectionModal = $state(false);
+
+  // Context Menu State
+  let contextMenuState = $state<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
 
   const categories: Array<{ id: MediaKind | "all"; label: string }> = [
     { id: "all", label: "All Media" },
@@ -51,6 +88,83 @@
       return matchCat && matchSearch;
     }),
   );
+
+  function handleToggleWatched(rec: MediaRecord): void {
+    const nextStatus: WatchStatus =
+      rec.status === "completed" ? "watching" : "completed";
+    onUpdateStatus?.(rec.id, nextStatus);
+  }
+
+  function handleToggleWatchlist(rec: MediaRecord): void {
+    const nextStatus: WatchStatus =
+      rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
+    onUpdateStatus?.(rec.id, nextStatus);
+  }
+
+  function handleOpenCollection(rec: MediaRecord): void {
+    activeModalRecord = rec;
+    showCollectionModal = true;
+  }
+
+  function handleOpenReview(rec: MediaRecord): void {
+    activeModalRecord = rec;
+    showReviewModal = true;
+  }
+
+  function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
+    e.preventDefault();
+    contextMenuState = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        {
+          id: "open",
+          label: "View Details...",
+          icon: IconPlayerPlay,
+          action: () => onSelectRecord(rec.id),
+        },
+        {
+          id: "prog",
+          label: "Update Progress...",
+          icon: IconAdjustments,
+          action: () => {
+            activeModalRecord = rec;
+            showProgressModal = true;
+          },
+        },
+        {
+          id: "review",
+          label: "Post a Review...",
+          icon: IconMessage,
+          action: () => {
+            activeModalRecord = rec;
+            showReviewModal = true;
+          },
+        },
+        {
+          id: "coll",
+          label: "Add to Collection...",
+          icon: IconFolder,
+          action: () => {
+            activeModalRecord = rec;
+            showCollectionModal = true;
+          },
+        },
+        {
+          id: "rewatch",
+          label: "Log Occurrence (Rewatch)",
+          icon: IconRepeat,
+          action: () => onUpdateStatus?.(rec.id, "completed"),
+        },
+        { id: "d1", label: "", divider: true, action: () => {} },
+        {
+          id: "copy_id",
+          label: `Copy Fasti ID (${rec.id})`,
+          action: () => navigator.clipboard.writeText(rec.id),
+        },
+      ],
+    };
+  }
 </script>
 
 <div class="discover-container">
@@ -126,7 +240,12 @@
 
     <div class="media-carousel">
       {#each filteredTrending as item (item.id)}
-        <div class="discover-card">
+        <div
+          class="discover-card"
+          role="group"
+          aria-label="{item.title} card"
+          oncontextmenu={(e) => handleOpenContextMenu(item, e)}
+        >
           <button
             type="button"
             class="card-art-btn"
@@ -155,6 +274,18 @@
             </div>
           </button>
 
+          <!-- Ryot-Style Fast Action Bar -->
+          <div class="fast-action-toolbar-wrap">
+            <FastActionBar
+              record={item}
+              onToggleWatched={handleToggleWatched}
+              onToggleWatchlist={handleToggleWatchlist}
+              onOpenCollection={handleOpenCollection}
+              onOpenReview={handleOpenReview}
+              onOpenContextMenu={handleOpenContextMenu}
+            />
+          </div>
+
           <div class="card-details">
             <button
               type="button"
@@ -167,13 +298,6 @@
               <span class="item-year">{item.releaseYear ?? "—"}</span>
               <span class="item-format">{item.format ?? item.mediaKind}</span>
             </div>
-            {#if item.genres && item.genres.length > 0}
-              <div class="genres-row">
-                {#each item.genres.slice(0, 2) as g}
-                  <span class="genre-pill">{g}</span>
-                {/each}
-              </div>
-            {/if}
           </div>
         </div>
       {/each}
@@ -194,7 +318,12 @@
 
     <div class="media-carousel">
       {#each filteredTrending.slice().reverse() as item (item.id + "_great")}
-        <div class="discover-card">
+        <div
+          class="discover-card"
+          role="group"
+          aria-label="{item.title} card"
+          oncontextmenu={(e) => handleOpenContextMenu(item, e)}
+        >
           <button
             type="button"
             class="card-art-btn"
@@ -221,6 +350,18 @@
             </div>
           </button>
 
+          <!-- Ryot-Style Fast Action Bar -->
+          <div class="fast-action-toolbar-wrap">
+            <FastActionBar
+              record={item}
+              onToggleWatched={handleToggleWatched}
+              onToggleWatchlist={handleToggleWatchlist}
+              onOpenCollection={handleOpenCollection}
+              onOpenReview={handleOpenReview}
+              onOpenContextMenu={handleOpenContextMenu}
+            />
+          </div>
+
           <div class="card-details">
             <button
               type="button"
@@ -239,6 +380,50 @@
     </div>
   </section>
 </div>
+
+<!-- Modal Dialogs -->
+{#if showProgressModal && activeModalRecord}
+  <ProgressModal
+    record={activeModalRecord}
+    onClose={() => {
+      showProgressModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveProgress={(recId, eps, sec, st) =>
+      onUpdateProgress?.(recId, eps, sec, st)}
+  />
+{/if}
+
+{#if showReviewModal && activeModalRecord}
+  <RatingReviewModal
+    record={activeModalRecord}
+    onClose={() => {
+      showReviewModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+  />
+{/if}
+
+{#if showCollectionModal && activeModalRecord}
+  <CollectionModal
+    record={activeModalRecord}
+    onClose={() => {
+      showCollectionModal = false;
+      activeModalRecord = null;
+    }}
+    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+  />
+{/if}
+
+{#if contextMenuState}
+  <ContextMenu
+    x={contextMenuState.x}
+    y={contextMenuState.y}
+    items={contextMenuState.items}
+    onClose={() => (contextMenuState = null)}
+  />
+{/if}
 
 <style>
   .discover-container {
@@ -264,11 +449,9 @@
     align-items: center;
     gap: 10px;
   }
-
   :global(.discover-icon) {
     color: var(--fasti-brand-mark);
   }
-
   .view-title {
     font-family: var(--fasti-font-display);
     font-size: 2.4rem;
@@ -276,7 +459,6 @@
     margin: 0;
     color: var(--fasti-text-primary);
   }
-
   .view-subtitle {
     margin: 4px 0 0;
     color: var(--fasti-text-muted);
@@ -302,19 +484,16 @@
     flex-direction: column;
     gap: 14px;
   }
-
   .search-bar-wrap {
     position: relative;
     display: flex;
     align-items: center;
   }
-
   :global(.search-icon) {
     position: absolute;
     left: 16px;
     color: var(--fasti-text-muted);
   }
-
   .online-search-input {
     width: 100%;
     height: 48px;
@@ -327,11 +506,9 @@
     color: var(--fasti-text-primary);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   }
-
   .online-search-input:focus {
     outline: 2px solid var(--fasti-action-primary);
   }
-
   .search-badge {
     position: absolute;
     right: 14px;
@@ -353,7 +530,6 @@
     flex-wrap: wrap;
     gap: 6px;
   }
-
   .cat-pill {
     padding: 6px 14px;
     border-radius: 20px;
@@ -366,12 +542,10 @@
     cursor: pointer;
     transition: all 120ms ease;
   }
-
   .cat-pill:hover {
     color: var(--fasti-text-primary);
     border-color: var(--fasti-text-primary);
   }
-
   .cat-pill.active {
     background: var(--fasti-brand-mark);
     border-color: var(--fasti-brand-mark);
@@ -384,27 +558,22 @@
     flex-direction: column;
     gap: 16px;
   }
-
   .section-header-row {
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
-
   .title-with-icon {
     display: flex;
     align-items: center;
     gap: 8px;
   }
-
   :global(.trend-flame-icon) {
     color: #e11d48;
   }
-
   :global(.award-icon) {
     color: var(--fasti-brand-gold);
   }
-
   .section-title {
     font-family: var(--fasti-font-display);
     font-size: 1.45rem;
@@ -412,7 +581,6 @@
     margin: 0;
     color: var(--fasti-text-primary);
   }
-
   .section-tagline {
     font-size: 0.85rem;
     color: var(--fasti-text-muted);
@@ -423,13 +591,11 @@
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 18px;
   }
-
   .discover-card {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
-
   .card-art-btn {
     background: transparent;
     border: none;
@@ -438,7 +604,6 @@
     text-align: left;
     display: block;
   }
-
   .poster-frame {
     position: relative;
     width: 100%;
@@ -449,17 +614,14 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     transition: transform 120ms ease;
   }
-
   .poster-frame:hover {
     transform: translateY(-4px);
   }
-
   .poster-img {
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
-
   .poster-fallback {
     width: 100%;
     height: 100%;
@@ -469,7 +631,6 @@
     text-transform: uppercase;
     color: var(--fasti-text-muted);
   }
-
   .kind-chip {
     position: absolute;
     top: 8px;
@@ -483,7 +644,6 @@
     background: rgba(0, 0, 0, 0.75);
     color: white;
   }
-
   .rating-chip {
     position: absolute;
     top: 8px;
@@ -500,6 +660,10 @@
     color: var(--fasti-brand-gold);
   }
 
+  .fast-action-toolbar-wrap {
+    margin-top: 2px;
+  }
+
   .title-link {
     background: transparent;
     border: none;
@@ -507,7 +671,6 @@
     text-align: left;
     cursor: pointer;
   }
-
   .item-title {
     font-family: var(--fasti-font-display);
     font-size: 1.05rem;
@@ -519,11 +682,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
   .title-link:hover .item-title {
     color: var(--fasti-action-primary);
   }
-
   .item-meta-row {
     display: flex;
     justify-content: space-between;
@@ -531,22 +692,5 @@
     font-size: 0.75rem;
     color: var(--fasti-text-muted);
     margin-top: 2px;
-  }
-
-  .genres-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
-  }
-
-  .genre-pill {
-    font-size: 0.7rem;
-    padding: 1px 6px;
-    background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border-radius: 3px;
-    color: var(--fasti-text-muted);
   }
 </style>
