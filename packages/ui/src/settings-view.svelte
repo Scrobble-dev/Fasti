@@ -10,7 +10,7 @@
     NavItemConfig,
     ContextMenuItemConfig,
   } from "./types.js";
-  import { DEFAULT_WORKBENCH_PREFERENCES } from "./mock-data.js";
+  import { DEFAULT_WORKBENCH_PREFERENCES } from "./defaults.js";
   import {
     IconKey,
     IconPalette,
@@ -653,11 +653,14 @@
         <section class="section-pane">
           <h2 class="pane-title">Metadata Providers & API Credentials</h2>
           <p class="pane-desc">
-            Provide your API keys to enable real-time online searches and rich
-            poster, cast, and episode downloads.
+            Provider credentials are not available in this build. Fasti does not
+            accept or store a key until the matching host command exists.
           </p>
 
           <div class="providers-list">
+            {#if providerKeys.length === 0}
+              <p class="unavailable-note">No provider commands are active.</p>
+            {/if}
             {#each providerKeys as prov}
               <div class="provider-key-card">
                 <div class="provider-key-header">
@@ -693,6 +696,10 @@
                   <button
                     type="button"
                     class="save-key-btn"
+                    disabled={!onSaveProviderKey}
+                    title={!onSaveProviderKey
+                      ? "Provider credential storage is not available in this build"
+                      : undefined}
                     onclick={() => {
                       const val = editingKeyMap[prov.provider] ?? prov.apiKey;
                       onSaveProviderKey?.(prov.provider, val);
@@ -816,72 +823,74 @@
         <section class="section-pane">
           <h2 class="pane-title">Single Sign-On & OpenID Connect (OIDC)</h2>
           <p class="pane-desc">
-            Authenticate with Authentik, Authelia, Keycloak, or your identity
-            provider.
+            OIDC configuration is not available until a host command can
+            validate and store it.
           </p>
 
-          <form
-            onsubmit={(e) => {
-              e.preventDefault();
-              onSaveOidc?.(oidcDraft);
-            }}
-            class="oidc-form"
-          >
-            <div class="form-toggle-row">
-              <label class="toggle-label">
-                <input type="checkbox" bind:checked={oidcDraft.enabled} />
-                <strong>Enable Single Sign-On (OIDC)</strong>
-              </label>
-            </div>
-
-            <div class="form-field">
-              <label for="oidc-issuer">OIDC Issuer Discovery URL</label>
-              <input
-                id="oidc-issuer"
-                type="url"
-                bind:value={oidcDraft.issuerUrl}
-                class="form-input"
-              />
-            </div>
-
-            <div class="form-row-2">
-              <div class="form-field">
-                <label for="oidc-client-id">Client ID</label>
-                <input
-                  id="oidc-client-id"
-                  type="text"
-                  bind:value={oidcDraft.clientId}
-                  class="form-input"
-                />
-              </div>
-              <div class="form-field">
-                <label for="oidc-client-secret">Client Secret</label>
-                <input
-                  id="oidc-client-secret"
-                  type="password"
-                  bind:value={oidcDraft.clientSecret}
-                  class="form-input"
-                />
-              </div>
-            </div>
-
-            <div class="form-field">
-              <label for="oidc-redirect-uri"
-                >Authorized Redirect Callback URI</label
-              >
-              <input
-                id="oidc-redirect-uri"
-                type="text"
-                readonly
-                value={oidcDraft.redirectUri}
-                class="form-input mono"
-              />
-            </div>
-
-            <button type="submit" class="btn-save"
-              >Save OIDC Configuration</button
+          {#if onSaveOidc}
+            <form
+              onsubmit={(e) => {
+                e.preventDefault();
+                onSaveOidc(oidcDraft);
+              }}
+              class="oidc-form"
             >
-          </form>
+              <div class="form-toggle-row">
+                <label class="toggle-label">
+                  <input type="checkbox" bind:checked={oidcDraft.enabled} />
+                  <strong>Enable Single Sign-On (OIDC)</strong>
+                </label>
+              </div>
+
+              <div class="form-field">
+                <label for="oidc-issuer">OIDC Issuer Discovery URL</label>
+                <input
+                  id="oidc-issuer"
+                  type="url"
+                  bind:value={oidcDraft.issuerUrl}
+                  class="form-input"
+                />
+              </div>
+
+              <div class="form-row-2">
+                <div class="form-field">
+                  <label for="oidc-client-id">Client ID</label>
+                  <input
+                    id="oidc-client-id"
+                    type="text"
+                    bind:value={oidcDraft.clientId}
+                    class="form-input"
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="oidc-client-secret">Client Secret</label>
+                  <input
+                    id="oidc-client-secret"
+                    type="password"
+                    bind:value={oidcDraft.clientSecret}
+                    class="form-input"
+                  />
+                </div>
+              </div>
+
+              <div class="form-field">
+                <label for="oidc-redirect-uri"
+                  >Authorized Redirect Callback URI</label
+                >
+                <input
+                  id="oidc-redirect-uri"
+                  type="text"
+                  readonly
+                  value={oidcDraft.redirectUri}
+                  class="form-input mono"
+                />
+              </div>
+
+              <button type="submit" class="btn-save"
+                >Save OIDC Configuration</button
+              >
+            </form>
+          {/if}
         </section>
 
         <!-- 6. Notifications & Apprise -->
@@ -889,75 +898,80 @@
         <section class="section-pane">
           <h2 class="pane-title">Notifications & Apprise Webhooks</h2>
           <p class="pane-desc">
-            Push notifications to Discord, Telegram, Pushover, Gotify, or Slack.
+            Notification configuration is not available until a host command can
+            validate and store it.
           </p>
 
-          <div class="apprise-box">
-            <div class="notify-triggers">
-              <label class="chk-label">
+          {#if onSaveApprise}
+            <div class="apprise-box">
+              <div class="notify-triggers">
+                <label class="chk-label">
+                  <input
+                    type="checkbox"
+                    bind:checked={appriseDraft.notifyOnReviewRequired}
+                  />
+                  <span>Notify when Review Inbox requires attention</span>
+                </label>
+                <label class="chk-label">
+                  <input
+                    type="checkbox"
+                    bind:checked={appriseDraft.notifyOnSyncError}
+                  />
+                  <span>Notify on sync and ingest connection errors</span>
+                </label>
+                <label class="chk-label">
+                  <input
+                    type="checkbox"
+                    bind:checked={appriseDraft.notifyOnMilestone}
+                  />
+                  <span
+                    >Notify when milestone achievements or backups complete</span
+                  >
+                </label>
+              </div>
+
+              <h3 class="sub-heading">Configured Apprise URLs</h3>
+              <ul class="apprise-urls-list">
+                {#each appriseDraft.urls as u}
+                  <li class="apprise-url-item">
+                    <code>{u}</code>
+                  </li>
+                {/each}
+              </ul>
+
+              <form onsubmit={handleAddAppriseUrl} class="add-url-form">
                 <input
-                  type="checkbox"
-                  bind:checked={appriseDraft.notifyOnReviewRequired}
+                  type="text"
+                  placeholder="discord://webhook_id/webhook_token or telegram://bot_token/chat_id..."
+                  bind:value={newAppriseUrl}
+                  class="form-input"
+                  aria-label="New Apprise URL"
                 />
-                <span>Notify when Review Inbox requires attention</span>
-              </label>
-              <label class="chk-label">
-                <input
-                  type="checkbox"
-                  bind:checked={appriseDraft.notifyOnSyncError}
-                />
-                <span>Notify on sync and ingest connection errors</span>
-              </label>
-              <label class="chk-label">
-                <input
-                  type="checkbox"
-                  bind:checked={appriseDraft.notifyOnMilestone}
-                />
-                <span
-                  >Notify when milestone achievements or backups complete</span
+                <button type="submit" class="btn-secondary"
+                  >+ Add Service</button
                 >
-              </label>
-            </div>
+              </form>
 
-            <h3 class="sub-heading">Configured Apprise URLs</h3>
-            <ul class="apprise-urls-list">
-              {#each appriseDraft.urls as u}
-                <li class="apprise-url-item">
-                  <code>{u}</code>
-                </li>
-              {/each}
-            </ul>
-
-            <form onsubmit={handleAddAppriseUrl} class="add-url-form">
-              <input
-                type="text"
-                placeholder="discord://webhook_id/webhook_token or telegram://bot_token/chat_id..."
-                bind:value={newAppriseUrl}
-                class="form-input"
-                aria-label="New Apprise URL"
-              />
-              <button type="submit" class="btn-secondary">+ Add Service</button>
-            </form>
-
-            <button
-              type="button"
-              class="btn-save"
-              onclick={() => onSaveApprise?.(appriseDraft)}
-            >
-              Save notification settings
-            </button>
-
-            <div class="test-notify-row">
               <button
                 type="button"
-                class="btn-test"
-                disabled
-                title="Test notifications are not available in this build"
+                class="btn-save"
+                onclick={() => onSaveApprise?.(appriseDraft)}
               >
-                Send Test Notification
+                Save notification settings
               </button>
+
+              <div class="test-notify-row">
+                <button
+                  type="button"
+                  class="btn-test"
+                  disabled
+                  title="Test notifications are not available in this build"
+                >
+                  Send Test Notification
+                </button>
+              </div>
             </div>
-          </div>
+          {/if}
         </section>
 
         <!-- 7. Lossless Importers & Backups -->

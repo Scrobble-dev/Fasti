@@ -12,4 +12,4 @@ export { default as FastiWorkbench } from "./fasti-workbench.svelte";
 
 export * from "./types.js";
 export * from "./setup-types.js";
-export * from "./mock-data.js";
+export * from "./defaults.js";

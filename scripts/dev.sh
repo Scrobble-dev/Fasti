@@ -13,13 +13,67 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGDIR="$PROJECT_ROOT/.dev-logs"
 DATADIR="$PROJECT_ROOT/.dev-data"
+DAEMON_PID_FILE="$LOGDIR/fastid.pid"
+WEB_PID_FILE="$LOGDIR/web.pid"
+
+_tracked_pid() {
+  local pid_file="$1"
+  local marker="$2"
+  local pid
+
+  [[ -f "$pid_file" ]] || return 1
+  read -r pid < "$pid_file"
+  if [[ ! "$pid" =~ ^[0-9]+$ ]] || ((pid <= 1)) || ! kill -0 "$pid" 2>/dev/null; then
+    rm -f "$pid_file"
+    return 1
+  fi
+  if ! ps -p "$pid" -o args= 2>/dev/null | grep -Eq -- "$marker"; then
+    rm -f "$pid_file"
+    return 1
+  fi
+  printf '%s' "$pid"
+}
+
+_stop_pid_file() {
+  local pid_file="$1"
+  local marker="$2"
+  local label="$3"
+  local pid
+  local pgid
+
+  if pid=$(_tracked_pid "$pid_file" "$marker"); then
+    pgid=$(ps -p "$pid" -o pgid= 2>/dev/null | tr -d ' ')
+    if [[ "$pgid" == "$pid" ]]; then
+      kill -- "-$pid" 2>/dev/null || true
+    else
+      kill "$pid" 2>/dev/null || true
+    fi
+    echo "Stopped $label (PID: $pid)"
+  fi
+  rm -f "$pid_file"
+}
+
+_cleanup_native() {
+  trap - EXIT INT TERM
+  _stop_pid_file "$WEB_PID_FILE" 'vite|pnpm' "Web Shell"
+  _stop_pid_file "$DAEMON_PID_FILE" 'target/debug/fastid' "Daemon"
+}
+
+_port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "sport = :$port" 2>/dev/null | grep -q ":$port"
+  else
+    curl --silent --max-time 1 "http://127.0.0.1:$port" >/dev/null 2>&1
+  fi
+}
 
 _status() {
   echo "=== Fasti Dev Status ==="
   local daemon_pid
   local web_pid
-  daemon_pid=$(pgrep -f "target/.*/fastid" 2>/dev/null || true)
-  web_pid=$(pgrep -f "vite.*apps/web" 2>/dev/null || true)
+  daemon_pid=$(_tracked_pid "$DAEMON_PID_FILE" 'target/debug/fastid' || true)
+  web_pid=$(_tracked_pid "$WEB_PID_FILE" 'vite|pnpm' || true)
 
   if [[ -n "$daemon_pid" ]]; then
     echo "  Daemon (fastid):  RUNNING (PID: $daemon_pid)"
@@ -45,11 +99,10 @@ _status() {
 
 _stop() {
   echo "Stopping Fasti dev processes..."
-  pkill -f "target/.*/fastid" 2>/dev/null || true
-  pkill -f "vite.*apps/web" 2>/dev/null || true
+  _stop_pid_file "$WEB_PID_FILE" 'vite|pnpm' "Web Shell"
+  _stop_pid_file "$DAEMON_PID_FILE" 'target/debug/fastid' "Daemon"
   podman stop fasti-dev 2>/dev/null || true
-  sleep 0.5
-  echo "All Fasti dev processes stopped."
+  echo "Tracked Fasti dev processes stopped."
 }
 
 _start_podman() {
@@ -75,17 +128,41 @@ _start_desktop() {
 _start_native() {
   mkdir -p "$LOGDIR" "$DATADIR"
 
+  if _tracked_pid "$DAEMON_PID_FILE" 'target/debug/fastid' >/dev/null; then
+    echo "Fasti daemon is already running for this worktree." >&2
+    exit 1
+  fi
+  if _tracked_pid "$WEB_PID_FILE" 'vite|pnpm' >/dev/null; then
+    echo "Fasti web shell is already running for this worktree." >&2
+    exit 1
+  fi
+  if _port_in_use 8420; then
+    echo "Port 8420 is already in use by a process this worktree did not start." >&2
+    exit 1
+  fi
+  if _port_in_use 5173; then
+    echo "Port 5173 is already in use by a process this worktree did not start." >&2
+    exit 1
+  fi
+
+  trap _cleanup_native EXIT INT TERM
+
   echo "=== 1. Compiling & Starting Fasti Daemon ==="
   cargo build --locked --bin fastid
   export FASTI_LISTEN=127.0.0.1:8420
   export FASTI_DATA_ROOT="$DATADIR"
   
-  "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
+  setsid "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
+  echo "$daemon_pid" > "$DAEMON_PID_FILE"
   echo "Fasti daemon started (PID: $daemon_pid, log: .dev-logs/fastid.log)"
 
   echo "Waiting for daemon health probe..."
   for _ in $(seq 1 10); do
+    if ! kill -0 "$daemon_pid" 2>/dev/null; then
+      echo "Fasti daemon exited during startup; check .dev-logs/fastid.log" >&2
+      exit 1
+    fi
     if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
       break
     fi
@@ -102,8 +179,9 @@ _start_native() {
   echo "=== 2. Starting Fasti Web Workbench (Vite + Svelte 5) ==="
   if [[ -d "$PROJECT_ROOT/apps/web" ]]; then
     cd "$PROJECT_ROOT/apps/web"
-    pnpm run dev --host 127.0.0.1 --port 5173 > "$LOGDIR/vite.log" 2>&1 &
+    setsid pnpm run dev --host 127.0.0.1 --port 5173 > "$LOGDIR/vite.log" 2>&1 &
     local web_pid=$!
+    echo "$web_pid" > "$WEB_PID_FILE"
     echo "Web Workbench started (PID: $web_pid, log: .dev-logs/vite.log)"
     echo ""
     echo "┌─────────────────────────────────────────────────────────────┐"

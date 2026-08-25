@@ -52,8 +52,8 @@ The production daemon deliberately exposes only behavior it can prove:
 | `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
 | `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
 | `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
-| Web UI                                  | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
-| Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
+| Web UI                                  | B4 review candidate only; unavailable host commands remain disabled and no supported deployment exists                                                   |
+| Desktop packaging                       | B4 review candidate only; B8 still owns supported packaging and release evidence                                                                         |
 | Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
 
 The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
@@ -95,7 +95,7 @@ packages/tokens      approved design-token projection
 xtask                deterministic generation and fail-closed verification
 ```
 
-Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
+Player, replication, connector, and provider-keyed projection packages are not active workspace boundaries. The B4 presentation and desktop packages are review candidates, not supported runtime capabilities. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
 
 Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
 

@@ -6,6 +6,7 @@
     MediaRecord,
     WatchStatus,
     ChronicleOccurrence,
+    ReconciliationCase,
     ProviderApiKeyConfig,
     OidcConfiguration,
     AppriseNotificationConfig,
@@ -13,17 +14,9 @@
     WorkbenchPreferences,
   } from "./types.js";
   import {
-    SAMPLE_RECORDS,
-    SAMPLE_CHRONICLE,
-    SAMPLE_RECONCILIATION,
-    SAMPLE_DISCOVER_TRENDING,
-    SAMPLE_CUSTOM_FIELDS,
-    SAMPLE_PROVIDER_KEYS,
-    SAMPLE_OIDC_CONFIG,
-    SAMPLE_APPRISE_CONFIG,
     DEFAULT_THEME_SETTINGS,
     DEFAULT_WORKBENCH_PREFERENCES,
-  } from "./mock-data.js";
+  } from "./defaults.js";
   import NavSidebar from "./nav-sidebar.svelte";
   import HomeView from "./home-view.svelte";
   import ChronicleView from "./chronicle-view.svelte";
@@ -46,13 +39,26 @@
   } from "@tabler/icons-svelte";
 
   let activeSection: ActiveNavSection = $state("home");
-  let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
-  let chronicle = $state<ChronicleOccurrence[]>(SAMPLE_CHRONICLE);
-  let reconciliationCases = $state(SAMPLE_RECONCILIATION);
+  let records = $state<MediaRecord[]>([]);
+  let chronicle = $state<ChronicleOccurrence[]>([]);
+  let reconciliationCases = $state<ReconciliationCase[]>([]);
   let tokens = $state([]);
-  let providerKeys = $state(SAMPLE_PROVIDER_KEYS);
-  let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
-  let appriseConfig = $state(SAMPLE_APPRISE_CONFIG);
+  let providerKeys = $state<ProviderApiKeyConfig[]>([]);
+  let oidcConfig = $state<OidcConfiguration>({
+    enabled: false,
+    issuerUrl: "",
+    clientId: "",
+    clientSecret: "",
+    redirectUri: "",
+    autoProvisionUsers: false,
+  });
+  let appriseConfig = $state<AppriseNotificationConfig>({
+    enabled: false,
+    urls: [],
+    notifyOnReviewRequired: false,
+    notifyOnSyncError: false,
+    notifyOnMilestone: false,
+  });
   let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
   let workbenchPreferences = $state<WorkbenchPreferences>(
     DEFAULT_WORKBENCH_PREFERENCES,
@@ -494,22 +500,6 @@
   function handleUpdateTheme(updates: Partial<ThemeSettings>): void {
     themeSettings = { ...themeSettings, ...updates };
   }
-
-  function handleSaveProviderKey(provider: string, key: string): void {
-    providerKeys = providerKeys.map((p) =>
-      p.provider === provider
-        ? { ...p, apiKey: key, isConfigured: key.trim().length > 0 }
-        : p,
-    );
-  }
-
-  function handleSaveOidc(config: OidcConfiguration): void {
-    oidcConfig = { ...config };
-  }
-
-  function handleSaveApprise(config: AppriseNotificationConfig): void {
-    appriseConfig = { ...config };
-  }
 </script>
 
 <div
@@ -646,20 +636,30 @@
     <!-- Main Viewport Canvas -->
     <main class="viewport-canvas" id="main-content">
       {#if activeSection === "home"}
-        <HomeView
-          {records}
-          {availableCollections}
-          contextMenuConfigs={workbenchPreferences.contextMenuItems}
-          onSelectRecord={handleSelectRecord}
-          onUpdateStatus={handleUpdateStatus}
-          onUpdateProgress={handleUpdateProgress}
-          onSaveReview={handleSaveReview}
-          onSaveCollection={handleSaveCollection}
-          onViewAllSection={(sec) => handleSelectSection(sec as any)}
-        />
+        {#if records.length === 0}
+          <section class="empty-workbench" aria-labelledby="empty-title">
+            <h1 id="empty-title">No media records</h1>
+            <p>
+              This review build has no active media ingest capability. It does
+              not load sample records.
+            </p>
+          </section>
+        {:else}
+          <HomeView
+            {records}
+            {availableCollections}
+            contextMenuConfigs={workbenchPreferences.contextMenuItems}
+            onSelectRecord={handleSelectRecord}
+            onUpdateStatus={handleUpdateStatus}
+            onUpdateProgress={handleUpdateProgress}
+            onSaveReview={handleSaveReview}
+            onSaveCollection={handleSaveCollection}
+            onViewAllSection={(sec) => handleSelectSection(sec as any)}
+          />
+        {/if}
       {:else if activeSection === "discover"}
         <DiscoverView
-          trendingRecords={SAMPLE_DISCOVER_TRENDING}
+          trendingRecords={[]}
           {availableCollections}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
@@ -697,7 +697,7 @@
         <ConnectionsView />
       {:else if activeSection === "settings"}
         <SettingsView
-          customFields={SAMPLE_CUSTOM_FIELDS}
+          customFields={[]}
           {tokens}
           {providerKeys}
           {oidcConfig}
@@ -707,9 +707,6 @@
           onUpdateTheme={handleUpdateTheme}
           onUpdateWorkbenchPreferences={(prefs) =>
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
-          onSaveProviderKey={handleSaveProviderKey}
-          onSaveOidc={handleSaveOidc}
-          onSaveApprise={handleSaveApprise}
         />
       {:else}
         <!-- Media Category Grid (Shows, Movies, Anime, Manga, Games, Books, etc.) -->
@@ -888,5 +885,18 @@
     overflow-y: auto;
     background-color: var(--fasti-surface-archive);
     box-sizing: border-box;
+  }
+
+  .empty-workbench {
+    max-width: 42rem;
+    margin: 4rem auto;
+    padding: 2rem;
+    border: 1px solid var(--fasti-border-subtle);
+    border-radius: var(--fasti-radius-lg);
+    background: var(--fasti-surface-paper);
+  }
+
+  .empty-workbench h1 {
+    margin-top: 0;
   }
 </style>

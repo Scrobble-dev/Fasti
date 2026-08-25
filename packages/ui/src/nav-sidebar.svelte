@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ActiveNavSection, NavItemConfig } from "./types.js";
-  import { DEFAULT_NAV_ITEMS } from "./mock-data.js";
+  import { DEFAULT_NAV_ITEMS } from "./defaults.js";
   import {
     IconHome,
     IconCompass,
