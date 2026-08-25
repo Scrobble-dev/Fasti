@@ -52,7 +52,7 @@ The production daemon deliberately exposes only behavior it can prove:
 | `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
 | `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
 | `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
-| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                         |
+| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                        |
 | Product web UI                          | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
 | Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
 | Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
@@ -158,7 +158,7 @@ FASTI_PORT=19420 ./scripts/dev.sh --podman
 ./scripts/dev.sh --stop
 ```
 
-`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. The launcher tracks only this worktree's process and container.
+`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. The Podman path uses the documented `fasti:b0` image; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
 
 With `fastid` still running on its default port, the local browser QA harness uses that same health contract:
 

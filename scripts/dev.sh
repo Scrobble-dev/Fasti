@@ -16,6 +16,7 @@ DATADIR="$PROJECT_ROOT/.dev-data"
 RUNDIR="$PROJECT_ROOT/.dev-run"
 FASTI_PORT="${FASTI_PORT:-8420}"
 FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:$FASTI_PORT}"
+FASTI_IMAGE="${FASTI_IMAGE:-fasti:b0}"
 if [[ -z "${FASTI_API_URL:-}" ]]; then
   case "$FASTI_LISTEN" in
     0.0.0.0:*) FASTI_API_URL="http://127.0.0.1:${FASTI_LISTEN##*:}" ;;
@@ -135,14 +136,23 @@ _stop() {
   echo "Stopped Fasti dev scope $DEV_SCOPE."
 }
 
+_require_podman_image() {
+  if podman image exists "$FASTI_IMAGE"; then
+    return 0
+  fi
+  echo "Podman image $FASTI_IMAGE is not available. Build it with: podman build --tag $FASTI_IMAGE ." >&2
+  return 1
+}
+
 _start_podman() {
   echo "=== Launching Fasti Podman Container ($CONTAINER_NAME) ==="
   mkdir -p "$DATADIR"
+  _require_podman_image
   if ! podman run -d --name "$CONTAINER_NAME" --rm \
     --publish "127.0.0.1:$FASTI_PORT:8420" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
-    localhost/fasti:test; then
+    "$FASTI_IMAGE"; then
     echo "Failed to start Podman container $CONTAINER_NAME" >&2
     return 1
   fi
@@ -206,6 +216,9 @@ _self_test() {
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
+  podman() { return 1; }
+  ! _require_podman_image >/dev/null 2>&1
+  unset -f podman
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
   trap - EXIT
