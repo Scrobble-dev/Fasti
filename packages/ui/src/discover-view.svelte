@@ -1,46 +1,20 @@
 <script lang="ts">
   import type {
-    ContextMenuItemConfig,
     MediaRecord,
     MediaKind,
     OutboundAccessPolicy,
     ProviderCandidate,
-    WatchStatus,
   } from "./types.js";
   import {
     IconCompass,
     IconSearch,
     IconStarFilled,
-    IconPlus,
-    IconCheck,
     IconFlame,
     IconAward,
-    IconCalendarEvent,
-    IconAdjustments,
-    IconMessage,
-    IconFolder,
-    IconRepeat,
-    IconPlayerPlay,
   } from "@tabler/icons-svelte";
-  import FastActionBar from "./fast-action-bar.svelte";
-  import ProgressModal from "./progress-modal.svelte";
-  import RatingReviewModal from "./rating-review-modal.svelte";
-  import CollectionModal from "./collection-modal.svelte";
-  import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
 
   interface Props {
     trendingRecords: MediaRecord[];
-    onSelectRecord: (recordId: string) => void;
-    onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
-    onUpdateProgress?: (
-      recordId: string,
-      episodes: number,
-      seconds: number,
-      status: WatchStatus,
-    ) => void;
-    onSaveReview?: (recordId: string, rating: number, notes: string) => void;
-    onSaveCollection?: (recordId: string, collections: string[]) => void;
-    contextMenuConfigs?: ContextMenuItemConfig[];
     providerPolicy: OutboundAccessPolicy;
     onSearchProvider: (
       provider: string,
@@ -49,17 +23,7 @@
     ) => Promise<ProviderCandidate[]>;
   }
 
-  let {
-    trendingRecords,
-    onSelectRecord,
-    onUpdateStatus,
-    onUpdateProgress,
-    onSaveReview,
-    onSaveCollection,
-    contextMenuConfigs,
-    providerPolicy,
-    onSearchProvider,
-  }: Props = $props();
+  let { trendingRecords, providerPolicy, onSearchProvider }: Props = $props();
 
   let selectedCategory: MediaKind | "all" = $state("all");
   let searchQuery = $state("");
@@ -68,19 +32,6 @@
     "idle" | "loading" | "results" | "empty" | "error"
   >("idle");
   let providerSearchMessage = $state("");
-
-  // Modal Dialog States
-  let activeModalRecord = $state<MediaRecord | null>(null);
-  let showProgressModal = $state(false);
-  let showReviewModal = $state(false);
-  let showCollectionModal = $state(false);
-
-  // Context Menu State
-  let contextMenuState = $state<{
-    x: number;
-    y: number;
-    items: ContextMenuItem[];
-  } | null>(null);
 
   const categories: Array<{ id: MediaKind | "all"; label: string }> = [
     { id: "all", label: "All Media" },
@@ -132,89 +83,6 @@
           .filter(Boolean)
           .join(" ") || "Fasti could not search Google Books.";
     }
-  }
-
-  function handleToggleWatched(rec: MediaRecord): void {
-    const nextStatus: WatchStatus =
-      rec.status === "completed" ? "watching" : "completed";
-    onUpdateStatus?.(rec.id, nextStatus);
-  }
-
-  function handleToggleWatchlist(rec: MediaRecord): void {
-    const nextStatus: WatchStatus =
-      rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
-    onUpdateStatus?.(rec.id, nextStatus);
-  }
-
-  function handleOpenCollection(rec: MediaRecord): void {
-    activeModalRecord = rec;
-    showCollectionModal = true;
-  }
-
-  function handleOpenReview(rec: MediaRecord): void {
-    activeModalRecord = rec;
-    showReviewModal = true;
-  }
-
-  function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
-    e.preventDefault();
-    const allItems: Record<string, ContextMenuItem> = {
-      view: {
-        id: "view",
-        label: "View Details...",
-        icon: IconPlayerPlay,
-        action: () => onSelectRecord(rec.id),
-      },
-      progress: {
-        id: "progress",
-        label: "Update Progress...",
-        icon: IconAdjustments,
-        action: () => {
-          activeModalRecord = rec;
-          showProgressModal = true;
-        },
-      },
-      review: {
-        id: "review",
-        label: "Post a Review...",
-        icon: IconMessage,
-        action: () => {
-          activeModalRecord = rec;
-          showReviewModal = true;
-        },
-      },
-      collection: {
-        id: "collection",
-        label: "Add to Collection...",
-        icon: IconFolder,
-        action: () => {
-          activeModalRecord = rec;
-          showCollectionModal = true;
-        },
-      },
-      watched: {
-        id: "watched",
-        label: rec.status === "completed" ? "Mark as unplayed" : "Mark as seen",
-        icon: IconRepeat,
-        action: () => handleToggleWatched(rec),
-      },
-      manage_ids: {
-        id: "manage_ids",
-        label: `Copy Fasti ID (${rec.id})`,
-        action: () => navigator.clipboard.writeText(rec.id),
-      },
-    };
-    const items = contextMenuConfigs?.length
-      ? [...contextMenuConfigs]
-          .filter((config) => config.visible && allItems[config.id])
-          .sort((a, b) => a.order - b.order)
-          .map((config) => allItems[config.id])
-      : Object.values(allItems);
-    contextMenuState = {
-      x: e.clientX,
-      y: e.clientY,
-      items,
-    };
   }
 </script>
 
@@ -313,17 +181,8 @@
 
     <div class="media-carousel">
       {#each filteredTrending as item (item.id)}
-        <div
-          class="discover-card"
-          role="group"
-          aria-label="{item.title} card"
-          oncontextmenu={(e) => handleOpenContextMenu(item, e)}
-        >
-          <button
-            type="button"
-            class="card-art-btn"
-            onclick={() => onSelectRecord(item.id)}
-          >
+        <div class="discover-card" role="group" aria-label="{item.title} card">
+          <div class="card-art-btn">
             <div class="poster-frame">
               {#if item.posterUrl}
                 <img
@@ -345,28 +204,10 @@
                 </div>
               {/if}
             </div>
-          </button>
-
-          <!-- Ryot-Style Fast Action Bar -->
-          <div class="fast-action-toolbar-wrap">
-            <FastActionBar
-              record={item}
-              onToggleWatched={handleToggleWatched}
-              onToggleWatchlist={handleToggleWatchlist}
-              onOpenCollection={handleOpenCollection}
-              onOpenReview={handleOpenReview}
-              onOpenContextMenu={handleOpenContextMenu}
-            />
           </div>
 
           <div class="card-details">
-            <button
-              type="button"
-              class="title-link"
-              onclick={() => onSelectRecord(item.id)}
-            >
-              <h3 class="item-title">{item.title}</h3>
-            </button>
+            <h3 class="item-title">{item.title}</h3>
             <div class="item-meta-row">
               <span class="item-year">{item.releaseYear ?? "—"}</span>
               <span class="item-format">{item.format ?? item.mediaKind}</span>
@@ -388,17 +229,8 @@
 
     <div class="media-carousel">
       {#each filteredTrending.slice().reverse() as item (item.id + "_great")}
-        <div
-          class="discover-card"
-          role="group"
-          aria-label="{item.title} card"
-          oncontextmenu={(e) => handleOpenContextMenu(item, e)}
-        >
-          <button
-            type="button"
-            class="card-art-btn"
-            onclick={() => onSelectRecord(item.id)}
-          >
+        <div class="discover-card" role="group" aria-label="{item.title} card">
+          <div class="card-art-btn">
             <div class="poster-frame">
               {#if item.posterUrl}
                 <img
@@ -418,28 +250,10 @@
                 </div>
               {/if}
             </div>
-          </button>
-
-          <!-- Ryot-Style Fast Action Bar -->
-          <div class="fast-action-toolbar-wrap">
-            <FastActionBar
-              record={item}
-              onToggleWatched={handleToggleWatched}
-              onToggleWatchlist={handleToggleWatchlist}
-              onOpenCollection={handleOpenCollection}
-              onOpenReview={handleOpenReview}
-              onOpenContextMenu={handleOpenContextMenu}
-            />
           </div>
 
           <div class="card-details">
-            <button
-              type="button"
-              class="title-link"
-              onclick={() => onSelectRecord(item.id)}
-            >
-              <h3 class="item-title">{item.title}</h3>
-            </button>
+            <h3 class="item-title">{item.title}</h3>
             <div class="item-meta-row">
               <span class="item-year">{item.releaseYear ?? "—"}</span>
               <span class="item-format">{item.format ?? item.mediaKind}</span>
@@ -450,50 +264,6 @@
     </div>
   </section>
 </div>
-
-<!-- Modal Dialogs -->
-{#if showProgressModal && activeModalRecord}
-  <ProgressModal
-    record={activeModalRecord}
-    onClose={() => {
-      showProgressModal = false;
-      activeModalRecord = null;
-    }}
-    onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
-  />
-{/if}
-
-{#if showReviewModal && activeModalRecord}
-  <RatingReviewModal
-    record={activeModalRecord}
-    onClose={() => {
-      showReviewModal = false;
-      activeModalRecord = null;
-    }}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
-  />
-{/if}
-
-{#if showCollectionModal && activeModalRecord}
-  <CollectionModal
-    record={activeModalRecord}
-    onClose={() => {
-      showCollectionModal = false;
-      activeModalRecord = null;
-    }}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
-  />
-{/if}
-
-{#if contextMenuState}
-  <ContextMenu
-    x={contextMenuState.x}
-    y={contextMenuState.y}
-    items={contextMenuState.items}
-    onClose={() => (contextMenuState = null)}
-  />
-{/if}
 
 <style>
   .discover-container {
@@ -718,7 +488,7 @@
     background: transparent;
     border: none;
     padding: 0;
-    cursor: pointer;
+    cursor: default;
     text-align: left;
     display: block;
   }
@@ -778,17 +548,6 @@
     color: var(--fasti-brand-gold);
   }
 
-  .fast-action-toolbar-wrap {
-    margin-top: 2px;
-  }
-
-  .title-link {
-    background: transparent;
-    border: none;
-    padding: 0;
-    text-align: left;
-    cursor: pointer;
-  }
   .item-title {
     font-family: var(--fasti-font-display);
     font-size: 1.05rem;
@@ -799,9 +558,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  .title-link:hover .item-title {
-    color: var(--fasti-action-primary);
   }
   .item-meta-row {
     display: flex;

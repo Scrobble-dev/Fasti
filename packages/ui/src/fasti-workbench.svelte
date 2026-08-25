@@ -7,6 +7,7 @@
     MediaRecord,
     WatchStatus,
     ChronicleOccurrence,
+    ReconciliationCase,
     OutboundAccessPolicy,
     ProviderCandidate,
     ProviderCredentialStatus,
@@ -17,9 +18,6 @@
     ConnectionTestStatus,
   } from "./types.js";
   import {
-    SAMPLE_RECORDS,
-    SAMPLE_CHRONICLE,
-    SAMPLE_RECONCILIATION,
     SAMPLE_DISCOVER_TRENDING,
     SAMPLE_CUSTOM_FIELDS,
     SAMPLE_OIDC_CONFIG,
@@ -71,9 +69,9 @@
   }: Props = $props();
 
   let activeSection: ActiveNavSection = $state("home");
-  let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
-  let chronicle = $state<ChronicleOccurrence[]>(SAMPLE_CHRONICLE);
-  let reconciliationCases = $state(SAMPLE_RECONCILIATION);
+  let records = $state<MediaRecord[]>([]);
+  let chronicle = $state<ChronicleOccurrence[]>([]);
+  let reconciliationCases = $state<ReconciliationCase[]>([]);
   let tokens = $state([]);
   let providerPolicy = $state<OutboundAccessPolicy>(initialProviderPolicy());
   let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
@@ -718,12 +716,6 @@
           trendingRecords={SAMPLE_DISCOVER_TRENDING}
           {providerPolicy}
           {onSearchProvider}
-          contextMenuConfigs={workbenchPreferences.contextMenuItems}
-          onSelectRecord={handleSelectRecord}
-          onUpdateStatus={handleUpdateStatus}
-          onUpdateProgress={handleUpdateProgress}
-          onSaveReview={handleSaveReview}
-          onSaveCollection={handleSaveCollection}
         />
       {:else if activeSection === "detail" && selectedRecord}
         <MediaDetailView

@@ -55,7 +55,7 @@ flowchart LR
 
 ## B4: Implement the approved media interface
 
-Review status: the web workbench, configurable connection settings, responsive navigation fixes, and trusted-host health checks exist on a stacked review branch. Sample records are labeled. Authenticated record operations, complete device evidence, and milestone approval remain open.
+Review status: the web workbench, configurable connection settings, responsive navigation fixes, and trusted-host health checks exist on a stacked review branch. Runtime record and Chronicle state start empty; labeled sample records remain only in the static Discover demonstration. Authenticated record operations, complete device evidence, and milestone approval remain open.
 
 - Reintroduce `apps/web` only with real source and a committed lockfile.
 - Reintroduce `packages/ui` only as a presentation boundary consuming generated contracts and Fasti tokens.
