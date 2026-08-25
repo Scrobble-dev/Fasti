@@ -132,12 +132,13 @@ impl LockedDataRoot {
 
 #[derive(Debug)]
 pub(crate) struct KernelInner {
-    pub(crate) data_root: LockedDataRoot,
     pub(crate) current_root: PathBuf,
     pub(crate) payload_root: PathBuf,
     pub(crate) scratch_root: PathBuf,
     pub(crate) connection: Mutex<Connection>,
     pub(crate) upload_budget: Mutex<UploadBudget>,
+    // Rust drops fields in declaration order; release this lock last.
+    pub(crate) data_root: LockedDataRoot,
 }
 
 #[derive(Debug, Default)]
@@ -199,12 +200,12 @@ impl SqliteKernel {
 
         Ok(Self {
             inner: Arc::new(KernelInner {
-                data_root,
                 current_root,
                 payload_root,
                 scratch_root,
                 connection: Mutex::new(connection),
                 upload_budget: Mutex::new(UploadBudget::default()),
+                data_root,
             }),
         })
     }
