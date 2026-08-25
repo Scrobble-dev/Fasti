@@ -2,6 +2,8 @@
 
 The roadmap is ordered by proof, not by visible feature count. Each body begins only after its predecessor is independently green. Mandatory QA gates every body; rendered UI and UX also require design review.
 
+A pre-body diagnostic harness may render an already implemented capability solely to gather design, accessibility, and developer-experience evidence. It must remain local, private, unpackaged, and excluded from capability activation. It does not satisfy a body entry gate or milestone deliverable.
+
 ```mermaid
 flowchart LR
     B0["B0<br/>Truthful baseline"] --> B1["B1<br/>Contract spine"]
@@ -55,6 +57,7 @@ flowchart LR
 
 ## B4: Implement the approved media interface
 
+- Keep the pre-body `system.health` harness separate from B4 completion evidence; it proves the interface-quality gate, not the approved media interface.
 - Reintroduce `apps/web` only with real source and a committed lockfile.
 - Reintroduce `packages/ui` only as a presentation boundary consuming generated contracts and Fasti tokens.
 - Consume generated registry, DTO, problem, receipt, cursor, and SDK surfaces; do not redefine domain, retry, or offline behavior in the client.

@@ -83,6 +83,31 @@ jobs:
       - run: npx nx fix-ci
         if: always()
 
+  ui-quality:
+    name: Browser UI quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:ui
+      - name: Retain browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fasti-ui-quality-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: error
+          retention-days: 30
+
   repository-truth:
     name: B0 repository truth
     runs-on: ubuntu-latest

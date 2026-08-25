@@ -276,3 +276,12 @@ All UI pull requests must provide verified evidence against the following test h
 * **Interactive Preview:** Open `brand/preview.html` in any browser to inspect live theme switching, Tabler integration specimens, color contrast swatches, and timeline layouts.
 * **Machine-Readable Tokens:** `brand/tokens/tokens.json` (W3C Design Token Community Group format).
 
+Open `brand/preview.html` in any browser to explore the live interactive theme switcher, vector logos, color swatch tokens, and timeline UI specimens.
+
+---
+
+## 13. Component and Theme Implementation
+
+Use native HTML controls first. Use Tabler icons or a focused Tabler component when the platform primitive does not provide the required meaning. Do not load the full Tabler stylesheet for one or two native controls.
+
+`packages/tokens` owns the semantic browser variables. Light and dark themes reuse the canonical palette through CSS `color-mix()`; they do not create a second palette owner. The active theme is set with `data-bs-theme="light|dark"`. Interactive targets remain at least 44 by 44 CSS pixels, and focus uses a three-pixel indicator with a two-pixel offset.

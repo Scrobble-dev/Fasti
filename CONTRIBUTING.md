@@ -158,6 +158,7 @@ To balance architectural rigor with low contributor friction, Fasti uses a tiere
    pnpm format:check
    pnpm typecheck
    pnpm test
+   pnpm test:ui
 
    bash scripts/check-repository-truth.sh
    bash scripts/check-no-publish.sh

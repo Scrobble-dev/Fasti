@@ -39,7 +39,7 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
+This repository is an engineering baseline, not a supported public release. No published container, package, product web application, desktop application, import adapter, replication service, or supported installation exists yet. A pre-production browser harness renders only the implemented health capability for interface QA. It is not packaged, deployed, or evidence that B4 has begun. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
 
 The production daemon deliberately exposes only behavior it can prove:
 
@@ -52,7 +52,8 @@ The production daemon deliberately exposes only behavior it can prove:
 | `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
 | `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
 | `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
-| Web UI                                  | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
+| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                         |
+| Product web UI                          | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
 | Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
 | Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
 
@@ -79,6 +80,7 @@ The active workspace has an inward-facing ownership spine and executable B1 cont
 
 ```text
 apps/fastid          production, health-only daemon composition root
+apps/web             pre-production health and interface-quality harness; not packaged or deployed
 crates/fasti-domain  typed IDs, time values, and domain invariants
 crates/fasti-application
                      use cases, authorization, B1 fixture behavior, B2 ports, and typed problems
@@ -92,10 +94,11 @@ contracts            authoritative registry, authored semantics, examples, and g
 packages/sdk         generated typed TypeScript HTTP/SSE client
 packages/schemas     governed JSON Schema 2020-12 inputs
 packages/tokens      approved design-token projection
+packages/ui          presentation-only health status component; no domain or retry policy
 xtask                deterministic generation and fail-closed verification
 ```
 
-Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
+Player, replication, connector, provider-keyed projection, desktop, and placeholder catalogue packages are not active workspace boundaries. The browser harness is evidence tooling over the generated `system.health` SDK binding; it does not activate a product presentation boundary or later capability. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
 
 Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
 
@@ -146,6 +149,15 @@ The exact response is `{"status":"healthy","version":"0.1.0"}`.
 
 That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
 
+With `fastid` still running, the local browser QA harness uses that same health contract:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm dev:web
+```
+
+Open `http://127.0.0.1:5173/`. The Vite-only proxy forwards `/api` to the default loopback daemon at `127.0.0.1:8420`. This fixed proxy is test tooling, not the owner of custom-domain, certificate, container, Tauri, or runtime listener configuration. See the [browser harness QA evidence](docs/qa/b4-truthful-shell-evidence.md) for the test scope and release limits.
+
 To inspect the governed public capability identifiers without starting a service:
 
 ```bash
@@ -181,6 +193,7 @@ pnpm install --frozen-lockfile
 pnpm format:check
 pnpm typecheck
 pnpm test
+pnpm test:ui
 
 bash scripts/check-repository-truth.sh
 bash scripts/check-no-publish.sh
@@ -205,7 +218,7 @@ The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user
 
 The approved [brand and design system](brand/DESIGN.md) is a protected input. B0 preserves its tokens, logos, boards, preview assets, accessibility rules, and ADHD/AuDHD state-continuity requirements byte-for-byte.
 
-The product interface arrives after the headless contract and local kernel. Its fixed direction is media-first navigation, poster and row views, a collapsible rail, visible quick actions for activity, watchlist, collection, and rate/note, and a Tabler-based theme panel governed by Fasti tokens. There is no playback control and no persistent “offline ready” badge.
+The product interface arrives after the headless contract and local kernel. The earlier browser harness is a bounded design and accessibility test surface for `system.health`; it is not the product interface. B4's fixed direction remains media-first navigation, poster and row views, a collapsible rail, visible quick actions for activity, watchlist, collection, and rate/note, and a Tabler-based theme panel governed by Fasti tokens. There is no playback control and no persistent “offline ready” badge.
 
 ## Relationship to Scrobble.dev
 

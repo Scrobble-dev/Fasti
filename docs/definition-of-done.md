@@ -18,6 +18,8 @@ A Fasti body is complete only when all applicable evidence below is current and 
   - Automated `@axe-core/playwright` accessibility scans with zero violations and visual reflow checks at 320px, 768px, and 1440px in Light and Dark themes (coverage limited to automated tooling; for WCAG 2.2 AA and EN 301 549 full compliance claims, provide documented manual keyboard navigation and screen-reader testing with Orca/NVDA/VoiceOver);
   - Screenshots demonstrating visual conformance across tested viewports.
 
+A local pre-body diagnostic harness may exercise an already implemented capability before the next body starts. It must be private, unpackaged, contract-backed, and explicit about unavailable later capabilities. Its checks can retire interface defects, but the harness does not satisfy predecessor acceptance, activate a capability, or count as body completion evidence.
+
 ## Contracts
 
 From B1 onward, every implemented capability has a registry entry and an explicit disposition for domain/application, HTTP/OpenAPI, SSE/AsyncAPI, CLI, JSON Schema, JSON-LD/OKF, SDK, knowledge, package smoke, and UI.

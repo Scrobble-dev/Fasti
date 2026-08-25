@@ -1,0 +1,25 @@
+{
+  "name": "@fasti/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pre-production Fasti health and interface quality harness",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "svelte-check --tsgo --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@fasti/sdk": "workspace:*",
+    "@fasti/tokens": "workspace:*",
+    "@fasti/ui": "workspace:*",
+    "svelte": "5.56.10"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.2.2"
+  }
+}
