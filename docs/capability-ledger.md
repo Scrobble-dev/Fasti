@@ -28,4 +28,6 @@ Required surfaces are generated or validated from the registry across domain/app
 
 `cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1. The mandatory headless QA and developer-experience gates also pass on this branch. Closure requires the exact-head aggregate manifest, including the governed Tauri package and same-workflow-attempt x86_64/aarch64 low-hardware envelope packages from one exact `dev` push. Until `cargo xtask test milestone --body B1` passes, B1 remains in progress and B2 is not authorized.
 
+`cargo xtask test milestone --body B8b` is the fail-closed gate for public release readiness (checksums, SBOM, provenance, final security review, and release notes — see [B8b release readiness](architecture/b8b-release-readiness.md)). It stays unsatisfiable today: it requires a passing B8a manifest as a prerequisite, and B8a's own evidence formalization is not implemented; and it requires a `Pass` design review, which cannot be legitimately claimed until B4 (the UI) ships. Preparing this evidence does not activate release behavior — the table above still holds until B8's explicit, out-of-band publishing action.
+
 Reserved identifiers do not authorize early request shapes, success behavior, persistence, installation, release, UI, or playback. Fasti records; players play.

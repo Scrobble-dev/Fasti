@@ -31,3 +31,12 @@ From B1 onward, every implemented capability has a registry entry and an explici
 ## User capability
 
 The primary action is obvious without instructional dashboard copy. Status is persistent where losing it would break trust. Users can safely defer and resume ambiguous work. Keyboard, screen reader, touch, TV-remote where applicable, contrast, reduced motion, focus return, and ADHD/AuDHD state continuity are acceptance evidence.
+
+## B8b — public release readiness
+
+- Content-digest checksums for native binaries and OCI images are generated per architecture and self-verified before publication as evidence.
+- A CycloneDX SBOM covers both the Rust workspace and the retained npm packages, and is schema-valid and non-empty.
+- A plain in-toto/SLSA-shaped provenance statement binds the exact commit, tree, and CI run that produced the checksums and SBOM — never through the `attest-build-provenance` action.
+- `cargo-deny` gates dependency licenses, advisories, and sources; any accepted gap (for example the isolated Tauri benchmark shell's inherited GTK3-binding advisories) is documented, not silently ignored.
+- Release notes extract mechanically from `CHANGELOG.md`; rollback is a documented manual procedure, not an auto-updater.
+- None of the above signs, attests, or publishes anything; `scripts/check-no-publish.sh` still passes after every change, and `cargo xtask test milestone --body B8b` stays fail-closed until B8a and B4 both close ahead of it.

@@ -1,0 +1,59 @@
+# cargo-deny configuration: final security review gate for B8b.
+#
+# This config is shared by two independent `cargo deny check` invocations:
+# the main workspace (CI-gated, must stay clean) and the isolated Tauri
+# benchmark shell's lockfile (report-only for now -- see
+# docs/architecture/b8b-release-readiness.md and SECURITY.md for why).
+#
+# The allow-list below is the set of licenses present across both lockfiles
+# (verified via `cargo metadata` on each), plus a small number of common
+# permissive licenses a future dependency might reasonably carry. All are
+# compatible with distributing Fasti under AGPL-3.0-or-later (see NOTICE) as
+# a dependency, not as a derivative of Fasti itself. MPL-2.0 is weak-copyleft
+# (file-level, not project-level) and is used only as a library dependency
+# here (cssparser/selectors/dtoa-short/option-ext, transitive via the Tauri
+# benchmark shell's wry/webkit stack).
+
+[graph]
+targets = []
+
+[licenses]
+version = 2
+allow = [
+    "AGPL-3.0-or-later",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "LGPL-2.1-or-later",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[advisories]
+version = 2
+yanked = "deny"
+# No ignore list. The main workspace has no advisories to ignore today. The
+# isolated Tauri benchmark shell's lockfile has 13 (GTK3 bindings,
+# proc-macro-error, the unic-* family) -- all "unmaintained" category, none
+# a known exploitable vulnerability, all inherited from Tauri's Linux
+# GTK3/webkit2gtk binding stack with no safe upgrade available upstream.
+# Blanket-ignoring 13 findings to force this specific gate green would be a
+# real judgment call about acceptable risk, not a config detail -- left for
+# a maintainer to decide, not decided here. See
+# docs/architecture/b8b-release-readiness.md §7 and SECURITY.md.
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

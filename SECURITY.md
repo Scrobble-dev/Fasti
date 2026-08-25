@@ -24,6 +24,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Evidence upload authorizes before temporary-file creation, enforces concurrent and byte budgets, hashes while streaming, rechecks authorization before durable promotion, and verifies existing content before deduplication.
 - Operation receipts bind workspace, client, operation, capability, and semantic digest. Replay and receipt streams remain profile/client scoped and bounded.
 - B2-only bootstrap, authentication, integrity, storage, cursor, evidence, identity, and review failures are accepted by the internal kernel policy but remain absent from finalized B1 public contract output.
+- `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
 These controls make the development baseline and B2 review implementation safer; they do not mount B2 in production or make Fasti a supported service.
 
@@ -55,7 +56,8 @@ B2-B8 must still prove, rather than merely document:
 - archive traversal, decompression-bomb, Unicode/path ambiguity, SQL injection, header confusion, stale-credential, SSRF, and hostile-JSON defenses;
 - secrets external to images and proof bundles, permission-restricted credential delivery, and no credentials in command arguments or logs;
 - explicit local-origin and browser security policy when B4 adds a UI;
-- dependency, SBOM, signing, trust-root, update, and recovery evidence before B8 publishes a release.
+- dependency license compliance and SBOM generation, now covered in CI by `cargo-deny` and `cargo-cyclonedx`/`cyclonedx-npm` (`.github/workflows/release.yml`, `deny.toml`) — see [B8b release readiness](docs/architecture/b8b-release-readiness.md);
+- signing, trust-root, update, and recovery evidence, still deferred to B8's own release action.
 
 Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. A supported network-exposure guide cannot exist until the access and threat-model gates pass.
 

@@ -56,6 +56,8 @@ enum BodyArg {
     B1,
     B2,
     B3,
+    B8a,
+    B8b,
 }
 
 #[derive(Subcommand)]
@@ -159,6 +161,26 @@ fn run_milestone(
                 _ => unreachable!(),
             }
         ),
+        BodyArg::B8a => anyhow::bail!(
+            "B8a milestone evidence formalization is not implemented; B8a is a prerequisite for B8b and is out of scope for this gate"
+        ),
+        BodyArg::B8b => {
+            let b8a_manifest = root.join("target/fasti-evidence/b8a-manifest.json");
+            anyhow::ensure!(
+                b8a_manifest.is_file(),
+                "B8b requires a passing B8a manifest at {}; none exists yet",
+                b8a_manifest.display()
+            );
+            evidence::verify(root, &b8a_manifest).map_err(|error| {
+                error.context(format!(
+                    "B8b requires a passing B8a manifest at {}",
+                    b8a_manifest.display()
+                ))
+            })?;
+            let manifest =
+                manifest.unwrap_or_else(|| root.join("target/fasti-evidence/b8b-manifest.json"));
+            evidence::create_b8b_milestone_manifest(root, &manifest).map(|_| ())
+        }
     }
 }
 

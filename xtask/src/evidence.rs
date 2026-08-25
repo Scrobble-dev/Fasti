@@ -46,6 +46,8 @@ pub(crate) enum Body {
     B1,
     B2,
     B3,
+    B8a,
+    B8b,
 }
 
 impl Body {
@@ -55,6 +57,8 @@ impl Body {
             Self::B1 => "B1",
             Self::B2 => "B2",
             Self::B3 => "B3",
+            Self::B8a => "B8a",
+            Self::B8b => "B8b",
         }
     }
 }
@@ -85,6 +89,10 @@ enum EvidenceKind {
     B1DeviceLedger,
     B1PerformanceEnvelope,
     B1TauriShell,
+    /// A B8b release-readiness receipt (checksums, SBOM, provenance,
+    /// security review, or release notes) bound to source via
+    /// `ensure_receipt_source`.
+    B8bReceipt,
     QaReview,
     RawResult,
     BuiltArtifact,
@@ -499,7 +507,7 @@ pub(crate) fn create_b1_milestone_manifest(
             Ok(()) => Ok(path),
             Err(error) => {
                 remove_if_present(&manifest_path)?;
-                write_incomplete_candidate(root, &candidate_path, &error)?;
+                write_incomplete_candidate(root, &candidate_path, &error, Body::B1)?;
                 Err(error.context(format!(
                     "generated B1 manifest failed immediate verification and was removed; incomplete candidate={}",
                     candidate_path.display()
@@ -507,13 +515,336 @@ pub(crate) fn create_b1_milestone_manifest(
             }
         },
         Err(error) => {
-            write_incomplete_candidate(root, &candidate_path, &error)?;
+            write_incomplete_candidate(root, &candidate_path, &error, Body::B1)?;
             Err(error.context(format!(
                 "B1 milestone manifest was not emitted; incomplete candidate={}",
                 candidate_path.display()
             )))
         }
     }
+}
+
+pub(crate) fn create_b8b_milestone_manifest(
+    root: &Path,
+    manifest_path: &Path,
+) -> anyhow::Result<PathBuf> {
+    let manifest_path = safe_manifest_output_path(root, manifest_path)?;
+    let candidate_path = root.join("target/fasti-evidence/b8b-incomplete-candidate.json");
+    remove_if_present(&manifest_path)?;
+    remove_if_present(&candidate_path)?;
+
+    match build_b8b_milestone_manifest(root, &manifest_path) {
+        Ok(path) => match verify_b8b_milestone(root, &path) {
+            Ok(()) => Ok(path),
+            Err(error) => {
+                remove_if_present(&manifest_path)?;
+                write_incomplete_candidate(root, &candidate_path, &error, Body::B8b)?;
+                Err(error.context(format!(
+                    "generated B8b manifest failed immediate verification and was removed; incomplete candidate={}",
+                    candidate_path.display()
+                )))
+            }
+        },
+        Err(error) => {
+            write_incomplete_candidate(root, &candidate_path, &error, Body::B8b)?;
+            Err(error.context(format!(
+                "B8b milestone manifest was not emitted; incomplete candidate={}",
+                candidate_path.display()
+            )))
+        }
+    }
+}
+
+fn build_b8b_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Result<PathBuf> {
+    let source = current_source_binding(root)?;
+    verify_source_binding(root, &source)?;
+
+    let evidence_root = PathBuf::from("target/fasti-evidence/b8b");
+    let sbom_root = evidence_root.join("sbom");
+    let security_review_path = evidence_root.join("security-review/b8b-security-review.json");
+    let provenance_path = evidence_root.join("provenance/provenance-statement.json");
+    let release_notes_path = evidence_root.join("release-notes.md");
+    let qa_path = evidence_root.join("qa/b8b-qa.json");
+
+    for required in [
+        &security_review_path,
+        &provenance_path,
+        &release_notes_path,
+        &qa_path,
+    ] {
+        ensure!(
+            root.join(required).is_file(),
+            "required B8b evidence is missing: {}",
+            required.display()
+        );
+    }
+
+    let mut entries = vec![
+        evidence_entry(
+            root,
+            "b8b-security-review",
+            EvidenceKind::B8bReceipt,
+            security_review_path.clone(),
+        )?,
+        evidence_entry(
+            root,
+            "b8b-provenance",
+            EvidenceKind::B8bReceipt,
+            provenance_path,
+        )?,
+        evidence_entry(
+            root,
+            "b8b-release-notes",
+            EvidenceKind::BuiltArtifact,
+            release_notes_path,
+        )?,
+        evidence_entry(root, "b8b-qa", EvidenceKind::QaReview, qa_path)?,
+    ];
+
+    for architecture in ["x86_64", "aarch64"] {
+        let path = evidence_root.join(format!("checksums/checksums-{architecture}.sha256"));
+        ensure!(
+            root.join(&path).is_file(),
+            "required B8b checksums manifest is missing: {}",
+            path.display()
+        );
+        entries.push(evidence_entry(
+            root,
+            &format!("b8b-checksums-{architecture}"),
+            EvidenceKind::BuiltArtifact,
+            path,
+        )?);
+    }
+
+    let sbom_files = list_files_with_extension(&root.join(&sbom_root), ".cdx.json")?;
+    ensure!(
+        !sbom_files.is_empty(),
+        "no SBOM files were found under {}",
+        sbom_root.display()
+    );
+    for absolute in sbom_files {
+        let relative = absolute
+            .strip_prefix(root)
+            .context("SBOM file escaped the workspace root")?
+            .to_path_buf();
+        let file_name = relative
+            .file_name()
+            .and_then(|value| value.to_str())
+            .context("SBOM file name is not UTF-8")?;
+        let stem = file_name.trim_end_matches(".cdx.json");
+        entries.push(evidence_entry(
+            root,
+            &format!("b8b-sbom-{stem}"),
+            EvidenceKind::BuiltArtifact,
+            relative,
+        )?);
+    }
+
+    entries.sort_by(|left, right| (&left.id, &left.path).cmp(&(&right.id, &right.path)));
+    let evidence_roots = vec![evidence_root];
+
+    let snapshot = snapshot_evidence_files(root, &source, &entries)?;
+    let ci = current_ci_binding()?;
+    verify_evidence_inventory(root, &evidence_roots, &entries)?;
+    for entry in &entries {
+        validate_entry_semantics(root, snapshot.path(), entry, &source, &ci)?;
+    }
+    let qa = validate_qa_receipt(
+        snapshot.path(),
+        &entries,
+        &source,
+        Body::B8b,
+        "/qa",
+        DesignReviewStatus::Pass,
+    )?;
+    verify_source_binding(root, &source)?;
+
+    let security_review_bytes = fs::read(snapshot.path().join(&security_review_path))
+        .context("failed to read the snapshotted B8b security-review receipt")?;
+    let count = entries.len();
+    let manifest = EvidenceManifest {
+        schema: SchemaBinding {
+            id: SCHEMA_ID.to_owned(),
+            sha256: schema_digest()?,
+        },
+        body: Body::B8b,
+        source,
+        ci,
+        command: "cargo xtask test milestone --body B8b".to_owned(),
+        runner: current_runner_binding(root)?,
+        environment: EnvironmentBinding {
+            declaration: "B8b non-publishing release-readiness evidence: content-digest checksums, SBOM, provenance statement, final security review, and release notes".to_owned(),
+            network: "per-receipt isolation; no step in this milestone publishes, signs, or attests anything".to_owned(),
+        },
+        corpus: CorpusBinding {
+            seed: "b8b-release-readiness-v1".to_owned(),
+            sha256: sha256_bytes(&security_review_bytes),
+        },
+        qa: ReviewBinding {
+            status: qa.status,
+            evidence_id: "b8b-qa".to_owned(),
+        },
+        design_review: DesignReviewBinding {
+            status: qa.design_review.status,
+            reason: qa.design_review.reason,
+        },
+        evidence_roots,
+        evidence: entries,
+        summary: Summary {
+            status: ResultStatus::Pass,
+            pass: count,
+            fail: 0,
+            unsupported: 0,
+            bound_files: count,
+        },
+    };
+    let canonical = serde_json_canonicalizer::to_vec(&manifest)
+        .context("failed to canonicalize generated B8b milestone evidence")?;
+    let envelope = EvidenceEnvelope {
+        manifest,
+        manifest_sha256: sha256_bytes(&canonical),
+    };
+    write_json_atomic(manifest_path, &envelope)?;
+    println!(
+        "PASS: generated canonical B8b milestone manifest {}",
+        manifest_path.display()
+    );
+    Ok(manifest_path.to_path_buf())
+}
+
+fn list_files_with_extension(directory: &Path, suffix: &str) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("failed to read directory {}", directory.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let name = path.file_name().and_then(|value| value.to_str());
+        if name.is_some_and(|value| value.ends_with(suffix)) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+pub(crate) fn verify_b8b_milestone(root: &Path, manifest_path: &Path) -> anyhow::Result<()> {
+    let verified = verify(root, manifest_path)?;
+    ensure!(
+        verified.manifest.body == Body::B8b,
+        "manifest does not declare body B8b"
+    );
+    Ok(())
+}
+
+fn verify_b8b_manifest_requirements(
+    root: &Path,
+    manifest: &EvidenceManifest,
+) -> anyhow::Result<()> {
+    ensure!(
+        manifest.command == "cargo xtask test milestone --body B8b",
+        "B8b evidence manifest must bind the exact milestone command"
+    );
+    ensure!(
+        manifest.summary.status == ResultStatus::Pass,
+        "B8b evidence manifest contains a failing or unsupported result"
+    );
+    ensure!(
+        manifest.qa.status == ResultStatus::Pass,
+        "mandatory B8b QA is not recorded as passing"
+    );
+    ensure!(
+        manifest.design_review.status == DesignReviewStatus::Pass
+            && !manifest.design_review.reason.trim().is_empty(),
+        "B8b requires a passing design review with a reason, not a headless N/A claim"
+    );
+
+    let receipt_count = manifest
+        .evidence
+        .iter()
+        .filter(|entry| {
+            entry.kind == EvidenceKind::B8bReceipt && entry.status == ResultStatus::Pass
+        })
+        .count();
+    ensure!(
+        receipt_count == 2,
+        "B8b milestone requires exactly two passing source-bound receipts (security review, provenance); found {receipt_count}"
+    );
+    let checksums_count = manifest
+        .evidence
+        .iter()
+        .filter(|entry| {
+            entry.kind == EvidenceKind::BuiltArtifact
+                && entry.status == ResultStatus::Pass
+                && entry.id.starts_with("b8b-checksums-")
+        })
+        .count();
+    ensure!(
+        checksums_count == 2,
+        "B8b milestone requires exactly two passing per-architecture checksums receipts; found {checksums_count}"
+    );
+    let sbom_count = manifest
+        .evidence
+        .iter()
+        .filter(|entry| {
+            entry.kind == EvidenceKind::BuiltArtifact
+                && entry.status == ResultStatus::Pass
+                && entry.id.starts_with("b8b-sbom-")
+        })
+        .count();
+    ensure!(
+        sbom_count >= 2,
+        "B8b milestone requires at least two passing SBOM receipts (Rust and npm); found {sbom_count}"
+    );
+    let release_notes_count = manifest
+        .evidence
+        .iter()
+        .filter(|entry| entry.id == "b8b-release-notes" && entry.status == ResultStatus::Pass)
+        .count();
+    ensure!(
+        release_notes_count == 1,
+        "B8b milestone requires exactly one passing release-notes receipt; found {release_notes_count}"
+    );
+
+    let qa_entry = manifest
+        .evidence
+        .iter()
+        .find(|entry| entry.id == manifest.qa.evidence_id)
+        .context("qa.evidence_id does not resolve to a bound evidence entry")?;
+    ensure!(
+        qa_entry.kind == EvidenceKind::QaReview && qa_entry.status == ResultStatus::Pass,
+        "qa.evidence_id must resolve to the passing QA review entry"
+    );
+
+    let snapshot = snapshot_evidence_files(root, &manifest.source, &manifest.evidence)?;
+    for entry in &manifest.evidence {
+        validate_entry_semantics(root, snapshot.path(), entry, &manifest.source, &manifest.ci)?;
+    }
+    validate_qa_receipt(
+        snapshot.path(),
+        &manifest.evidence,
+        &manifest.source,
+        Body::B8b,
+        "/qa",
+        DesignReviewStatus::Pass,
+    )?;
+    let security_review_entry = manifest
+        .evidence
+        .iter()
+        .find(|entry| entry.id == "b8b-security-review")
+        .context("b8b-security-review evidence entry is missing")?;
+    let security_review_bytes = fs::read(snapshot.path().join(&security_review_entry.path))
+        .context("failed to read the snapshotted B8b security-review receipt")?;
+    ensure!(
+        manifest.corpus.seed == "b8b-release-readiness-v1"
+            && manifest.corpus.sha256 == sha256_bytes(&security_review_bytes),
+        "B8b corpus binding does not recompute from the security-review receipt"
+    );
+    verify_source_binding(root, &manifest.source)?;
+    println!(
+        "PASS: B8b milestone evidence is complete, envelope-enforced, current, and fail-closed"
+    );
+    Ok(())
 }
 
 fn safe_manifest_output_path(root: &Path, requested: &Path) -> anyhow::Result<PathBuf> {
@@ -640,7 +971,14 @@ fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Res
         validate_entry_semantics(root, snapshot.path(), entry, &source, &ci)?;
     }
     verify_performance_envelope_set(snapshot.path(), &entries, &source)?;
-    let qa = validate_qa_receipt(snapshot.path(), &entries, &source)?;
+    let qa = validate_qa_receipt(
+        snapshot.path(),
+        &entries,
+        &source,
+        Body::B1,
+        "/qa",
+        DesignReviewStatus::NotApplicable,
+    )?;
     verify_source_binding(root, &source)?;
 
     let corpus_bytes = fs::read(snapshot.path().join("benchmarks/b1/budgets.json"))
@@ -728,6 +1066,7 @@ pub(crate) fn verify(root: &Path, manifest_path: &Path) -> anyhow::Result<Verifi
     let verified = verify_envelope(root, manifest_path)?;
     match verified.manifest.body {
         Body::B1 => verify_b1_manifest_requirements(root, &verified.manifest)?,
+        Body::B8b => verify_b8b_manifest_requirements(root, &verified.manifest)?,
         body => bail!(
             "{} evidence verification has no implemented body-specific closure policy",
             body.as_str()
@@ -836,7 +1175,14 @@ fn verify_b1_manifest_requirements(root: &Path, manifest: &EvidenceManifest) -> 
     for entry in &manifest.evidence {
         validate_entry_semantics(root, snapshot.path(), entry, &manifest.source, &manifest.ci)?;
     }
-    validate_qa_receipt(snapshot.path(), &manifest.evidence, &manifest.source)?;
+    validate_qa_receipt(
+        snapshot.path(),
+        &manifest.evidence,
+        &manifest.source,
+        Body::B1,
+        "/qa",
+        DesignReviewStatus::NotApplicable,
+    )?;
     verify_performance_envelope_set(snapshot.path(), &manifest.evidence, &manifest.source)?;
     verify_tauri_artifact_binding(snapshot.path(), &manifest.evidence)?;
     let corpus_bytes = fs::read(snapshot.path().join("benchmarks/b1/budgets.json"))
@@ -1450,6 +1796,10 @@ fn validate_entry_semantics(
                 "B1 raw-result receipt was produced from dirty source"
             );
             validate_gate_records(&value, false, &expected_gates)
+        }
+        EvidenceKind::B8bReceipt => {
+            let value = read_json(evidence_root.join(&entry.path))?;
+            ensure_receipt_source(&value, source)
         }
         EvidenceKind::B1ArtifactBudgets | EvidenceKind::QaReview | EvidenceKind::BuiltArtifact => {
             Ok(())
@@ -2877,43 +3227,51 @@ fn validate_qa_receipt(
     root: &Path,
     entries: &[EvidenceEntry],
     source: &SourceBinding,
+    expected_body: Body,
+    expected_review_command: &str,
+    expected_design_review_status: DesignReviewStatus,
 ) -> anyhow::Result<QaReceipt> {
     let entry = entries
         .iter()
         .find(|entry| entry.kind == EvidenceKind::QaReview)
-        .context("B1 QA receipt entry is missing")?;
+        .context("QA receipt entry is missing")?;
     let bytes = fs::read(root.join(&entry.path))
         .with_context(|| format!("failed to read QA receipt {}", entry.path.display()))?;
     let receipt: QaReceipt = serde_json::from_slice(&bytes)
-        .context("B1 QA receipt does not match the strict machine-readable shape")?;
+        .context("QA receipt does not match the strict machine-readable shape")?;
     ensure!(
         receipt.schema_version == "fasti.qa-review.v1"
             && receipt.kind == "fasti.qa-review"
-            && receipt.body == Body::B1,
-        "B1 QA receipt schema, kind, or body is invalid"
+            && receipt.body == expected_body,
+        "QA receipt schema, kind, or body is invalid"
     );
     ensure!(
         receipt.status == ResultStatus::Pass,
-        "mandatory B1 QA did not pass"
+        "mandatory QA did not pass"
     );
     ensure!(
         receipt.reviewed_commit == source.git_commit && receipt.reviewed_tree == source.git_tree,
-        "B1 QA receipt is stale for the reviewed source"
+        "QA receipt is stale for the reviewed source"
     );
     ensure!(
-        receipt.review_command == "/qa",
-        "B1 QA receipt must bind /qa"
+        receipt.review_command == expected_review_command,
+        "QA receipt must bind {expected_review_command}"
     );
-    ensure!(
-        receipt.open_findings == 0,
-        "B1 QA receipt has open findings"
-    );
-    ensure!(
-        !receipt.rendered_ui_or_ux_changed
-            && receipt.design_review.status == DesignReviewStatus::NotApplicable
-            && !receipt.design_review.reason.trim().is_empty(),
-        "headless B1 QA must record design review N/A with a reason"
-    );
+    ensure!(receipt.open_findings == 0, "QA receipt has open findings");
+    if expected_design_review_status == DesignReviewStatus::NotApplicable {
+        ensure!(
+            !receipt.rendered_ui_or_ux_changed
+                && receipt.design_review.status == DesignReviewStatus::NotApplicable
+                && !receipt.design_review.reason.trim().is_empty(),
+            "headless QA must record design review N/A with a reason"
+        );
+    } else {
+        ensure!(
+            receipt.design_review.status == expected_design_review_status
+                && !receipt.design_review.reason.trim().is_empty(),
+            "QA receipt design review status does not match the required status"
+        );
+    }
     Ok(receipt)
 }
 
@@ -3184,18 +3542,20 @@ fn write_incomplete_candidate(
     root: &Path,
     path: &Path,
     error: &anyhow::Error,
+    body: Body,
 ) -> anyhow::Result<()> {
     let source = current_source_binding(root).ok();
+    let body = body.as_str();
     let candidate = serde_json::json!({
-        "schema_version": "fasti.b1.milestone-candidate.v1",
-        "kind": "fasti.b1.milestone-candidate",
+        "schema_version": format!("fasti.{}.milestone-candidate.v1", body.to_lowercase()),
+        "kind": format!("fasti.{}.milestone-candidate", body.to_lowercase()),
         "status": "incomplete",
         "source": source.map(|value| serde_json::json!({
             "git_commit": value.git_commit,
             "git_tree": value.git_tree,
         })),
         "blocking_reason": format!("{error:#}"),
-        "declaration": "This candidate is diagnostic only. It is not a passing evidence manifest and cannot satisfy the B1 milestone gate."
+        "declaration": format!("This candidate is diagnostic only. It is not a passing evidence manifest and cannot satisfy the {body} milestone gate.")
     });
     write_json_atomic(path, &candidate)
 }
@@ -5010,6 +5370,25 @@ mod tests {
             .get("declaration")
             .and_then(Value::as_str)
             .is_some_and(|value| value.contains("cannot satisfy")));
+    }
+
+    #[test]
+    fn b8b_milestone_requires_evidence_before_generation() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let manifest_path = root.path().join("target/fasti-evidence/b8b-manifest.json");
+        let error = create_b8b_milestone_manifest(root.path(), &manifest_path)
+            .expect_err("missing evidence blocks generation");
+        assert!(error.to_string().contains("manifest was not emitted"));
+        assert!(!manifest_path.exists());
+        let candidate_path = root
+            .path()
+            .join("target/fasti-evidence/b8b-incomplete-candidate.json");
+        let candidate = read_json(candidate_path).expect("read incomplete candidate");
+        assert_eq!(
+            candidate.get("status").and_then(Value::as_str),
+            Some("incomplete")
+        );
     }
 
     #[test]

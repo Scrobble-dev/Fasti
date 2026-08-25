@@ -1,0 +1,55 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { extractReleaseNotes } from "../../scripts/generate-release-notes.mjs";
+
+const fixtureChangelog = `# Changelog
+
+## [Unreleased]
+
+### Added
+
+* Something not yet released.
+
+## [0.2.0] - 2026-08-20
+
+### Added
+
+* Second release feature.
+
+### Fixed
+
+* Second release fix.
+
+## [0.1.0] - 2026-08-01
+
+### Added
+
+* First release feature.
+`;
+
+test("extracts exactly the requested version's section", () => {
+  const notes = extractReleaseNotes(fixtureChangelog, "v0.2.0");
+  assert.match(notes, /Second release feature\./);
+  assert.match(notes, /Second release fix\./);
+  assert.doesNotMatch(notes, /First release feature\./);
+  assert.doesNotMatch(notes, /Something not yet released\./);
+});
+
+test("extracts the oldest section without bleeding into a next one that doesn't exist", () => {
+  const notes = extractReleaseNotes(fixtureChangelog, "v0.1.0");
+  assert.match(notes, /First release feature\./);
+  assert.doesNotMatch(notes, /Second release/);
+});
+
+test("accepts a tag without the leading v", () => {
+  const notes = extractReleaseNotes(fixtureChangelog, "0.2.0");
+  assert.match(notes, /Second release feature\./);
+});
+
+test("errors on a version with no matching section", () => {
+  assert.throws(
+    () => extractReleaseNotes(fixtureChangelog, "v9.9.9"),
+    /9\.9\.9/,
+  );
+});
