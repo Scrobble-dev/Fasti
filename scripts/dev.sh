@@ -2,159 +2,266 @@
 # Fasti Local Development Launcher
 #
 # Usage:
-#   ./scripts/dev.sh           # Start daemon + web frontend
-#   ./scripts/dev.sh --podman  # Start Fasti in Podman container
-#   ./scripts/dev.sh --desktop # Launch Tauri desktop app
-#   ./scripts/dev.sh --status  # Check running processes and health
-#   ./scripts/dev.sh --stop    # Stop all Fasti dev processes
+#   ./scripts/dev.sh             # Start the native daemon
+#   ./scripts/dev.sh --podman    # Start Fasti in a scoped Podman container
+#   ./scripts/dev.sh --status    # Check this worktree's daemon and API health
+#   ./scripts/dev.sh --stop      # Stop this worktree's daemon or container
+#   ./scripts/dev.sh --self-test # Verify scoped process cleanup
 #
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGDIR="$PROJECT_ROOT/.dev-logs"
 DATADIR="$PROJECT_ROOT/.dev-data"
-TRACKED_PIDS=()
+RUNDIR="$PROJECT_ROOT/.dev-run"
+FASTI_PORT="${FASTI_PORT:-8420}"
+FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:$FASTI_PORT}"
+FASTI_IMAGE="${FASTI_IMAGE:-fasti:b0}"
+if [[ -z "${FASTI_API_URL:-}" ]]; then
+  case "$FASTI_LISTEN" in
+    0.0.0.0:*) FASTI_API_URL="http://127.0.0.1:${FASTI_LISTEN##*:}" ;;
+    \[::\]:*) FASTI_API_URL="http://[::1]:${FASTI_LISTEN##*:}" ;;
+    *) FASTI_API_URL="http://$FASTI_LISTEN" ;;
+  esac
+fi
+FASTI_API_URL="${FASTI_API_URL%/}"
+DEV_SCOPE="${FASTI_DEV_SCOPE:-$(basename "$PROJECT_ROOT")}"
+DEV_SCOPE="${DEV_SCOPE//[^A-Za-z0-9_.-]/-}"
+CONTAINER_NAME="fasti-dev-$DEV_SCOPE"
 
-# _status reports Fasti daemon and web process status and probes API health on ports 8420 and 4000.
-_status() {
-  echo "=== Fasti Dev Status ==="
-  local daemon_pid
-  local web_pid
-  daemon_pid=$(pgrep -f "target/.*/fastid" 2>/dev/null || true)
-  web_pid=$(pgrep -f "vite.*apps/web" 2>/dev/null || true)
-
-  if [[ -n "$daemon_pid" ]]; then
-    echo "  Daemon (fastid):  RUNNING (PID: $daemon_pid)"
-  else
-    echo "  Daemon (fastid):  NOT RUNNING"
+_validate_port() {
+  if [[ "$2" =~ ^[0-9]+$ && ${#2} -le 5 ]] && ((10#$2 >= 1 && 10#$2 <= 65535)); then
+    return 0
   fi
+  echo "$1 must be an integer from 1 to 65535" >&2
+  return 1
+}
 
-  if [[ -n "$web_pid" ]]; then
-    echo "  Web Shell (Vite): RUNNING (PID: $web_pid)"
-  else
-    echo "  Web Shell (Vite): NOT RUNNING"
+_validate_port FASTI_PORT "$FASTI_PORT"
+
+_validate_origin_url() {
+  local label="$1"
+  local value="$2"
+  local rest=""
+  case "$value" in
+    http://*) rest="${value#http://}" ;;
+    https://*) rest="${value#https://}" ;;
+    *) echo "$label must use http or https" >&2; return 1 ;;
+  esac
+  if [[ -z "$rest" || "$rest" == */* || "$rest" == *"?"* || "$rest" == *"#"* || "$rest" == *"@"* || "$rest" == *[$'\t\r\n ']* ]]; then
+    echo "$label must be an origin URL without credentials, path, query, or fragment" >&2
+    return 1
   fi
-
-  echo ""
-  if curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
-    echo "  API Probe (8420): HEALTHY ($(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:8420/api/v1/health))"
-  elif curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
-    echo "  API Probe (4000): HEALTHY ($(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:4000/api/v1/health))"
-  else
-    echo "  API Probe:        NOT REACHABLE"
+  if [[ "$value" == http://* ]]; then
+    case "$rest" in
+      localhost|localhost:*|127.0.0.1|127.0.0.1:*|\[::1\]|\[::1\]:*) ;;
+      *) echo "$label must use https for non-loopback hosts" >&2; return 1 ;;
+    esac
   fi
 }
 
-# _stop stops Fasti development processes and the `fasti-dev` Podman container.
-_stop() {
-  echo "Stopping Fasti dev processes..."
-  for pid in "${TRACKED_PIDS[@]}"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      echo "  Stopping PID $pid..."
-      kill "$pid" 2>/dev/null || true
-    fi
+_validate_origin_url FASTI_API_URL "$FASTI_API_URL"
+
+_wait_for_health() {
+  local pid="${1:-}"
+  for _ in {1..10}; do
+    [[ -z "$pid" ]] || kill -0 "$pid" 2>/dev/null || return 1
+    curl --connect-timeout 2 --max-time 5 --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1 && return 0
+    sleep 0.5
   done
-  podman stop fasti-dev 2>/dev/null || true
-  sleep 0.5
-  echo "All Fasti dev processes stopped."
+  return 1
 }
 
-# _start_podman launches the Fasti development container with persistent data and reports its API health.
+_process_identity() {
+  ps -p "$1" -o lstart= -o args= 2>/dev/null | sed 's/^ *//'
+}
+
+_write_pidfile() {
+  local name="$1"
+  local pid="$2"
+  local started
+  started="$(_process_identity "$pid")"
+  [[ -n "$started" ]] || return 1
+  mkdir -p "$RUNDIR"
+  printf '%s|%s\n' "$pid" "$started" > "$RUNDIR/$name.pid"
+}
+
+_tracked_pid() {
+  local name="$1"
+  local pid=""
+  local started=""
+  local current=""
+  [[ -f "$RUNDIR/$name.pid" ]] || return 1
+  IFS='|' read -r pid started < "$RUNDIR/$name.pid"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  current="$(_process_identity "$pid")"
+  [[ -n "$current" && "$current" == "$started" ]] || return 1
+  printf '%s\n' "$pid"
+}
+
+_stop_pidfile() {
+  local name="$1"
+  local pid=""
+  if pid="$(_tracked_pid "$name")"; then
+    kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+    for _ in {1..10}; do
+      [[ "$(_tracked_pid "$name" 2>/dev/null || true)" == "$pid" ]] || break
+      sleep 0.1
+    done
+    if [[ "$(_tracked_pid "$name" 2>/dev/null || true)" == "$pid" ]]; then
+      kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
+      for _ in {1..10}; do
+        [[ "$(_tracked_pid "$name" 2>/dev/null || true)" == "$pid" ]] || break
+        sleep 0.1
+      done
+    fi
+  fi
+  rm -f "$RUNDIR/$name.pid"
+}
+
+_stop_processes() {
+  _stop_pidfile daemon
+}
+
+_cleanup() {
+  trap - EXIT INT TERM
+  _stop_processes
+}
+
+_status_line() {
+  local label="$1"
+  local name="$2"
+  local pid=""
+  if pid="$(_tracked_pid "$name")"; then
+    printf '  %-19s RUNNING (PID: %s)\n' "$label:" "$pid"
+  else
+    rm -f "$RUNDIR/$name.pid"
+    printf '  %-19s NOT RUNNING\n' "$label:"
+  fi
+}
+
+_status() {
+  local health=""
+  echo "=== Fasti Dev Status ($DEV_SCOPE) ==="
+  _status_line "Daemon (fastid)" daemon
+  echo ""
+  echo "  API URL: $FASTI_API_URL"
+  if health="$(curl --connect-timeout 2 --max-time 5 --silent --fail "$FASTI_API_URL/api/v1/health" 2>/dev/null)"; then
+    echo "  API Probe: HEALTHY ($health)"
+  else
+    echo "  API Probe: NOT REACHABLE"
+  fi
+}
+
+_stop() {
+  echo "Stopping Fasti dev scope $DEV_SCOPE..."
+  _stop_processes
+  podman stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  echo "Stopped Fasti dev scope $DEV_SCOPE."
+}
+
+_require_podman_image() {
+  if podman image exists "$FASTI_IMAGE"; then
+    return 0
+  fi
+  echo "Podman image $FASTI_IMAGE is not available. Build it with: podman build --tag $FASTI_IMAGE ." >&2
+  return 1
+}
+
 _start_podman() {
-  echo "=== Launching Fasti Podman Container ==="
+  if [[ "$FASTI_LISTEN" != "127.0.0.1:$FASTI_PORT" ]]; then
+    echo "Podman mode supports FASTI_LISTEN=127.0.0.1:FASTI_PORT only; the container listens on 0.0.0.0:8420 internally" >&2
+    return 1
+  fi
+  echo "=== Launching Fasti Podman Container ($CONTAINER_NAME) ==="
   mkdir -p "$DATADIR"
-  if ! podman run -d --name fasti-dev --rm \
-    --publish 8420:8420 \
+  _require_podman_image
+  if ! podman run -d --name "$CONTAINER_NAME" --rm \
+    --memory 192m --memory-swap 192m \
+    --publish "127.0.0.1:$FASTI_PORT:8420" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
-    localhost/fasti:test 2>/dev/null; then
-    if ! podman restart fasti-dev 2>/dev/null; then
-      echo "Failed to start or restart Podman container fasti-dev"
-      return 1
-    fi
+    "$FASTI_IMAGE"; then
+    echo "Failed to start Podman container $CONTAINER_NAME" >&2
+    return 1
   fi
 
-  sleep 1
-  echo "Fasti Podman container running on http://127.0.0.1:8420"
-  echo "API Health: $(curl --connect-timeout 2 --max-time 5 -s http://127.0.0.1:8420/api/v1/health || echo 'starting...')"
+  if _wait_for_health; then
+    echo "Fasti Podman container is healthy on $FASTI_API_URL"
+  else
+    echo "Fasti Podman container failed its health probe; run: podman logs $CONTAINER_NAME" >&2
+    podman stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    return 1
+  fi
 }
 
-# _start_desktop launches the Fasti Tauri desktop application from its source directory.
-_start_desktop() {
-  echo "=== Launching Fasti Desktop (Tauri v2) ==="
-  cd "$PROJECT_ROOT/apps/desktop/src-tauri"
-  PKG_CONFIG=/usr/bin/pkg-config cargo run
-}
-
-# _start_native builds and starts the local Fasti daemon and, when available, the web workbench.
 _start_native() {
-  trap _stop EXIT INT TERM
-  mkdir -p "$LOGDIR" "$DATADIR"
+  trap _cleanup EXIT
+  trap '_cleanup; exit 130' INT
+  trap '_cleanup; exit 143' TERM
+  set -m
+  mkdir -p "$LOGDIR" "$DATADIR" "$RUNDIR"
 
-  echo "=== 1. Compiling & Starting Fasti Daemon ==="
+  echo "=== 1. Compiling and starting Fasti daemon ==="
   cargo build --locked --bin fastid
-  export FASTI_LISTEN=127.0.0.1:8420
+  export FASTI_LISTEN FASTI_API_URL
   export FASTI_DATA_ROOT="$DATADIR"
-  
+
   "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
-  TRACKED_PIDS+=("$daemon_pid")
+  set +m
+  _write_pidfile daemon "$daemon_pid"
   echo "Fasti daemon started (PID: $daemon_pid, log: .dev-logs/fastid.log)"
 
   echo "Waiting for daemon health probe..."
-  for _ in $(seq 1 10); do
-    if curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.5
-  done
-
-  if curl --connect-timeout 2 --max-time 5 --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
-    echo "✓ Fasti daemon is healthy on http://127.0.0.1:8420"
+  if _wait_for_health "$daemon_pid"; then
+    echo "Fasti daemon is healthy on $FASTI_API_URL"
   else
-    echo "⚠️ Daemon did not respond in time, check .dev-logs/fastid.log"
+    echo "Fasti daemon failed to start; see .dev-logs/fastid.log" >&2
+    return 1
   fi
 
-  echo ""
-  echo "=== 2. Starting Fasti Web Workbench (Vite + Svelte 5) ==="
-  if [[ -d "$PROJECT_ROOT/apps/web" ]]; then
-    cd "$PROJECT_ROOT/apps/web"
-    pnpm run dev --host 127.0.0.1 --port 5173 > "$LOGDIR/vite.log" 2>&1 &
-    local web_pid=$!
-    TRACKED_PIDS+=("$web_pid")
-    echo "Web Workbench started (PID: $web_pid, log: .dev-logs/vite.log)"
-    echo ""
-    echo "┌─────────────────────────────────────────────────────────────┐"
-    echo "│ Fasti Workbench is live!                                    │"
-    echo "│                                                             │"
-    echo "│ • Web Interface:  http://127.0.0.1:5173                     │"
-    echo "│ • Local Daemon:   http://127.0.0.1:8420                     │"
-    echo "│ • Health Probe:   http://127.0.0.1:8420/api/v1/health       │"
-    echo "│ • Data Directory: $DATADIR                                  │"
-    echo "└─────────────────────────────────────────────────────────────┘"
-    echo ""
-    echo "Press Ctrl+C or run ./scripts/dev.sh --stop to shutdown."
-    wait "$web_pid"
-  else
-    echo "apps/web not found in current directory."
-    wait "$daemon_pid"
-  fi
+  echo "Press Ctrl+C or run ./scripts/dev.sh --stop to shut down."
+  wait "$daemon_pid"
+}
+
+_self_test() {
+  local old_rundir="$RUNDIR"
+  RUNDIR="$(mktemp -d)"
+  trap '_stop_pidfile child; rm -f "$RUNDIR/stale.pid"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
+  setsid bash -c 'trap "" TERM; sleep 30 & wait' &
+  local leader=$!
+  _write_pidfile child "$leader"
+  [[ "$(_tracked_pid child)" == "$leader" ]]
+  _stop_pidfile child
+  wait "$leader" 2>/dev/null || true
+  ! kill -0 "$leader" 2>/dev/null
+  printf '%s|invalid start time\n' "$$" > "$RUNDIR/stale.pid"
+  _stop_pidfile stale
+  [[ ! -e "$RUNDIR/stale.pid" ]]
+  ! FASTI_PORT=0 "$0" --status >/dev/null 2>&1
+  local status_output
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 "$0" --status)"
+  [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
+  [[ "$status_output" == *"http://localhost:18421"* ]]
+  ! FASTI_API_URL='http://user:secret@127.0.0.1:18421?token=secret' "$0" --status >/dev/null 2>&1
+  status_output="$(FASTI_API_URL=http://127.0.0.1:18421/ "$0" --status)"
+  [[ "$status_output" == *"http://127.0.0.1:18421"* ]]
+  ! FASTI_LISTEN=0.0.0.0:18420 FASTI_PORT=18420 _start_podman >/dev/null 2>&1
+  podman() { return 1; }
+  ! _require_podman_image >/dev/null 2>&1
+  unset -f podman
+  rmdir "$RUNDIR"
+  RUNDIR="$old_rundir"
+  trap - EXIT
+  echo "dev launcher self-test passed"
 }
 
 case "${1:-}" in
-  --stop)
-    _stop
-    ;;
-  --status)
-    _status
-    ;;
-  --podman|--container)
-    _start_podman
-    ;;
-  --desktop)
-    _start_desktop
-    ;;
-  *)
-    _start_native
-    ;;
+  --stop) _stop ;;
+  --status) _status ;;
+  --podman|--container) _start_podman ;;
+  --self-test) _self_test ;;
+  *) _start_native ;;
 esac
