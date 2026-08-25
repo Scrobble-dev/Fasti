@@ -34,7 +34,7 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 ┌──────────────┐             ┌──────────────┐             ┌──────────────┐
 │  Branch: dev │             │ PR #20: dev  │             │ PR #44: B4   │
 │  (Integration│             │      to      │             │  Workbench   │
-│   Head: fd6b)│             │   release    │             │  Bootstrap   │
+│   B5-B7 merged│            │   release    │             │  Bootstrap   │
 └──────┬───────┘             └──────────────┘             └──────┬───────┘
        │                                                         │
        ├────────────────────────────┐                            │
@@ -55,7 +55,7 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 ### Active Branches & Worktrees:
 
 1. **`dev`**:
-   - Integration branch containing B0, B1, and merged B3 portability PR #35.
+   - Integration branch containing B0, B1, B3, B5, B6, and B7 work.
 2. **`codex/b4-durable-bootstrap` (PR #44)**:
    - Contains the full B4 implementation, Svelte 5 `@fasti/ui` suite, `apps/web`, `apps/desktop`, `scripts/dev.sh`, and OCI containerfile.
 3. **`codex/b2-namespace-definition` (`.codex/worktrees/b2-namespace-definition`)**:
@@ -72,9 +72,9 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 | **B2**         | Namespace definition registration & identity governance       | **READY**     | Branch `codex/b2-namespace-definition`                |
 | **B3**         | Portability workspace manifest & JCS verification             | **MERGED**    | PR #35 in `dev`                                       |
 | **B4**         | Durable bootstrap, Fasti Workbench UI, Tauri v2, Podman       | **IN REVIEW** | PR #44 (`codex/b4-durable-bootstrap`)                 |
-| **B5**         | Multi-provider metadata ingest (TMDB, TVDB, MAL, Kitsu)       | **NEXT**      | Scheduled after B4                                    |
-| **B6**         | Ingestion webhooks & desktop observer (Plex, Jellyfin, MPRIS) | **PLANNED**   | Unavailable controls remain disabled                  |
-| **B7**         | NuvioTV 2-way sync engine & monotonic cursor outbox           | **PLANNED**   | Outbox contracts defined                              |
+| **B5**         | Metadata resolution and claims                               | **MERGED**    | PR #39 in `dev`                                       |
+| **B6**         | Ingestion webhooks & desktop observer (Plex, Jellyfin, MPRIS) | **MERGED**    | `crates/fasti-application/src/ingest.rs`               |
+| **B7**         | NuvioTV sync engine, cursor outbox, and catalog projections   | **MERGED**    | `crates/fasti-application/src/nuvio.rs`                |
 | **B8**         | Release candidate stabilization & public gateway              | **PLANNED**   | Release gate scripts ready                            |
 | **Goldilocks** | Custom fields, WebAuthn, PAT tokens, Floppy/Yamtrack import   | **BLUEPRINT** | `fasti_batteries_included_goldilocks_plan.md`         |
 
@@ -129,3 +129,8 @@ pnpm --filter @fasti/ui typecheck && pnpm --filter @fasti/web typecheck
   - [`packages/ui/src/media-detail-view.svelte`](../../packages/ui/src/media-detail-view.svelte) — Media details, identity claims, and episode checklists.
   - [`packages/ui/src/reconciliation-view.svelte`](../../packages/ui/src/reconciliation-view.svelte) — Review Inbox and candidate diffs.
   - [`packages/ui/src/settings-view.svelte`](../../packages/ui/src/settings-view.svelte) — Settings and capability availability.
+- **Merged integration capabilities**:
+  - [`crates/fasti-application/src/ingest.rs`](../../crates/fasti-application/src/ingest.rs) — Plex, Jellyfin/Emby, and MPRIS observation adapters.
+  - [`crates/fasti-application/src/nuvio.rs`](../../crates/fasti-application/src/nuvio.rs) — Nuvio observation ingress, outbox, watched-state sync, and catalog projections.
+  - [`crates/fasti-application/tests/b6_ingest_webhooks.rs`](../../crates/fasti-application/tests/b6_ingest_webhooks.rs) and [`b7_nuvio_observations.rs`](../../crates/fasti-application/tests/b7_nuvio_observations.rs) — Integration evidence.
+  - [`docs/architecture/nuvio-integration.md`](../architecture/nuvio-integration.md) — B7 architecture and invariants.
