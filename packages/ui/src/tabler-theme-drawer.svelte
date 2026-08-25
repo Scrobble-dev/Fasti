@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import type { ThemeSettings } from "./types.js";
   import {
     IconSun,
@@ -18,18 +17,11 @@
   }
 
   let { open = false, themeSettings, onClose, onUpdateTheme }: Props = $props();
+  let drawer: HTMLDialogElement | undefined;
 
-  function handleKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape" && open) {
-      onClose();
-    }
-  }
-
-  onMount(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+  $effect(() => {
+    if (open && !drawer?.open) drawer?.showModal();
+    if (!open && drawer?.open) drawer.close();
   });
 
   const SCHEMES = [
@@ -73,156 +65,166 @@
   }
 </script>
 
-{#if open}
-  <div class="drawer-overlay" onclick={onClose} aria-hidden="true"></div>
-  <aside class="theme-drawer-panel" aria-label="Theme settings drawer">
-    <header class="drawer-header">
-      <h2 class="drawer-title">Theme settings</h2>
-      <button
-        type="button"
-        class="close-btn"
-        onclick={onClose}
-        aria-label="Close theme settings"
-      >
-        <IconX size={20} />
-      </button>
-    </header>
+<dialog
+  bind:this={drawer}
+  class="theme-drawer-panel"
+  aria-labelledby="theme-drawer-title"
+  oncancel={onClose}
+  onclick={(event) => {
+    if (event.target === event.currentTarget) onClose();
+  }}
+>
+  <header class="drawer-header">
+    <h2 id="theme-drawer-title" class="drawer-title">Theme settings</h2>
+    <button
+      type="button"
+      class="close-btn"
+      onclick={onClose}
+      aria-label="Close theme settings"
+    >
+      <IconX size={20} />
+    </button>
+  </header>
 
-    <div class="drawer-body">
-      <!-- 1. Color Mode -->
-      <section class="drawer-section">
-        <span class="section-label">Color mode</span>
-        <div class="mode-grid">
+  <div class="drawer-body">
+    <!-- 1. Color Mode -->
+    <section class="drawer-section">
+      <span class="section-label">Color mode</span>
+      <div class="mode-grid">
+        <button
+          type="button"
+          class="mode-btn"
+          class:active={themeSettings.mode === "light"}
+          onclick={() => onUpdateTheme({ mode: "light" })}
+        >
+          <IconSun size={18} />
+          <span>Light</span>
+        </button>
+
+        <button
+          type="button"
+          class="mode-btn"
+          class:active={themeSettings.mode === "dark"}
+          onclick={() => onUpdateTheme({ mode: "dark" })}
+        >
+          <IconMoon size={18} />
+          <span>Dark</span>
+        </button>
+
+        <button
+          type="button"
+          class="mode-btn"
+          class:active={themeSettings.mode === "night"}
+          onclick={() => onUpdateTheme({ mode: "night" })}
+        >
+          <IconMoonStars size={18} />
+          <span>Night</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 2. Color Scheme Palette -->
+    <section class="drawer-section">
+      <span class="section-label">Scheme</span>
+      <div class="swatches-grid">
+        {#each SCHEMES as s}
           <button
             type="button"
-            class="mode-btn"
-            class:active={themeSettings.mode === "light"}
-            onclick={() => onUpdateTheme({ mode: "light" })}
-          >
-            <IconSun size={18} />
-            <span>Light</span>
-          </button>
+            class="swatch-btn"
+            class:selected={themeSettings.accentColor === s.hex}
+            style="background-color: {s.hex};"
+            title={s.name}
+            onclick={() => onUpdateTheme({ accentColor: s.hex })}
+            aria-label={s.name}
+          ></button>
+        {/each}
+      </div>
+    </section>
 
+    <!-- 3. Font Family -->
+    <section class="drawer-section">
+      <label class="section-label" for="theme-font-select">Font family</label>
+      <div class="select-wrapper">
+        <select
+          id="theme-font-select"
+          class="theme-select"
+          value={themeSettings.fontFamily ?? "sans-serif"}
+          onchange={(e) =>
+            onUpdateTheme({ fontFamily: e.currentTarget.value as any })}
+        >
+          <option value="sans-serif">Atkinson Hyperlegible (Sans)</option>
+          <option value="serif">Newsreader (Editorial Serif)</option>
+          <option value="monospace">IBM Plex Mono (Terminal Mono)</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- 4. Theme Base (Gray Shade) -->
+    <section class="drawer-section">
+      <span class="section-label">Theme base</span>
+      <div class="segmented-row">
+        {#each BASES as b}
           <button
             type="button"
-            class="mode-btn"
-            class:active={themeSettings.mode === "dark"}
-            onclick={() => onUpdateTheme({ mode: "dark" })}
+            class="segment-btn"
+            class:active={(themeSettings.themeBase ?? "slate") === b.id}
+            onclick={() => onUpdateTheme({ themeBase: b.id as any })}
           >
-            <IconMoon size={18} />
-            <span>Dark</span>
+            {b.name}
           </button>
+        {/each}
+      </div>
+    </section>
 
+    <!-- 5. Corner Radius -->
+    <section class="drawer-section">
+      <span class="section-label">Corner radius</span>
+      <div class="segmented-row">
+        {#each RADII as r}
           <button
             type="button"
-            class="mode-btn"
-            class:active={themeSettings.mode === "night"}
-            onclick={() => onUpdateTheme({ mode: "night" })}
+            class="segment-btn"
+            class:active={(themeSettings.cornerRadius ?? 1) === r.id}
+            onclick={() => onUpdateTheme({ cornerRadius: r.id })}
           >
-            <IconMoonStars size={18} />
-            <span>Night</span>
+            {r.label}
           </button>
-        </div>
-      </section>
+        {/each}
+      </div>
+    </section>
+  </div>
 
-      <!-- 2. Color Scheme Palette -->
-      <section class="drawer-section">
-        <span class="section-label">Scheme</span>
-        <div class="swatches-grid">
-          {#each SCHEMES as s}
-            <button
-              type="button"
-              class="swatch-btn"
-              class:selected={themeSettings.accentColor === s.hex}
-              style="background-color: {s.hex};"
-              title={s.name}
-              onclick={() => onUpdateTheme({ accentColor: s.hex })}
-              aria-label={s.name}
-            ></button>
-          {/each}
-        </div>
-      </section>
-
-      <!-- 3. Font Family -->
-      <section class="drawer-section">
-        <label class="section-label" for="theme-font-select">Font family</label>
-        <div class="select-wrapper">
-          <select
-            id="theme-font-select"
-            class="theme-select"
-            value={themeSettings.fontFamily ?? "sans-serif"}
-            onchange={(e) =>
-              onUpdateTheme({ fontFamily: e.currentTarget.value as any })}
-          >
-            <option value="sans-serif">Atkinson Hyperlegible (Sans)</option>
-            <option value="serif">Newsreader (Editorial Serif)</option>
-            <option value="monospace">IBM Plex Mono (Terminal Mono)</option>
-          </select>
-        </div>
-      </section>
-
-      <!-- 4. Theme Base (Gray Shade) -->
-      <section class="drawer-section">
-        <span class="section-label">Theme base</span>
-        <div class="segmented-row">
-          {#each BASES as b}
-            <button
-              type="button"
-              class="segment-btn"
-              class:active={(themeSettings.themeBase ?? "slate") === b.id}
-              onclick={() => onUpdateTheme({ themeBase: b.id as any })}
-            >
-              {b.name}
-            </button>
-          {/each}
-        </div>
-      </section>
-
-      <!-- 5. Corner Radius -->
-      <section class="drawer-section">
-        <span class="section-label">Corner radius</span>
-        <div class="segmented-row">
-          {#each RADII as r}
-            <button
-              type="button"
-              class="segment-btn"
-              class:active={(themeSettings.cornerRadius ?? 1) === r.id}
-              onclick={() => onUpdateTheme({ cornerRadius: r.id })}
-            >
-              {r.label}
-            </button>
-          {/each}
-        </div>
-      </section>
-    </div>
-
-    <footer class="drawer-footer">
-      <button type="button" class="btn-reset" onclick={handleReset}>
-        <IconRotate2 size={16} /> Reset changes
-      </button>
-      <button type="button" class="btn-save" onclick={onClose}>
-        <IconDeviceFloppy size={16} /> Save
-      </button>
-    </footer>
-  </aside>
-{/if}
+  <footer class="drawer-footer">
+    <button type="button" class="btn-reset" onclick={handleReset}>
+      <IconRotate2 size={16} /> Reset changes
+    </button>
+    <button type="button" class="btn-save" onclick={onClose}>
+      <IconDeviceFloppy size={16} /> Save
+    </button>
+  </footer>
+</dialog>
 
 <style>
-  .drawer-overlay {
-    position: fixed;
-    inset: 0;
+  .theme-drawer-panel::backdrop {
     background: rgba(0, 0, 0, 0.45);
-    z-index: 999;
     backdrop-filter: blur(2px);
+  }
+
+  .theme-drawer-panel:not([open]) {
+    display: none;
   }
 
   .theme-drawer-panel {
     position: fixed;
     top: 0;
     right: 0;
-    bottom: 0;
+    left: auto;
+    height: 100dvh;
     width: 320px;
     max-width: 90vw;
+    max-height: none;
+    margin: 0;
+    padding: 0;
     background: var(--fasti-surface-paper);
     border-left: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
