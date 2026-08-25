@@ -24,6 +24,14 @@ _pid_running() {
   [[ -f "$pid_file" ]] && kill -0 "$(<"$pid_file")" 2>/dev/null
 }
 
+_wait_for_health() {
+  for _ in {1..10}; do
+    curl --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
 _status() {
   echo "=== Fasti Dev Status ==="
   if _pid_running "$LOGDIR/fastid.pid"; then
@@ -53,6 +61,7 @@ _stop() {
       kill "$(<"$pid_file")"
     fi
   done
+  rm -f "$LOGDIR/fastid.pid" "$LOGDIR/vite.pid"
   podman stop "$FASTI_DEV_NAME" 2>/dev/null || true
   echo "This worktree's Fasti dev processes stopped."
 }
@@ -60,15 +69,22 @@ _stop() {
 _start_podman() {
   echo "=== Launching Fasti Podman Container ==="
   mkdir -p "$DATADIR"
-  podman run -d --name "$FASTI_DEV_NAME" --rm \
-    --publish "127.0.0.1:${FASTI_PORT}:8420" \
-    -v "$DATADIR:/data:Z" \
-    -e FASTI_DATA_ROOT=/data \
-    localhost/fasti:test 2>/dev/null || podman restart "$FASTI_DEV_NAME" 2>/dev/null || true
+  if podman container exists "$FASTI_DEV_NAME"; then
+    podman start "$FASTI_DEV_NAME" >/dev/null
+  else
+    podman run -d --name "$FASTI_DEV_NAME" --rm \
+      --publish "127.0.0.1:${FASTI_PORT}:8420" \
+      -v "$DATADIR:/data:Z" \
+      -e FASTI_DATA_ROOT=/data \
+      localhost/fasti:test >/dev/null
+  fi
 
-  sleep 1
-  echo "Fasti Podman container running on $FASTI_API_URL"
-  echo "API Health: $(curl -s "$FASTI_API_URL/api/v1/health" || echo 'starting...')"
+  if _wait_for_health; then
+    echo "Fasti Podman container is healthy on $FASTI_API_URL"
+  else
+    echo "Fasti Podman container did not become healthy. Check podman logs $FASTI_DEV_NAME."
+    return 1
+  fi
 }
 
 _start_desktop() {
@@ -79,6 +95,11 @@ _start_desktop() {
 
 _start_native() {
   mkdir -p "$LOGDIR" "$DATADIR"
+  if _pid_running "$LOGDIR/fastid.pid" || _pid_running "$LOGDIR/vite.pid"; then
+    echo "This worktree already has Fasti development processes. Run ./scripts/dev.sh --stop first."
+    _status
+    return 1
+  fi
 
   echo "=== 1. Compiling & Starting Fasti Daemon ==="
   cargo build --locked --bin fastid
@@ -88,20 +109,16 @@ _start_native() {
   "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
   printf '%s\n' "$daemon_pid" > "$LOGDIR/fastid.pid"
+  trap _stop EXIT
+  trap '_stop; trap - EXIT; exit 130' INT TERM
   echo "Fasti daemon started (PID: $daemon_pid, log: .dev-logs/fastid.log)"
 
   echo "Waiting for daemon health probe..."
-  for _ in $(seq 1 10); do
-    if curl --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1; then
-      break
-    fi
-    sleep 0.5
-  done
-
-  if curl --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1; then
+  if _wait_for_health; then
     echo "Fasti daemon is healthy on $FASTI_API_URL"
   else
     echo "Daemon did not respond in time. Check .dev-logs/fastid.log."
+    return 1
   fi
 
   echo ""

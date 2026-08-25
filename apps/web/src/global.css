@@ -98,6 +98,7 @@ textarea {
   left: 8px;
   z-index: 10000;
   padding: 10px 14px;
+  min-height: var(--fasti-touch-target-min, 44px);
   background: var(--fasti-surface-paper);
   color: var(--fasti-action-primary);
   transform: translateY(-160%);
