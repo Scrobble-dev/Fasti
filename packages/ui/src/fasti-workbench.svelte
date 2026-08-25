@@ -811,6 +811,7 @@
 
   .global-search-input {
     width: 100%;
+    min-height: 44px;
     padding: 8px 12px 8px 38px;
     background: var(--fasti-surface-archive);
     border: 1px solid
@@ -835,7 +836,7 @@
   }
 
   .scope-select {
-    min-height: 38px;
+    min-height: 44px;
     padding: 8px 12px;
     background: var(--fasti-surface-archive);
     border: 1px solid
@@ -847,7 +848,7 @@
   }
 
   .tool-btn {
-    min-height: 38px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -868,16 +869,16 @@
   }
 
   .tool-btn.icon-only {
-    min-width: 38px;
-    min-height: 38px;
+    min-width: 44px;
+    min-height: 44px;
     padding: 7px;
     display: grid;
     place-items: center;
   }
 
   .status-indicator {
-    min-width: 38px;
-    min-height: 38px;
+    min-width: 44px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;

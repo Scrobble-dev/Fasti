@@ -400,6 +400,16 @@
     color: var(--fasti-action-primary);
   }
 
+  .brand-button,
+  .brand-header-row :global(.btn-icon),
+  .nav-link {
+    min-height: 44px !important;
+  }
+
+  .brand-header-row :global(.btn-icon) {
+    min-width: 44px !important;
+  }
+
   .nav-section-title {
     padding: 6px 8px 2px;
     font-size: 0.7rem;
