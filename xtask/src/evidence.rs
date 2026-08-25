@@ -503,37 +503,21 @@ pub(crate) fn print_schema() -> anyhow::Result<()> {
 }
 
 /// Generates, verifies, and writes a B1 milestone evidence manifest.
-
 ///
-
 /// Invalid manifests are removed, and generation or verification failures produce
-
 /// an incomplete candidate containing diagnostic information.
-
 ///
-
 /// # Examples
-
 ///
-
 /// ```no_run
-
 /// use std::path::Path;
-
 ///
-
 /// let manifest_path = create_b1_milestone_manifest(
-
 ///     Path::new("."),
-
 ///     Path::new("target/fasti-evidence/b1-manifest.json"),
-
 /// )?;
-
 /// assert!(manifest_path.exists());
-
 /// # Ok::<(), anyhow::Error>(())
-
 /// ```
 pub(crate) fn create_b1_milestone_manifest(
     root: &Path,
@@ -588,10 +572,6 @@ pub(crate) fn create_b1_milestone_manifest(
 ///
 /// Returns an error if the output path is unsafe, generation fails, or the
 /// generated manifest fails verification.
-pub(crate) fn create_b8b_milestone_manifest(
-root: &Path,
-manifest_path: &Path,
-) -> anyhow::Result<PathBuf> {
 pub(crate) fn create_b8b_milestone_manifest(
     root: &Path,
     manifest_path: &Path,
