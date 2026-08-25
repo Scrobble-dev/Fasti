@@ -55,6 +55,16 @@ pub(crate) fn map_offline_open_error(
             FastiProblem::storage_unavailable(capability, correlation_id),
         ),
         StoreOpenError::UnsupportedPlatform
+            if capability
+                .allowed_problem_codes()
+                .contains(&ProblemCode::UnsupportedPlatform) =>
+        {
+            Box::new(FastiProblem::unsupported_platform(
+                capability,
+                correlation_id,
+            ))
+        }
+        StoreOpenError::UnsupportedPlatform
         | StoreOpenError::Io(_)
         | StoreOpenError::UnsafePath { .. }
         | StoreOpenError::Sqlite(_)
@@ -669,6 +679,24 @@ mod tests {
         assert_eq!(problem.code(), ProblemCode::IntegrityFailed);
         assert_eq!(problem.capability(), CapabilityKey::VerifyWorkspace);
         assert_eq!(problem.correlation_id(), correlation_id);
+    }
+
+    #[test]
+    fn offline_restore_reports_unsupported_platform_without_mutation() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let problem = map_offline_open_error(
+            StoreOpenError::UnsupportedPlatform,
+            CapabilityKey::RestoreWorkspace,
+            correlation_id,
+        );
+
+        assert_eq!(problem.code(), ProblemCode::UnsupportedPlatform);
+        assert_eq!(problem.capability(), CapabilityKey::RestoreWorkspace);
+        assert_eq!(problem.correlation_id(), correlation_id);
+        assert_eq!(
+            problem.safe_state(),
+            fasti_application::SafeState::NoMutation
+        );
     }
 
     fn sqlite_open_error(result_code: i32) -> StoreOpenError {

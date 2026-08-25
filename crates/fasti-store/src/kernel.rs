@@ -71,25 +71,20 @@ pub struct LockedDataRoot {
 }
 
 impl LockedDataRoot {
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
         let path = path.as_ref().to_path_buf();
         prepare_private_directory(&path)?;
-        #[cfg(target_os = "linux")]
         let root_directory = open_data_root_directory(&path)?;
-        #[cfg(target_os = "linux")]
         let lock = acquire_data_root_lock(&path, &root_directory)?;
-        #[cfg(not(target_os = "linux"))]
-        let lock = acquire_data_root_lock(&path)?;
         Ok(Self {
             path,
-            #[cfg(target_os = "linux")]
             root_directory,
             _lock: lock,
         })
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     pub fn acquire(_path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
         Err(StoreOpenError::UnsupportedPlatform)
     }
@@ -102,8 +97,8 @@ impl LockedDataRoot {
     /// filesystem operations are supported.
     ///
     /// Linux restore and recovery code must use this handle instead of
-    /// resolving child paths from [`Self::path`] again. Other platforms return
-    /// `None` until they provide equivalent no-follow activation semantics.
+    /// resolving child paths from [`Self::path`] again. Acquiring the guard
+    /// fails on other platforms until they provide equivalent semantics.
     pub fn anchored_directory(&self) -> Option<&File> {
         #[cfg(target_os = "linux")]
         {
@@ -251,12 +246,7 @@ fn acquire_data_root_lock(data_root: &Path, root_directory: &File) -> Result<Fil
     finish_data_root_lock(data_root, file)
 }
 
-#[cfg(not(target_os = "linux"))]
-fn acquire_data_root_lock(data_root: &Path) -> Result<File, StoreOpenError> {
-    let file = open_data_root_lock(data_root)?;
-    finish_data_root_lock(data_root, file)
-}
-
+#[cfg(target_os = "linux")]
 fn finish_data_root_lock(data_root: &Path, file: File) -> Result<File, StoreOpenError> {
     if !file.metadata()?.is_file() {
         return Err(unsafe_path(
@@ -302,22 +292,6 @@ fn open_data_root_lock(root_directory: &File) -> Result<File, StoreOpenError> {
             | rustix::fs::ResolveFlags::NO_MAGICLINKS
             | rustix::fs::ResolveFlags::NO_SYMLINKS
             | rustix::fs::ResolveFlags::NO_XDEV,
-    )
-    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
-    Ok(File::from(fd))
-}
-
-#[cfg(all(not(target_os = "linux"), unix))]
-fn open_data_root_lock(data_root: &Path) -> Result<File, StoreOpenError> {
-    let path = data_root.join("fasti.lock");
-    reject_unsafe_existing_file(&path)?;
-    let fd = rustix::fs::open(
-        &path,
-        rustix::fs::OFlags::RDWR
-            | rustix::fs::OFlags::CREATE
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NOFOLLOW,
-        rustix::fs::Mode::from_raw_mode(0o600),
     )
     .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
     Ok(File::from(fd))
@@ -386,14 +360,9 @@ fn set_owner_only_file_permissions(_path: &Path) -> Result<(), StoreOpenError> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn set_owner_only_open_file_permissions(file: &File) -> Result<(), StoreOpenError> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_owner_only_open_file_permissions(_file: &File) -> Result<(), StoreOpenError> {
     Ok(())
 }
 
@@ -650,6 +619,19 @@ pub(crate) fn problem(
 mod tests {
     use super::*;
 
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn unsupported_platform_fails_before_touching_the_data_root() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+
+        assert!(matches!(
+            LockedDataRoot::acquire(&root),
+            Err(StoreOpenError::UnsupportedPlatform)
+        ));
+        assert!(!root.exists());
+    }
+
     #[test]
     fn data_root_rejects_a_symbolic_link() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -713,6 +695,38 @@ mod tests {
             (after.dev(), after.ino()),
             (moved_metadata.dev(), moved_metadata.ino())
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sqlite_sidecar_reopen_fails_closed_when_the_database_path_is_replaced() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let moved = temporary.path().join("moved-fasti-data");
+        let kernel = SqliteKernel::open(&root).expect("kernel");
+        let connection = kernel.inner.connection.lock().expect("connection");
+        let mode: String = connection
+            .query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))
+            .expect("close WAL sidecars");
+        assert!(mode.eq_ignore_ascii_case("delete"));
+
+        fs::rename(&root, &moved).expect("rename data root");
+        fs::create_dir_all(root.join("current")).expect("replacement current directory");
+
+        let error = connection
+            .query_row("PRAGMA journal_mode = WAL", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .expect_err("moved database must reject a sidecar reopen");
+        assert!(matches!(
+            error,
+            rusqlite::Error::SqliteFailure(error, _)
+                if error.extended_code == rusqlite::ffi::SQLITE_READONLY_DBMOVED
+        ));
+        assert!(!root.join("current/fasti.sqlite3-wal").exists());
+        assert!(!root.join("current/fasti.sqlite3-shm").exists());
+        assert!(!root.join("current/fasti.sqlite3-journal").exists());
+        assert!(moved.join("current/fasti.sqlite3").is_file());
     }
 
     #[cfg(target_os = "linux")]
