@@ -1032,7 +1032,10 @@ export const SAMPLE_APPRISE_CONFIG: AppriseNotificationConfig = {
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "light",
-  accentColor: "oxblood",
+  accentColor: "#066fd1",
+  fontFamily: "sans-serif",
+  themeBase: "slate",
+  cornerRadius: 1,
   density: "normal",
   fontSize: "md",
 };

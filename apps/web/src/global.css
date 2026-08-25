@@ -1,3 +1,69 @@
+@import "@tabler/core/dist/css/tabler.min.css";
+
+/* Tabler & Fasti Root Theme Variables */
+:root,
+[data-bs-theme="light"] {
+  --fasti-surface-archive: #f2efe6;
+  --fasti-surface-paper: #fffdf8;
+  --fasti-surface-night: #11110f;
+  --fasti-text-primary: #181716;
+  --fasti-text-muted: #625e56;
+  --fasti-brand-mark: #8b2e2a;
+  --fasti-brand-gold: #d4af37;
+  --fasti-action-primary: #066fd1;
+  --fasti-state-verified: #2fb344;
+  --fasti-state-attention: #f59f00;
+  --fasti-font-display: "Newsreader", Georgia, serif;
+  --fasti-font-body:
+    "Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --fasti-font-mono: "IBM Plex Mono", "Menlo", monospace;
+  --fasti-touch-target-min: 44px;
+
+  --tblr-body-bg: #f2efe6;
+  --tblr-card-bg: #fffdf8;
+  --tblr-body-color: #181716;
+  --tblr-primary: #066fd1;
+}
+
+[data-bs-theme="dark"],
+[data-fasti-mode="dark"] {
+  --fasti-surface-archive: #0f172a;
+  --fasti-surface-paper: #1e293b;
+  --fasti-surface-night: #090d16;
+  --fasti-text-primary: #f8fafc;
+  --fasti-text-muted: #94a3b8;
+  --fasti-brand-mark: #d34b45;
+  --fasti-brand-gold: #f1d06e;
+  --fasti-action-primary: #38bdf8;
+  --fasti-state-verified: #4ade80;
+  --fasti-state-attention: #fbbf24;
+
+  --tblr-body-bg: #0f172a;
+  --tblr-card-bg: #1e293b;
+  --tblr-body-color: #f8fafc;
+  --tblr-primary: #38bdf8;
+}
+
+[data-fasti-mode="night"] {
+  --fasti-surface-archive: #000000;
+  --fasti-surface-paper: #09090b;
+  --fasti-surface-night: #000000;
+  --fasti-text-primary: #ffffff;
+  --fasti-text-muted: #a1a1aa;
+  --fasti-brand-mark: #ef4444;
+  --fasti-brand-gold: #eab308;
+  --fasti-action-primary: #60a5fa;
+  --fasti-state-verified: #22c55e;
+  --fasti-state-attention: #eab308;
+
+  --tblr-body-bg: #000000;
+  --tblr-card-bg: #09090b;
+  --tblr-body-color: #ffffff;
+  --tblr-primary: #60a5fa;
+}
+
+/* Base resets & typography */
 * {
   box-sizing: border-box;
 }
@@ -7,12 +73,16 @@ body,
 #app {
   min-height: 100%;
   margin: 0;
+  padding: 0;
 }
 
 body {
-  background: var(--fasti-surface-archive);
-  color: var(--fasti-text-primary);
+  background-color: var(--fasti-surface-archive) !important;
+  color: var(--fasti-text-primary) !important;
   font-family: var(--fasti-font-body);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
 }
 
 button,
@@ -26,11 +96,12 @@ textarea {
   position: fixed;
   top: 8px;
   left: 8px;
-  z-index: 10;
+  z-index: 10000;
   padding: 10px 14px;
   background: var(--fasti-surface-paper);
   color: var(--fasti-action-primary);
   transform: translateY(-160%);
+  transition: transform 120ms ease;
 }
 
 .skip-link:focus {

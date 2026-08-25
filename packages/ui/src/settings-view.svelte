@@ -192,17 +192,18 @@
 
     <!-- Right Settings Content Panel -->
     <main class="settings-content-card">
-      <!-- 1. Appearance & Theme Editor (Tabler Style) -->
+      <!-- 1. Appearance & Theme Editor (Tabler Customizer) -->
       {#if activeSettingsSection === "appearance"}
         <section class="section-pane">
           <h2 class="pane-title">Appearance & Theme Editor</h2>
           <p class="pane-desc">
-            Customize color schemes, density, and typography scale.
+            Tabler Theme Engine: configure live color modes, accent color
+            schemes, font families, base grays, and corner radii.
           </p>
 
           <!-- Color Mode -->
           <div class="setting-group">
-            <h3 class="group-title">Color Scheme Mode</h3>
+            <h3 class="group-title">Color Mode</h3>
             <div class="options-grid-3">
               <button
                 type="button"
@@ -212,8 +213,8 @@
               >
                 <div class="preview-swatch light-swatch"></div>
                 <div class="swatch-label">
-                  <strong>Light (Archival Paper)</strong>
-                  <span>Warm off-white #FFFDF8</span>
+                  <strong>Light Mode</strong>
+                  <span>Clean archival paper theme</span>
                 </div>
               </button>
 
@@ -225,8 +226,8 @@
               >
                 <div class="preview-swatch dark-swatch"></div>
                 <div class="swatch-label">
-                  <strong>Dark (Slate Modern)</strong>
-                  <span>Rich charcoal #1E1E24</span>
+                  <strong>Dark Mode</strong>
+                  <span>Tabler charcoal slate #1e293b</span>
                 </div>
               </button>
 
@@ -238,29 +239,82 @@
               >
                 <div class="preview-swatch night-swatch"></div>
                 <div class="swatch-label">
-                  <strong>Night (OLED True Black)</strong>
-                  <span>Deep #000000 high-contrast</span>
+                  <strong>Night Mode (OLED)</strong>
+                  <span>True black #000000 high-contrast</span>
                 </div>
               </button>
             </div>
           </div>
 
-          <!-- Accent Color Swatches -->
+          <!-- Color Scheme (Accent Palette) -->
           <div class="setting-group">
-            <h3 class="group-title">Accent Color Palette</h3>
+            <h3 class="group-title">Color Scheme (Primary Accent)</h3>
             <div class="accents-row">
-              {#each [{ id: "oxblood", name: "Fasti Oxblood", hex: "#8B2E2A" }, { id: "blue", name: "Chronicle Blue", hex: "#1E4FA3" }, { id: "verdigris", name: "Verdigris", hex: "#2E6F63" }, { id: "gold", name: "Horological Gold", hex: "#D4AF37" }, { id: "purple", name: "Royal Purple", hex: "#7E22CE" }, { id: "rose", name: "Rose Crimson", hex: "#E11D48" }] as acc}
+              {#each [{ id: "#066fd1", name: "Tabler Blue", hex: "#066fd1" }, { id: "#4263eb", name: "Indigo", hex: "#4263eb" }, { id: "#ae3ec9", name: "Purple", hex: "#ae3ec9" }, { id: "#d6336c", name: "Pink", hex: "#d6336c" }, { id: "#d63939", name: "Red", hex: "#d63939" }, { id: "#f76707", name: "Orange", hex: "#f76707" }, { id: "#f59f00", name: "Yellow", hex: "#f59f00" }, { id: "#74b816", name: "Lime", hex: "#74b816" }, { id: "#2fb344", name: "Green", hex: "#2fb344" }, { id: "#0ca678", name: "Teal", hex: "#0ca678" }, { id: "#17a2b8", name: "Cyan", hex: "#17a2b8" }, { id: "#8B2E2A", name: "Fasti Oxblood", hex: "#8B2E2A" }, { id: "#D4AF37", name: "Horological Gold", hex: "#D4AF37" }] as acc}
                 <button
                   type="button"
                   class="accent-btn"
-                  class:selected={themeSettings.accentColor === acc.id}
+                  class:selected={themeSettings.accentColor === acc.id ||
+                    themeSettings.accentColor === acc.hex}
                   style="--accent-hex: {acc.hex}"
-                  onclick={() =>
-                    onUpdateTheme?.({ accentColor: acc.id as any })}
+                  onclick={() => onUpdateTheme?.({ accentColor: acc.hex })}
                   title={acc.name}
                 >
                   <span class="accent-circle"></span>
                   <span class="accent-name">{acc.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Font Family -->
+          <div class="setting-group">
+            <h3 class="group-title">Font Family</h3>
+            <div class="options-grid-3">
+              {#each [{ id: "sans-serif", title: "Sans-serif", desc: "Atkinson Hyperlegible / Clean modern" }, { id: "serif", title: "Serif", desc: "Newsreader / Archival editorial" }, { id: "monospace", title: "Monospace", desc: "IBM Plex Mono / Precision terminal" }] as f}
+                <button
+                  type="button"
+                  class="density-btn"
+                  class:selected={(themeSettings.fontFamily ?? "sans-serif") ===
+                    f.id}
+                  onclick={() => onUpdateTheme?.({ fontFamily: f.id as any })}
+                >
+                  <strong>{f.title}</strong>
+                  <span>{f.desc}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Theme Base (Gray Shade) -->
+          <div class="setting-group">
+            <h3 class="group-title">Theme Base Shade</h3>
+            <div class="accents-row">
+              {#each [{ id: "slate", name: "Slate" }, { id: "gray", name: "Gray" }, { id: "zinc", name: "Zinc" }, { id: "neutral", name: "Neutral" }, { id: "stone", name: "Stone" }] as b}
+                <button
+                  type="button"
+                  class="density-btn text-center"
+                  class:selected={(themeSettings.themeBase ?? "slate") === b.id}
+                  onclick={() => onUpdateTheme?.({ themeBase: b.id as any })}
+                >
+                  <strong>{b.name}</strong>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Corner Radius -->
+          <div class="setting-group">
+            <h3 class="group-title">Corner Radius Factor</h3>
+            <div class="accents-row">
+              {#each [{ id: 0, name: "0 (Square)" }, { id: 0.5, name: "0.5 (2px)" }, { id: 1, name: "1 (4px)" }, { id: 1.5, name: "1.5 (6px)" }, { id: 2, name: "2 (8px)" }] as rad}
+                <button
+                  type="button"
+                  class="density-btn text-center"
+                  class:selected={(themeSettings.cornerRadius ?? 1) === rad.id}
+                  onclick={() => onUpdateTheme?.({ cornerRadius: rad.id })}
+                >
+                  <strong>{rad.name}</strong>
                 </button>
               {/each}
             </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type {
     ActiveNavSection,
     MediaRecord,
@@ -52,29 +53,156 @@
     reconciliationCases.filter((c) => c.status === "open").length,
   );
 
+  // --- 1. HTML5 History API URL Routing ---
+  function sectionToPath(
+    section: ActiveNavSection,
+    recordId?: string | null,
+  ): string {
+    switch (section) {
+      case "chronicle":
+        return "/chronicle";
+      case "discover":
+        return "/discover";
+      case "library":
+        return "/library";
+      case "detail":
+        return recordId ? `/records/${recordId}` : "/library";
+      case "up_next":
+        return "/up-next";
+      case "calendar":
+        return "/calendar";
+      case "reconciliation":
+        return "/review-inbox";
+      case "connections":
+        return "/connections";
+      case "settings":
+        return "/settings";
+      default:
+        return "/";
+    }
+  }
+
+  function syncFromUrl(): void {
+    if (typeof window === "undefined") return;
+    const pathname = window.location.pathname;
+
+    if (pathname.startsWith("/records/")) {
+      const recId = pathname.replace("/records/", "").trim();
+      const rec = records.find((r) => r.id === recId);
+      if (rec) {
+        selectedRecordId = recId;
+        activeSection = "detail";
+        return;
+      }
+    }
+
+    if (pathname === "/discover") {
+      activeSection = "discover";
+      selectedRecordId = null;
+    } else if (pathname === "/library") {
+      activeSection = "library";
+      selectedRecordId = null;
+    } else if (pathname === "/up-next") {
+      activeSection = "up_next";
+      selectedRecordId = null;
+    } else if (pathname === "/calendar") {
+      activeSection = "calendar";
+      selectedRecordId = null;
+    } else if (pathname === "/review-inbox" || pathname === "/reconciliation") {
+      activeSection = "reconciliation";
+      selectedRecordId = null;
+    } else if (pathname === "/connections") {
+      activeSection = "connections";
+      selectedRecordId = null;
+    } else if (pathname === "/settings") {
+      activeSection = "settings";
+      selectedRecordId = null;
+    } else {
+      activeSection = "chronicle";
+      selectedRecordId = null;
+    }
+  }
+
   function handleSelectSection(section: ActiveNavSection): void {
     activeSection = section;
     if (section !== "detail") {
       selectedRecordId = null;
+    }
+    if (typeof window !== "undefined") {
+      const path = sectionToPath(section);
+      window.history.pushState({}, "", path);
     }
   }
 
   function handleSelectRecord(recordId: string): void {
     selectedRecordId = recordId;
     activeSection = "detail";
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", `/records/${recordId}`);
+    }
   }
 
   function handleBackToLibrary(): void {
     activeSection = "library";
     selectedRecordId = null;
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/library");
+    }
   }
+
+  // --- 2. Real Tabler Theme Engine Synchronization ---
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    const mode = themeSettings.mode;
+    const isDark = mode === "dark" || mode === "night";
+
+    // Tabler & Bootstrap Theme Attributes
+    document.documentElement.setAttribute(
+      "data-bs-theme",
+      isDark ? "dark" : "light",
+    );
+    document.documentElement.setAttribute("data-fasti-mode", mode);
+    document.body.className = `theme-${mode} layout-fluid`;
+
+    // Dynamic Tabler Accent Color and Variables
+    const accent = themeSettings.accentColor || "#066fd1";
+    document.documentElement.style.setProperty("--tblr-primary", accent);
+    document.documentElement.style.setProperty(
+      "--fasti-action-primary",
+      accent,
+    );
+
+    if (themeSettings.cornerRadius !== undefined) {
+      document.documentElement.style.setProperty(
+        "--tblr-border-radius",
+        `${themeSettings.cornerRadius * 4}px`,
+      );
+    }
+
+    if (themeSettings.fontFamily) {
+      const font =
+        themeSettings.fontFamily === "serif"
+          ? '"Newsreader", Georgia, serif'
+          : themeSettings.fontFamily === "monospace"
+            ? '"IBM Plex Mono", monospace'
+            : '"Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      document.documentElement.style.setProperty("--fasti-font-body", font);
+    }
+  });
+
+  onMount(() => {
+    syncFromUrl();
+    window.addEventListener("popstate", syncFromUrl);
+    return () => {
+      window.removeEventListener("popstate", syncFromUrl);
+    };
+  });
 
   function handleUpdateStatus(recordId: string, newStatus: WatchStatus): void {
     records = records.map((r) =>
       r.id === recordId ? { ...r, status: newStatus } : r,
     );
 
-    // If marked as completed, record an occurrence in Chronicle
     if (newStatus === "completed") {
       const rec = records.find((r) => r.id === recordId);
       if (rec) {
@@ -246,7 +374,7 @@
 </script>
 
 <div
-  class="workbench-root theme-{themeSettings.mode} density-{themeSettings.density} accent-{themeSettings.accentColor}"
+  class="workbench-root page theme-{themeSettings.mode} density-{themeSettings.density}"
 >
   <NavSidebar
     {activeSection}
@@ -254,7 +382,7 @@
     onSelectSection={handleSelectSection}
   />
 
-  <div class="viewport-canvas">
+  <div class="viewport-canvas page-wrapper">
     {#if activeSection === "chronicle"}
       <ChronicleView
         occurrences={chronicle}

@@ -23,9 +23,11 @@
     "High Fantasy Runs",
   ]);
 
-  let selected = $state<string[]>(
-    record.collectionName ? [record.collectionName] : ["Favorites"],
-  );
+  let selected = $state<string[]>([]);
+
+  $effect(() => {
+    selected = record.collectionName ? [record.collectionName] : ["Favorites"];
+  });
   let newCollectionInput = $state("");
 
   function handleToggle(name: string): void {

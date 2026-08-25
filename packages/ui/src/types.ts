@@ -177,10 +177,12 @@ export interface AppriseNotificationConfig {
 
 export interface ThemeSettings {
   readonly mode: "light" | "dark" | "night";
-  readonly accentColor:
-    "oxblood" | "blue" | "verdigris" | "gold" | "purple" | "rose";
+  readonly accentColor: string;
+  readonly fontFamily?: "sans-serif" | "serif" | "monospace";
+  readonly themeBase?: "slate" | "gray" | "zinc" | "neutral" | "stone";
+  readonly cornerRadius?: number;
   readonly density: "compact" | "normal" | "spacious";
-  readonly fontSize: "sm" | "md" | "lg";
+  readonly fontSize?: "sm" | "md" | "lg";
 }
 
 export type ActiveNavSection =

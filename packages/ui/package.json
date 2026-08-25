@@ -19,12 +19,13 @@
   },
   "dependencies": {
     "@fasti/tokens": "workspace:*",
+    "@tabler/core": "^1.4.0",
     "@tabler/icons-svelte": "3.46.0"
   },
   "devDependencies": {
+    "@typescript/native": "npm:typescript@7.0.2",
     "svelte": "5.56.10",
     "svelte-check": "4.7.6",
-    "@typescript/native": "npm:typescript@7.0.2",
     "typescript": "6.0.3"
   }
 }
