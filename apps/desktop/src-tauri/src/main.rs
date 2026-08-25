@@ -1,3 +1,4 @@
+mod connection;
 mod setup;
 
 use fasti_store::SqliteKernel;
@@ -49,6 +50,13 @@ fn complete_setup(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, 
     setup::complete_setup(&kernel, &state.secrets)
 }
 
+#[tauri::command(async)]
+async fn test_endpoint_connection(
+    endpoint: String,
+) -> Result<connection::ConnectionStatus, DesktopProblem> {
+    connection::test(endpoint).await
+}
+
 fn explicit_data_root(value: Option<OsString>) -> io::Result<PathBuf> {
     value
         .filter(|value| !value.is_empty())
@@ -73,7 +81,11 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![setup_status, complete_setup])
+        .invoke_handler(tauri::generate_handler![
+            setup_status,
+            complete_setup,
+            test_endpoint_connection
+        ])
         .run(tauri::generate_context!())
         .expect("Fasti desktop shell failed");
 }

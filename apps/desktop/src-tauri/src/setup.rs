@@ -32,6 +32,20 @@ pub(crate) struct DesktopProblem {
 }
 
 impl DesktopProblem {
+    pub(crate) fn connection(
+        code: &'static str,
+        title: &'static str,
+        detail: impl Into<String>,
+        next_action: &'static str,
+    ) -> Self {
+        Self {
+            code,
+            title,
+            detail: detail.into(),
+            next_action,
+        }
+    }
+
     fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
@@ -204,9 +218,8 @@ pub(crate) fn complete_setup(
     let proof = match store.load(SetupSecret::Proof)? {
         Some(proof) => proof,
         None => {
-            match kernel.initialize_node(InitializeNodeCommand::new(
-                RequestCorrelationId::new_v7(),
-            )) {
+            match kernel.initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
+            {
                 Ok(outcome) => {
                     let proof = outcome.initialization_proof();
                     store.store(SetupSecret::Proof, proof)?;
@@ -303,9 +316,7 @@ mod tests {
         let store = MemoryStore::default();
 
         let outcome = kernel
-            .initialize_node(InitializeNodeCommand::new(
-                RequestCorrelationId::new_v7(),
-            ))
+            .initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
             .expect("initialize node");
         store
             .store(SetupSecret::Proof, outcome.initialization_proof())
