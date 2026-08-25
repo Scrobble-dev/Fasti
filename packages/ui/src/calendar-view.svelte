@@ -1,10 +1,5 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
-  import {
-    IconPlayerPlay,
-    IconCalendar,
-    IconCheck,
-  } from "@tabler/icons-svelte";
 
   interface Props {
     watchingRecords: MediaRecord[];
@@ -49,7 +44,7 @@
     <div>
       <h1 class="view-title">Up Next & Calendar</h1>
       <p class="view-subtitle">
-        Resume your active series and track upcoming broadcast releases.
+        Review your active series and track upcoming broadcast releases.
       </p>
     </div>
   </header>
@@ -66,21 +61,21 @@
             {/if}
           </div>
           <div class="deck-content">
-            <span class="next-label">Next to Watch</span>
+            <span class="next-label">Active record</span>
             <h3 class="deck-title">{rec.title}</h3>
             <p class="deck-meta">
-              {#if rec.progressEpisodes}
+              {#if rec.progressEpisodes !== undefined}
                 Ep {rec.progressEpisodes + 1} of {rec.totalEpisodes ?? "?"}
               {:else}
-                Resume playback
+                No episode progress recorded
               {/if}
             </p>
             <button
               type="button"
-              class="play-next-btn"
+              class="open-record-btn"
               onclick={() => onSelectRecord(rec.id)}
             >
-              <IconPlayerPlay size={16} stroke={2.5} /> Continue
+              Open record
             </button>
           </div>
         </div>
@@ -210,7 +205,7 @@
     margin: 0 0 10px;
   }
 
-  .play-next-btn {
+  .open-record-btn {
     align-self: flex-start;
     display: inline-flex;
     align-items: center;

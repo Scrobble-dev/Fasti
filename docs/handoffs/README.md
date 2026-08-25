@@ -16,7 +16,7 @@ Read in this order. A document lower in the list never overrides one above it.
 | 6     | [`FASTI_BRANCH_TOPOLOGY_CHANGE_2026-08-24.md`](FASTI_BRANCH_TOPOLOGY_CHANGE_2026-08-24.md)               | dated snapshot | Branch and pull-request topology only. Overrides the branch and PR facts in documents 4 and 5, which are otherwise unchanged      |
 | 7     | [`FASTI_B3_CONTINUATION_2026-08-24.md`](FASTI_B3_CONTINUATION_2026-08-24.md)                             | dated snapshot | Verified B0-B2 status with the three activation gates, and the state of the in-progress B3 export slice                           |
 
-Branch and pull-request facts in documents 3 and 4 are superseded by document 5. Documents 3 and 4 were written on the same day by different sessions and overlap. They are both retained because each carries material the other does not. When they disagree, prefer document 3 for programme state and document 4 for the B3 implementation slice, and prefer live source over both.
+Branch and pull-request facts in documents 4 and 5 are superseded by document 6. Documents 4 and 5 were written on the same day by different sessions and overlap. They are both retained because each carries material the other does not. When they disagree outside branch and pull-request topology, prefer document 4 for programme state and document 5 for the B3 implementation slice. Prefer live source over every handoff.
 
 ## Rules
 
