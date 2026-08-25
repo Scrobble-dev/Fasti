@@ -64,6 +64,7 @@ export type ConnectionTrust = "http" | "https";
 
 export interface ConnectionEndpoint {
   readonly url: string;
+  readonly port: number;
   readonly source: ConnectionValueSource;
   readonly managed: boolean;
   readonly trust: ConnectionTrust;
@@ -80,6 +81,7 @@ export function connectionEndpoint(
   }
   return Object.freeze({
     url: url.origin,
+    port: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
     source,
     managed: source === "environment" || source === "build",
     trust: url.protocol === "https:" ? "https" : "http",

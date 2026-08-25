@@ -39,6 +39,15 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         page.getByRole("heading", { name: "Local service available" }),
       ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Network settings" }),
+      ).toBeVisible();
+      await expect(
+        page
+          .locator("#network-settings dd")
+          .filter({ hasText: "http://127.0.0.1:8420" }),
+      ).toBeVisible();
+      await expect(page.getByText("http://localhost:8420")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute(
         "data-bs-theme",
         theme,

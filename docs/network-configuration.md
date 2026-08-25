@@ -3,15 +3,18 @@
 Fasti keeps the listener, client URL, and public URL separate. This prevents a
 reverse-proxy address from changing the daemon bind address.
 
-| Variable | Owner | Purpose |
-| --- | --- | --- |
-| `FASTI_LISTEN` | `fastid` | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`. |
-| `FASTI_PORT` | launcher | Native or container host port. Default: `8420`. |
-| `FASTI_PORT_FALLBACK` | `fastid` and launcher | `auto` selects an OS-assigned port after a loopback collision. `fail` stops instead. |
-| `FASTI_API_URL` | launcher or app build | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
-| `FASTI_PUBLIC_URL` | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy. |
-| `FASTI_CONTAINER_RUNTIME` | launcher | `podman` or `docker`. Default: `podman`. |
-| `FASTI_BOUND_ADDR_FILE` | supervisor | Optional file where `fastid` atomically publishes its actual bind address. |
+| Variable                   | Owner                    | Purpose                                                                                              |
+| -------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `FASTI_LISTEN`             | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                |
+| `FASTI_PORT`               | launcher                 | Native or container host port. Default: `8420`.                                                      |
+| `FASTI_PORT_FALLBACK`      | `fastid` and launcher    | `auto` selects an OS-assigned port after a loopback collision. `fail` stops instead.                 |
+| `FASTI_API_URL`            | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
+| `FASTI_PUBLIC_URL`         | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                     |
+| `FASTI_CONTAINER_RUNTIME`  | launcher                 | `podman` or `docker`. Default: `podman`.                                                             |
+| `FASTI_BOUND_ADDR_FILE`    | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                           |
+| `VITE_FASTI_API_URL`       | app build                | Service origin shown in Network settings and used by the generated SDK.                              |
+| `VITE_FASTI_PUBLIC_URL`    | app build                | Optional external origin shown in Network settings.                                                  |
+| `VITE_FASTI_PORT_FALLBACK` | app build                | `auto` or `fail`, shown with the active connection values.                                           |
 
 Non-loopback client and public URLs must use HTTPS. `localhost`, `127.0.0.1`,
 and `[::1]` are equivalent loopback choices. The app can show all three for the
@@ -82,6 +85,21 @@ includes that host. Fasti uses the platform trust store. It does not issue a
 root certificate, install a certificate authority, or bypass certificate
 validation. Add the issuing root CA through the operating system or managed
 device policy when a private CA is required.
+
+For a managed browser, Tauri, or APK build, project the same values into the
+app at build time:
+
+```bash
+VITE_FASTI_API_URL=https://fasti.internal \
+VITE_FASTI_PUBLIC_URL=https://fasti.internal \
+VITE_FASTI_PORT_FALLBACK=fail \
+pnpm build
+```
+
+The Network settings section shows the effective URL, port, source, trust
+mode, public URL, fallback mode, and loopback alternatives. The current
+browser surface is diagnostic and read-only. Editable packaged-app settings
+remain gated by the desktop and Android delivery body.
 
 ## Contract disposition
 

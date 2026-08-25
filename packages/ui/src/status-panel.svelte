@@ -4,18 +4,26 @@
   import IconMoon from "@tabler/icons-svelte/icons/moon";
   import IconRefresh from "@tabler/icons-svelte/icons/refresh";
   import IconSun from "@tabler/icons-svelte/icons/sun";
+  import type { ConnectionEndpoint } from "@fasti/sdk";
+  import NetworkSettingsPanel from "./network-settings-panel.svelte";
   import type { StatusPanelState } from "./status-types.js";
 
   let {
     status,
     theme,
     mark,
+    endpoint,
+    publicEndpoint,
+    portFallback,
     onRetry,
     onToggleTheme,
   }: {
     status: StatusPanelState;
     theme: "light" | "dark";
     mark: string;
+    endpoint: ConnectionEndpoint;
+    publicEndpoint?: ConnectionEndpoint;
+    portFallback: "auto" | "fail";
     onRetry: () => void;
     onToggleTheme: () => void;
   } = $props();
@@ -111,6 +119,8 @@
         unavailable until their contracts and milestone gates are active.
       </p>
     </section>
+
+    <NetworkSettingsPanel {endpoint} {publicEndpoint} {portFallback} />
   </main>
 </div>
 

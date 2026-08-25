@@ -574,6 +574,7 @@ test("connection endpoints preserve custom domains and expose loopback alternati
   );
   assert.deepEqual(connectionEndpoint("https://fasti.internal", "build"), {
     url: "https://fasti.internal",
+    port: 443,
     source: "build",
     managed: true,
     trust: "https",
