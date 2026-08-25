@@ -35,8 +35,9 @@ The 17 Playwright tests use the installed Chrome channel locally and a pinned
 Playwright Chromium build in CI. Isolated generated-contract fixtures cover
 healthy, invalid, and network-unavailable responses. A bounded loopback stub
 also proves the Vite proxy path. The native and OCI smoke gates own live-daemon
-health proof. The UI suite retains light and dark screenshots at 320, 768, and
-1440 CSS pixels. It also checks:
+health proof. OCI smoke also proves that the staged node-initialization route
+remains absent from production with a `404` response. The UI suite retains light
+and dark screenshots at 320, 768, and 1440 CSS pixels. It also checks:
 
 - zero Axe violations in each tested state;
 - one H1 and a descriptive document title;
@@ -49,7 +50,8 @@ health proof. The UI suite retains light and dark screenshots at 320, 768, and
 - system dark mode when reading local theme storage is unavailable, theme
   changes when writing it is unavailable, and both toggle directions;
 - 200% text enlargement and the WCAG text-spacing override;
-- reduced-motion removal of the loading animation;
+- reduced-motion removal of the loading animation while an explicit request
+  barrier holds the loading state without an elapsed-time assumption;
 - forced-colors status and control visibility in Chromium;
 - no request to a third-party origin;
 - absence of unauthorised catalogue, review, and connection destinations.
