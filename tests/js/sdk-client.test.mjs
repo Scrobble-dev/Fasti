@@ -13,6 +13,8 @@ import {
   FastiProtocolError,
   FastiTimeoutError,
   FastiTransportError,
+  connectionEndpoint,
+  normalizeBaseUrl,
   parseAcceptObservationRequest,
   parseHealthResponse,
   parseReceiptCommittedEvent,
@@ -563,6 +565,37 @@ test("base URL semantics reject application paths instead of silently discarding
   assert.doesNotThrow(
     () => new FastiClient({ baseUrl: "http://127.0.0.1:8420/" }),
   );
+});
+
+test("connection endpoints preserve custom domains and expose loopback alternatives", () => {
+  assert.equal(
+    normalizeBaseUrl("https://fasti.internal:9443").origin,
+    "https://fasti.internal:9443",
+  );
+  assert.deepEqual(connectionEndpoint("https://fasti.internal", "build"), {
+    url: "https://fasti.internal",
+    source: "build",
+    managed: true,
+    trust: "https",
+    loopbackAliases: [],
+  });
+  assert.deepEqual(
+    connectionEndpoint("http://localhost:8420").loopbackAliases,
+    ["http://localhost:8420", "http://127.0.0.1:8420", "http://[::1]:8420"],
+  );
+});
+
+test("connection endpoints reject unsafe origins", () => {
+  for (const value of [
+    "ftp://fasti.internal",
+    "http://user:secret@fasti.internal",
+    "http://fasti.internal",
+    "https://fasti.internal/path",
+    "https://fasti.internal?query=yes",
+    "https://fasti.internal#fragment",
+  ]) {
+    assert.throws(() => connectionEndpoint(value));
+  }
 });
 
 test("generated public metadata preserves complete registry and surface dispositions", () => {
