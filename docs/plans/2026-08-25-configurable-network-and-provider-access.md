@@ -1,6 +1,6 @@
 # Configurable network and provider access
 
-**Status:** Accepted implementation plan
+**Status:** Implemented locally; landing remains blocked by PR #51 governance
 
 **Date:** 2026-08-25
 
@@ -344,6 +344,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: PR audit — current canonical gate failure, active review findings, and unsigned commits.
   - Files: governance workflows, benchmark fixture, `scripts/`, governing docs.
   - Verify: `PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr` and exact-head GitHub checks.
+  - Local feature-head evidence: the canonical gate passes. PR #51 itself remains unrepaired and has no new exact-head GitHub evidence.
 - [x] **T2 (P1, human: ~6h / CC: ~45min)** — configuration — implement validated bind, public URL, client endpoint, source, alias, and port composition.
   - Surfaced by: Architecture review — hardcoded, conflated delivery settings.
   - Files: application/contracts, daemon, SDK, web configuration.
@@ -352,7 +353,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: Architecture and security review — provider/network/capability controls have no owner.
   - Files: application/provider adapters, contracts, tests.
   - Verify: policy truth table, network class, redirect, timeout, and byte-limit tests.
-- [ ] **T4 (P1, human: ~8h / CC: ~60min)** — provider search — implement one real credential-backed provider and neutral Discover results.
+- [x] **T4 (P1, human: ~8h / CC: ~60min)** — provider search — implement one real credential-backed provider and neutral Discover results.
   - Surfaced by: Root cause — sample data is presented as online search.
   - Files: application/provider adapter, desktop host commands, UI Discover.
   - Verify: fake-server integration, key replacement, missing-key, 429, malformed, and partial-result tests.
@@ -360,7 +361,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: Code quality and UX review — local-only callbacks and false success states.
   - Files: UI Settings/workbench, host adapters, component tests.
   - Verify: UI typecheck, accessibility tests, no-secret DOM assertions, false-state regressions.
-- [ ] **T6 (P1, human: ~6h / CC: ~45min)** — responsive shell — fix sidebar, landmarks, selection semantics, focus, target size, and contrast.
+- [x] **T6 (P1, human: ~6h / CC: ~45min)** — responsive shell — fix sidebar, landmarks, selection semantics, focus, target size, and contrast.
   - Surfaced by: UX review — desktop overlay and 390 px reflow failure.
   - Files: UI shell, Settings, design tokens.
   - Verify: keyboard and screen-reader audit; screenshots at 320, 390, 768, and 1440 CSS px.
@@ -368,7 +369,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: Distribution review — hardcoded ports and absent mobile entrypoint/config proof.
   - Files: container, scripts, web, desktop/mobile configuration.
   - Verify: native/container smoke, Tauri desktop build, real APK build or an explicit failing gate.
-- [ ] **T8 (P2, human: ~6h / CC: ~45min)** — documentation and contracts — publish truthful task-led setup, CA, policy, provider, and deployment guidance.
+- [x] **T8 (P2, human: ~6h / CC: ~45min)** — documentation and contracts — publish truthful task-led setup, CA, policy, provider, and deployment guidance.
   - Surfaced by: Documentation review — no discoverable custom-domain/private-CA path.
   - Files: README, AGENTS, SECURITY, roadmap, contract/knowledge surfaces.
   - Verify: doc links, contract verification, repository truth, STE100 copy review.
@@ -376,6 +377,7 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
   - Surfaced by: Definition of Done and PR audit — stale or absent exact-head evidence.
   - Files: evidence artifacts and review reports.
   - Verify: `cargo xtask test pr`, focused QA report, screenshots, review dashboard, GitHub checks.
+  - Local evidence is complete. Hosted exact-head checks and review dashboards require a submitted PR, so this gate remains open.
 
 ## Completion gates
 
@@ -387,6 +389,18 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
 - Settings passes keyboard, screen reader, reflow, focus, contrast, reduced motion, and state-continuity checks.
 - No secret appears in logs, URLs, DOM return state, fixtures, screenshots, or generated docs.
 - CodeRabbit and Codacy findings on the submitted exact head are fixed or explicitly dispositioned; no merge occurs without user authorization.
+
+## Implementation evidence
+
+- `PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr` passes on the local feature head. This includes deterministic OpenAPI, AsyncAPI, JSON Schema, and JSON-LD validation; formatting; type checks; 87 JavaScript tests; strict Rust clippy; the Rust workspace; repository-truth checks; and all governed benchmark self-tests.
+- Native health passed on `127.0.0.1:19420`. The full development script passed with API port `19422` and web port `15174`, then removed its PID files and listeners on interrupt. Podman passed on host port `19423`, and Compose rendered the requested host port `19421`.
+- Browser QA passed at 320, 390, 768, and 1440 CSS px. The 320 px accessibility tree has named navigation controls, one `main`, one H1, an explicit current page, no visible target smaller than 44 CSS px, no horizontal overflow, and no console errors. The skip link receives first focus and moves focus to `main-content`.
+- Connection QA saved `https://fasti.internal:9443`, preserved it after rejecting a path-bearing URL, and exposed the three loopback alternatives for `http://localhost:8420`.
+- Provider Settings never returned a secret to the browser. Browser Discover sent no provider request and gave a truthful Desktop-only recovery message. The Desktop Google Books adapter uses a header-only key and passes missing-key, policy-denied, 429, unavailable, malformed, partial-result, redirect, timeout, and byte-bound checks. The optional unauthenticated live smoke received the provider's current HTTP 429 response; deterministic tests remain the release evidence.
+- The Linux desktop release embeds `https://fasti.internal:9443`; SHA-256 is `7f5ccd756832afb7a8c112dcff65bfedd2dee007cf5d988cf8a29fb4b94dbe87`.
+- The Android ARM64 release APK is 23,541,387 bytes; SHA-256 is `6307333247483e67b5d8046e51bfbf38cbfc462ea415270f89076471f7868a54`. It contains the ARM64 native library and the configured origin, targets Android 36 with minimum Android 24, trusts system CAs in release, and adds user-installed CAs only through Android debug overrides. The artifact is unsigned, as expected before release signing. No Android device was connected, so installed-device runtime remains a release check.
+- Impeccable reports no findings in the changed UI files. Three whole-tree warnings remain in unchanged legacy components and are outside this slice.
+- PR #51 remains the landing prerequisite. PR #44 still needs replacement or reduction, and PR #52 remains independent. No branch was merged, force-pushed, or rewritten.
 
 ## Review summary
 
