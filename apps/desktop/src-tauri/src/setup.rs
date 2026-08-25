@@ -6,7 +6,7 @@ use fasti_domain::RequestCorrelationId;
 use fasti_store::SqliteKernel;
 use serde::Serialize;
 
-const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
+pub(crate) const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SetupSecret {
@@ -32,7 +32,7 @@ pub(crate) struct DesktopProblem {
 }
 
 impl DesktopProblem {
-    fn secure_storage(detail: impl Into<String>) -> Self {
+    pub(crate) fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
             title: "Secure storage is unavailable",
@@ -56,6 +56,33 @@ impl DesktopProblem {
             title: "Local storage is unavailable",
             detail: detail.into(),
             next_action: "Check the Fasti data directory, then retry.",
+        }
+    }
+
+    pub(crate) fn configuration(detail: impl Into<String>) -> Self {
+        Self {
+            code: "configuration_invalid",
+            title: "Network configuration is invalid",
+            detail: detail.into(),
+            next_action: "Check the network settings, then retry.",
+        }
+    }
+
+    pub(crate) fn connection(detail: impl Into<String>) -> Self {
+        Self {
+            code: "connection_failed",
+            title: "Connection failed",
+            detail: detail.into(),
+            next_action: "Check the address, network policy, and certificate trust, then retry.",
+        }
+    }
+
+    pub(crate) fn provider(detail: impl Into<String>) -> Self {
+        Self {
+            code: "provider_unavailable",
+            title: "Provider is unavailable",
+            detail: detail.into(),
+            next_action: "Check the provider settings and outbound policy, then retry.",
         }
     }
 
@@ -108,8 +135,8 @@ pub(crate) trait SetupSecretStore: Send + Sync {
 pub(crate) struct KeyringSetupSecretStore;
 
 impl KeyringSetupSecretStore {
-    fn entry(secret: SetupSecret) -> Result<keyring::Entry, DesktopProblem> {
-        keyring::Entry::new(KEYRING_SERVICE, secret.account()).map_err(|_| {
+    fn entry(secret: SetupSecret) -> Result<crate::secure_storage::Entry, DesktopProblem> {
+        crate::secure_storage::Entry::new(KEYRING_SERVICE, secret.account()).map_err(|_| {
             DesktopProblem::secure_storage("Fasti could not open the system credential store.")
         })
     }
@@ -127,7 +154,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
                 })?;
                 Ok(Some(SecretMaterial::from_bytes(bytes)))
             }
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(crate::secure_storage::Error::NoEntry) => Ok(None),
             Err(_) => Err(DesktopProblem::secure_storage(
                 "Fasti could not read the system credential store.",
             )),
@@ -153,7 +180,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem> {
         let entry = Self::entry(secret)?;
         match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(crate::secure_storage::Error::NoEntry) => Ok(()),
             Err(_) => Err(DesktopProblem::secure_storage(
                 "Fasti could not remove the consumed setup proof.",
             )),
@@ -204,9 +231,8 @@ pub(crate) fn complete_setup(
     let proof = match store.load(SetupSecret::Proof)? {
         Some(proof) => proof,
         None => {
-            match kernel.initialize_node(InitializeNodeCommand::new(
-                RequestCorrelationId::new_v7(),
-            )) {
+            match kernel.initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
+            {
                 Ok(outcome) => {
                     let proof = outcome.initialization_proof();
                     store.store(SetupSecret::Proof, proof)?;
@@ -303,9 +329,7 @@ mod tests {
         let store = MemoryStore::default();
 
         let outcome = kernel
-            .initialize_node(InitializeNodeCommand::new(
-                RequestCorrelationId::new_v7(),
-            ))
+            .initialize_node(InitializeNodeCommand::new(RequestCorrelationId::new_v7()))
             .expect("initialize node");
         store
             .store(SetupSecret::Proof, outcome.initialization_proof())

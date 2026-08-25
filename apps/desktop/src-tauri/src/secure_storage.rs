@@ -1,0 +1,18 @@
+#[cfg(not(target_os = "android"))]
+pub(crate) use keyring::{Entry, Error};
+
+#[cfg(target_os = "android")]
+pub(crate) use keyring_core::{Entry, Error};
+
+pub(crate) fn initialize() -> Result<(), ()> {
+    #[cfg(target_os = "android")]
+    {
+        let store = android_native_keyring_store::Store::new().map_err(|_| ())?;
+        keyring_core::set_default_store(store);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {}
+
+    Ok(())
+}
