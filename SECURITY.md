@@ -28,6 +28,10 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 These controls make the development baseline and B2 review implementation safer. Production mounts only the durable loopback setup slice when `FASTI_DATA_ROOT` is explicit. This does not make Fasti a supported service.
 
+## Temporary dependency exception
+
+The desktop crate inherits `glib 0.18.5` and `RUSTSEC-2024-0429` from Tauri 2's GTK3 stack. Fasti does not depend on `glib` directly. The desktop lockfile audit ignores only this advisory and still fails for every other advisory. Remove the exception when the [upstream GTK4 migration](https://github.com/tauri-apps/tauri-docs/issues/3143) is available.
+
 ## Current threat model
 
 The current source tree protects these assets:
