@@ -62,23 +62,10 @@ HTTPS port. Set the external address separately:
 FASTI_PUBLIC_URL=https://fasti.internal ./scripts/dev.sh
 ```
 
-This variable does not create DNS, TLS, or a reverse proxy. Configure those at
-the network edge. This example keeps the development web server and daemon on
-loopback and exposes one HTTPS origin:
-
-```caddyfile
-https://fasti.internal {
-    tls /etc/fasti/tls/fasti.crt /etc/fasti/tls/fasti.key
-
-    handle /api/* {
-        reverse_proxy 127.0.0.1:8420
-    }
-
-    handle {
-        reverse_proxy 127.0.0.1:5173
-    }
-}
-```
+This variable does not create DNS, TLS, or a reverse proxy. Fasti does not yet
+publish a remote-exposure recipe. A reverse proxy can erase the daemon's
+loopback trust boundary, so public routing remains blocked until authenticated
+inbound access and its threat-model gate are active.
 
 `.internal` needs working name resolution and a certificate whose subject
 includes that host. Fasti uses the platform trust store. It does not issue a
@@ -100,6 +87,23 @@ The Network settings section shows the effective URL, port, source, trust
 mode, public URL, fallback mode, and loopback alternatives. The current
 browser surface is diagnostic and read-only. Editable packaged-app settings
 remain gated by the desktop and Android delivery body.
+
+## Provider network policy
+
+Provider manifests declare their maximum hosts, capabilities, and network
+classes. Operator allow lists can only narrow that declaration. A deny always
+wins. The application policy rejects empty or mixed DNS results and unsafe
+addresses before an adapter connects.
+
+Adapters must ignore system proxies, disable redirects, authorize every
+resolved address, and connect to one authorized address without a second DNS
+lookup. Provider credentials must use headers or a platform credential store.
+They must not enter URLs, arguments, logs, browser storage, screenshots,
+fixtures, or proof bundles.
+
+The Google Books review manifest accepts `GOOGLE_BOOKS_API_KEY` and sends it as
+`X-Goog-Api-Key`. It remains a contract until the provider runtime body is
+authorized. The browser QA harness does not execute provider requests.
 
 ## Contract disposition
 

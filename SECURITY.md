@@ -60,4 +60,6 @@ B2-B8 must still prove, rather than merely document:
 
 Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. A supported network-exposure guide cannot exist until the access and threat-model gates pass.
 
+Provider and other governed outbound adapters must evaluate the shared application policy after DNS resolution. Provider declarations are maximum grants; operator allow lists only narrow them and deny rules win. Adapters must reject redirects, system proxies, empty DNS results, any unsafe answer, and DNS rebinding. Provider secrets use request headers or platform credential stores, never URLs or browser storage.
+
 See [the constitution](docs/constitution.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md).
