@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { globSync, readFileSync } from "node:fs";
+import { globSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,27 +24,35 @@ const entrypointWorkspaces = new Set([
 ]);
 const failures = [];
 
-function packageEntryPath(packageRoot, entry) {
-  if (typeof entry !== "string" || isAbsolute(entry)) return undefined;
-  const path = resolve(packageRoot, entry);
-  const fromRoot = relative(packageRoot, path);
-  if (
+function isConfinedPath(root, path) {
+  const fromRoot = relative(root, path);
+  return !(
     fromRoot === "" ||
     fromRoot === ".." ||
     fromRoot.startsWith(`..${sep}`) ||
     isAbsolute(fromRoot)
-  ) {
-    return undefined;
-  }
-  return path;
+  );
 }
 
-function packageEntryExists(packageRoot, packageFiles, entry) {
+function packageEntryPath(packageRoot, entry) {
+  if (typeof entry !== "string" || isAbsolute(entry)) return undefined;
+  const path = resolve(packageRoot, entry);
+  return isConfinedPath(packageRoot, path) ? path : undefined;
+}
+
+function packageEntryExists(packageRoot, entry) {
   const entryPath = packageEntryPath(packageRoot, entry);
-  return (
-    entryPath !== undefined &&
-    packageFiles.has(relative(packageRoot, entryPath))
-  );
+  if (entryPath === undefined) return false;
+  try {
+    // The root is fixed by expectedWorkspaces and entryPath passed lexical confinement.
+    /* eslint-disable security/detect-non-literal-fs-filename */
+    const physicalRoot = realpathSync(packageRoot);
+    const physicalEntry = realpathSync(entryPath);
+    /* eslint-enable security/detect-non-literal-fs-filename */
+    return isConfinedPath(physicalRoot, physicalEntry);
+  } catch {
+    return false;
+  }
 }
 
 assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);
@@ -54,6 +62,12 @@ assert.equal(
   packageEntryPath(repoRoot, "package.json"),
   join(repoRoot, "package.json"),
 );
+// A symlinked entry resolves to its physical target before this check.
+assert.equal(
+  isConfinedPath(repoRoot, resolve(repoRoot, "../outside/transport.js")),
+  false,
+);
+
 const actualWorkspaces = globSync("{apps,packages}/*/package.json", {
   cwd: repoRoot,
 })
@@ -79,40 +93,33 @@ for (const [directory, expectedName] of expectedWorkspaces) {
   if (manifest.private !== true) {
     failures.push(`${directory}: package must remain private before B8`);
   }
-  if (!buildableWorkspaces.has(directory)) continue;
+
+  if (!buildableWorkspaces.has(directory)) {
+    continue;
+  }
 
   for (const script of ["build", "typecheck"]) {
     if (typeof manifest.scripts?.[script] !== "string") {
       failures.push(`${directory}: missing required ${script} script`);
     }
   }
-  if (!entrypointWorkspaces.has(directory)) continue;
 
-  const packageFiles = new Set(
-    globSync("**/*", {
-      cwd: packageRoot,
-      exclude: ["node_modules/**"],
-      withFileTypes: true,
-    })
-      .filter((entry) => entry.isFile())
-      .map((entry) =>
-        relative(packageRoot, join(entry.parentPath, entry.name)),
-      ),
-  );
+  if (!entrypointWorkspaces.has(directory)) continue;
 
   for (const [field, target] of [
     ["primary", manifest.main ?? manifest.svelte],
     ["types", manifest.types],
   ]) {
-    if (!packageEntryExists(packageRoot, packageFiles, target)) {
+    if (!packageEntryExists(packageRoot, target)) {
       failures.push(
         `${directory}: ${field} does not resolve to a confined built entrypoint`,
       );
     }
   }
+
   if (
-    manifest.module &&
-    !packageEntryExists(packageRoot, packageFiles, manifest.module)
+    manifest.module !== undefined &&
+    !packageEntryExists(packageRoot, manifest.module)
   ) {
     failures.push(
       `${directory}: module does not resolve to a confined built entrypoint`,
