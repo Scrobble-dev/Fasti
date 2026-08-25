@@ -632,6 +632,7 @@ mod tests {
         assert!(!root.exists());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn data_root_rejects_a_symbolic_link() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -654,6 +655,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn data_root_lock_excludes_a_second_kernel_and_releases_on_drop() {
         let temporary = tempfile::tempdir().expect("temporary directory");
@@ -832,7 +834,7 @@ mod tests {
         assert_eq!(fs::read(outside).expect("outside bytes"), b"unchanged");
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn data_root_and_database_are_owner_only() {
         let temporary = tempfile::tempdir().expect("temporary directory");

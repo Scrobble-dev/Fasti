@@ -288,8 +288,8 @@ and fail-closed partial completion. Recovery tests prove the source credential
 is not restored, the new caller-owned credential authenticates, and the
 recovered workspace verifies. Lock regressions prove
 stopped-node restore and offline verify return `data_root_locked` while a live
-kernel owns the data root. They also prove unsupported kernels fail before
-touching a data root and a moved live database fails closed when its configured
+kernel owns the data root. They also prove unsupported platforms fail before
+creating a data root and a moved live database fails closed when its configured
 path no longer resolves to the opened inode. Run the focused crash gate with:
 
 ```bash
