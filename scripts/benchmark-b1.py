@@ -58,6 +58,7 @@ IDLE_CPU_P95_LIMIT_PERCENT = float(
 )
 ARTIFACT_LIMITS = LOCKED_BUDGETS["artifact_bytes"]
 SAMPLE_INTERVAL_MS = int(LOCKED_BUDGETS["timing_seconds"]["sample_interval_ms"])
+CONTRACT_SDK_BUILD_COMMAND = ("pnpm", "--filter", "@fasti/sdk", "build")
 IMAGE_SOURCE_LABELS = {
     "git_commit": "org.opencontainers.image.revision",
     "git_tree": "dev.scrobble.fasti.source.tree",
@@ -2263,7 +2264,7 @@ def artifact_sizes(
         contract_context = temp / "contract-context"
         contract_context_provenance = create_exact_git_archive_context(contract_context)
         sdk_install_command = ["pnpm", "--offline", "install", "--frozen-lockfile"]
-        sdk_build_command = ["pnpm", "--offline", "--filter", "@fasti/sdk", "build"]
+        sdk_build_command = list(CONTRACT_SDK_BUILD_COMMAND)
         run_checked(sdk_install_command, cwd=contract_context, timeout=300)
         run_checked(sdk_build_command, cwd=contract_context, timeout=300)
         contract_archive = [

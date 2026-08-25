@@ -861,6 +861,12 @@ class LockedProfileTests(unittest.TestCase):
 
 
 class ProvenanceAndStorageTests(unittest.TestCase):
+    def test_contract_sdk_build_uses_supported_pnpm_run_options(self) -> None:
+        self.assertEqual(
+            benchmark.CONTRACT_SDK_BUILD_COMMAND,
+            ("pnpm", "--filter", "@fasti/sdk", "build"),
+        )
+
     def test_storage_fingerprint_targets_root_mount(self) -> None:
         commands: list[list[str]] = []
 
