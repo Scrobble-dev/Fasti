@@ -571,7 +571,7 @@ class ImmutableSourceTests(unittest.TestCase):
                     image_id, members, "layer bytes do not match"
                 )
 
-    def test_saved_oci_layout_has_a_separate_injectable_safety_ceiling(self) -> None:
+    def test_saved_oci_archives_have_a_separate_injectable_safety_ceiling(self) -> None:
         self.assertEqual(
             benchmark.SAVED_OCI_UNPACKED_SAFETY_CEILING_BYTES,
             4 * benchmark.ARTIFACT_LIMITS["oci_image_unpacked"],
@@ -584,6 +584,18 @@ class ImmutableSourceTests(unittest.TestCase):
                 benchmark.saved_oci_layer_bytes(
                     archive_path,
                     image_id,
+                    self._source(),
+                    unpacked_safety_ceiling_bytes=20,
+                )
+
+            legacy_id, legacy_members = self._saved_oci_fixture(
+                layers=[("layer/layer.tar", b"x" * 21)]
+            )
+            self._write_saved_oci_archive(archive_path, legacy_members)
+            with self.assertRaisesRegex(benchmark.CaptureError, "bounded unpacked size"):
+                benchmark.saved_oci_layer_bytes(
+                    archive_path,
+                    legacy_id,
                     self._source(),
                     unpacked_safety_ceiling_bytes=20,
                 )

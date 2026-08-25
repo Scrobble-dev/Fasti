@@ -2511,6 +2511,9 @@ def saved_oci_layer_bytes(
         diff_ids = config["rootfs"].get("diff_ids")
         if not isinstance(diff_ids, list) or len(diff_ids) != len(layers):
             raise CaptureError("Docker save config layer identity does not match its manifest")
+        unpacked_total = sum(members[layer].size for layer in layers)
+        if unpacked_total > unpacked_safety_ceiling_bytes:
+            raise CaptureError("Docker save layers exceed the bounded unpacked size")
         for layer, diff_id in zip(layers, diff_ids, strict=True):
             stream = archive.extractfile(members[layer])
             if stream is None:
@@ -2520,7 +2523,7 @@ def saved_oci_layer_bytes(
                 digest.update(chunk)
             if diff_id != f"sha256:{digest.hexdigest()}":
                 raise CaptureError("Docker save layer bytes do not match the image config")
-        return sum(members[name].size for name in layers)
+        return unpacked_total
 
 
 def artifact_sizes(
@@ -2678,7 +2681,7 @@ def artifact_budget_verdicts(sizes: dict[str, Any]) -> list[dict[str, Any]]:
         measured(
             "oci_image_unpacked",
             sizes["oci_image_bytes"],
-            "Docker image inspection reports the unpacked layer size for the immutable governed image ID.",
+            "Sum of the verified Docker-save image layers after decompression for the immutable governed image ID.",
         ),
         measured(
             "contract_pack_compressed",
@@ -3002,7 +3005,7 @@ def capture_artifact_budgets(args: argparse.Namespace) -> None:
         output.write("\n")
         output.flush()
         os.fsync(output.fileno())
-    print(f"PASS: validated B1 artifact budgets written to {args.output}")
+    print(f"PASS: B1 artifact budget evidence written to {args.output}")
 
 
 def add_runner_arguments(command_parser: argparse.ArgumentParser, *, with_output: bool) -> None:

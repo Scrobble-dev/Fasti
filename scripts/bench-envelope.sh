@@ -135,7 +135,7 @@ timing = document["timing_seconds"]
 cpu = document["idle_cpu_percent_one_core"]
 print(
     budgets[keys[target]], budgets["absolute_ceiling"],
-    timing["idle_warmup"], timing["idle_measurement"], timing["sample_interval_ms"],
+    int(timing["idle_warmup"]), int(timing["idle_measurement"]), int(timing["sample_interval_ms"]),
     int(Decimal(str(cpu["average"])) * 100), int(Decimal(str(cpu["p95"])) * 100),
 )
 PY

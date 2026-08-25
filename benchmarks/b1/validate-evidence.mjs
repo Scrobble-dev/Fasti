@@ -2681,6 +2681,12 @@ function runSelfTest() {
   );
   const valid = makeSelfTestEvidence();
   validateEvidence(valid, "valid in-memory self-test fixture");
+  const missingMilestoneRole = clone(physicalProfiles);
+  delete missingMilestoneRole.milestone_role;
+  assert(
+    !schemaValidator(physicalProfilesSchemaPath)(missingMilestoneRole),
+    "physical profile schema accepted a missing milestone role",
+  );
   validateContainedReceiptReaderSentinels();
   const packagingRemovalSentinels = validatePackagingSpikeRemovalSentinels();
   validateLedgerStateTransitions(valid);
