@@ -61,7 +61,10 @@ impl DesktopState {
 #[tauri::command(async)]
 fn setup_status(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, DesktopProblem> {
     let kernel = state.kernel()?;
-    setup::inspect_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
+    setup::inspect_setup(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -72,7 +75,10 @@ fn complete_setup(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, 
         .lock()
         .map_err(|_| DesktopProblem::storage("The setup lock is unavailable."))?;
     let kernel = state.kernel()?;
-    setup::complete_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
+    setup::complete_setup(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -102,24 +108,31 @@ async fn test_endpoint_connection(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
-fn provider_credential_status() -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    providers::credential_statuses()
+fn provider_credential_status(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    providers::credential_statuses(kernel.data_root_identity())
 }
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
 fn save_provider_credential(
+    state: tauri::State<'_, DesktopState>,
     input: SaveProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    providers::save_credential(input)
+    let kernel = state.kernel()?;
+    providers::save_credential(input, kernel.data_root_identity())
 }
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
 fn delete_provider_credential(
+    state: tauri::State<'_, DesktopState>,
     input: DeleteProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    providers::delete_credential(input)
+    let kernel = state.kernel()?;
+    providers::delete_credential(input, kernel.data_root_identity())
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -128,8 +141,14 @@ async fn search_provider(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSearchInput,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    let kernel = state.kernel()?;
     let configuration = state.network.load()?;
-    providers::search(input, configuration.outbound_policy()).await
+    providers::search(
+        input,
+        configuration.outbound_policy(),
+        kernel.data_root_identity(),
+    )
+    .await
 }
 
 fn explicit_data_root(value: Option<OsString>) -> io::Result<PathBuf> {

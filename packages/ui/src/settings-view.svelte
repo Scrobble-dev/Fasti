@@ -218,13 +218,13 @@
   async function saveProviderKey(provider: string): Promise<void> {
     const credential = editingKeyMap[provider]?.trim() ?? "";
     if (!credential || !onSaveProviderKey || providerBusy) return;
+    editingKeyMap[provider] = "";
     providerBusy = provider;
     providerNotice = "";
     providerProblem = "";
     try {
       await onSaveProviderKey(provider, credential);
-      editingKeyMap[provider] = "";
-      providerNotice = "Credential saved in the platform credential store.";
+      providerNotice = "Credential saved securely for this Fasti node.";
     } catch (error) {
       providerProblem = hostProblemText(
         error,
@@ -266,8 +266,8 @@
     <div>
       <h1 class="view-title">Settings & Studio</h1>
       <p class="view-subtitle">
-        Configure metadata API keys, appearance themes, media server connectors,
-        and security.
+        Configure available metadata providers, network access, appearance, and
+        navigation. Unavailable sections say so.
       </p>
     </div>
   </header>
@@ -802,8 +802,16 @@
                 </div>
 
                 <p class="wb-help">
-                  Source: {prov.source.replaceAll("_", " ")}. Google Books is
-                  required for Discover book search.
+                  {#if prov.source === "environment"}
+                    Source: environment. This value is read-only and applies to
+                    this app process.
+                  {:else if prov.source === "credential_store"}
+                    Source: platform credential store. This value is shared by
+                    all profiles on this Fasti node.
+                  {:else}
+                    No key is saved for this Fasti node.
+                  {/if}
+                  Google Books is required for Discover book search.
                 </p>
                 <form
                   class="key-input-row"
@@ -891,8 +899,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Personal Access Tokens (PAT)</h2>
           <p class="pane-desc">
-            Generate cryptographically verified Bearer tokens for scripts and
-            devices.
+            Token creation and revocation are not available in this build. The
+            disabled controls show the planned scope model.
           </p>
 
           <!-- New Token Form -->
@@ -1145,7 +1153,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Lossless Importers & Migrations</h2>
           <p class="pane-desc">
-            Migrate your entire scrobble and media history with zero data loss.
+            Importers are not available in this build. Each disabled option
+            shows its planned source formats.
           </p>
 
           <div class="importers-grid">

@@ -67,6 +67,8 @@ Generated files are outputs, not sources of truth.
 - Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
+- Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
+- Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
@@ -114,6 +116,11 @@ Listener, public URL, loopback alias, container port, and certificate-trust
 ownership is documented in [`docs/network-configuration.md`](docs/network-configuration.md).
 Do not merge the bind address, client URL, and public reverse-proxy URL into one
 setting.
+
+Android sandbox selection, data-root locking, and descriptor-rooted kernel
+directories are implemented in source but are not Android build- or
+device-verified. Do not claim Android package support until the NDK build and
+device evidence pass. B3 restore and startup recovery remain Linux-only.
 
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 

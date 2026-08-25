@@ -642,7 +642,7 @@
         {#if workbenchPreferences.sidebarHidden}
           <button
             type="button"
-            class="btn btn-icon btn-outline-secondary btn-sm"
+            class="btn btn-icon btn-outline-secondary sidebar-toggle"
             onclick={() =>
               (workbenchPreferences = {
                 ...workbenchPreferences,
@@ -996,6 +996,11 @@
     font-weight: 500;
     cursor: pointer;
     transition: all 120ms ease;
+  }
+
+  :global(.sidebar-toggle) {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .tool-btn:hover {

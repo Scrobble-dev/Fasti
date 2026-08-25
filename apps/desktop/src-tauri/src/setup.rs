@@ -3,11 +3,8 @@ use fasti_application::{
     FastiProblem, InitializeNodeCommand, ProblemCode, RequestAccessContext, SecretMaterial,
 };
 use fasti_domain::RequestCorrelationId;
-use fasti_store::SqliteKernel;
+use fasti_store::{DataRootIdentity, SqliteKernel};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use std::fmt::Write as _;
-use std::path::Path;
 
 pub(crate) const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
@@ -150,13 +147,10 @@ pub(crate) struct KeyringSetupSecretStore {
 }
 
 impl KeyringSetupSecretStore {
-    pub(crate) fn new(data_root: &Path) -> Self {
-        let digest = Sha256::digest(data_root.as_os_str().as_encoded_bytes());
-        let mut account_scope = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            write!(account_scope, "{byte:02x}").expect("writing to a String cannot fail");
+    pub(crate) fn new(identity: DataRootIdentity) -> Self {
+        Self {
+            account_scope: crate::secure_storage::account_scope(identity),
         }
-        Self { account_scope }
     }
 
     fn account(&self, secret: SetupSecret) -> String {
@@ -375,10 +369,18 @@ mod tests {
 
     #[test]
     fn keyring_accounts_are_scoped_to_the_data_root() {
-        let root_a = tempfile::tempdir().expect("first data root");
-        let root_b = tempfile::tempdir().expect("second data root");
-        let store_a = KeyringSetupSecretStore::new(root_a.path());
-        let store_b = KeyringSetupSecretStore::new(root_b.path());
+        let (_root_a, kernel_a) = new_kernel();
+        let (_root_b, kernel_b) = new_kernel();
+        let store_a = KeyringSetupSecretStore::new(kernel_a.data_root_identity());
+        let store_b = KeyringSetupSecretStore::new(kernel_b.data_root_identity());
+
+        assert_eq!(
+            store_a.account(SetupSecret::Credential),
+            format!(
+                "local-admin-credential-v1-{}",
+                crate::secure_storage::account_scope(kernel_a.data_root_identity())
+            )
+        );
 
         assert_ne!(
             store_a.account(SetupSecret::Credential),
