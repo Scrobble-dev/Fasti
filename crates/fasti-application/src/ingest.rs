@@ -124,12 +124,17 @@ impl PlexWebhookPayload {
         // Account would synthesize the same source identity (0) and could
         // collide into one lexeme -- fail closed instead of guessing.
         let account_id = self.account.as_ref()?.id;
-        // view_offset distinguishes genuinely separate occurrences of the same
-        // event on the same item (a rewatch) from Plex re-delivering the exact
-        // same webhook on retry, which repeats view_offset identically.
+        // view_offset distinguishes mid-playback occurrences, but a completed
+        // rewatch repeats the same terminal offset as the first watch (both
+        // end near the item's full duration). observed_at's calendar day adds
+        // a discriminator two completions of the same item essentially never
+        // share unless they happen on the same day, while staying stable
+        // across a same-request retry, which arrives seconds later, not on a
+        // different day.
         let view_offset = metadata.view_offset.unwrap_or(0);
+        let day = observed_at.claim().date();
         let lexeme = format!(
-            "plex:account:{account_id}:key:{}:event:{}:offset:{view_offset}",
+            "plex:account:{account_id}:key:{}:event:{}:offset:{view_offset}:day:{day}",
             metadata.rating_key, self.event
         );
         let op_id = derive_ingest_operation_id(&lexeme);
@@ -236,12 +241,16 @@ impl JellyfinWebhookPayload {
         // UserId would synthesize the same source identity ("default") and
         // could collide into one lexeme -- fail closed instead of guessing.
         let user_str = self.user_id.as_deref()?;
-        // playback_position_ticks distinguishes a genuine rewatch from Jellyfin
-        // re-sending the same notification on retry, which repeats the tick
-        // count identically.
+        // playback_position_ticks distinguishes mid-playback occurrences, but a
+        // completed rewatch repeats the same terminal tick count as the first
+        // watch. observed_at's calendar day adds a discriminator two
+        // completions of the same item essentially never share unless they
+        // happen on the same day, while staying stable across a same-request
+        // retry, which arrives seconds later, not on a different day.
         let position = self.playback_position_ticks.unwrap_or(0);
+        let day = observed_at.claim().date();
         let lexeme = format!(
-            "jellyfin:user:{user_str}:item:{}:event:{}:position:{position}",
+            "jellyfin:user:{user_str}:item:{}:event:{}:position:{position}:day:{day}",
             self.item_id, self.notification_type
         );
         let op_id = derive_ingest_operation_id(&lexeme);
@@ -291,10 +300,17 @@ impl MprisMediaEvent {
         // track from the desktop client re-sending the same event on retry,
         // which repeats the position identically. Without it, every
         // intermediate progress tick and every rewatch of a track collapses
-        // into the first-ever event for that track_id/completed pair.
+        // into the first-ever event for that track_id/completed pair. A
+        // completed replay still repeats the same terminal position as the
+        // first listen, so observed_at's calendar day adds a discriminator
+        // two completions of the same track essentially never share unless
+        // they happen on the same day, while staying stable across a
+        // same-request retry, which arrives seconds later, not on a
+        // different day.
         let position = self.position_micros.unwrap_or(0);
+        let day = observed_at.claim().date();
         let lexeme = format!(
-            "mpris:player:{}:track:{}:completed:{}:position:{position}",
+            "mpris:player:{}:track:{}:completed:{}:position:{position}:day:{day}",
             self.player_identity, self.track_id, self.is_completed
         );
         let op_id = derive_ingest_operation_id(&lexeme);

@@ -384,3 +384,60 @@ fn jellyfin_webhook_without_a_user_id_is_rejected_rather_than_using_a_synthetic_
         "a payload with no user id must not synthesize a shared source identity"
     );
 }
+
+#[test]
+fn plex_completed_rewatch_at_the_same_terminal_offset_on_a_different_day_is_a_distinct_commit() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    // A completed watch and a completed rewatch of the same movie both end
+    // at (near) the same terminal view_offset -- offset alone cannot
+    // distinguish them.
+    let base = PlexWebhookPayload {
+        event: "media.scrobble".to_owned(),
+        user: true,
+        owner: true,
+        account: Some(PlexAccount {
+            id: 101,
+            title: "alice".to_owned(),
+        }),
+        metadata: Some(PlexMetadata {
+            rating_key: "plex-completed-rewatch".to_owned(),
+            media_type: "movie".to_owned(),
+            title: "Spirited Away".to_owned(),
+            grandparent_title: None,
+            parent_index: None,
+            index: None,
+            year: Some(2001),
+            duration: Some(7500000),
+            view_offset: Some(7500000),
+            guid: None,
+            guids: vec![],
+        }),
+    };
+    let first_watch = base.clone();
+    let second_watch = base;
+
+    let first_cmd = first_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T23:50:00Z"))
+        .expect("generates valid command");
+    let second_cmd = second_watch
+        .to_observation_command(access, sample_observed_at("2026-09-24T23:50:00Z"))
+        .expect("generates valid command");
+
+    assert_ne!(
+        first_cmd.operation_id(),
+        second_cmd.operation_id(),
+        "a completed rewatch at the same terminal offset must not collide just because \
+         both watches ended at the same position"
+    );
+
+    let outcome1 = fixture.authorize_and_accept(first_cmd).expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(second_cmd).expect("accepts");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Committed(_)),
+        "the completed rewatch must commit as its own observation"
+    );
+}
