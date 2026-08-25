@@ -583,6 +583,22 @@ fn read_source_state(root: &Path) -> anyhow::Result<SourceState> {
     })
 }
 
+/// Executes a Git command in the repository and returns its UTF-8 standard output.
+///
+/// The command must complete successfully, and its output must contain valid UTF-8.
+/// Errors include context describing failures to start Git, execute the command, or
+/// decode its output.
+///
+/// # Examples
+///
+/// ```
+/// # fn example() -> anyhow::Result<()> {
+/// let root = std::path::Path::new(".");
+/// let output = git_output(root, ["rev-parse", "--is-inside-work-tree"])?;
+/// assert_eq!(output.trim(), "true");
+/// # Ok(())
+/// # }
+/// ```
 fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> anyhow::Result<String> {
     let output = Command::new("git")
         .args(args)
@@ -597,6 +613,24 @@ fn git_output<const N: usize>(root: &Path, args: [&str; N]) -> anyhow::Result<St
     String::from_utf8(output.stdout).context("git emitted non-UTF-8 source metadata")
 }
 
+/// Retrieves the version text reported by a gate's executable.
+///
+/// The executable is invoked from the repository root with the `--version`
+/// argument. The command must succeed and emit nonempty UTF-8 text.
+///
+/// # Examples
+///
+/// ```ignore
+/// let gate = CommandGate {
+///     id: "rustc",
+///     program: "rustc",
+///     args: &[],
+///     remediation: "Install Rust.",
+/// };
+/// let version = tool_version(Path::new("."), &gate)?;
+/// assert!(!version.is_empty());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn tool_version(root: &Path, gate: &CommandGate) -> anyhow::Result<String> {
     let version_args = &["--version"];
     let output = Command::new(gate.program)

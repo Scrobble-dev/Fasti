@@ -26,6 +26,7 @@ container_id="$("$oci_runtime" run --detach --rm --publish 127.0.0.1::8420 "$ima
 isolated_id=""
 cli_stdout=""
 cli_stderr=""
+# cleanup removes temporary CLI output files and force-removes the test containers.
 cleanup() {
   if [[ -n "$cli_stdout" ]]; then
     rm -f "$cli_stdout"

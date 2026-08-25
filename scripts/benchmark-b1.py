@@ -378,6 +378,15 @@ def parse_firmware_identity(hardware_profile: str) -> dict[str, str]:
 
 
 def parse_cpu_governors() -> dict[str, Any]:
+    """
+    Collect CPU frequency governor settings from the available CPUs.
+    
+    Returns:
+    	dict[str, Any]: The governor source path, distinct observed governor values, and number of CPUs with readable governor settings.
+    
+    Raises:
+    	CaptureError: If no governor files are available or any governor value is empty.
+    """
     paths = sorted(Path("/sys/devices/system/cpu").glob("cpu[0-9]*/cpufreq/scaling_governor"))
     if not paths:
         raise CaptureError("CPU governor evidence is unavailable under /sys/devices/system/cpu")
@@ -398,6 +407,19 @@ def parse_temperature(
     thermal_root: Path = Path("/sys/class/thermal"),
     hwmon_root: Path = Path("/sys/class/hwmon"),
 ) -> dict[str, Any]:
+    """
+    Select and return a plausible CPU or SoC temperature reading from thermal and hwmon sources.
+    
+    Parameters:
+    	thermal_root (Path): Root directory containing thermal zone data.
+    	hwmon_root (Path): Root directory containing hardware monitoring sensor data.
+    
+    Returns:
+    	dict[str, Any]: A mapping containing the reading source, sensor name, and temperature in degrees Celsius.
+    
+    Raises:
+    	CaptureError: If no plausible CPU or SoC temperature reading is available.
+    """
     candidates: list[tuple[str, Path]] = []
     for zone in sorted(thermal_root.glob("thermal_zone*")):
         try:
@@ -456,6 +478,19 @@ def parse_temperature(
 
 
 def top_level_block_device(source: str) -> str:
+    """
+    Resolve a physical block-device source to its top-level device name.
+    
+    Parameters:
+        source (str): Root filesystem source path under ``/dev/``.
+    
+    Returns:
+        str: Name of the top-level block device.
+    
+    Raises:
+        CaptureError: If the source is not a device path, has ambiguous or unsafe
+            parentage, or contains a parent-cycle.
+    """
     if not source.startswith("/dev/"):
         raise CaptureError(f"root filesystem source is not a physical block device: {source!r}")
     current_path = source
@@ -1079,6 +1114,15 @@ def verify_capture_inputs_unchanged(args: argparse.Namespace, context: dict[str,
 
 
 def preflight(args: argparse.Namespace) -> dict[str, Any]:
+    """
+    Validate the host, source tree, container environment, and hardware profile required for benchmark capture.
+    
+    Parameters:
+    	args (argparse.Namespace): Command-line arguments containing the requested command, output path, OS image, runner identity, and custodian information.
+    
+    Returns:
+    	dict[str, Any]: Structured runner, source, fingerprint-command, and Docker-locality evidence.
+    """
     if platform.system() != "Linux":
         raise CaptureError(
             f"B1 performance capture is Linux-only; {platform.system()} cannot provide the required /proc, netns, and cgroup-v2 evidence"

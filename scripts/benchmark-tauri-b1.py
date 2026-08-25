@@ -320,6 +320,15 @@ def performance_environment_module() -> Any:
 
 
 def collect_environment(os_image_path: Path) -> tuple[dict[str, Any], Any]:
+    """
+    Collect host and runtime evidence for the benchmark environment.
+    
+    Parameters:
+    	os_image_path (Path): Path to the operating-system image whose contents are fingerprinted.
+    
+    Returns:
+    	tuple[dict[str, Any], Any]: The collected environment metadata and the environment collector used to obtain it.
+    """
     retained_image = fingerprint_regular_file(os_image_path)
     collector = performance_environment_module()
     os_image = collector.parse_os_image()

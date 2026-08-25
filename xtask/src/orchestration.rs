@@ -135,6 +135,15 @@ pub(crate) fn run_deep_b1(root: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Defines the deep B1 validation gates for documentation and arm64 OCI packaging.
+///
+/// # Examples
+///
+/// ```
+/// let gates = deep_b1_gates();
+/// assert_eq!(gates.len(), 3);
+/// ```
+pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
 pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
     [
         CommandGate::new(
