@@ -217,34 +217,33 @@ pub(crate) fn complete_setup(
         return Ok(ready_status(store));
     }
 
-    // Write both secrets to the OS store before the first SQLite mutation.
-    ensure_secret(store, SetupSecret::Proof)?;
-    ensure_secret(store, SetupSecret::Credential)?;
+    let proof = match store.load(SetupSecret::Proof)? {
+        Some(proof) => proof,
+        None => {
+            match kernel.initialize_node(InitializeNodeCommand::new(
+                RequestCorrelationId::new_v7(),
+            )) {
+                Ok(outcome) => {
+                    let proof = outcome.initialization_proof();
+                    store.store(SetupSecret::Proof, proof)?;
+                    SecretMaterial::from_bytes(*proof.expose_bytes())
+                }
+                Err(problem) if problem.code() == ProblemCode::AlreadyInitialized => {
+                    return Err(DesktopProblem::recovery_required());
+                }
+                Err(problem) => return Err(DesktopProblem::application(&problem)),
+            }
+        }
+    };
 
-    let proof = store
-        .load(SetupSecret::Proof)?
-        .ok_or_else(DesktopProblem::recovery_required)?;
-    match kernel.initialize_node(InitializeNodeCommand::new(
-        RequestCorrelationId::new_v7(),
-        proof,
-    )) {
-        Ok(_) => {}
-        Err(problem) if problem.code() == ProblemCode::AlreadyInitialized => {}
-        Err(problem) => return Err(DesktopProblem::application(&problem)),
-    }
-
-    let proof = store
-        .load(SetupSecret::Proof)?
-        .ok_or_else(DesktopProblem::recovery_required)?;
-    let credential = store
-        .load(SetupSecret::Credential)?
-        .ok_or_else(DesktopProblem::recovery_required)?;
     match kernel.enroll_first_client(EnrollFirstClientCommand::new(
         RequestCorrelationId::new_v7(),
         proof,
-        credential,
     )) {
-        Ok(_) => {}
+        Ok(outcome) => {
+            store.store(SetupSecret::Credential, outcome.credential())?;
+            let _ = store.delete(SetupSecret::Proof);
+        }
         Err(problem) if problem.code() == ProblemCode::BootstrapClosed => {}
         Err(problem) => return Err(DesktopProblem::application(&problem)),
     }
@@ -296,46 +295,44 @@ mod tests {
     }
 
     #[test]
-    fn setup_resumes_after_each_durable_boundary() {
+    fn setup_initializes_and_enrolls_cleanly() {
         let (_root, kernel) = new_kernel();
         let store = MemoryStore::default();
-        store
-            .store(SetupSecret::Proof, &SecretMaterial::from_bytes([1; 32]))
-            .expect("persist proof before simulated crash");
 
         assert_eq!(
-            complete_setup(&kernel, &store).expect("resume setup"),
+            complete_setup(&kernel, &store).expect("complete setup"),
             SetupStatus::ready(false)
         );
         assert!(store
-            .load(SetupSecret::Proof)
-            .expect("proof lookup")
-            .is_none());
+            .load(SetupSecret::Credential)
+            .expect("credential lookup")
+            .is_some());
         assert_eq!(
             inspect_setup(&kernel, &store).expect("ready status"),
             SetupStatus::ready(false)
         );
+    }
 
+    #[test]
+    fn setup_resumes_from_saved_proof_after_initialization() {
         let (_root, kernel) = new_kernel();
         let store = MemoryStore::default();
-        store
-            .store(SetupSecret::Proof, &SecretMaterial::from_bytes([3; 32]))
-            .expect("persist proof");
-        store
-            .store(
-                SetupSecret::Credential,
-                &SecretMaterial::from_bytes([4; 32]),
-            )
-            .expect("persist credential");
-        kernel
+
+        let outcome = kernel
             .initialize_node(InitializeNodeCommand::new(
                 RequestCorrelationId::new_v7(),
-                SecretMaterial::from_bytes([3; 32]),
             ))
-            .expect("simulate crash after initialization");
+            .expect("initialize node");
+        store
+            .store(SetupSecret::Proof, outcome.initialization_proof())
+            .expect("persist proof before enrollment");
 
         assert_eq!(
-            complete_setup(&kernel, &store).expect("resume enrollment"),
+            complete_setup(&kernel, &store).expect("resume enrollment from proof"),
+            SetupStatus::ready(false)
+        );
+        assert_eq!(
+            inspect_setup(&kernel, &store).expect("ready status"),
             SetupStatus::ready(false)
         );
     }
