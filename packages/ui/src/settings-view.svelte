@@ -10,7 +10,7 @@
     NavItemConfig,
     ContextMenuItemConfig,
   } from "./types.js";
-  import { DEFAULT_WORKBENCH_PREFERENCES } from "./defaults.js";
+  import { createDefaultWorkbenchPreferences } from "./defaults.js";
   import {
     IconKey,
     IconPalette,
@@ -56,7 +56,7 @@
     oidcConfig,
     appriseConfig,
     themeSettings,
-    workbenchPreferences = DEFAULT_WORKBENCH_PREFERENCES,
+    workbenchPreferences = createDefaultWorkbenchPreferences(),
     onUpdateTheme,
     onUpdateWorkbenchPreferences,
     onSaveProviderKey,
@@ -174,7 +174,7 @@
   }
 
   function handleResetNavPreferences(): void {
-    onUpdateWorkbenchPreferences?.(DEFAULT_WORKBENCH_PREFERENCES);
+    onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
   }
 </script>
 

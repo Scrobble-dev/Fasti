@@ -15,7 +15,7 @@
   } from "./types.js";
   import {
     DEFAULT_THEME_SETTINGS,
-    DEFAULT_WORKBENCH_PREFERENCES,
+    createDefaultWorkbenchPreferences,
   } from "./defaults.js";
   import NavSidebar from "./nav-sidebar.svelte";
   import HomeView from "./home-view.svelte";
@@ -61,7 +61,7 @@
   });
   let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
   let workbenchPreferences = $state<WorkbenchPreferences>(
-    DEFAULT_WORKBENCH_PREFERENCES,
+    createDefaultWorkbenchPreferences(),
   );
   let selectedRecordId = $state<string | null>(null);
   let themeDrawerOpen = $state(false);
@@ -169,6 +169,8 @@
         return "/calendar";
       case "collection":
         return "/collection";
+      case "library":
+        return "/library";
       case "custom":
         return "/custom";
       case "history":
@@ -250,6 +252,9 @@
     } else if (pathname === "/collection") {
       activeSection = "collection";
       selectedRecordId = null;
+    } else if (pathname === "/library") {
+      activeSection = "library";
+      selectedRecordId = null;
     } else if (pathname === "/custom") {
       activeSection = "custom";
       selectedRecordId = null;
@@ -298,6 +303,12 @@
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", `/records/${recordId}`);
     }
+  }
+
+  function handleViewAllSection(
+    section: "in_progress" | "history" | "up_next",
+  ): void {
+    handleSelectSection(section === "history" ? "history" : "library");
   }
 
   function handleBackToLibrary(): void {
@@ -674,7 +685,7 @@
             onUpdateProgress={handleUpdateProgress}
             onSaveReview={handleSaveReview}
             onSaveCollection={handleSaveCollection}
-            onViewAllSection={(sec) => handleSelectSection(sec as any)}
+            onViewAllSection={handleViewAllSection}
           />
         {/if}
       {:else if activeSection === "discover"}

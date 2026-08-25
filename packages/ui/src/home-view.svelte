@@ -17,11 +17,11 @@
     IconMicrophone,
     IconShieldCheck,
     IconChevronRight,
+    IconAdjustments,
     IconEye,
     IconBookmark,
     IconFolderPlus,
     IconStar,
-    IconPlayerPlay,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -38,7 +38,7 @@
     onSaveReview: (recordId: string, rating: number, notes: string) => void;
     onSaveCollection: (recordId: string, collections: string[]) => void;
     contextMenuConfigs?: ContextMenuItemConfig[];
-    onViewAllSection?: (section: string) => void;
+    onViewAllSection?: (section: "in_progress" | "history" | "up_next") => void;
   }
 
   let {
@@ -146,7 +146,7 @@
       view: {
         id: "view",
         label: "View details",
-        icon: IconPlayerPlay,
+        icon: IconEye,
         action: () => onSelectRecord(r.id),
       },
       watched: {
@@ -158,7 +158,7 @@
       progress: {
         id: "progress",
         label: "Update progress & episodes",
-        icon: IconPlayerPlay,
+        icon: IconAdjustments,
         action: () => (activeProgressRecord = r),
       },
       watchlist: {

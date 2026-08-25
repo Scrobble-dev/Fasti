@@ -11,7 +11,6 @@
     IconList,
     IconStarFilled,
     IconCheck,
-    IconPlayerPlay,
     IconBookmark,
     IconEye,
     IconEyeCheck,
@@ -135,7 +134,7 @@
       view: {
         id: "view",
         label: "View Details...",
-        icon: IconPlayerPlay,
+        icon: IconEye,
         action: () => onSelectRecord(rec.id),
       },
       progress: {
@@ -398,12 +397,17 @@
           {#each filteredRecords as rec (rec.id)}
             <tr
               class="table-row"
-              onclick={() => onSelectRecord(rec.id)}
               oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
             >
               <td>
                 <div class="row-title-box">
-                  <strong>{rec.title}</strong>
+                  <button
+                    type="button"
+                    class="title-link"
+                    onclick={() => onSelectRecord(rec.id)}
+                  >
+                    <strong>{rec.title}</strong>
+                  </button>
                   {#if rec.releaseYear}
                     <span class="row-year">({rec.releaseYear})</span>
                   {/if}
@@ -824,7 +828,6 @@
   }
 
   .table-row {
-    cursor: pointer;
     transition: background 80ms ease;
   }
 

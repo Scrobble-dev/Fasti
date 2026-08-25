@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { MediaRecord, WatchStatus } from "./types.js";
-  import { IconX, IconCheck, IconPlayerPlay } from "@tabler/icons-svelte";
+  import { IconX, IconCheck } from "@tabler/icons-svelte";
 
   interface Props {
     record: MediaRecord;
@@ -41,9 +41,9 @@
   });
 
   const percentage = $derived(
-    record.mediaKind === "movie" || !record.totalEpisodes
-      ? Math.min(100, Math.round((progressSec / totalSec) * 100))
-      : Math.min(100, Math.round((episodeVal / totalEps) * 100)),
+    record.mediaKind === "show" || record.mediaKind === "anime"
+      ? Math.min(100, Math.round((episodeVal / totalEps) * 100))
+      : Math.min(100, Math.round((progressSec / totalSec) * 100)),
   );
 
   function handleKeyDown(e: KeyboardEvent): void {

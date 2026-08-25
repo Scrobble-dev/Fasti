@@ -229,9 +229,11 @@ export const DEFAULT_CONTEXT_MENU_ITEMS: ContextMenuItemConfig[] = [
   },
 ];
 
-export const DEFAULT_WORKBENCH_PREFERENCES: WorkbenchPreferences = {
-  sidebarCollapsed: false,
-  sidebarHidden: false,
-  navItems: DEFAULT_NAV_ITEMS,
-  contextMenuItems: DEFAULT_CONTEXT_MENU_ITEMS,
-};
+export function createDefaultWorkbenchPreferences(): WorkbenchPreferences {
+  return {
+    sidebarCollapsed: false,
+    sidebarHidden: false,
+    navItems: DEFAULT_NAV_ITEMS.map((item) => ({ ...item })),
+    contextMenuItems: DEFAULT_CONTEXT_MENU_ITEMS.map((item) => ({ ...item })),
+  };
+}
