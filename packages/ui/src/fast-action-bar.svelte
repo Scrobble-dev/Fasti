@@ -131,15 +131,16 @@
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     border-radius: 6px;
-    padding: 3px;
-    gap: 2px;
+    padding: 4px;
+    gap: 4px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
     backdrop-filter: blur(8px);
   }
 
   .fast-btn {
     flex: 1;
-    height: 30px;
+    min-height: 36px;
+    height: 36px;
     display: grid;
     place-items: center;
     background: transparent;
@@ -148,7 +149,7 @@
     color: var(--fasti-text-muted);
     cursor: pointer;
     transition: all 100ms ease;
-    padding: 0;
+    padding: 4px;
   }
 
   .fast-btn:hover {
@@ -160,7 +161,7 @@
     color: var(--fasti-action-primary);
     background: color-mix(
       in srgb,
-      var(--fasti-action-primary) 12%,
+      var(--fasti-action-primary) 14%,
       transparent
     );
   }

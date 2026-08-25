@@ -8,7 +8,6 @@
   import {
     IconArrowLeft,
     IconStarFilled,
-    IconPlayerPlay,
     IconCheck,
     IconBookmark,
     IconHeart,
@@ -92,6 +91,12 @@
   $effect(() => {
     editedNotesText = record.userNotes ?? "";
     activeDisplaySource = record.displaySource;
+    const seasonCount = record.seasons?.length ?? 0;
+    if (seasonCount === 0) {
+      selectedSeasonIndex = 0;
+    } else if (selectedSeasonIndex >= seasonCount) {
+      selectedSeasonIndex = seasonCount - 1;
+    }
   });
 
   const recordOccurrences = $derived(
@@ -308,10 +313,6 @@
         >
           <IconDotsVertical size={18} />
         </button>
-
-        <button type="button" class="play-with-btn">
-          <IconPlayerPlay size={16} stroke={2.5} /> Play With...
-        </button>
       </div>
 
       <!-- Synopsis -->
@@ -497,56 +498,58 @@
             </div>
 
             <!-- Episode Checklist -->
-            <div class="episodes-deck">
-              <h3 class="deck-title">
-                Episodes — {record.seasons[selectedSeasonIndex].title}
-              </h3>
-              <div class="episodes-table-wrap">
-                {#each record.seasons[selectedSeasonIndex].episodes as ep (ep.id)}
-                  <div class="episode-item-row" class:watched={ep.watched}>
-                    <button
-                      type="button"
-                      class="ep-check-btn"
-                      class:checked={ep.watched}
-                      onclick={() => onToggleEpisode?.(record.id, ep.id)}
-                      aria-label="Toggle watched for Episode {ep.number}"
-                    >
-                      {#if ep.watched}
-                        <IconCheck size={16} stroke={3} />
-                      {/if}
-                    </button>
-
-                    <span class="ep-num">#{ep.number}</span>
-
-                    <div class="ep-main-details">
-                      <div class="ep-header-line">
-                        <h4 class="ep-title">{ep.title}</h4>
-                        {#if ep.durationSeconds}
-                          <span class="ep-duration"
-                            >{Math.round(ep.durationSeconds / 60)} min</span
-                          >
+            {#if record.seasons[selectedSeasonIndex]}
+              <div class="episodes-deck">
+                <h3 class="deck-title">
+                  Episodes — {record.seasons[selectedSeasonIndex].title}
+                </h3>
+                <div class="episodes-table-wrap">
+                  {#each record.seasons[selectedSeasonIndex].episodes ?? [] as ep (ep.id)}
+                    <div class="episode-item-row" class:watched={ep.watched}>
+                      <button
+                        type="button"
+                        class="ep-check-btn"
+                        class:checked={ep.watched}
+                        onclick={() => onToggleEpisode?.(record.id, ep.id)}
+                        aria-label="Toggle watched for Episode {ep.number}"
+                      >
+                        {#if ep.watched}
+                          <IconCheck size={16} stroke={3} />
                         {/if}
-                        {#if ep.airDate}
-                          <span class="ep-air-date">{ep.airDate}</span>
+                      </button>
+
+                      <span class="ep-num">#{ep.number}</span>
+
+                      <div class="ep-main-details">
+                        <div class="ep-header-line">
+                          <h4 class="ep-title">{ep.title}</h4>
+                          {#if ep.durationSeconds}
+                            <span class="ep-duration"
+                              >{Math.round(ep.durationSeconds / 60)} min</span
+                            >
+                          {/if}
+                          {#if ep.airDate}
+                            <span class="ep-air-date">{ep.airDate}</span>
+                          {/if}
+                        </div>
+                        {#if ep.overview}
+                          <p class="ep-overview">{ep.overview}</p>
                         {/if}
                       </div>
-                      {#if ep.overview}
-                        <p class="ep-overview">{ep.overview}</p>
+
+                      {#if ep.watchedAt}
+                        <div class="ep-watched-pill">
+                          Watched {new Date(ep.watchedAt).toLocaleDateString(
+                            "en-IE",
+                            { month: "short", day: "numeric" },
+                          )}
+                        </div>
                       {/if}
                     </div>
-
-                    {#if ep.watchedAt}
-                      <div class="ep-watched-pill">
-                        Watched {new Date(ep.watchedAt).toLocaleDateString(
-                          "en-IE",
-                          { month: "short", day: "numeric" },
-                        )}
-                      </div>
-                    {/if}
-                  </div>
-                {/each}
+                  {/each}
+                </div>
               </div>
-            </div>
+            {/if}
           {/if}
 
           <!-- Cast & Crew Section -->
@@ -1061,20 +1064,6 @@
     border-color: #e11d48;
   }
 
-  .play-with-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border-radius: 4px;
-    background: var(--fasti-brand-mark);
-    color: white;
-    font-weight: 600;
-    font-size: 0.9rem;
-    border: none;
-    cursor: pointer;
-    margin-left: auto;
-  }
   .synopsis-prose {
     font-size: 0.95rem;
     line-height: 1.7;

@@ -18,6 +18,10 @@
   }
 
   let { cases, onAcceptCase, onRejectCase, onDeferCase }: Props = $props();
+
+  const actionableCases = $derived(
+    cases.filter((c) => c.status !== "deferred"),
+  );
 </script>
 
 <div class="reconciliation-container">
@@ -37,7 +41,7 @@
     </div>
   </header>
 
-  {#if cases.length === 0}
+  {#if actionableCases.length === 0}
     <div class="empty-inbox">
       <IconShieldCheck size={48} class="empty-icon" />
       <h2>All caught up!</h2>
@@ -48,7 +52,7 @@
     </div>
   {:else}
     <div class="cases-list">
-      {#each cases as item (item.id)}
+      {#each actionableCases as item (item.id)}
         <article class="case-card">
           <div class="case-header">
             <span class="case-badge">Topology Conflict</span>

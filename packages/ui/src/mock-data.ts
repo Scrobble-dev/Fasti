@@ -8,6 +8,9 @@ import type {
   OidcConfiguration,
   AppriseNotificationConfig,
   ThemeSettings,
+  NavItemConfig,
+  ContextMenuItemConfig,
+  WorkbenchPreferences,
 } from "./types.js";
 
 export const SAMPLE_RECORDS: MediaRecord[] = [
@@ -1038,4 +1041,232 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   cornerRadius: 1,
   density: "normal",
   fontSize: "md",
+};
+
+export const DEFAULT_NAV_ITEMS: NavItemConfig[] = [
+  // Primary
+  {
+    id: "home",
+    label: "Home",
+    category: "primary",
+    visible: true,
+    pinned: true,
+    order: 0,
+  },
+  {
+    id: "discover",
+    label: "Discover",
+    category: "primary",
+    visible: true,
+    pinned: true,
+    order: 1,
+  },
+
+  // Media
+  {
+    id: "tv_shows",
+    label: "TV Shows",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 2,
+  },
+  {
+    id: "tv_seasons",
+    label: "TV Seasons",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 3,
+  },
+  {
+    id: "movies",
+    label: "Movies",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 4,
+  },
+  {
+    id: "anime",
+    label: "Anime",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 5,
+  },
+  {
+    id: "manga",
+    label: "Manga",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 6,
+  },
+  {
+    id: "games",
+    label: "Games",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 7,
+  },
+  {
+    id: "books",
+    label: "Books",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 8,
+  },
+  {
+    id: "comics",
+    label: "Comics",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 9,
+  },
+  {
+    id: "board_games",
+    label: "Board Games",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 10,
+  },
+  {
+    id: "music",
+    label: "Music",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 11,
+  },
+  {
+    id: "podcasts",
+    label: "Podcasts",
+    category: "media",
+    visible: true,
+    pinned: false,
+    order: 12,
+  },
+
+  // Library
+  {
+    id: "calendar",
+    label: "Calendar",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 13,
+  },
+  {
+    id: "collection",
+    label: "Collection",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 14,
+  },
+  {
+    id: "custom",
+    label: "Custom",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 15,
+  },
+  {
+    id: "history",
+    label: "History",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 16,
+  },
+  {
+    id: "lists",
+    label: "Lists",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 17,
+  },
+  {
+    id: "statistics",
+    label: "Statistics",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 18,
+  },
+  {
+    id: "tags",
+    label: "Tags",
+    category: "library",
+    visible: true,
+    pinned: false,
+    order: 19,
+  },
+
+  // Utilities
+  {
+    id: "reconciliation",
+    label: "Identity Review",
+    category: "utilities",
+    visible: true,
+    pinned: false,
+    order: 20,
+  },
+  {
+    id: "sources",
+    label: "Sources",
+    category: "utilities",
+    visible: true,
+    pinned: false,
+    order: 21,
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    category: "utilities",
+    visible: true,
+    pinned: true,
+    order: 22,
+  },
+];
+
+export const DEFAULT_CONTEXT_MENU_ITEMS: ContextMenuItemConfig[] = [
+  { id: "view", label: "View Details", visible: true, order: 0 },
+  { id: "watched", label: "Mark as Seen / Unplayed", visible: true, order: 1 },
+  {
+    id: "progress",
+    label: "Update Progress & Episodes",
+    visible: true,
+    order: 2,
+  },
+  { id: "watchlist", label: "Watchlist Toggle", visible: true, order: 3 },
+  { id: "collection", label: "Add to Collection...", visible: true, order: 4 },
+  { id: "review", label: "Rate & Personal Review...", visible: true, order: 5 },
+  { id: "edit_tags", label: "Manage Tags...", visible: true, order: 6 },
+  {
+    id: "manage_ids",
+    label: "Inspect External Claim IDs...",
+    visible: true,
+    order: 7,
+  },
+  {
+    id: "reconcile",
+    label: "Review & Reconcile Identity...",
+    visible: true,
+    order: 8,
+  },
+];
+
+export const DEFAULT_WORKBENCH_PREFERENCES: WorkbenchPreferences = {
+  sidebarCollapsed: false,
+  sidebarHidden: false,
+  navItems: DEFAULT_NAV_ITEMS,
+  contextMenuItems: DEFAULT_CONTEXT_MENU_ITEMS,
 };

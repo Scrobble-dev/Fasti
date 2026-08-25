@@ -9,6 +9,7 @@
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
+    WorkbenchPreferences,
   } from "./types.js";
   import {
     SAMPLE_RECORDS,
@@ -21,8 +22,10 @@
     SAMPLE_OIDC_CONFIG,
     SAMPLE_APPRISE_CONFIG,
     DEFAULT_THEME_SETTINGS,
+    DEFAULT_WORKBENCH_PREFERENCES,
   } from "./mock-data.js";
   import NavSidebar from "./nav-sidebar.svelte";
+  import HomeView from "./home-view.svelte";
   import ChronicleView from "./chronicle-view.svelte";
   import DiscoverView from "./discover-view.svelte";
   import LibraryView from "./library-view.svelte";
@@ -31,8 +34,21 @@
   import CalendarView from "./calendar-view.svelte";
   import ConnectionsView from "./connections-view.svelte";
   import SettingsView from "./settings-view.svelte";
+  import TablerThemeDrawer from "./tabler-theme-drawer.svelte";
+  import {
+    IconSearch,
+    IconLayoutGrid,
+    IconList,
+    IconFilter,
+    IconMoon,
+    IconSun,
+    IconCircleCheck,
+    IconLayoutSidebar,
+    IconAlertCircle,
+    IconLoader2,
+  } from "@tabler/icons-svelte";
 
-  let activeSection: ActiveNavSection = $state("chronicle");
+  let activeSection: ActiveNavSection = $state("home");
   let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
   let chronicle = $state<ChronicleOccurrence[]>(SAMPLE_CHRONICLE);
   let reconciliationCases = $state(SAMPLE_RECONCILIATION);
@@ -41,7 +57,15 @@
   let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
   let appriseConfig = $state(SAMPLE_APPRISE_CONFIG);
   let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
+  let workbenchPreferences = $state<WorkbenchPreferences>(
+    DEFAULT_WORKBENCH_PREFERENCES,
+  );
   let selectedRecordId = $state<string | null>(null);
+  let themeDrawerOpen = $state(false);
+  let searchQuery = $state("");
+  let mediaScope = $state("all");
+  let viewMode: "grid" | "list" = $state("grid");
+  let nodeHealthy = $state<boolean | null>(null);
 
   const selectedRecord = $derived(
     records.find((r) => r.id === selectedRecordId),
@@ -53,30 +77,99 @@
     reconciliationCases.filter((c) => c.status === "open").length,
   );
 
+  // Filtered records based on active section
+  const filteredSectionRecords = $derived.by(() => {
+    let list = records;
+    if (activeSection === "tv_shows" || activeSection === "tv_seasons") {
+      list = records.filter((r) => r.mediaKind === "show");
+    } else if (activeSection === "movies") {
+      list = records.filter((r) => r.mediaKind === "movie");
+    } else if (activeSection === "anime") {
+      list = records.filter((r) => r.mediaKind === "anime");
+    } else if (activeSection === "manga") {
+      list = records.filter((r) => r.mediaKind === "manga");
+    } else if (activeSection === "games" || activeSection === "board_games") {
+      list = records.filter((r) => r.mediaKind === "game");
+    } else if (activeSection === "books") {
+      list = records.filter((r) => r.mediaKind === "book");
+    } else if (activeSection === "comics") {
+      list = records.filter((r) => r.mediaKind === "comic");
+    } else if (activeSection === "podcasts") {
+      list = records.filter((r) => r.mediaKind === "podcast");
+    } else if (activeSection === "music") {
+      list = records.filter((r) => r.mediaKind === "music");
+    } else if (activeSection === "collection") {
+      list = records.filter((r) => !!r.collectionName);
+    }
+
+    if (searchQuery.trim().length > 0) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.overview?.toLowerCase().includes(q) ||
+          r.tags?.some((t) => t.toLowerCase().includes(q)),
+      );
+    }
+    return list;
+  });
+
   // --- 1. HTML5 History API URL Routing ---
   function sectionToPath(
     section: ActiveNavSection,
     recordId?: string | null,
   ): string {
     switch (section) {
-      case "chronicle":
-        return "/chronicle";
+      case "home":
+        return "/";
       case "discover":
         return "/discover";
-      case "library":
-        return "/library";
-      case "detail":
-        return recordId ? `/records/${recordId}` : "/library";
-      case "up_next":
-        return "/up-next";
+      case "tv_shows":
+        return "/media/shows";
+      case "tv_seasons":
+        return "/media/seasons";
+      case "movies":
+        return "/media/movies";
+      case "anime":
+        return "/media/anime";
+      case "manga":
+        return "/media/manga";
+      case "games":
+        return "/media/games";
+      case "books":
+        return "/media/books";
+      case "comics":
+        return "/media/comics";
+      case "board_games":
+        return "/media/board-games";
+      case "music":
+        return "/media/music";
+      case "podcasts":
+        return "/media/podcasts";
       case "calendar":
         return "/calendar";
+      case "collection":
+        return "/collection";
+      case "custom":
+        return "/custom";
+      case "history":
+      case "chronicle":
+        return "/history";
+      case "lists":
+        return "/lists";
+      case "statistics":
+        return "/statistics";
+      case "tags":
+        return "/tags";
       case "reconciliation":
         return "/review-inbox";
+      case "sources":
       case "connections":
         return "/connections";
       case "settings":
         return "/settings";
+      case "detail":
+        return recordId ? `/records/${recordId}` : "/";
       default:
         return "/";
     }
@@ -99,26 +192,62 @@
     if (pathname === "/discover") {
       activeSection = "discover";
       selectedRecordId = null;
-    } else if (pathname === "/library") {
-      activeSection = "library";
+    } else if (pathname === "/media/shows") {
+      activeSection = "tv_shows";
       selectedRecordId = null;
-    } else if (pathname === "/up-next") {
-      activeSection = "up_next";
+    } else if (pathname === "/media/movies") {
+      activeSection = "movies";
+      selectedRecordId = null;
+    } else if (pathname === "/media/anime") {
+      activeSection = "anime";
+      selectedRecordId = null;
+    } else if (pathname === "/media/manga") {
+      activeSection = "manga";
+      selectedRecordId = null;
+    } else if (pathname === "/media/games") {
+      activeSection = "games";
+      selectedRecordId = null;
+    } else if (pathname === "/media/books") {
+      activeSection = "books";
+      selectedRecordId = null;
+    } else if (pathname === "/media/comics") {
+      activeSection = "comics";
+      selectedRecordId = null;
+    } else if (pathname === "/media/podcasts") {
+      activeSection = "podcasts";
+      selectedRecordId = null;
+    } else if (pathname === "/media/music") {
+      activeSection = "music";
       selectedRecordId = null;
     } else if (pathname === "/calendar") {
       activeSection = "calendar";
       selectedRecordId = null;
+    } else if (pathname === "/collection") {
+      activeSection = "collection";
+      selectedRecordId = null;
+    } else if (pathname === "/history" || pathname === "/chronicle") {
+      activeSection = "history";
+      selectedRecordId = null;
+    } else if (pathname === "/lists") {
+      activeSection = "lists";
+      selectedRecordId = null;
+    } else if (pathname === "/statistics") {
+      activeSection = "statistics";
+      selectedRecordId = null;
+    } else if (pathname === "/tags") {
+      activeSection = "tags";
+      selectedRecordId = null;
     } else if (pathname === "/review-inbox" || pathname === "/reconciliation") {
       activeSection = "reconciliation";
       selectedRecordId = null;
-    } else if (pathname === "/connections") {
+    } else if (pathname === "/connections" || pathname === "/sources") {
       activeSection = "connections";
       selectedRecordId = null;
     } else if (pathname === "/settings") {
       activeSection = "settings";
       selectedRecordId = null;
     } else {
-      activeSection = "chronicle";
+      activeSection = "home";
       selectedRecordId = null;
     }
   }
@@ -143,20 +272,19 @@
   }
 
   function handleBackToLibrary(): void {
-    activeSection = "library";
+    activeSection = "home";
     selectedRecordId = null;
     if (typeof window !== "undefined") {
-      window.history.pushState({}, "", "/library");
+      window.history.pushState({}, "", "/");
     }
   }
 
-  // --- 2. Real Tabler Theme Engine Synchronization ---
+  // --- 2. Tabler Live Theme Engine ---
   $effect(() => {
     if (typeof document === "undefined") return;
     const mode = themeSettings.mode;
     const isDark = mode === "dark" || mode === "night";
 
-    // Tabler & Bootstrap Theme Attributes
     document.documentElement.setAttribute(
       "data-bs-theme",
       isDark ? "dark" : "light",
@@ -164,7 +292,6 @@
     document.documentElement.setAttribute("data-fasti-mode", mode);
     document.body.className = `theme-${mode} layout-fluid`;
 
-    // Dynamic Tabler Accent Color and Variables
     const accent = themeSettings.accentColor || "#066fd1";
     document.documentElement.style.setProperty("--tblr-primary", accent);
     document.documentElement.style.setProperty(
@@ -190,8 +317,19 @@
     }
   });
 
+  async function checkNodeHealth(): Promise<void> {
+    if (typeof fetch === "undefined") return;
+    try {
+      const res = await fetch("/api/v1/health");
+      nodeHealthy = res.ok;
+    } catch {
+      nodeHealthy = false;
+    }
+  }
+
   onMount(() => {
     syncFromUrl();
+    checkNodeHealth();
     window.addEventListener("popstate", syncFromUrl);
     return () => {
       window.removeEventListener("popstate", syncFromUrl);
@@ -378,80 +516,269 @@
 >
   <NavSidebar
     {activeSection}
+    navItems={workbenchPreferences.navItems}
     {openReviewCount}
+    collapsed={workbenchPreferences.sidebarCollapsed}
+    hidden={workbenchPreferences.sidebarHidden}
+    onToggleCollapse={() =>
+      (workbenchPreferences = {
+        ...workbenchPreferences,
+        sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
+      })}
+    onToggleHide={() =>
+      (workbenchPreferences = {
+        ...workbenchPreferences,
+        sidebarHidden: !workbenchPreferences.sidebarHidden,
+      })}
     onSelectSection={handleSelectSection}
   />
 
-  <main class="viewport-canvas" id="main-content">
-    {#if activeSection === "chronicle"}
-      <ChronicleView
-        occurrences={chronicle}
-        onSelectRecord={handleSelectRecord}
-      />
-    {:else if activeSection === "discover"}
-      <DiscoverView
-        trendingRecords={SAMPLE_DISCOVER_TRENDING}
-        onSelectRecord={handleSelectRecord}
-        onUpdateStatus={handleUpdateStatus}
-        onUpdateProgress={handleUpdateProgress}
-        onSaveReview={handleSaveReview}
-        onSaveCollection={handleSaveCollection}
-      />
-    {:else if activeSection === "library"}
-      <LibraryView
-        {records}
-        onSelectRecord={handleSelectRecord}
-        onUpdateStatus={handleUpdateStatus}
-        onUpdateRating={handleUpdateRating}
-        onUpdateProgress={handleUpdateProgress}
-        onSaveReview={handleSaveReview}
-        onSaveCollection={handleSaveCollection}
-      />
-    {:else if activeSection === "detail" && selectedRecord}
-      <MediaDetailView
-        record={selectedRecord}
-        occurrences={chronicle}
-        onBack={handleBackToLibrary}
-        onUpdateStatus={handleUpdateStatus}
-        onUpdateRating={handleUpdateRating}
-        onToggleEpisode={handleToggleEpisode}
-        onUpdateProgress={handleUpdateProgress}
-        onSaveReview={handleSaveReview}
-        onSaveCollection={handleSaveCollection}
-        onUpdateNotes={handleUpdateNotes}
-        onAddTag={handleAddTag}
-        onRemoveTag={handleRemoveTag}
-      />
-    {:else if activeSection === "up_next"}
-      <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
-    {:else if activeSection === "calendar"}
-      <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
-    {:else if activeSection === "reconciliation"}
-      <ReconciliationView
-        cases={reconciliationCases}
-        onAcceptCase={handleAcceptCase}
-        onRejectCase={handleRejectCase}
-        onDeferCase={handleDeferCase}
-      />
-    {:else if activeSection === "connections"}
-      <ConnectionsView />
-    {:else if activeSection === "settings"}
-      <SettingsView
-        customFields={SAMPLE_CUSTOM_FIELDS}
-        {tokens}
-        {providerKeys}
-        {oidcConfig}
-        {appriseConfig}
-        {themeSettings}
-        onUpdateTheme={handleUpdateTheme}
-        onSaveProviderKey={handleSaveProviderKey}
-        onCreateToken={handleCreateToken}
-        onDeleteToken={handleDeleteToken}
-        onSaveOidc={handleSaveOidc}
-        onSaveApprise={handleSaveApprise}
-      />
-    {/if}
-  </main>
+  <div class="workbench-main-shell">
+    <!-- Top Bar Header (Search, Scope, View Mode, Filters, Theme Drawer Toggle) -->
+    <header
+      class="top-nav-bar"
+      role="toolbar"
+      aria-label="Global workbench toolbar"
+    >
+      <div
+        class="d-flex align-items-center gap-2 flex-grow-1"
+        style="max-width: 480px;"
+      >
+        {#if workbenchPreferences.sidebarHidden}
+          <button
+            type="button"
+            class="btn btn-icon btn-outline-secondary btn-sm"
+            onclick={() =>
+              (workbenchPreferences = {
+                ...workbenchPreferences,
+                sidebarHidden: false,
+              })}
+            title="Show sidebar menu"
+            aria-label="Show sidebar menu"
+          >
+            <IconLayoutSidebar size={18} />
+          </button>
+        {/if}
+
+        <div class="search-field-wrapper">
+          <IconSearch size={18} class="search-icon" />
+          <input
+            type="search"
+            class="global-search-input"
+            placeholder="Search your media..."
+            bind:value={searchQuery}
+            aria-label="Search media collection"
+          />
+        </div>
+      </div>
+
+      <div class="top-actions-right">
+        <!-- Media Scope Select -->
+        <select
+          class="scope-select"
+          bind:value={mediaScope}
+          aria-label="Filter media scope"
+        >
+          <option value="all">All media</option>
+          <option value="shows">TV Shows</option>
+          <option value="movies">Movies</option>
+          <option value="anime">Anime</option>
+          <option value="games">Games</option>
+          <option value="books">Books</option>
+        </select>
+
+        <!-- Grid / List Toggle -->
+        <div
+          class="view-toggle-group"
+          role="radiogroup"
+          aria-label="View layout mode"
+        >
+          <button
+            type="button"
+            class="view-mode-btn"
+            class:active={viewMode === "grid"}
+            onclick={() => (viewMode = "grid")}
+            role="radio"
+            aria-checked={viewMode === "grid"}
+            title="Grid view"
+            aria-label="Grid view"
+          >
+            <IconLayoutGrid size={17} />
+          </button>
+          <button
+            type="button"
+            class="view-mode-btn"
+            class:active={viewMode === "list"}
+            onclick={() => (viewMode = "list")}
+            role="radio"
+            aria-checked={viewMode === "list"}
+            title="List view"
+            aria-label="List view"
+          >
+            <IconList size={17} />
+          </button>
+        </div>
+
+        <!-- Filter Button -->
+        <button
+          type="button"
+          class="tool-btn"
+          title="Open filters"
+          aria-label="Filter records"
+        >
+          <IconFilter size={17} />
+          <span>Filter</span>
+        </button>
+
+        <!-- Theme Settings Drawer Trigger -->
+        <button
+          type="button"
+          class="tool-btn icon-only"
+          onclick={() => (themeDrawerOpen = true)}
+          title="Open theme customizer"
+          aria-label="Open theme customizer"
+        >
+          {#if themeSettings.mode === "light"}
+            <IconSun size={18} />
+          {:else}
+            <IconMoon size={18} />
+          {/if}
+        </button>
+
+        <!-- Node Health Status Indicator (WCAG 1.4.1 & EN 301 549 Multi-sensory representation) -->
+        <div
+          class="status-indicator"
+          role="status"
+          aria-live="polite"
+          title={nodeHealthy === true
+            ? "Local node active and verified"
+            : nodeHealthy === false
+              ? "Local node unreachable / uninitialized"
+              : "Connecting to local node..."}
+        >
+          {#if nodeHealthy === true}
+            <span
+              class="d-inline-flex align-items-center gap-1 text-success"
+              title="Verified"
+            >
+              <IconCircleCheck size={18} stroke={2.5} />
+              <span class="visually-hidden">Local node verified</span>
+            </span>
+          {:else if nodeHealthy === false}
+            <span
+              class="d-inline-flex align-items-center gap-1 text-danger"
+              title="Unreachable"
+            >
+              <IconAlertCircle size={18} stroke={2} />
+              <span class="visually-hidden">Local node unreachable</span>
+            </span>
+          {:else}
+            <span
+              class="d-inline-flex align-items-center gap-1 text-warning"
+              title="Connecting..."
+            >
+              <IconLoader2 size={18} stroke={2} class="spin" />
+              <span class="visually-hidden">Connecting to local node</span>
+            </span>
+          {/if}
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Viewport Canvas -->
+    <main class="viewport-canvas" id="main-content">
+      {#if activeSection === "home"}
+        <HomeView
+          {records}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSelectRecord={handleSelectRecord}
+          onUpdateStatus={handleUpdateStatus}
+          onUpdateProgress={handleUpdateProgress}
+          onSaveReview={handleSaveReview}
+          onSaveCollection={handleSaveCollection}
+          onViewAllSection={(sec) => handleSelectSection(sec as any)}
+        />
+      {:else if activeSection === "discover"}
+        <DiscoverView
+          trendingRecords={SAMPLE_DISCOVER_TRENDING}
+          onSelectRecord={handleSelectRecord}
+          onUpdateStatus={handleUpdateStatus}
+          onUpdateProgress={handleUpdateProgress}
+          onSaveReview={handleSaveReview}
+          onSaveCollection={handleSaveCollection}
+        />
+      {:else if activeSection === "detail" && selectedRecord}
+        <MediaDetailView
+          record={selectedRecord}
+          occurrences={chronicle}
+          onBack={handleBackToLibrary}
+          onUpdateStatus={handleUpdateStatus}
+          onUpdateRating={handleUpdateRating}
+          onToggleEpisode={handleToggleEpisode}
+          onUpdateProgress={handleUpdateProgress}
+          onSaveReview={handleSaveReview}
+          onSaveCollection={handleSaveCollection}
+          onUpdateNotes={handleUpdateNotes}
+          onAddTag={handleAddTag}
+          onRemoveTag={handleRemoveTag}
+        />
+      {:else if activeSection === "history" || activeSection === "chronicle"}
+        <ChronicleView
+          occurrences={chronicle}
+          onSelectRecord={handleSelectRecord}
+        />
+      {:else if activeSection === "calendar"}
+        <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
+      {:else if activeSection === "reconciliation"}
+        <ReconciliationView
+          cases={reconciliationCases}
+          onAcceptCase={handleAcceptCase}
+          onRejectCase={handleRejectCase}
+          onDeferCase={handleDeferCase}
+        />
+      {:else if activeSection === "connections" || activeSection === "sources"}
+        <ConnectionsView />
+      {:else if activeSection === "settings"}
+        <SettingsView
+          customFields={SAMPLE_CUSTOM_FIELDS}
+          {tokens}
+          {providerKeys}
+          {oidcConfig}
+          {appriseConfig}
+          {themeSettings}
+          {workbenchPreferences}
+          onUpdateTheme={handleUpdateTheme}
+          onUpdateWorkbenchPreferences={(prefs) =>
+            (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
+          onSaveProviderKey={handleSaveProviderKey}
+          onCreateToken={handleCreateToken}
+          onDeleteToken={handleDeleteToken}
+          onSaveOidc={handleSaveOidc}
+          onSaveApprise={handleSaveApprise}
+        />
+      {:else}
+        <!-- Media Category Grid (Shows, Movies, Anime, Manga, Games, Books, etc.) -->
+        <LibraryView
+          records={filteredSectionRecords}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSelectRecord={handleSelectRecord}
+          onUpdateStatus={handleUpdateStatus}
+          onUpdateRating={handleUpdateRating}
+          onUpdateProgress={handleUpdateProgress}
+          onSaveReview={handleSaveReview}
+          onSaveCollection={handleSaveCollection}
+        />
+      {/if}
+    </main>
+  </div>
+
+  <!-- Off-Canvas Tabler Theme Drawer -->
+  <TablerThemeDrawer
+    open={themeDrawerOpen}
+    {themeSettings}
+    onClose={() => (themeDrawerOpen = false)}
+    onUpdateTheme={handleUpdateTheme}
+  />
 </div>
 
 <style>
@@ -465,9 +792,157 @@
     color: var(--fasti-text-primary);
   }
 
+  .workbench-main-shell {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .top-nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--fasti-surface-paper);
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    gap: 16px;
+    z-index: 10;
+  }
+
+  .search-field-wrapper {
+    position: relative;
+    flex: 1;
+    max-width: 440px;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.search-icon) {
+    position: absolute;
+    left: 12px;
+    color: var(--fasti-text-muted);
+    pointer-events: none;
+  }
+
+  .global-search-input {
+    width: 100%;
+    padding: 8px 12px 8px 38px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: var(--tblr-border-radius, 4px);
+    color: var(--fasti-text-primary);
+    font-size: 0.88rem;
+    outline: none;
+    transition: border-color 120ms ease;
+  }
+
+  .global-search-input:focus {
+    border-color: var(--fasti-action-primary);
+    outline: 2px solid var(--fasti-action-primary);
+    outline-offset: 1px;
+  }
+
+  .top-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .scope-select {
+    min-height: 38px;
+    padding: 8px 12px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: var(--tblr-border-radius, 4px);
+    color: var(--fasti-text-primary);
+    font-size: 0.86rem;
+    font-weight: 500;
+  }
+
+  .view-toggle-group {
+    display: flex;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: var(--tblr-border-radius, 4px);
+    overflow: hidden;
+  }
+
+  .view-mode-btn {
+    min-width: 38px;
+    min-height: 38px;
+    background: var(--fasti-surface-archive);
+    border: none;
+    padding: 6px 10px;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .view-mode-btn.active {
+    background: var(--fasti-action-primary);
+    color: #ffffff;
+  }
+
+  .tool-btn {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border-radius: var(--tblr-border-radius, 4px);
+    color: var(--fasti-text-primary);
+    font-size: 0.84rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 120ms ease;
+  }
+
+  .tool-btn:hover {
+    background: color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+  }
+
+  .tool-btn.icon-only {
+    min-width: 38px;
+    min-height: 38px;
+    padding: 7px;
+    display: grid;
+    place-items: center;
+  }
+
+  .status-indicator {
+    min-width: 38px;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  :global(.spin) {
+    animation: spin 1.2s linear infinite;
+  }
+
   .viewport-canvas {
     flex: 1;
-    height: 100vh;
     overflow-y: auto;
     background-color: var(--fasti-surface-archive);
     box-sizing: border-box;

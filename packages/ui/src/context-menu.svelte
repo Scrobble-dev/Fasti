@@ -1,17 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    IconEye,
-    IconBookmark,
-    IconFolderPlus,
-    IconStar,
-    IconPlayerPlay,
-    IconRefresh,
-    IconGitPullRequest,
-    IconCopy,
-    IconTrash,
-    IconCheck,
-  } from "@tabler/icons-svelte";
 
   export interface ContextMenuItem {
     id: string;
@@ -57,19 +45,19 @@
 
 <div
   bind:this={menuRef}
-  class="context-menu-popover"
-  style="top: {y}px; left: {x}px;"
+  class="dropdown-menu show shadow-lg border fasti-context-menu"
+  style="position: fixed; top: {y}px; left: {x}px; z-index: 1050; display: block;"
   role="menu"
   tabindex="-1"
 >
   {#each items as item}
     {#if item.divider}
-      <div class="menu-divider" role="separator"></div>
+      <div class="dropdown-divider" role="separator"></div>
     {:else}
       <button
         type="button"
-        class="menu-item-btn"
-        class:danger={item.danger}
+        class="dropdown-item d-flex align-items-center gap-2 py-2"
+        class:text-danger={item.danger}
         onclick={() => {
           item.action();
           onClose();
@@ -77,35 +65,29 @@
         role="menuitem"
       >
         {#if item.icon}
-          <item.icon size={16} class="item-icon" />
+          {@const Icon = item.icon}
+          <span
+            class="dropdown-item-icon text-muted d-inline-flex align-items-center"
+          >
+            <Icon size={16} />
+          </span>
         {/if}
-        <span class="item-label">{item.label}</span>
+        <span>{item.label}</span>
       </button>
     {/if}
   {/each}
 </div>
 
 <style>
-  .context-menu-popover {
-    position: fixed;
-    z-index: 10000;
-    min-width: 200px;
-    background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    animation: fadeIn 80ms ease-out;
+  .fasti-context-menu {
+    min-width: 210px;
+    animation: fastiMenuFade 90ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  @keyframes fadeIn {
+  @keyframes fastiMenuFade {
     from {
       opacity: 0;
-      transform: scale(0.96);
+      transform: scale(0.97);
     }
     to {
       opacity: 1;
@@ -113,51 +95,9 @@
     }
   }
 
-  .menu-divider {
-    height: 1px;
-    background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    margin: 4px 0;
-  }
-
-  .menu-item-btn {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--fasti-text-primary);
-    cursor: pointer;
-    text-align: left;
-    transition: background 80ms ease;
-  }
-
-  .menu-item-btn:hover {
-    background: var(--fasti-surface-archive);
-    color: var(--fasti-action-primary);
-  }
-
-  .menu-item-btn.danger {
-    color: #e11d48;
-  }
-
-  .menu-item-btn.danger:hover {
-    background: rgba(225, 29, 72, 0.1);
-  }
-
-  :global(.item-icon) {
-    color: var(--fasti-text-muted);
-  }
-
-  .menu-item-btn:hover :global(.item-icon) {
-    color: currentColor;
-  }
-
-  .item-label {
-    flex: 1;
+  @media (prefers-reduced-motion: reduce) {
+    .fasti-context-menu {
+      animation: none !important;
+    }
   }
 </style>

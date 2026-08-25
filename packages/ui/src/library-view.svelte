@@ -1,5 +1,10 @@
 <script lang="ts">
-  import type { MediaRecord, MediaKind, WatchStatus } from "./types.js";
+  import type {
+    MediaRecord,
+    MediaKind,
+    WatchStatus,
+    ContextMenuItemConfig,
+  } from "./types.js";
   import {
     IconSearch,
     IconLayoutGrid,
@@ -35,6 +40,7 @@
     ) => void;
     onSaveReview?: (recordId: string, rating: number, notes: string) => void;
     onSaveCollection?: (recordId: string, collections: string[]) => void;
+    contextMenuConfigs?: ContextMenuItemConfig[];
   }
 
   let {
@@ -45,6 +51,7 @@
     onUpdateProgress,
     onSaveReview,
     onSaveCollection,
+    contextMenuConfigs,
   }: Props = $props();
 
   let selectedKind: MediaKind | "all" = $state("all");
@@ -122,56 +129,76 @@
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
     e.preventDefault();
+    const allItems: Record<string, ContextMenuItem> = {
+      view: {
+        id: "view",
+        label: "View Details...",
+        icon: IconPlayerPlay,
+        action: () => onSelectRecord(rec.id),
+      },
+      progress: {
+        id: "progress",
+        label: "Update Progress...",
+        icon: IconAdjustments,
+        action: () => {
+          activeModalRecord = rec;
+          showProgressModal = true;
+        },
+      },
+      review: {
+        id: "review",
+        label: "Post a Review...",
+        icon: IconMessage,
+        action: () => {
+          activeModalRecord = rec;
+          showReviewModal = true;
+        },
+      },
+      collection: {
+        id: "collection",
+        label: "Add to Collection...",
+        icon: IconFolder,
+        action: () => {
+          activeModalRecord = rec;
+          showCollectionModal = true;
+        },
+      },
+      watched: {
+        id: "watched",
+        label: "Log Occurrence (Rewatch)",
+        icon: IconRepeat,
+        action: () => onUpdateStatus?.(rec.id, "completed"),
+      },
+      watchlist: {
+        id: "watchlist",
+        label:
+          rec.status === "plan_to_watch"
+            ? "Remove from Watchlist"
+            : "Add to Watchlist",
+        icon: IconBookmark,
+        action: () => handleToggleWatchlist(rec),
+      },
+      manage_ids: {
+        id: "manage_ids",
+        label: `Copy Fasti ID (${rec.id})`,
+        action: () => navigator.clipboard.writeText(rec.id),
+      },
+    };
+
+    let items: ContextMenuItem[] = [];
+    if (contextMenuConfigs && contextMenuConfigs.length > 0) {
+      items = [...contextMenuConfigs]
+        .filter((cfg) => cfg.visible && allItems[cfg.id])
+        .sort((a, b) => a.order - b.order)
+        .map((cfg) => allItems[cfg.id]);
+    } else {
+      items = Object.values(allItems);
+    }
+
     contextMenuState = {
       x: e.clientX,
       y: e.clientY,
-      items: [
-        {
-          id: "open",
-          label: "View Details...",
-          icon: IconPlayerPlay,
-          action: () => onSelectRecord(rec.id),
-        },
-        {
-          id: "prog",
-          label: "Update Progress...",
-          icon: IconAdjustments,
-          action: () => {
-            activeModalRecord = rec;
-            showProgressModal = true;
-          },
-        },
-        {
-          id: "review",
-          label: "Post a Review...",
-          icon: IconMessage,
-          action: () => {
-            activeModalRecord = rec;
-            showReviewModal = true;
-          },
-        },
-        {
-          id: "coll",
-          label: "Add to Collection...",
-          icon: IconFolder,
-          action: () => {
-            activeModalRecord = rec;
-            showCollectionModal = true;
-          },
-        },
-        {
-          id: "rewatch",
-          label: "Log Occurrence (Rewatch)",
-          icon: IconRepeat,
-          action: () => onUpdateStatus?.(rec.id, "completed"),
-        },
-        { id: "d1", label: "", divider: true, action: () => {} },
-        {
-          id: "copy_id",
-          label: `Copy Fasti ID (${rec.id})`,
-          action: () => navigator.clipboard.writeText(rec.id),
-        },
-      ],
+      items,
     };
   }
 </script>

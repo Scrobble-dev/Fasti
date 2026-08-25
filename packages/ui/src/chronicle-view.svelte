@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { ChronicleOccurrence } from "./types.js";
   import {
-    IconPlayerPlay,
     IconRepeat,
     IconStarFilled,
     IconDeviceTv,
@@ -44,29 +43,6 @@
       </div>
     </div>
   </header>
-
-  <!-- Now Playing card -->
-  <section class="now-playing-section" aria-label="Currently Active Playback">
-    <div class="now-playing-card">
-      <div class="playing-pulse" aria-hidden="true"></div>
-      <div class="playing-content">
-        <span class="playing-badge">
-          <IconPlayerPlay size={14} stroke={2.5} /> Active Playback
-        </span>
-        <h3 class="playing-title">Elden Ring: Shadow of the Erdtree</h3>
-        <p class="playing-meta">Gaming Desktop · Steam Hook · 120m elapsed</p>
-        <div
-          class="progress-bar-wrap"
-          role="progressbar"
-          aria-valuenow={80}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
-          <div class="progress-fill" style="width: 80%;"></div>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <!-- Timeline Feed -->
   <section class="timeline-section" aria-label="Recent Media Occurrences">
@@ -202,70 +178,6 @@
     color: var(--fasti-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-  }
-
-  .now-playing-card {
-    position: relative;
-    background: var(--fasti-surface-paper);
-    border: 1px solid var(--fasti-brand-gold);
-    border-left: 4px solid var(--fasti-brand-gold);
-    border-radius: 6px;
-    padding: 16px 20px;
-    display: flex;
-    gap: 14px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
-  }
-
-  .playing-pulse {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--fasti-brand-gold);
-    margin-top: 6px;
-    box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--fasti-brand-gold) 30%, transparent);
-  }
-
-  .playing-content {
-    flex: 1;
-  }
-
-  .playing-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-family: var(--fasti-font-mono);
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--fasti-brand-gold);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 4px;
-  }
-
-  .playing-title {
-    font-family: var(--fasti-font-display);
-    font-size: 1.25rem;
-    margin: 0 0 4px;
-    color: var(--fasti-text-primary);
-  }
-
-  .playing-meta {
-    margin: 0 0 10px;
-    font-size: 0.85rem;
-    color: var(--fasti-text-muted);
-  }
-
-  .progress-bar-wrap {
-    height: 6px;
-    background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: var(--fasti-brand-gold);
   }
 
   .section-heading {

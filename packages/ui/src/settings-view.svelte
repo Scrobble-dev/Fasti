@@ -6,10 +6,21 @@
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
+    WorkbenchPreferences,
+    NavItemConfig,
+    ContextMenuItemConfig,
   } from "./types.js";
+  import { DEFAULT_WORKBENCH_PREFERENCES } from "./mock-data.js";
   import {
     IconKey,
     IconPalette,
+    IconLayoutSidebar,
+    IconPin,
+    IconArrowUp,
+    IconArrowDown,
+    IconEye,
+    IconEyeOff,
+    IconRotate2,
     IconDevices,
     IconUserCheck,
     IconBell,
@@ -32,7 +43,11 @@
     oidcConfig: OidcConfiguration;
     appriseConfig: AppriseNotificationConfig;
     themeSettings: ThemeSettings;
+    workbenchPreferences?: WorkbenchPreferences;
     onUpdateTheme?: (theme: Partial<ThemeSettings>) => void;
+    onUpdateWorkbenchPreferences?: (
+      prefs: Partial<WorkbenchPreferences>,
+    ) => void;
     onSaveProviderKey?: (provider: string, key: string) => void;
     onCreateToken?: (name: string, scopes: string[]) => void;
     onDeleteToken?: (id: string) => void;
@@ -47,7 +62,9 @@
     oidcConfig,
     appriseConfig,
     themeSettings,
+    workbenchPreferences = DEFAULT_WORKBENCH_PREFERENCES,
     onUpdateTheme,
+    onUpdateWorkbenchPreferences,
     onSaveProviderKey,
     onCreateToken,
     onDeleteToken,
@@ -57,6 +74,7 @@
 
   let activeSettingsSection:
     | "appearance"
+    | "navigation"
     | "providers"
     | "connectors"
     | "tokens"
@@ -110,6 +128,62 @@
       newAppriseUrl = "";
     }
   }
+
+  function handleToggleNavVisible(id: string): void {
+    if (!workbenchPreferences) return;
+    const updated = workbenchPreferences.navItems.map((item) =>
+      item.id === id ? { ...item, visible: !item.visible } : item,
+    );
+    onUpdateWorkbenchPreferences?.({ navItems: updated });
+  }
+
+  function handleToggleNavPin(id: string): void {
+    if (!workbenchPreferences) return;
+    const updated = workbenchPreferences.navItems.map((item) =>
+      item.id === id ? { ...item, pinned: !item.pinned } : item,
+    );
+    onUpdateWorkbenchPreferences?.({ navItems: updated });
+  }
+
+  function handleMoveNav(id: string, direction: -1 | 1): void {
+    if (!workbenchPreferences) return;
+    const items = [...workbenchPreferences.navItems];
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= items.length) return;
+    const temp = items[idx];
+    items[idx] = items[targetIdx];
+    items[targetIdx] = temp;
+    const reordered = items.map((it, i) => ({ ...it, order: i }));
+    onUpdateWorkbenchPreferences?.({ navItems: reordered });
+  }
+
+  function handleToggleContextVisible(id: string): void {
+    if (!workbenchPreferences) return;
+    const updated = workbenchPreferences.contextMenuItems.map((item) =>
+      item.id === id ? { ...item, visible: !item.visible } : item,
+    );
+    onUpdateWorkbenchPreferences?.({ contextMenuItems: updated });
+  }
+
+  function handleMoveContext(id: string, direction: -1 | 1): void {
+    if (!workbenchPreferences) return;
+    const items = [...workbenchPreferences.contextMenuItems];
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx < 0) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= items.length) return;
+    const temp = items[idx];
+    items[idx] = items[targetIdx];
+    items[targetIdx] = temp;
+    const reordered = items.map((it, i) => ({ ...it, order: i }));
+    onUpdateWorkbenchPreferences?.({ contextMenuItems: reordered });
+  }
+
+  function handleResetNavPreferences(): void {
+    onUpdateWorkbenchPreferences?.(DEFAULT_WORKBENCH_PREFERENCES);
+  }
 </script>
 
 <div class="settings-container">
@@ -133,6 +207,15 @@
         onclick={() => (activeSettingsSection = "appearance")}
       >
         <IconPalette size={18} /> Appearance & Theme
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "navigation"}
+        onclick={() => (activeSettingsSection = "navigation")}
+      >
+        <IconLayoutSidebar size={18} /> Navigation & Menus
       </button>
 
       <button
@@ -339,7 +422,241 @@
           </div>
         </section>
 
-        <!-- 2. Metadata Providers & Keys -->
+        <!-- 2. Navigation & Menus Customizer -->
+      {:else if activeSettingsSection === "navigation"}
+        <section class="section-pane">
+          <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+              <h2 class="pane-title">Navigation & Menus Customizer</h2>
+              <p class="pane-desc">
+                Configure sidebar visibility, pinned shortcuts, reorder
+                sections, and customize right-click context menu actions.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1"
+              onclick={handleResetNavPreferences}
+            >
+              <IconRotate2 size={16} /> Reset to Defaults
+            </button>
+          </div>
+
+          <!-- Sidebar Display Mode -->
+          <div class="setting-group mb-4">
+            <h3 class="group-title">Sidebar Display Mode</h3>
+            <div class="options-grid-2">
+              <button
+                type="button"
+                class="density-btn"
+                class:selected={!workbenchPreferences.sidebarCollapsed &&
+                  !workbenchPreferences.sidebarHidden}
+                onclick={() =>
+                  onUpdateWorkbenchPreferences?.({
+                    sidebarCollapsed: false,
+                    sidebarHidden: false,
+                  })}
+              >
+                <strong>Expanded (240 px)</strong>
+                <span
+                  >Full navigation rail with titles, counts, and category labels</span
+                >
+              </button>
+              <button
+                type="button"
+                class="density-btn"
+                class:selected={workbenchPreferences.sidebarCollapsed &&
+                  !workbenchPreferences.sidebarHidden}
+                onclick={() =>
+                  onUpdateWorkbenchPreferences?.({
+                    sidebarCollapsed: true,
+                    sidebarHidden: false,
+                  })}
+              >
+                <strong>Collapsed (64 px)</strong>
+                <span>Compact icon-only vertical rail with tooltips</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Sidebar Navigation Items -->
+          <div class="setting-group mb-4">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h3 class="group-title mb-0">Sidebar Navigation Items</h3>
+              <span class="text-muted small"
+                >Show, hide, pin, and reorder sidebar links</span
+              >
+            </div>
+
+            <div class="card border">
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 80px;">Order</th>
+                      <th style="width: 70px;">Pin</th>
+                      <th>Navigation Item</th>
+                      <th>Category</th>
+                      <th class="text-end" style="width: 120px;">Visibility</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each [...(workbenchPreferences.navItems || [])].sort((a, b) => a.order - b.order) as item, idx (item.id)}
+                      <tr>
+                        <td>
+                          <div class="btn-group btn-group-sm">
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-ghost-secondary p-1"
+                              disabled={idx === 0}
+                              onclick={() => handleMoveNav(item.id, -1)}
+                              title="Move Up"
+                              aria-label="Move Up"
+                            >
+                              <IconArrowUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-ghost-secondary p-1"
+                              disabled={idx ===
+                                workbenchPreferences.navItems.length - 1}
+                              onclick={() => handleMoveNav(item.id, 1)}
+                              title="Move Down"
+                              aria-label="Move Down"
+                            >
+                              <IconArrowDown size={14} />
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            class="btn btn-sm p-1 border-0"
+                            class:text-primary={item.pinned}
+                            class:text-muted={!item.pinned}
+                            onclick={() => handleToggleNavPin(item.id)}
+                            title={item.pinned
+                              ? "Pinned to top shortcuts"
+                              : "Click to pin"}
+                            aria-label={item.pinned ? "Unpin item" : "Pin item"}
+                          >
+                            <IconPin size={16} />
+                          </button>
+                        </td>
+                        <td>
+                          <span
+                            class="fw-semibold"
+                            class:text-muted={!item.visible}>{item.label}</span
+                          >
+                        </td>
+                        <td>
+                          <span
+                            class="badge bg-secondary-lt text-uppercase font-monospace"
+                            >{item.category}</span
+                          >
+                        </td>
+                        <td class="text-end">
+                          <button
+                            type="button"
+                            class="btn btn-sm"
+                            class:btn-outline-primary={item.visible}
+                            class:btn-ghost-secondary={!item.visible}
+                            onclick={() => handleToggleNavVisible(item.id)}
+                          >
+                            {#if item.visible}
+                              <IconEye size={14} class="me-1" /> Visible
+                            {:else}
+                              <IconEyeOff size={14} class="me-1" /> Hidden
+                            {/if}
+                          </button>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Context Menu (Right Click) Actions -->
+          <div class="setting-group">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <h3 class="group-title mb-0">Right-Click Context Menu Actions</h3>
+              <span class="text-muted small"
+                >Show, hide, and reorder card actions</span
+              >
+            </div>
+
+            <div class="card border">
+              <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 80px;">Order</th>
+                      <th>Action Name</th>
+                      <th class="text-end" style="width: 120px;">Visibility</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each [...(workbenchPreferences.contextMenuItems || [])].sort((a, b) => a.order - b.order) as item, idx (item.id)}
+                      <tr>
+                        <td>
+                          <div class="btn-group btn-group-sm">
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-ghost-secondary p-1"
+                              disabled={idx === 0}
+                              onclick={() => handleMoveContext(item.id, -1)}
+                              title="Move Up"
+                              aria-label="Move Up"
+                            >
+                              <IconArrowUp size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-ghost-secondary p-1"
+                              disabled={idx ===
+                                workbenchPreferences.contextMenuItems.length -
+                                  1}
+                              onclick={() => handleMoveContext(item.id, 1)}
+                              title="Move Down"
+                              aria-label="Move Down"
+                            >
+                              <IconArrowDown size={14} />
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            class="fw-semibold"
+                            class:text-muted={!item.visible}>{item.label}</span
+                          >
+                        </td>
+                        <td class="text-end">
+                          <button
+                            type="button"
+                            class="btn btn-sm"
+                            class:btn-outline-primary={item.visible}
+                            class:btn-ghost-secondary={!item.visible}
+                            onclick={() => handleToggleContextVisible(item.id)}
+                          >
+                            {#if item.visible}
+                              <IconEye size={14} class="me-1" /> Visible
+                            {:else}
+                              <IconEyeOff size={14} class="me-1" /> Hidden
+                            {/if}
+                          </button>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
           <h2 class="pane-title">Metadata Providers & API Credentials</h2>

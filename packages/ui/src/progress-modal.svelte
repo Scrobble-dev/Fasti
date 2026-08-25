@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import type { MediaRecord, WatchStatus } from "./types.js";
   import { IconX, IconCheck, IconPlayerPlay } from "@tabler/icons-svelte";
 
@@ -15,6 +16,7 @@
 
   let { record, onClose, onSaveProgress }: Props = $props();
 
+  let modalCardRef: HTMLDivElement | null = $state(null);
   let episodeVal = $state(0);
   let totalEps = $derived(record.totalEpisodes ?? 1);
   let progressSec = $state(0);
@@ -35,6 +37,19 @@
       ? Math.min(100, Math.round((progressSec / totalSec) * 100))
       : Math.min(100, Math.round((episodeVal / totalEps) * 100)),
   );
+
+  function handleKeyDown(e: KeyboardEvent): void {
+    if (e.key === "Escape") {
+      onClose();
+    }
+  }
+
+  onMount(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  });
 
   function handleSave(): void {
     const finalStatus: WatchStatus =
@@ -228,8 +243,9 @@
   }
 
   .step-btn {
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
@@ -237,11 +253,14 @@
     font-size: 1.2rem;
     font-weight: bold;
     cursor: pointer;
+    display: grid;
+    place-items: center;
   }
 
   .num-input {
-    width: 80px;
-    height: 38px;
+    width: 84px;
+    height: 44px;
+    min-height: 44px;
     text-align: center;
     font-family: var(--fasti-font-mono);
     font-size: 1.1rem;
@@ -253,8 +272,9 @@
   }
 
   .max-btn {
-    height: 38px;
-    padding: 0 12px;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 14px;
     border-radius: 4px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -299,8 +319,9 @@
   }
 
   .select-input {
-    height: 38px;
-    padding: 6px 12px;
+    height: 44px;
+    min-height: 44px;
+    padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
@@ -319,7 +340,8 @@
   }
 
   .btn-cancel {
-    padding: 8px 16px;
+    min-height: 44px;
+    padding: 8px 18px;
     background: transparent;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -329,10 +351,11 @@
   }
 
   .btn-save {
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 18px;
+    padding: 8px 20px;
     background: var(--fasti-action-primary);
     color: white;
     border: none;

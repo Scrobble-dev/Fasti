@@ -102,8 +102,38 @@ textarea {
   color: var(--fasti-action-primary);
   transform: translateY(-160%);
   transition: transform 120ms ease;
+  font-weight: 600;
+  border-radius: var(--tblr-border-radius, 4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .skip-link:focus {
   transform: translateY(0);
+}
+
+/* WCAG 2.4.7 Visible Focus Indicator (3px High Contrast Focus Ring + 2px Offset) */
+:focus-visible {
+  outline: 3px solid var(--fasti-action-primary) !important;
+  outline-offset: 2px !important;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--fasti-action-primary) !important;
+  outline-offset: 2px !important;
+}
+
+/* WCAG 2.2.2 / 2.3.3 Reduced Motion Media Query */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

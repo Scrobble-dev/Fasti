@@ -186,12 +186,53 @@ export interface ThemeSettings {
 }
 
 export type ActiveNavSection =
-  | "chronicle"
+  | "home"
   | "discover"
-  | "library"
-  | "up_next"
+  | "tv_shows"
+  | "tv_seasons"
+  | "movies"
+  | "anime"
+  | "manga"
+  | "games"
+  | "books"
+  | "comics"
+  | "board_games"
+  | "music"
+  | "podcasts"
   | "calendar"
+  | "collection"
+  | "custom"
+  | "history"
+  | "lists"
+  | "statistics"
+  | "tags"
   | "reconciliation"
+  | "sources"
   | "connections"
   | "settings"
-  | "detail";
+  | "detail"
+  | "chronicle"
+  | "library";
+
+export interface NavItemConfig {
+  id: ActiveNavSection;
+  label: string;
+  category: "primary" | "media" | "library" | "utilities";
+  visible: boolean;
+  pinned: boolean;
+  order: number;
+}
+
+export interface ContextMenuItemConfig {
+  id: string;
+  label: string;
+  visible: boolean;
+  order: number;
+}
+
+export interface WorkbenchPreferences {
+  sidebarCollapsed: boolean;
+  sidebarHidden: boolean;
+  navItems: NavItemConfig[];
+  contextMenuItems: ContextMenuItemConfig[];
+}

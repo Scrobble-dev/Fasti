@@ -105,6 +105,8 @@ mod tests {
     use tower::ServiceExt;
     use utoipa::openapi::OpenApiVersion;
 
+    // Note: SqliteKernel::open requires a locked Linux data root via fasti_store::LockedDataRoot.
+    // On non-Linux targets, LockedDataRoot::acquire returns StoreOpenError::UnsupportedPlatform.
     #[cfg(target_os = "linux")]
     fn test_kernel() -> (tempfile::TempDir, Arc<fasti_store::SqliteKernel>) {
         let root = tempfile::tempdir().expect("temporary data root");
