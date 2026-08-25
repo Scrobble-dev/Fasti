@@ -12,7 +12,8 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 ## Implemented review controls
 
-- Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value.
+- Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value. Automatic collision recovery stays on the requested loopback address. It never moves a public or wildcard listener.
+- Client and public origins reject credentials, paths, queries, and fragments. Non-loopback origins require HTTPS and platform certificate validation.
 - The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.

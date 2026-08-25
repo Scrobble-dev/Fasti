@@ -100,7 +100,7 @@ xtask                deterministic generation and fail-closed verification
 
 Player, replication, connector, provider-keyed projection, desktop, and placeholder catalogue packages are not active workspace boundaries. The browser harness is evidence tooling over the generated `system.health` SDK binding; it does not activate a product presentation boundary or later capability. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
 
-Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
+Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. An occupied loopback port can recover to an OS-assigned port; public and wildcard listeners fail closed. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately. See [network configuration](docs/network-configuration.md) for custom domains, `.internal`, system CA trust, public URLs, loopback aliases, Docker, Podman, and collision behavior.
 
 ## Contract gates
 
@@ -154,11 +154,12 @@ The scoped launcher provides the same health-only native path and an optional Po
 ```bash
 FASTI_PORT=19420 ./scripts/dev.sh
 FASTI_PORT=19420 ./scripts/dev.sh --podman
+FASTI_PORT=19420 ./scripts/dev.sh --docker
 ./scripts/dev.sh --status
 ./scripts/dev.sh --stop
 ```
 
-`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. The Podman path uses the documented `fasti:b0` image, a 192 MiB memory ceiling, and no additional swap; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
+`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. `FASTI_PUBLIC_URL` records a separate reverse-proxy origin and can omit the port when HTTPS uses port 443. `FASTI_PORT_FALLBACK=auto|fail` controls safe loopback collision recovery. Container mode uses the documented `fasti:b0` image, a 192 MiB memory ceiling, and no additional swap; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
 
 With `fastid` still running on its default port, the local browser QA harness uses that same health contract:
 

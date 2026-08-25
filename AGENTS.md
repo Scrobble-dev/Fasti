@@ -105,6 +105,11 @@ cargo fetch --manifest-path benchmarks/b1/tauri-shell/src-tauri/Cargo.toml --loc
 
 Without the second fetch the gate fails with a misleading `swift-rs` version-resolution error.
 
+Listener, public URL, loopback alias, container port, and certificate-trust
+ownership is documented in [`docs/network-configuration.md`](docs/network-configuration.md).
+Do not merge the bind address, client URL, and public reverse-proxy URL into one
+setting.
+
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
