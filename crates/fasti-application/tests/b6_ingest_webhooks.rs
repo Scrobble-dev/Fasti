@@ -441,3 +441,115 @@ fn plex_completed_rewatch_at_the_same_terminal_offset_on_a_different_day_is_a_di
         "the completed rewatch must commit as its own observation"
     );
 }
+
+#[test]
+fn plex_completed_rewatch_at_the_same_terminal_offset_the_same_day_is_a_distinct_commit() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    // Two completed watches on the same calendar day, both ending at the
+    // same terminal offset: a day-level discriminator alone would collide
+    // these. The full observed_at instant must not.
+    let base = PlexWebhookPayload {
+        event: "media.scrobble".to_owned(),
+        user: true,
+        owner: true,
+        account: Some(PlexAccount {
+            id: 101,
+            title: "alice".to_owned(),
+        }),
+        metadata: Some(PlexMetadata {
+            rating_key: "plex-same-day-rewatch".to_owned(),
+            media_type: "movie".to_owned(),
+            title: "Spirited Away".to_owned(),
+            grandparent_title: None,
+            parent_index: None,
+            index: None,
+            year: Some(2001),
+            duration: Some(7500000),
+            view_offset: Some(7500000),
+            guid: None,
+            guids: vec![],
+        }),
+    };
+    let first_watch = base.clone();
+    let second_watch = base;
+
+    let first_cmd = first_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"))
+        .expect("generates valid command");
+    let second_cmd = second_watch
+        .to_observation_command(access, sample_observed_at("2026-08-25T22:00:00Z"))
+        .expect("generates valid command");
+
+    assert_ne!(
+        first_cmd.operation_id(),
+        second_cmd.operation_id(),
+        "two same-day completed occurrences at the same terminal offset must not collide"
+    );
+
+    let outcome1 = fixture.authorize_and_accept(first_cmd).expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(second_cmd).expect("accepts");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Committed(_)),
+        "the second same-day occurrence must commit as its own observation"
+    );
+}
+
+#[test]
+fn plex_webhook_redelivered_with_the_same_observed_at_replays_rather_than_duplicating() {
+    let fixture = B1ConformanceFixture::new();
+    let enrollment = enroll(&fixture);
+    let access = *enrollment.access();
+
+    // A genuine redelivery of the exact same webhook: identical payload,
+    // and the caller supplies the same observed_at both times (the
+    // documented contract for what "retry" means for this adapter).
+    let payload = PlexWebhookPayload {
+        event: "media.scrobble".to_owned(),
+        user: true,
+        owner: true,
+        account: Some(PlexAccount {
+            id: 101,
+            title: "alice".to_owned(),
+        }),
+        metadata: Some(PlexMetadata {
+            rating_key: "plex-redelivery".to_owned(),
+            media_type: "movie".to_owned(),
+            title: "Spirited Away".to_owned(),
+            grandparent_title: None,
+            parent_index: None,
+            index: None,
+            year: Some(2001),
+            duration: Some(7500000),
+            view_offset: Some(7500000),
+            guid: None,
+            guids: vec![],
+        }),
+    };
+
+    let first_attempt = payload
+        .to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"))
+        .expect("generates valid command");
+    let redelivery = payload
+        .to_observation_command(access, sample_observed_at("2026-08-25T10:00:00Z"))
+        .expect("generates valid command");
+
+    assert_eq!(
+        first_attempt.operation_id(),
+        redelivery.operation_id(),
+        "a redelivery with the same observed_at must derive the same operation id"
+    );
+
+    let outcome1 = fixture
+        .authorize_and_accept(first_attempt)
+        .expect("accepts");
+    assert!(matches!(outcome1, AcceptObservationOutcome::Committed(_)));
+    let outcome2 = fixture.authorize_and_accept(redelivery).expect("replays");
+    assert!(
+        matches!(outcome2, AcceptObservationOutcome::Replayed(_)),
+        "the redelivery must replay the first attempt's receipt, not duplicate it"
+    );
+}

@@ -126,15 +126,16 @@ impl PlexWebhookPayload {
         let account_id = self.account.as_ref()?.id;
         // view_offset distinguishes mid-playback occurrences, but a completed
         // rewatch repeats the same terminal offset as the first watch (both
-        // end near the item's full duration). observed_at's calendar day adds
-        // a discriminator two completions of the same item essentially never
-        // share unless they happen on the same day, while staying stable
-        // across a same-request retry, which arrives seconds later, not on a
-        // different day.
+        // end near the item's full duration). Plex's webhook body carries no
+        // other per-occurrence signal, so the caller-supplied observed_at is
+        // the only remaining discriminator: it MUST be a stable value
+        // (e.g. request receipt time) reused verbatim if this exact webhook
+        // delivery is retried, and a fresh value for a genuinely new event,
+        // for retry-collapse and rewatch-distinction to both hold.
         let view_offset = metadata.view_offset.unwrap_or(0);
-        let day = observed_at.claim().date();
+        let occurred_at = observed_at.claim().original();
         let lexeme = format!(
-            "plex:account:{account_id}:key:{}:event:{}:offset:{view_offset}:day:{day}",
+            "plex:account:{account_id}:key:{}:event:{}:offset:{view_offset}:at:{occurred_at}",
             metadata.rating_key, self.event
         );
         let op_id = derive_ingest_operation_id(&lexeme);
@@ -243,14 +244,16 @@ impl JellyfinWebhookPayload {
         let user_str = self.user_id.as_deref()?;
         // playback_position_ticks distinguishes mid-playback occurrences, but a
         // completed rewatch repeats the same terminal tick count as the first
-        // watch. observed_at's calendar day adds a discriminator two
-        // completions of the same item essentially never share unless they
-        // happen on the same day, while staying stable across a same-request
-        // retry, which arrives seconds later, not on a different day.
+        // watch. Jellyfin's webhook body carries no other per-occurrence
+        // signal, so the caller-supplied observed_at is the only remaining
+        // discriminator: it MUST be a stable value (e.g. request receipt
+        // time) reused verbatim if this exact webhook delivery is retried,
+        // and a fresh value for a genuinely new event, for retry-collapse
+        // and rewatch-distinction to both hold.
         let position = self.playback_position_ticks.unwrap_or(0);
-        let day = observed_at.claim().date();
+        let occurred_at = observed_at.claim().original();
         let lexeme = format!(
-            "jellyfin:user:{user_str}:item:{}:event:{}:position:{position}:day:{day}",
+            "jellyfin:user:{user_str}:item:{}:event:{}:position:{position}:at:{occurred_at}",
             self.item_id, self.notification_type
         );
         let op_id = derive_ingest_operation_id(&lexeme);
@@ -302,15 +305,16 @@ impl MprisMediaEvent {
         // intermediate progress tick and every rewatch of a track collapses
         // into the first-ever event for that track_id/completed pair. A
         // completed replay still repeats the same terminal position as the
-        // first listen, so observed_at's calendar day adds a discriminator
-        // two completions of the same track essentially never share unless
-        // they happen on the same day, while staying stable across a
-        // same-request retry, which arrives seconds later, not on a
-        // different day.
+        // first listen and MPRIS carries no other per-occurrence signal, so
+        // the caller-supplied observed_at is the only remaining
+        // discriminator: it MUST be a stable value (e.g. request receipt
+        // time) reused verbatim if this exact event is retried, and a fresh
+        // value for a genuinely new event, for retry-collapse and
+        // rewatch-distinction to both hold.
         let position = self.position_micros.unwrap_or(0);
-        let day = observed_at.claim().date();
+        let occurred_at = observed_at.claim().original();
         let lexeme = format!(
-            "mpris:player:{}:track:{}:completed:{}:position:{position}:day:{day}",
+            "mpris:player:{}:track:{}:completed:{}:position:{position}:at:{occurred_at}",
             self.player_identity, self.track_id, self.is_completed
         );
         let op_id = derive_ingest_operation_id(&lexeme);
