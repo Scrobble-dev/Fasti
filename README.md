@@ -133,6 +133,8 @@ The B1 performance gate retains the exact measured release daemon, raw idle obse
 
 ## Development
 
+See [docs/dev-loop.md](docs/dev-loop.md) for the day-to-day dev loop (`bash scripts/dev.sh`), how to QA it, and how Docker/Podman fit in.
+
 There is no supported installation yet. The shortest contributor path runs the production daemon's one truthful capability. With the Rust toolchain and dependencies available:
 
 ```bash
