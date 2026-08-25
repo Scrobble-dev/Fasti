@@ -62,6 +62,32 @@ export interface FastiClientOptions {
   readonly fetch?: typeof globalThis.fetch;
 }
 
+export type ConnectionValueSource = "default" | "saved" | "environment" | "build";
+
+export type ConnectionTrust = "http" | "https";
+
+export interface ConnectionEndpoint {
+  readonly url: string;
+  readonly source: ConnectionValueSource;
+  readonly managed: boolean;
+  readonly trust: ConnectionTrust;
+  readonly loopbackAliases: readonly string[];
+}
+
+export function connectionEndpoint(
+  value: string,
+  source: ConnectionValueSource = "saved",
+): ConnectionEndpoint {
+  const url = normalizeBaseUrl(value);
+  return Object.freeze({
+    url: url.origin,
+    source,
+    managed: source === "environment" || source === "build",
+    trust: url.protocol === "https:" ? "https" : "http",
+    loopbackAliases: loopbackAliases(url),
+  });
+}
+
 export interface CallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -699,7 +725,7 @@ function unexpectedProblemOnlySuccess(_value: unknown): never {
   );
 }
 
-function normalizeBaseUrl(value: string): URL {
+export function normalizeBaseUrl(value: string): URL {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new TypeError("baseUrl must use http or https");
@@ -716,6 +742,19 @@ function normalizeBaseUrl(value: string): URL {
     );
   }
   return url;
+}
+
+function loopbackAliases(url: URL): readonly string[] {
+  const hostname = url.hostname.toLowerCase();
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]") {
+    return Object.freeze([]);
+  }
+  const port = url.port === "" ? "" : `:${url.port}`;
+  return Object.freeze([
+    `${url.protocol}//localhost${port}`,
+    `${url.protocol}//127.0.0.1${port}`,
+    `${url.protocol}//[::1]${port}`,
+  ]);
 }
 
 function normalizeRetryPolicy(
