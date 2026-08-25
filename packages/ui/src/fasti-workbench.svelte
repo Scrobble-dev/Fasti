@@ -374,7 +374,7 @@
 </script>
 
 <div
-  class="workbench-root page theme-{themeSettings.mode} density-{themeSettings.density}"
+  class="fasti-workbench-layout theme-{themeSettings.mode} density-{themeSettings.density}"
 >
   <NavSidebar
     {activeSection}
@@ -382,7 +382,7 @@
     onSelectSection={handleSelectSection}
   />
 
-  <div class="viewport-canvas page-wrapper">
+  <main class="viewport-canvas" id="main-content">
     {#if activeSection === "chronicle"}
       <ChronicleView
         occurrences={chronicle}
@@ -451,20 +451,25 @@
         onSaveApprise={handleSaveApprise}
       />
     {/if}
-  </div>
+  </main>
 </div>
 
 <style>
-  .workbench-root {
-    display: flex;
-    min-height: 100vh;
+  .fasti-workbench-layout {
+    display: flex !important;
+    flex-direction: row !important;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
     background-color: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
   }
 
   .viewport-canvas {
     flex: 1;
+    height: 100vh;
     overflow-y: auto;
-    max-height: 100vh;
+    background-color: var(--fasti-surface-archive);
+    box-sizing: border-box;
   }
 </style>

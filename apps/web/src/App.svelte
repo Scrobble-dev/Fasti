@@ -18,12 +18,14 @@
   let isTauri = $state(false);
 
   function applyStatus(status: SetupStatus): void {
+    console.info("[Fasti UI] Host status:", status);
     viewState = status.phase;
     cleanupPending = status.proof_cleanup_pending;
     problem = undefined;
   }
 
   function applyProblem(error: unknown): void {
+    console.warn("[Fasti UI] Host inspection problem:", error);
     // If not in Tauri, default gracefully to web workbench
     if (!("__TAURI_INTERNALS__" in window)) {
       viewState = "ready";
@@ -50,10 +52,12 @@
         const { invoke } = await import("@tauri-apps/api/core");
         applyStatus(await invoke<SetupStatus>("setup_status"));
       } catch (error) {
+        console.error("[Fasti UI] Tauri setup_status failed:", error);
         applyProblem(error);
       }
     } else {
       // Standalone web mode - ready
+      console.info("[Fasti UI] Running in standalone web mode.");
       viewState = "ready";
     }
   }
@@ -63,6 +67,7 @@
       const { invoke } = await import("@tauri-apps/api/core");
       applyStatus(await invoke<SetupStatus>("complete_setup"));
     } catch (error) {
+      console.error("[Fasti UI] Tauri complete_setup failed:", error);
       applyProblem(error);
     }
   }
