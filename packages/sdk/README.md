@@ -13,13 +13,13 @@ pnpm install --frozen-lockfile
 pnpm --filter @fasti/sdk build
 ```
 
-Start the health-only production daemon from the repository root:
+Start the production daemon in health-only mode from the repository root:
 
 ```bash
 cargo run --locked -p fastid
 ```
 
-In another terminal, call the only production API currently mounted:
+In another terminal, call the health route:
 
 ```bash
 node --input-type=module <<'EOF'
@@ -38,6 +38,12 @@ Expected output:
 
 Stop the daemon with `Ctrl-C`. This health call does not prove any B1 fixture route or B2 runtime behavior.
 
+## Durable local setup
+
+Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry.
+
+The initialization proof and bearer credential exist only in JSON bodies. A trusted local host shell must store them in permission-restricted credential storage. Do not print them or put them in URLs, command arguments, logs, `localStorage`, or `sessionStorage`. Other B2 routes remain absent from production.
+
 ## Exercise the B1 contract
 
 The focused client test builds and starts the loopback-only Rust fixture on an ephemeral port, executes the generated SDK against it, and stops it:
@@ -47,7 +53,7 @@ pnpm --filter @fasti/sdk build
 node --test tests/js/sdk-client.test.mjs
 ```
 
-Fixture successes always declare `fixture_only` availability and `none` durability. The production `fastid` process does not mount those routes. Run the full governed gate before treating a contract change as complete:
+Fixture successes always declare `fixture_only` availability and `none` durability. Production mounts only health and the separate durable setup operations. Run the full governed gate before treating a contract change as complete:
 
 ```bash
 cargo xtask contract verify --locked

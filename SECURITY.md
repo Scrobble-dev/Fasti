@@ -23,9 +23,9 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Credential authentication binds the selected profile, client, grant, credential epoch, and workspace. Ambiguous active grants, ungranted profiles, revoked state, and cross-workspace grants fail closed.
 - Evidence upload authorizes before temporary-file creation, enforces concurrent and byte budgets, hashes while streaming, rechecks authorization before durable promotion, and verifies existing content before deduplication.
 - Operation receipts bind workspace, client, operation, capability, and semantic digest. Replay and receipt streams remain profile/client scoped and bounded.
-- B2-only bootstrap, authentication, integrity, storage, cursor, evidence, identity, and review failures are accepted by the internal kernel policy but remain absent from finalized B1 public contract output.
+- Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 
-These controls make the development baseline and B2 review implementation safer; they do not mount B2 in production or make Fasti a supported service.
+These controls make the development baseline and B2 review implementation safer. Production mounts only the durable loopback setup slice when `FASTI_DATA_ROOT` is explicit. This does not make Fasti a supported service.
 
 ## Current threat model
 
