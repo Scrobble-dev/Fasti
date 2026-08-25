@@ -210,4 +210,6 @@ done < <(
   grep -RHnE '^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*' .github/workflows
 )
 
+bash scripts/dev.sh --self-test
+
 echo "PASS: active repository surfaces match the B0/B1 capability boundaries"

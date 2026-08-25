@@ -28,7 +28,7 @@ If you forgot to sign off a commit on a branch:
 ```bash
 git commit --amend --no-edit -s
 # Or for multiple commits:
-git rebase --signoff origin/release
+git rebase --signoff origin/dev
 ```
 
 ### Full DCO 1.1 Text
@@ -171,7 +171,7 @@ Signed-off-by: Jane Developer <jane@example.com>
    ```bash
    git push origin feat/my-new-feature
    ```
-3. Open a Pull Request against `release` unless the linked Discussion names a different integration branch. Repository automation does not publish a release from the pull request.
+3. Open a pull request against `dev`. The `release` branch is reserved for release-candidate stabilization. Repository automation does not publish a release from the pull request.
 4. Complete the provided [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md), documenting:
    * The problem being solved.
    * Behavioral & data-model impact.

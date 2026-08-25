@@ -128,6 +128,15 @@ setting, or desktop surface.
 
 Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision. Font choices, colors, spacing, and aesthetic direction are defined there. Do not deviate without explicit approval.
 
+Use the smallest applicable component in this order:
+
+1. upstream Tabler;
+2. Tabler with Fasti tokens;
+3. composed Tabler components;
+4. custom Svelte only when Tabler has no equivalent, with a recorded reason.
+
+Do not use generic SaaS card walls, decorative gradients or glows, or continuous decorative motion. User-facing UI must meet the applicable WCAG 2.2 Level AA and EN 301 549 requirements. Automated accessibility scans supplement manual keyboard and target-platform assistive-technology checks; they do not prove conformance.
+
 In QA mode, flag any code that does not match `brand/DESIGN.md`.
 
 ## Skill routing
@@ -164,3 +173,5 @@ Document:
 - accessibility impact;
 - tests;
 - rollback.
+
+All active development pull requests target `dev`. The `release` branch is reserved for release-candidate stabilization. Before B8, repository workflows must use strictly read-only permissions.
