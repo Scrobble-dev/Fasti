@@ -13,10 +13,10 @@
   --fasti-action-primary: #066fd1;
   --fasti-state-verified: #2fb344;
   --fasti-state-attention: #f59f00;
-  --fasti-font-display: "Newsreader", Georgia, serif;
+  --fasti-font-display: "Newsreader", "Georgia", serif;
   --fasti-font-body:
-    "Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, sans-serif;
+    "Atkinson Hyperlegible", -apple-system, "BlinkMacSystemFont", "Segoe UI",
+    "Roboto", sans-serif;
   --fasti-font-mono: "IBM Plex Mono", "Menlo", monospace;
   --fasti-touch-target-min: 44px;
 

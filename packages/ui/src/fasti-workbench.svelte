@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type {
     ActiveNavSection,
+    MediaKind,
     MediaRecord,
     WatchStatus,
     ChronicleOccurrence,
@@ -36,9 +37,6 @@
   import TablerThemeDrawer from "./tabler-theme-drawer.svelte";
   import {
     IconSearch,
-    IconLayoutGrid,
-    IconList,
-    IconFilter,
     IconMoon,
     IconSun,
     IconCircleCheck,
@@ -63,7 +61,6 @@
   let themeDrawerOpen = $state(false);
   let searchQuery = $state("");
   let mediaScope = $state("all");
-  let viewMode: "grid" | "list" = $state("grid");
   let nodeHealthy = $state<boolean | null>(null);
 
   const selectedRecord = $derived(
@@ -99,6 +96,18 @@
       list = records.filter((r) => r.mediaKind === "music");
     } else if (activeSection === "collection") {
       list = records.filter((r) => !!r.collectionName);
+    }
+
+    if (mediaScope !== "all") {
+      const scopeKinds: Record<string, MediaKind> = {
+        shows: "show",
+        movies: "movie",
+        anime: "anime",
+        games: "game",
+        books: "book",
+      };
+      const kind = scopeKinds[mediaScope];
+      list = kind ? list.filter((record) => record.mediaKind === kind) : [];
     }
 
     if (searchQuery.trim().length > 0) {
@@ -194,6 +203,9 @@
     } else if (pathname === "/media/shows") {
       activeSection = "tv_shows";
       selectedRecordId = null;
+    } else if (pathname === "/media/seasons") {
+      activeSection = "tv_seasons";
+      selectedRecordId = null;
     } else if (pathname === "/media/movies") {
       activeSection = "movies";
       selectedRecordId = null;
@@ -205,6 +217,9 @@
       selectedRecordId = null;
     } else if (pathname === "/media/games") {
       activeSection = "games";
+      selectedRecordId = null;
+    } else if (pathname === "/media/board-games") {
+      activeSection = "board_games";
       selectedRecordId = null;
     } else if (pathname === "/media/books") {
       activeSection = "books";
@@ -223,6 +238,9 @@
       selectedRecordId = null;
     } else if (pathname === "/collection") {
       activeSection = "collection";
+      selectedRecordId = null;
+    } else if (pathname === "/custom") {
+      activeSection = "custom";
       selectedRecordId = null;
     } else if (pathname === "/history" || pathname === "/chronicle") {
       activeSection = "history";
@@ -289,7 +307,9 @@
       isDark ? "dark" : "light",
     );
     document.documentElement.setAttribute("data-fasti-mode", mode);
-    document.body.className = `theme-${mode} layout-fluid`;
+    document.body.classList.add("layout-fluid");
+    document.body.classList.remove("theme-light", "theme-dark", "theme-night");
+    document.body.classList.add(`theme-${mode}`);
 
     const accent = themeSettings.accentColor || "#066fd1";
     document.documentElement.style.setProperty("--tblr-primary", accent);
@@ -319,7 +339,9 @@
   async function checkNodeHealth(): Promise<void> {
     if (typeof fetch === "undefined") return;
     try {
-      const res = await fetch("/api/v1/health");
+      const res = await fetch("/api/v1/health", {
+        signal: AbortSignal.timeout(3000),
+      });
       nodeHealthy = res.ok;
     } catch {
       nodeHealthy = false;
@@ -328,9 +350,13 @@
 
   onMount(() => {
     syncFromUrl();
-    checkNodeHealth();
+    void checkNodeHealth();
+    const healthInterval = window.setInterval(() => {
+      void checkNodeHealth();
+    }, 30_000);
     window.addEventListener("popstate", syncFromUrl);
     return () => {
+      window.clearInterval(healthInterval);
       window.removeEventListener("popstate", syncFromUrl);
     };
   });
@@ -557,49 +583,6 @@
           <option value="books">Books</option>
         </select>
 
-        <!-- Grid / List Toggle -->
-        <div
-          class="view-toggle-group"
-          role="radiogroup"
-          aria-label="View layout mode"
-        >
-          <button
-            type="button"
-            class="view-mode-btn"
-            class:active={viewMode === "grid"}
-            onclick={() => (viewMode = "grid")}
-            role="radio"
-            aria-checked={viewMode === "grid"}
-            title="Grid view"
-            aria-label="Grid view"
-          >
-            <IconLayoutGrid size={17} />
-          </button>
-          <button
-            type="button"
-            class="view-mode-btn"
-            class:active={viewMode === "list"}
-            onclick={() => (viewMode = "list")}
-            role="radio"
-            aria-checked={viewMode === "list"}
-            title="List view"
-            aria-label="List view"
-          >
-            <IconList size={17} />
-          </button>
-        </div>
-
-        <!-- Filter Button -->
-        <button
-          type="button"
-          class="tool-btn"
-          title="Open filters"
-          aria-label="Filter records"
-        >
-          <IconFilter size={17} />
-          <span>Filter</span>
-        </button>
-
         <!-- Theme Settings Drawer Trigger -->
         <button
           type="button"
@@ -671,6 +654,7 @@
       {:else if activeSection === "discover"}
         <DiscoverView
           trendingRecords={SAMPLE_DISCOVER_TRENDING}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
           onUpdateStatus={handleUpdateStatus}
           onUpdateProgress={handleUpdateProgress}
@@ -763,6 +747,18 @@
     overflow: hidden;
   }
 
+  .density-compact {
+    font-size: 14px;
+  }
+
+  .density-normal {
+    font-size: 16px;
+  }
+
+  .density-spacious {
+    font-size: 18px;
+  }
+
   .top-nav-bar {
     display: flex;
     align-items: center;
@@ -825,32 +821,6 @@
     color: var(--fasti-text-primary);
     font-size: 0.86rem;
     font-weight: 500;
-  }
-
-  .view-toggle-group {
-    display: flex;
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: var(--tblr-border-radius, 4px);
-    overflow: hidden;
-  }
-
-  .view-mode-btn {
-    min-width: 38px;
-    min-height: 38px;
-    background: var(--fasti-surface-archive);
-    border: none;
-    padding: 6px 10px;
-    color: var(--fasti-text-muted);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .view-mode-btn.active {
-    background: var(--fasti-action-primary);
-    color: #ffffff;
   }
 
   .tool-btn {

@@ -158,6 +158,15 @@
           <button
             type="button"
             class="btn btn-icon btn-sm btn-ghost-secondary"
+            onclick={onToggleHide}
+            title="Hide sidebar"
+            aria-label="Hide sidebar"
+          >
+            <IconEyeOff size={16} />
+          </button>
+          <button
+            type="button"
+            class="btn btn-icon btn-sm btn-ghost-secondary"
             onclick={onToggleCollapse}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}

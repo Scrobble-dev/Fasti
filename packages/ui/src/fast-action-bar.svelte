@@ -48,6 +48,7 @@
     }}
     title={isWatched ? "Marked as completed / seen" : "Mark as seen"}
     aria-label="Toggle watched"
+    aria-pressed={isWatched}
   >
     {#if isWatched}
       <IconEyeCheck size={16} stroke={2.5} class="icon-watched" />
@@ -67,6 +68,7 @@
     }}
     title={isWatchlist ? "In your watchlist" : "Add to watchlist"}
     aria-label="Toggle watchlist"
+    aria-pressed={isWatchlist}
   >
     {#if isWatchlist}
       <IconBookmarkFilled size={16} class="icon-bookmark-active" />

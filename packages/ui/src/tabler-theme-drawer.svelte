@@ -4,7 +4,7 @@
   import {
     IconSun,
     IconMoon,
-    IconDeviceDesktop,
+    IconMoonStars,
     IconX,
     IconDeviceFloppy,
     IconRotate2,
@@ -67,6 +67,8 @@
       fontFamily: "sans-serif",
       themeBase: "slate",
       cornerRadius: 1,
+      density: "normal",
+      fontSize: "md",
     });
   }
 </script>
@@ -117,8 +119,8 @@
             class:active={themeSettings.mode === "night"}
             onclick={() => onUpdateTheme({ mode: "night" })}
           >
-            <IconDeviceDesktop size={18} />
-            <span>System</span>
+            <IconMoonStars size={18} />
+            <span>Night</span>
           </button>
         </div>
       </section>

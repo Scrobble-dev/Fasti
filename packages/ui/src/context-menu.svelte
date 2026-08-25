@@ -20,10 +20,57 @@
   let { x, y, items, onClose }: Props = $props();
 
   let menuRef: HTMLDivElement | null = $state(null);
+  let position = $state({ x: 0, y: 0 });
+
+  function menuButtons(): HTMLButtonElement[] {
+    return menuRef
+      ? Array.from(
+          menuRef.querySelectorAll<HTMLButtonElement>("[role=menuitem]"),
+        )
+      : [];
+  }
 
   function handleKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       onClose();
+      return;
+    }
+
+    const buttons = menuButtons();
+    if (buttons.length === 0) return;
+    const current = buttons.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    let next = current;
+    if (e.key === "ArrowDown") next = (current + 1) % buttons.length;
+    else if (e.key === "ArrowUp")
+      next = (current - 1 + buttons.length) % buttons.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = buttons.length - 1;
+    else return;
+
+    e.preventDefault();
+    buttons[next]?.focus();
+  }
+
+  function clampToViewport(): void {
+    if (!menuRef) return;
+    const rect = menuRef.getBoundingClientRect();
+    const inset = 8;
+    position = {
+      x: Math.max(inset, Math.min(x, window.innerWidth - rect.width - inset)),
+      y: Math.max(inset, Math.min(y, window.innerHeight - rect.height - inset)),
+    };
+  }
+
+  function handleResize(): void {
+    clampToViewport();
+  }
+
+  function focusFirstItem(): void {
+    const first = menuButtons()[0];
+    if (first) {
+      first.focus();
     }
   }
 
@@ -34,11 +81,15 @@
   }
 
   onMount(() => {
+    clampToViewport();
+    focusFirstItem();
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("mousedown", handleWindowClick);
+    window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleWindowClick);
+      window.removeEventListener("resize", handleResize);
     };
   });
 </script>
@@ -46,7 +97,7 @@
 <div
   bind:this={menuRef}
   class="dropdown-menu show shadow-lg border fasti-context-menu"
-  style="position: fixed; top: {y}px; left: {x}px; z-index: 1050; display: block;"
+  style="position: fixed; top: {position.y}px; left: {position.x}px; z-index: 1050; display: block;"
   role="menu"
   tabindex="-1"
 >

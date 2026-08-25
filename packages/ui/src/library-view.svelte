@@ -326,7 +326,7 @@
                 </div>
               {/if}
 
-              {#if rec.progressEpisodes && rec.totalEpisodes}
+              {#if rec.progressEpisodes !== undefined && rec.totalEpisodes !== undefined}
                 <div class="episode-pill">
                   {rec.progressEpisodes}/{rec.totalEpisodes} eps
                 </div>
@@ -410,7 +410,7 @@
                 {/if}
               </td>
               <td>
-                {#if rec.progressEpisodes && rec.totalEpisodes}
+                {#if rec.progressEpisodes !== undefined && rec.totalEpisodes !== undefined}
                   <span class="mono-prog"
                     >{rec.progressEpisodes}/{rec.totalEpisodes} eps</span
                   >

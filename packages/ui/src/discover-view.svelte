@@ -1,5 +1,10 @@
 <script lang="ts">
-  import type { MediaRecord, MediaKind, WatchStatus } from "./types.js";
+  import type {
+    ContextMenuItemConfig,
+    MediaRecord,
+    MediaKind,
+    WatchStatus,
+  } from "./types.js";
   import {
     IconCompass,
     IconSearch,
@@ -34,6 +39,7 @@
     ) => void;
     onSaveReview?: (recordId: string, rating: number, notes: string) => void;
     onSaveCollection?: (recordId: string, collections: string[]) => void;
+    contextMenuConfigs?: ContextMenuItemConfig[];
   }
 
   let {
@@ -43,6 +49,7 @@
     onUpdateProgress,
     onSaveReview,
     onSaveCollection,
+    contextMenuConfigs,
   }: Props = $props();
 
   let selectedCategory: MediaKind | "all" = $state("all");
@@ -113,56 +120,62 @@
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
     e.preventDefault();
+    const allItems: Record<string, ContextMenuItem> = {
+      view: {
+        id: "view",
+        label: "View Details...",
+        icon: IconPlayerPlay,
+        action: () => onSelectRecord(rec.id),
+      },
+      progress: {
+        id: "progress",
+        label: "Update Progress...",
+        icon: IconAdjustments,
+        action: () => {
+          activeModalRecord = rec;
+          showProgressModal = true;
+        },
+      },
+      review: {
+        id: "review",
+        label: "Post a Review...",
+        icon: IconMessage,
+        action: () => {
+          activeModalRecord = rec;
+          showReviewModal = true;
+        },
+      },
+      collection: {
+        id: "collection",
+        label: "Add to Collection...",
+        icon: IconFolder,
+        action: () => {
+          activeModalRecord = rec;
+          showCollectionModal = true;
+        },
+      },
+      watched: {
+        id: "watched",
+        label: rec.status === "completed" ? "Mark as unplayed" : "Mark as seen",
+        icon: IconRepeat,
+        action: () => handleToggleWatched(rec),
+      },
+      manage_ids: {
+        id: "manage_ids",
+        label: `Copy Fasti ID (${rec.id})`,
+        action: () => navigator.clipboard.writeText(rec.id),
+      },
+    };
+    const items = contextMenuConfigs?.length
+      ? [...contextMenuConfigs]
+          .filter((config) => config.visible && allItems[config.id])
+          .sort((a, b) => a.order - b.order)
+          .map((config) => allItems[config.id])
+      : Object.values(allItems);
     contextMenuState = {
       x: e.clientX,
       y: e.clientY,
-      items: [
-        {
-          id: "open",
-          label: "View Details...",
-          icon: IconPlayerPlay,
-          action: () => onSelectRecord(rec.id),
-        },
-        {
-          id: "prog",
-          label: "Update Progress...",
-          icon: IconAdjustments,
-          action: () => {
-            activeModalRecord = rec;
-            showProgressModal = true;
-          },
-        },
-        {
-          id: "review",
-          label: "Post a Review...",
-          icon: IconMessage,
-          action: () => {
-            activeModalRecord = rec;
-            showReviewModal = true;
-          },
-        },
-        {
-          id: "coll",
-          label: "Add to Collection...",
-          icon: IconFolder,
-          action: () => {
-            activeModalRecord = rec;
-            showCollectionModal = true;
-          },
-        },
-        {
-          id: "rewatch",
-          label: "Log Occurrence (Rewatch)",
-          icon: IconRepeat,
-          action: () => onUpdateStatus?.(rec.id, "completed"),
-        },
-        { id: "d1", label: "", divider: true, action: () => {} },
-        {
-          id: "copy_id",
-          label: `Copy Fasti ID (${rec.id})`,
-          action: () => navigator.clipboard.writeText(rec.id),
-        },
-      ],
+      items,
     };
   }
 </script>
@@ -185,6 +198,8 @@
         type="button"
         class="refresh-btn"
         aria-label="Refresh Recommendations"
+        disabled
+        title="Feed refresh is not available in this build"
       >
         <IconRefresh size={16} /> Refresh Feeds
       </button>
