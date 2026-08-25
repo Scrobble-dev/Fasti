@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,16 +23,10 @@ const entrypointWorkspaces = new Set([
 ]);
 const failures = [];
 
-const actualWorkspaces = ["apps", "packages"]
-  .flatMap((group) =>
-    readdirSync(join(repoRoot, group), { withFileTypes: true })
-      .filter(
-        (entry) =>
-          entry.isDirectory() &&
-          existsSync(join(repoRoot, group, entry.name, "package.json")),
-      )
-      .map((entry) => `${group}/${entry.name}`),
-  )
+const actualWorkspaces = globSync("{apps,packages}/*/package.json", {
+  cwd: repoRoot,
+})
+  .map((manifestPath) => dirname(manifestPath))
   .sort();
 
 if (
