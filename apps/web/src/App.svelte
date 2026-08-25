@@ -78,7 +78,7 @@
       );
     }
     const health = await new FastiClient({
-      baseUrl: value,
+      baseUrl: window.location.origin,
       timeoutMs: 5_000,
       retryPolicy: { maxAttempts: 1 },
     }).health();

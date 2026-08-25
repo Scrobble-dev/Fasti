@@ -4,13 +4,13 @@ This guide covers the review implementation. It is not a supported production re
 
 ## Configuration map
 
-| Setting                | Owner                           | Default                 | Purpose                                                                                    |
-| ---------------------- | ------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------ |
-| `FASTI_LISTEN`         | `fastid`                        | `127.0.0.1:8420`        | Node bind socket. Use an explicit `IP:PORT`.                                               |
-| `FASTI_API_URL`        | web, desktop, Android build     | `http://127.0.0.1:8420` | Managed client origin. Settings can save another origin when the build does not manage it. |
-| `FASTI_WEB_PORT`       | Vite                            | `5173`                  | Local web development port.                                                                |
-| `FASTI_PORT`           | Compose or Podman               | `8420`                  | Host port published to container port `8420`.                                              |
-| `GOOGLE_BOOKS_API_KEY` | trusted desktop or Android host | unset                   | Optional managed provider key. It overrides the system credential store.                   |
+| Setting                | Owner                             | Default                 | Purpose                                                                                                                |
+| ---------------------- | --------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `FASTI_LISTEN`         | `fastid`                          | `127.0.0.1:8420`        | Node bind socket. Use an explicit `IP:PORT`.                                                                           |
+| `FASTI_API_URL`        | web proxy, desktop, Android build | `http://127.0.0.1:8420` | Managed daemon origin. Browser requests use their own origin and the web proxy; native hosts use this origin directly. |
+| `FASTI_WEB_PORT`       | Vite                              | `5173`                  | Local web development port.                                                                                            |
+| `FASTI_PORT`           | Compose or Podman                 | `8420`                  | Host port published to container port `8420`.                                                                          |
+| `GOOGLE_BOOKS_API_KEY` | trusted desktop or Android host   | unset                   | Optional managed provider key. It overrides the system credential store.                                               |
 
 The node bind socket and the client origin are separate settings. Changing one does not rewrite the other.
 
