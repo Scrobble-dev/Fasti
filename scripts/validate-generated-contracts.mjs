@@ -62,7 +62,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     SwaggerParser.validate(openapi),
     SwaggerParser.validate(conformanceOpenapi),
   ]);
-  assert.deepEqual(Object.keys(openapi.paths), ["/api/v1/health"]);
+  assert.deepEqual(Object.keys(openapi.paths), [
+    "/api/v1/client-enrollments",
+    "/api/v1/health",
+    "/api/v1/node/initialization",
+  ]);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   ajv.addFormat("uint16", {
@@ -123,6 +127,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
       return `later_${capability.contract_body}`;
     }
     if (capability.id === "system.health") return "health";
+    if (["client.enroll", "node.initialize"].includes(capability.id)) {
+      return "b1_durable_bootstrap";
+    }
     if (capability.id === "observation.accept") return "b1_observation_accept";
     if (capability.id === "receipt.replay") return "b1_receipt_replay";
     if (capability.id === "receipt.stream") return "b1_receipt_stream";
@@ -192,13 +199,14 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     operationCapabilities.add(capability.id);
     assert.equal(operation["x-fasti-authorization"], capability.authorization);
     assert.deepEqual(operation["x-fasti-required-scopes"], capability.scopes);
-    assert.equal(
-      operation["x-fasti-runtime-availability"],
-      capability.lifecycle.runtime_availability,
+    assert.equal(operation["x-fasti-runtime-availability"], "fixture_only");
+    assert.ok(
+      operation["x-fasti-problem-codes"].every((code) =>
+        capability.problems.includes(code),
+      ),
     );
-    assert.deepEqual(operation["x-fasti-problem-codes"], capability.problems);
     assert.deepEqual(operation["x-fasti-example-ids"], capability.examples);
-    for (const code of capability.problems) {
+    for (const code of operation["x-fasti-problem-codes"]) {
       const canonical = problemCatalog.problems.find(
         (problem) =>
           problem.capability_id === capability.id && problem.code === code,
@@ -212,8 +220,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   const expectedFiniteCapabilities = registry.capabilities
     .filter(
       (capability) =>
-        registry.surface_profiles[capability.surface_profile].http_openapi
-          .state === "required" && capability.id !== "system.health",
+        capability.contract_body === "b1" &&
+        capability.lifecycle.contract_state === "finalized" &&
+        !["receipt.stream", "system.health"].includes(capability.id),
     )
     .map(({ id }) => id)
     .sort();
@@ -249,6 +258,24 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
       operation,
     ]),
   );
+  for (const [path, pathItem] of Object.entries(openapi.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      const capabilityId = operation["x-fasti-capability-id"];
+      if (capabilityId !== "system.health") {
+        const capability = capabilities.get(capabilityId);
+        assert.ok(capability, `production operation ${path} has no capability`);
+        assert.equal(
+          operation["x-fasti-runtime-availability"],
+          capability.lifecycle.runtime_availability,
+        );
+        assert.deepEqual(
+          operation["x-fasti-problem-codes"],
+          capability.problems,
+        );
+        httpOperations.set(capabilityId, operation);
+      }
+    }
+  }
   httpOperations.set("system.health", healthOperation);
   for (const capability of registry.capabilities.filter(
     ({ contract_body: contractBody, lifecycle }) =>
@@ -283,7 +310,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         case "json_schema":
           if (binding === "schema:health-response") {
             assert.equal(capability.id, "system.health");
-          } else if (binding.startsWith("schema:openapi-operation:")) {
+          } else if (
+            binding.startsWith("schema:openapi-operation:") ||
+            binding.startsWith("schema:production-openapi-operation:")
+          ) {
             assert.ok(httpOperations.has(capability.id));
           } else {
             assert.equal(binding, "schema:asyncapi-message:receiptCommitted");
@@ -316,7 +346,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
             binding,
             capability.id === "system.health"
               ? "package-smoke:production-health"
-              : "package-smoke:b1-conformance-fixture",
+              : ["client.enroll", "node.initialize"].includes(capability.id)
+                ? "package-smoke:production-bootstrap"
+                : "package-smoke:b1-conformance-fixture",
           );
           break;
         default:

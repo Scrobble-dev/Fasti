@@ -742,7 +742,7 @@ impl AccessAdministrationPort for SqliteKernel {
         query: AuthenticateCredentialQuery,
     ) -> ApplicationResult<RequestAccessContext> {
         let correlation_id = query.correlation_id();
-        let capability = CapabilityKey::DiscoverCapabilities;
+        let capability = query.capability();
         let digest = digest_secret(query.credential());
         let connection = self.lock_connection(capability, correlation_id)?;
         let mut statement = map_sql(
@@ -1498,6 +1498,7 @@ mod tests {
             self.kernel
                 .authenticate_credential(AuthenticateCredentialQuery::new(
                     RequestCorrelationId::new_v7(),
+                    CapabilityKey::DiscoverCapabilities,
                     credential,
                 ))
         }
@@ -2216,6 +2217,7 @@ mod tests {
             .kernel
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::DiscoverCapabilities,
                 SecretMaterial::try_from_hex(&credential_hex).expect("authenticate final secret"),
             ))
             .expect("final caller-owned credential authenticates");
@@ -2360,13 +2362,22 @@ mod tests {
 
         let authentication_proof = SecretMaterial::try_from_hex(&node.initialization_proof_hex)
             .expect("copy consumed proof for authentication");
-        assert!(node
+        let authentication_error = node
             .kernel
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::InspectReview,
                 authentication_proof,
             ))
-            .is_err());
+            .expect_err("consumed proof must not authenticate");
+        assert_eq!(
+            authentication_error.code(),
+            ProblemCode::AuthenticationFailed
+        );
+        assert_eq!(
+            authentication_error.capability(),
+            CapabilityKey::InspectReview
+        );
 
         let connection = node
             .kernel

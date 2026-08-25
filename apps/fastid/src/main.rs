@@ -1,8 +1,12 @@
 use anyhow::{Context, Result};
 use fasti_api::{api_router, health_router};
+use fasti_store::SqliteKernel;
 use std::env;
+use std::ffi::OsString;
 use std::net::SocketAddr;
-use tracing::info;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tracing::{info, warn};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8420";
 
@@ -21,23 +25,57 @@ fn uses_remote_health_surface(addr: SocketAddr) -> bool {
     !addr.ip().is_loopback()
 }
 
+fn parse_data_root(value: Option<OsString>) -> Result<Option<PathBuf>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        !value.is_empty(),
+        "FASTI_DATA_ROOT must name a directory when it is set"
+    );
+    Ok(Some(PathBuf::from(value)))
+}
+
+fn data_root() -> Result<Option<PathBuf>> {
+    parse_data_root(env::var_os("FASTI_DATA_ROOT"))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let addr = listen_addr()?;
     let remote_health_only = uses_remote_health_surface(addr);
-    let app = if remote_health_only {
-        health_router()
-    } else {
-        api_router()
-    };
-
     if remote_health_only {
         info!("Fasti health-only listener starting on http://{}", addr);
-    } else {
-        info!("Fasti local listener starting on http://{}", addr);
     }
+
+    let configured_data_root = if remote_health_only {
+        None
+    } else {
+        data_root()?
+    };
+    let app = match configured_data_root {
+        Some(data_root) => {
+            let kernel = Arc::new(
+                SqliteKernel::open(&data_root)
+                    .with_context(|| format!("failed to open Fasti data root {data_root:?}"))?,
+            );
+            info!(
+                "Fasti durable local listener starting on http://{} with data root {:?}",
+                addr, data_root
+            );
+            api_router(kernel)
+        }
+        None => {
+            if !remote_health_only {
+                warn!(
+                    "Fasti local capability routes are disabled because FASTI_DATA_ROOT is not set"
+                );
+            }
+            health_router()
+        }
+    };
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -82,5 +120,15 @@ mod tests {
     fn rejects_a_bare_port() {
         let error = parse_listen_addr("8420").expect_err("bare ports are ambiguous");
         assert!(error.to_string().contains("IP:PORT"));
+    }
+
+    #[test]
+    fn data_root_is_explicit_and_never_defaults_to_the_working_directory() {
+        assert_eq!(parse_data_root(None).expect("absent data root"), None);
+        assert!(parse_data_root(Some(OsString::new())).is_err());
+        assert_eq!(
+            parse_data_root(Some(OsString::from("/tmp/fasti-data"))).expect("data root"),
+            Some(PathBuf::from("/tmp/fasti-data"))
+        );
     }
 }

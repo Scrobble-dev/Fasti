@@ -59,6 +59,41 @@ surface_profiles:
       { state: required, binding: "package-smoke:b1-conformance-fixture" }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
+  b1_durable_bootstrap:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Bootstrap is a finite local operation and has no event stream.,
+      }
+    cli:
+      {
+        state: not_applicable,
+        reason: One-time secret delivery uses the loopback API and generated SDK.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Node bootstrap is operational state rather than linked-data domain state.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      { state: required, binding: "package-smoke:production-bootstrap" }
+    ui:
+      {
+        state: not_applicable,
+        reason: The local host shell owns one-time secret setup and storage.,
+      }
+
   b1_observation_accept:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -272,9 +307,9 @@ capabilities:
       {
         introduced_in: b1,
         contract_state: finalized,
-        runtime_availability: fixture_only,
+        runtime_availability: implemented,
       }
-    surface_profile: b1_http_fixture
+    surface_profile: b1_durable_bootstrap
     scopes: []
     problems:
       [
@@ -283,6 +318,9 @@ capabilities:
         payload_too_large,
         unsupported_media_type,
         validation_failed,
+        already_initialized,
+        integrity_failed,
+        storage_unavailable,
       ]
     examples: [node.initialize.validation_failed]
     uat: []
@@ -297,9 +335,9 @@ capabilities:
       {
         introduced_in: b1,
         contract_state: finalized,
-        runtime_availability: fixture_only,
+        runtime_availability: implemented,
       }
-    surface_profile: b1_http_fixture
+    surface_profile: b1_durable_bootstrap
     scopes: [client_enroll]
     problems:
       [
@@ -308,6 +346,9 @@ capabilities:
         payload_too_large,
         unsupported_media_type,
         validation_failed,
+        bootstrap_closed,
+        integrity_failed,
+        storage_unavailable,
       ]
     examples: [client.enroll.forbidden]
     uat: []

@@ -6,14 +6,18 @@ resource: https://fasti.scrobble.dev/ns/knowledge/v1/problems
 tags: [fasti, b1, contracts, problems]
 status: draft
 identifiers:
+  - already_initialized
+  - bootstrap_closed
   - capacity_exceeded
   - capability_unavailable
   - forbidden
   - idempotency_conflict
+  - integrity_failed
   - invalid_observation
   - malformed_json
   - payload_too_large
   - receipt_not_found
+  - storage_unavailable
   - unsupported_media_type
   - validation_failed
 sources:
@@ -30,18 +34,22 @@ The shared RFC 9457 representation carries a capability ID, safe state,
 retryability, ordered next actions, and a correlation ID. Individual codes do
 not claim a later-body failure path is executable.
 
-| Code                     | Contract meaning                                                 |
-| ------------------------ | ---------------------------------------------------------------- |
-| `capacity_exceeded`      | A bounded application resource rejected work without mutation.   |
-| `capability_unavailable` | The requested capability is owned by another runtime body.       |
-| `forbidden`              | The request context is not authorized for the capability.        |
-| `idempotency_conflict`   | An operation identifier was reused with different semantics.     |
-| `invalid_observation`    | An observation violates the governed input contract.             |
-| `malformed_json`         | The request body is not well-formed JSON; no mutation occurred.  |
-| `payload_too_large`      | The request exceeded its documented bounded body limit.          |
-| `receipt_not_found`      | No visible receipt matches the requested identifier and context. |
-| `unsupported_media_type` | The request did not use the required JSON media type.            |
-| `validation_failed`      | One or more public fields fail contract validation.              |
+| Code                     | Contract meaning                                                     |
+| ------------------------ | -------------------------------------------------------------------- |
+| `already_initialized`    | One-time durable node initialization already completed.              |
+| `bootstrap_closed`       | The enrollment proof is invalid, expired, or already consumed.       |
+| `capacity_exceeded`      | A bounded application resource rejected work without mutation.       |
+| `capability_unavailable` | The requested capability is owned by another runtime body.           |
+| `forbidden`              | The request context is not authorized for the capability.            |
+| `idempotency_conflict`   | An operation identifier was reused with different semantics.         |
+| `integrity_failed`       | Durable local state failed a recorded integrity invariant.           |
+| `invalid_observation`    | An observation violates the governed input contract.                 |
+| `malformed_json`         | The request body is not well-formed JSON; no mutation occurred.      |
+| `payload_too_large`      | The request exceeded its documented bounded body limit.              |
+| `receipt_not_found`      | No visible receipt matches the requested identifier and context.     |
+| `storage_unavailable`    | The local durability boundary is temporarily unavailable.            |
+| `unsupported_media_type` | The request did not use the required JSON media type.                |
+| `validation_failed`      | One or more public fields fail contract validation.                  |
 
 See [capabilities](capabilities.md) for which codes each capability declares and
 [lifecycle](lifecycle.md) before treating a declared problem as a production

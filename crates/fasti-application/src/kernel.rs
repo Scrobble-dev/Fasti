@@ -178,22 +178,29 @@ impl EnrollFirstClientOutcome {
 
 pub struct AuthenticateCredentialQuery {
     correlation_id: fasti_domain::RequestCorrelationId,
+    capability: crate::CapabilityKey,
     credential: SecretMaterial,
 }
 
 impl AuthenticateCredentialQuery {
     pub const fn new(
         correlation_id: fasti_domain::RequestCorrelationId,
+        capability: crate::CapabilityKey,
         credential: SecretMaterial,
     ) -> Self {
         Self {
             correlation_id,
+            capability,
             credential,
         }
     }
 
     pub const fn correlation_id(&self) -> fasti_domain::RequestCorrelationId {
         self.correlation_id
+    }
+
+    pub const fn capability(&self) -> crate::CapabilityKey {
+        self.capability
     }
 
     pub const fn credential(&self) -> &SecretMaterial {
@@ -1081,5 +1088,16 @@ mod tests {
         let secret = SecretMaterial::try_from_hex(&value).expect("valid secret");
         assert_eq!(secret.expose_hex(), value);
         assert!(SecretMaterial::try_from_hex(&"AB".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn authentication_query_retains_the_requested_capability() {
+        let query = AuthenticateCredentialQuery::new(
+            fasti_domain::RequestCorrelationId::new_v7(),
+            crate::CapabilityKey::InspectReview,
+            SecretMaterial::from_bytes([7_u8; 32]),
+        );
+
+        assert_eq!(query.capability(), crate::CapabilityKey::InspectReview);
     }
 }
