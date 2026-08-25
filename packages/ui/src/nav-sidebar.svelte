@@ -383,6 +383,7 @@
 
 <style>
   .fasti-sidebar-vertical {
+    position: static !important;
     width: 240px;
     background: var(--fasti-surface-paper);
     border-right: 1px solid
