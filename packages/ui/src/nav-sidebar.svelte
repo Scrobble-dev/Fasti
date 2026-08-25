@@ -115,55 +115,57 @@
       <div
         class="brand-header-row d-flex align-items-center justify-content-between mb-3 px-2"
       >
-        <button
-          type="button"
-          class="btn p-0 border-0 bg-transparent text-reset d-flex align-items-center gap-2 brand-button"
-          onclick={() => onSelectSection("home")}
-          aria-label="Fasti Home"
-        >
-          <svg
-            class="brand-mark text-danger"
-            viewBox="0 0 32 32"
-            width="24"
-            height="24"
-            aria-hidden="true"
+        {#if !collapsed}
+          <button
+            type="button"
+            class="btn p-0 border-0 bg-transparent text-reset d-flex align-items-center gap-2 brand-button"
+            onclick={() => onSelectSection("home")}
+            aria-label="Fasti Home"
           >
-            <rect
-              x="4"
-              y="4"
-              width="4"
+            <svg
+              class="brand-mark text-danger"
+              viewBox="0 0 32 32"
+              width="24"
               height="24"
-              fill="currentColor"
-              opacity="0.4"
-            />
-            <rect
-              x="12"
-              y="4"
-              width="4"
-              height="24"
-              fill="currentColor"
-              opacity="0.7"
-            />
-            <rect x="20" y="4" width="4" height="24" fill="currentColor" />
-            <rect x="28" y="4" width="4" height="24" fill="currentColor" />
-          </svg>
-          {#if !collapsed}
+              aria-hidden="true"
+            >
+              <rect
+                x="4"
+                y="4"
+                width="4"
+                height="24"
+                fill="currentColor"
+                opacity="0.4"
+              />
+              <rect
+                x="12"
+                y="4"
+                width="4"
+                height="24"
+                fill="currentColor"
+                opacity="0.7"
+              />
+              <rect x="20" y="4" width="4" height="24" fill="currentColor" />
+              <rect x="28" y="4" width="4" height="24" fill="currentColor" />
+            </svg>
             <span class="navbar-brand-title fw-bold fs-3 tracking-tight"
               >Fasti</span
             >
-          {/if}
-        </button>
+          </button>
+        {/if}
 
         <div class="d-flex align-items-center gap-1">
-          <button
-            type="button"
-            class="btn btn-icon btn-sm btn-ghost-secondary"
-            onclick={onToggleHide}
-            title="Hide sidebar"
-            aria-label="Hide sidebar"
-          >
-            <IconEyeOff size={16} />
-          </button>
+          {#if !collapsed}
+            <button
+              type="button"
+              class="btn btn-icon btn-sm btn-ghost-secondary"
+              onclick={onToggleHide}
+              title="Hide sidebar"
+              aria-label="Hide sidebar"
+            >
+              <IconEyeOff size={16} />
+            </button>
+          {/if}
           <button
             type="button"
             class="btn btn-icon btn-sm btn-ghost-secondary"
