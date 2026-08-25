@@ -9,8 +9,11 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+// The canonical SemVer 2.0.0 grammar (see semver.org's own suggested
+// regex): rejects leading zeros in numeric identifiers and separates
+// build metadata, which CHANGELOG headings never include.
 const SEMVER_TAG_PATTERN =
-  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+  /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 // Fixed pattern, never built from input -- avoids constructing any RegExp
 // from tag/version data at all, not just escaping it.
 const HEADING_PATTERN = /^##\s*\[([^\]]+)\][^\n]*\n/gm;
@@ -21,7 +24,7 @@ export function extractReleaseNotes(changelog, tag) {
       `tag must be a semantic version like "v1.2.3", got: ${JSON.stringify(tag)}`,
     );
   }
-  const version = tag.replace(/^v/, "");
+  const version = tag.replace(/^v/, "").replace(/\+.*$/, "");
   const headings = [...changelog.matchAll(HEADING_PATTERN)];
   const index = headings.findIndex((heading) => heading[1] === version);
   if (index === -1) {
