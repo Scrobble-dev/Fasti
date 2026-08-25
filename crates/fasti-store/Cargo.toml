@@ -24,4 +24,5 @@ thiserror = { workspace = true }
 zstd = { workspace = true }
 
 [dev-dependencies]
+rustix = { workspace = true, features = ["process"] }
 tempfile = "3.27.0"

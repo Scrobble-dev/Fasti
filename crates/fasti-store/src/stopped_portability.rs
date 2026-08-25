@@ -1,11 +1,14 @@
 //! Stopped-daemon portability adapter owning only a configured data-root path.
 
-use crate::online_archive::{export_stopped_node_workspace_archive, online_receipt};
+use crate::online_archive::{
+    abort_destination_problem, export_stopped_node_workspace_archive,
+    online_receipt_with_destination_state,
+};
 use crate::recovery_coordinator::{complete_recovery_bootstrap, prepare_recovery_bootstrap};
 use crate::restore_coordinator::restore_clean_workspace;
 use fasti_application::{
-    CapabilityKey, CompleteRecoveryBootstrapOutcome, CompleteRecoveryBootstrapRequest,
-    ExportWorkspaceRequest, FastiProblem, PortabilityResult, PrepareRecoveryBootstrapOutcome,
+    CompleteRecoveryBootstrapOutcome, CompleteRecoveryBootstrapRequest, ExportWorkspaceRequest,
+    FastiProblem, PortabilityResult, PrepareRecoveryBootstrapOutcome,
     PrepareRecoveryBootstrapRequest, ReadSeek, RecoveryBootstrapPort, RestoreWorkspaceOutcome,
     RestoreWorkspaceRequest, StoppedNodeExportRequest, WorkspaceArchiveDestination,
     WorkspaceArchiveExportOutcome, WorkspaceArchiveExportPort, WorkspaceRestorePort,
@@ -32,15 +35,14 @@ impl WorkspaceArchiveExportPort for StoppedNodePortabilityAdapter {
         destination: Box<dyn WorkspaceArchiveDestination>,
     ) -> PortabilityResult<WorkspaceArchiveExportOutcome> {
         let correlation_id = request.query().correlation_id();
-        let problem = if destination.abort().is_ok() {
-            Box::new(FastiProblem::stopped_node_export_required(correlation_id))
-        } else {
-            Box::new(FastiProblem::storage_unavailable(
-                CapabilityKey::ExportWorkspace,
-                correlation_id,
-            ))
-        };
-        Err(online_receipt(&request, problem))
+        let (problem, state) = abort_destination_problem(
+            destination,
+            Box::new(FastiProblem::stopped_node_export_required(correlation_id)),
+            correlation_id,
+        );
+        Err(online_receipt_with_destination_state(
+            &request, problem, state,
+        ))
     }
 
     fn export_stopped_node_workspace_archive(
@@ -83,11 +85,13 @@ mod tests {
     use super::*;
     use fasti_application::{
         CancellationSignal, ExportWorkspaceQuery, PortabilityLimits, RequestAccessContext,
+        RestoreWorkspaceRequest,
     };
     use fasti_domain::{
-        ClientId, CredentialId, ProfileGrantId, ProfileId, RequestCorrelationId, WorkspaceId,
+        ClientId, CredentialId, ProfileGrantId, ProfileId, RequestCorrelationId, RestoreAttemptId,
+        WorkspaceId,
     };
-    use std::io::{self, Write};
+    use std::io::{self, Read, Seek, SeekFrom, Write};
     use std::num::NonZeroU64;
     use std::sync::{Arc, Mutex};
 
@@ -98,6 +102,20 @@ mod tests {
     }
 
     struct Destination(Arc<Mutex<DestinationState>>);
+
+    struct UnreadableArchive;
+
+    impl Read for UnreadableArchive {
+        fn read(&mut self, _bytes: &mut [u8]) -> io::Result<usize> {
+            panic!("archive must not be read before the data-root lock is acquired")
+        }
+    }
+
+    impl Seek for UnreadableArchive {
+        fn seek(&mut self, _position: SeekFrom) -> io::Result<u64> {
+            panic!("archive must not be sought before the data-root lock is acquired")
+        }
+    }
 
     impl Write for Destination {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -119,7 +137,7 @@ mod tests {
             self: Box<Self>,
             _archive_digest: &fasti_domain::Sha256Digest,
             _manifest_digest: &fasti_domain::Sha256Digest,
-        ) -> io::Result<()> {
+        ) -> Result<(), fasti_application::WorkspaceArchiveCompletionError> {
             Ok(())
         }
 
@@ -195,5 +213,36 @@ mod tests {
         let state = state.lock().expect("destination");
         assert!(state.aborted);
         assert_eq!(state.bytes, 0);
+    }
+
+    #[test]
+    fn stopped_adapter_restore_refuses_a_live_data_root_before_archive_input() {
+        let node = crate::test_support::TestNode::new();
+        let adapter = StoppedNodePortabilityAdapter::new(node.kernel.data_root());
+        let attempt_id = RestoreAttemptId::new_v7();
+        let correlation_id = RequestCorrelationId::new_v7();
+        let failure = WorkspaceRestorePort::restore_workspace(
+            &adapter,
+            RestoreWorkspaceRequest::new(
+                attempt_id,
+                correlation_id,
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(UnreadableArchive),
+        )
+        .expect_err("live kernel lock must exclude stopped-node restore");
+
+        assert_eq!(
+            failure.problem().code(),
+            fasti_application::ProblemCode::DataRootLocked
+        );
+        assert_eq!(
+            failure.operation(),
+            fasti_application::PortabilityFailureOperation::CleanRestore {
+                correlation_id,
+                restore_attempt_id: attempt_id,
+            }
+        );
     }
 }

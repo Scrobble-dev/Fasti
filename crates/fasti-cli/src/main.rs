@@ -60,7 +60,7 @@ fn unavailable(command: &str, capability: CapabilityKey) -> CliFailure {
         format!(
             "{command} is not available in the current runtime; it is owned by {body}. No data was changed and no success receipt was emitted."
         ),
-        format!("Wait for the {body} implementation gate before retrying {command}."),
+        format!("Wait for {body} public activation in this runtime before retrying {command}."),
     )
 }
 

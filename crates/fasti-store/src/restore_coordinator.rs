@@ -5,7 +5,10 @@ use crate::kernel::LockedDataRoot;
 use crate::portability::map_offline_open_error;
 use crate::restore::RestorePreflightError;
 use crate::restore_activation::{require_clean_restore_target, RestoreActivationError};
-use crate::restore_import::{stage_workspace_archive_pass_two, RestoreImportError};
+use crate::restore_import::{
+    preflight_restore_source, reject_interrupted_restore,
+    stage_preflighted_workspace_archive_pass_two, RestoreImportError,
+};
 use fasti_application::{
     CapabilityKey, FastiProblem, PortabilityFailureReceipt, PortabilityResult, ReadSeek,
     RestoreWorkspaceOutcome, RestoreWorkspaceRequest,
@@ -32,15 +35,27 @@ pub(crate) fn restore_clean_workspace(
                 correlation_id,
             ))
         })?;
-        require_clean_restore_target(root)
-            .map_err(|error| activation_problem(error, correlation_id))?;
-        let staged = stage_workspace_archive_pass_two(
+        let preflight =
+            preflight_restore_source(archive.as_mut(), request.limits(), request.cancellation())
+                .map_err(|error| import_problem(error, correlation_id))?;
+        match require_clean_restore_target(root) {
+            Ok(()) => {}
+            Err(RestoreActivationError::IncompleteStaging) => {
+                reject_interrupted_restore(root, request.limits().max_entries.get())
+                    .map_err(|error| import_problem(error, correlation_id))?;
+                require_clean_restore_target(root)
+                    .map_err(|error| activation_problem(error, correlation_id))?;
+            }
+            Err(error) => return Err(activation_problem(error, correlation_id)),
+        }
+        let staged = stage_preflighted_workspace_archive_pass_two(
             &locked,
             archive.as_mut(),
             request.restore_attempt_id(),
             correlation_id,
             request.limits(),
             request.cancellation(),
+            preflight,
         )
         .map_err(|error| import_problem(error, correlation_id))?;
         let marker = staged

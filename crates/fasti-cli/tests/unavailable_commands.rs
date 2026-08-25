@@ -23,6 +23,7 @@ fn assert_unavailable(output: Output, command: &str, capability_id: &str) {
     assert!(stderr.contains(&format!("capability_id={capability_id}")));
     assert!(stderr.contains("No data was changed"));
     assert!(stderr.contains("no success receipt was emitted"));
+    assert!(stderr.contains("public activation in this runtime"));
 }
 
 #[test]

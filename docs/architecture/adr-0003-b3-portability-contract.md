@@ -131,15 +131,18 @@ removes its partial destination before it returns mode-neutral
 removes staging before it returns `operation_canceled`. Cancellation cannot
 return a partial success.
 
-Portability ports return a typed failure receipt outside the partial archive
-destination. Every receipt constructor takes its concrete request, validates
-the problem capability, correlation ID, and operation-specific problem set,
-then derives identity from that request. Online and stopped-node export retain
-mode, workspace, and correlation. Clean restore retains correlation and restore
-attempt. Recovery prepare also retains workspace and the explicit selected
-profile; completion additionally retains the concrete recovery client. The
-adapter discards incomplete bytes before it returns an export or restore
-receipt.
+Portability ports return a typed failure receipt after the destination leaves
+the caller's control. Every receipt constructor takes its concrete request,
+validates the problem capability, correlation ID, and operation-specific
+problem set, then derives identity from that request. Online and stopped-node
+export retain mode, workspace, and correlation. Clean restore retains
+correlation and restore attempt. Recovery prepare also retains workspace and
+the explicit selected profile; completion additionally retains the concrete
+recovery client. The adapter discards incomplete bytes before it returns an
+export or restore receipt when cleanup succeeds. Export receipts distinguish
+successful discard, indeterminate partial cleanup, and the fail-closed case
+where a complete archive was linked but parent-directory durability could not
+be confirmed.
 
 Stopped-node export is a distinct request mode. It carries the same
 `ExportWorkspaceQuery` and `RequestAccessContext` as online export, derives the
@@ -174,11 +177,15 @@ failure remove the phased staging attempt and synchronize its parent.
 The private Linux activation composition writes create-new `received`,
 `staging`, `verified`, and `activating` sentinels, then moves one canonical
 digest-bound marker with the verified staging directory by no-replace rename.
-It writes `complete` only after the data-root parent sync. The staged owner is
-consumed and disarmed at activation, so its cleanup cannot remove the renamed
-`current`. Startup refuses non-empty pre-rename `staging`, completes the one
-valid post-rename/pre-complete crash state, and opens SQLite through the retained
-data-root descriptor rather than the replaceable configured path.
+It publishes `complete` through a synchronized pending file and no-replace
+rename after the data-root parent sync, then synchronizes `current` and the data
+root before success. The staged owner is consumed and disarmed at activation,
+so its cleanup cannot remove the renamed `current`. Startup refuses non-empty
+pre-rename `staging`. A new stopped-node restore validates its incoming archive,
+then rejects and removes exactly one interrupted attempt before retrying. Startup
+completes the one valid post-rename/pre-complete crash state and opens SQLite
+through the retained data-root descriptor rather than the replaceable configured
+path.
 
 Private recovery composition verifies the full COMPLETE marker before and
 after opening the activated database, then calls the prepare or completion
@@ -223,7 +230,16 @@ modes reauthorize at bounded disclosure points and once more after final flush,
 open evidence from the locked data-root descriptor on Linux, validate the same
 opened inode while copying, and keep the destination under an abort guard until
 consuming completion succeeds. The orchestration seams remain crate-private
-behind the two ownership-specific store port implementations.
+behind the two ownership-specific store port implementations. The production
+Linux filesystem destination keeps its bounded partial archive in an unnamed
+owner-only `O_TMPFILE`, verifies the complete archive digest, links it to the
+caller-selected final name without replacement, and synchronizes the retained
+parent directory. A process crash before linking leaves no named partial; a
+crash after linking exposes only the complete digest-verified archive. A
+post-link directory-sync failure does not attempt a check-then-unlink rollback:
+the failure receipt reports indeterminate publication durability so the caller
+can inspect the selected path without risking deletion of a concurrent
+replacement.
 
 ## Consequences
 
@@ -259,9 +275,23 @@ pair, and never persists plaintext secrets. Pass-two regressions exercise a
 reachable fixture across all 16 frozen streams plus one evidence blob, verify
 zero node-local authorization state and no activation marker, and reject typed,
 ordering, cross-workspace, and missing-reference mutations while removing the
-failed attempt. The existing lock regression proves offline verify returns
-`data_root_locked`. The governed contract verifier must show that the public
-registry and generated public artifacts remain unchanged.
+failed attempt. A real subprocess matrix sends `SIGKILL` at every restore phase,
+including rejection, database/blob sync, marker publication, activation rename,
+and completion sync boundaries. It proves lock release, no pre-rename `current`,
+validated retry after interrupted staging, digest-proven post-rename recovery,
+and fail-closed partial completion. Recovery tests prove the source credential
+is not restored, the new caller-owned credential authenticates, and the
+recovered workspace verifies. Lock regressions prove
+stopped-node restore and offline verify return `data_root_locked` while a live
+kernel owns the data root. Run the focused crash gate with:
+
+```bash
+cargo test -p fasti-store archive::tests::filesystem_destination_sigkill_matrix --locked -- --exact
+cargo test -p fasti-store restore_import::tests::full_restore_sigkill_matrix --locked -- --exact
+```
+
+The governed contract verifier must show that the public registry and generated
+public artifacts remain unchanged.
 
 ## Related records
 

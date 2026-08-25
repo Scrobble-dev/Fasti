@@ -6,9 +6,9 @@
 //! bootstrap, or implement an application port.
 
 use crate::archive::{
-    create_staging_attempt, open_new_file_beneath, open_or_create_private_directory,
-    open_private_directory, sync_open_handle, visit_archive_entries, ArchiveEntryReader,
-    ArchiveError, ArchiveLimits,
+    create_staging_attempt, open_existing_file_beneath, open_new_file_beneath,
+    open_or_create_private_directory, open_private_directory, sync_open_handle,
+    visit_archive_entries, ArchiveEntryReader, ArchiveError, ArchiveLimits,
 };
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
 use crate::kernel::{timestamp, LockedDataRoot};
@@ -20,7 +20,8 @@ use crate::restore::{
     VerifiedArchivePreflight,
 };
 use crate::restore_activation::{
-    activate_verified_restore, recover_current_activation, verify_complete_restore,
+    activate_verified_restore, crash_test_point, discard_pending_restore_phase,
+    recover_current_activation, require_restore_phase, verify_complete_restore,
     write_restore_phase, RestoreActivationError, RestoreActivationMarker,
     RESTORE_STAGING_DIRECTORY, RESTORE_STATE_FILES,
 };
@@ -306,6 +307,7 @@ impl Drop for StagedWorkspaceImport {
 /// This is deliberately private and has no `RestoreWorkspacePort`
 /// implementation. The returned attempt contains no COMPLETE marker and is
 /// never renamed into `current` by this slice.
+#[cfg(test)]
 pub(crate) fn stage_workspace_archive_pass_two(
     data_root: &LockedDataRoot,
     source: &mut dyn ReadSeek,
@@ -314,6 +316,23 @@ pub(crate) fn stage_workspace_archive_pass_two(
     limits: PortabilityLimits,
     cancellation: &CancellationSignal,
 ) -> Result<StagedWorkspaceImport, RestoreImportError> {
+    let preflight = preflight_restore_source(source, limits, cancellation)?;
+    stage_preflighted_workspace_archive_pass_two(
+        data_root,
+        source,
+        restore_attempt_id,
+        correlation_id,
+        limits,
+        cancellation,
+        preflight,
+    )
+}
+
+pub(crate) fn preflight_restore_source(
+    source: &mut dyn ReadSeek,
+    limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
+) -> Result<VerifiedArchivePreflight, RestoreImportError> {
     check_cancellation(cancellation)?;
     let mut guarded_source = CancellableSource {
         source,
@@ -325,6 +344,23 @@ pub(crate) fn stage_workspace_archive_pass_two(
         Err(error) => return Err(error.into()),
     };
     check_cancellation(cancellation)?;
+    Ok(preflight)
+}
+
+pub(crate) fn stage_preflighted_workspace_archive_pass_two(
+    data_root: &LockedDataRoot,
+    source: &mut dyn ReadSeek,
+    restore_attempt_id: RestoreAttemptId,
+    correlation_id: RequestCorrelationId,
+    limits: PortabilityLimits,
+    cancellation: &CancellationSignal,
+    preflight: VerifiedArchivePreflight,
+) -> Result<StagedWorkspaceImport, RestoreImportError> {
+    check_cancellation(cancellation)?;
+    let mut guarded_source = CancellableSource {
+        source,
+        cancellation,
+    };
     let root = data_root
         .anchored_directory()
         .ok_or(RestoreImportError::UnsupportedPlatform)?;
@@ -452,6 +488,7 @@ fn import_verified_pass_two(
         cancellation,
     );
     pass_two?;
+    crash_test_point("import", "rows_written");
 
     verify_imported_database(
         &transaction,
@@ -461,10 +498,13 @@ fn import_verified_pass_two(
         limits,
         cancellation,
     )?;
+    crash_test_point("import", "verified");
     transaction.commit().map_err(RestoreImportError::Sqlite)?;
+    crash_test_point("import", "transaction_committed");
     connection
         .close()
         .map_err(|(_, error)| RestoreImportError::Sqlite(error))?;
+    crash_test_point("import", "connection_closed");
 
     if database_file
         .metadata()
@@ -476,10 +516,15 @@ fn import_verified_pass_two(
     }
 
     sync_open_handle(&database_file).map_err(RestoreImportError::Sync)?;
+    crash_test_point("import", "database_synced");
     sync_open_handle(&sha256).map_err(RestoreImportError::Sync)?;
+    crash_test_point("import", "sha256_synced");
     sync_open_handle(&payloads).map_err(RestoreImportError::Sync)?;
+    crash_test_point("import", "payloads_synced");
     sync_open_handle(&staged.attempt).map_err(RestoreImportError::Sync)?;
+    crash_test_point("import", "attempt_synced");
     sync_open_handle(&staged.staging).map_err(RestoreImportError::Sync)?;
+    crash_test_point("import", "staging_synced");
     Ok(())
 }
 
@@ -1867,6 +1912,138 @@ fn verify_database_identity(_attempt: &File, _created: &File) -> Result<(), Rest
 }
 
 #[cfg(target_os = "linux")]
+pub(crate) fn reject_interrupted_restore(
+    data_root: &File,
+    max_entries: u64,
+) -> Result<(), RestoreImportError> {
+    let staging = open_private_directory(data_root, RESTORE_STAGING_DIRECTORY)?;
+    let attempt_name = only_child_name(&staging)?;
+    attempt_name
+        .parse::<RestoreAttemptId>()
+        .map_err(|_| RestoreImportError::DomainInvariant)?;
+    let attempt = open_private_directory(&staging, &attempt_name)?;
+
+    discard_pending_restore_phase(&attempt, RestoreStatus::Complete)?;
+    discard_pending_restore_phase(&attempt, RestoreStatus::Rejected)?;
+    match require_restore_phase(&attempt, RestoreStatus::Rejected) {
+        Ok(()) => {}
+        Err(RestoreActivationError::Archive(ArchiveError::Io(error)))
+            if error.kind() == io::ErrorKind::NotFound =>
+        {
+            write_restore_phase(&attempt, RestoreStatus::Rejected)?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+
+    cleanup_interrupted_blobs(&attempt, max_entries)?;
+    cleanup_attempt(&staging, &attempt, &attempt_name, &[], &BTreeSet::new())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn reject_interrupted_restore(
+    _data_root: &File,
+    _max_entries: u64,
+) -> Result<(), RestoreImportError> {
+    Err(RestoreImportError::UnsupportedPlatform)
+}
+
+#[cfg(target_os = "linux")]
+fn cleanup_interrupted_blobs(attempt: &File, max_entries: u64) -> Result<(), RestoreImportError> {
+    let Some(payloads) = open_optional_cleanup_directory(attempt, "payloads")? else {
+        return Ok(());
+    };
+    let Some(sha256) = open_optional_cleanup_directory(&payloads, "sha256")? else {
+        return Ok(());
+    };
+    let mut digest_count = 0_u64;
+    let mut prefix_count = 0_u16;
+    for entry in descriptor_read_dir(&sha256)? {
+        prefix_count = prefix_count
+            .checked_add(1)
+            .filter(|count| *count <= 256)
+            .ok_or(RestoreImportError::DomainInvariant)?;
+        let prefix_name = child_name(entry)?;
+        if prefix_name.len() != 2
+            || !prefix_name
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(RestoreImportError::DomainInvariant);
+        }
+        let prefix = open_private_directory(&sha256, &prefix_name)?;
+        for entry in descriptor_read_dir(&prefix)? {
+            digest_count = digest_count
+                .checked_add(1)
+                .filter(|count| *count <= max_entries)
+                .ok_or(RestoreImportError::DomainInvariant)?;
+            let digest = child_name(entry)?;
+            if digest.len() != 64
+                || !digest.starts_with(&prefix_name)
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(RestoreImportError::DomainInvariant);
+            }
+            open_existing_file_beneath(&prefix, Path::new(&digest))?;
+            rustix::fs::unlinkat(&prefix, digest, rustix::fs::AtFlags::empty()).map_err(
+                |error| {
+                    RestoreImportError::Archive(ArchiveError::Io(io::Error::from_raw_os_error(
+                        error.raw_os_error(),
+                    )))
+                },
+            )?;
+        }
+        rustix::fs::unlinkat(&sha256, prefix_name, rustix::fs::AtFlags::REMOVEDIR).map_err(
+            |error| {
+                RestoreImportError::Archive(ArchiveError::Io(io::Error::from_raw_os_error(
+                    error.raw_os_error(),
+                )))
+            },
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn descriptor_read_dir(directory: &File) -> Result<std::fs::ReadDir, RestoreImportError> {
+    let path = format!("/proc/self/fd/{}", directory.as_raw_fd());
+    std::fs::read_dir(path).map_err(|error| RestoreImportError::Archive(ArchiveError::Io(error)))
+}
+
+#[cfg(target_os = "linux")]
+fn child_name(entry: io::Result<std::fs::DirEntry>) -> Result<String, RestoreImportError> {
+    entry
+        .map_err(|error| RestoreImportError::Archive(ArchiveError::Io(error)))?
+        .file_name()
+        .into_string()
+        .map_err(|_| RestoreImportError::DomainInvariant)
+}
+
+#[cfg(target_os = "linux")]
+fn only_child_name(directory: &File) -> Result<String, RestoreImportError> {
+    let mut entries = descriptor_read_dir(directory)?;
+    let name = child_name(entries.next().ok_or(RestoreImportError::DomainInvariant)?)?;
+    if let Some(entry) = entries.next() {
+        child_name(entry)?;
+        return Err(RestoreImportError::DomainInvariant);
+    }
+    Ok(name)
+}
+
+#[cfg(target_os = "linux")]
+fn open_optional_cleanup_directory(
+    parent: &File,
+    name: &str,
+) -> Result<Option<File>, RestoreImportError> {
+    match open_private_directory(parent, name) {
+        Ok(directory) => Ok(Some(directory)),
+        Err(ArchiveError::Io(error)) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn cleanup_attempt(
     staging: &File,
     attempt: &File,
@@ -1971,20 +2148,29 @@ mod tests {
     use crate::kernel::scope_storage_key;
     use crate::online_archive::export_online_workspace_archive;
     use crate::test_support::TestNode;
+    use crate::StoreOpenError;
     use fasti_application::{
-        AppendCorrectionCommand, CancellationSignal, CompleteRecoveryBootstrapRequest,
-        CorrectionPort, CorrectionTarget, CreateRecordCommand, ExportWorkspaceQuery,
-        ExportWorkspaceRequest, IdentityPort, ObservationAcceptancePort,
-        PrepareRecoveryBootstrapRequest, RecoveryBootstrapPort, RegisterNamespaceDefinitionCommand,
-        ResolveReviewCommand, RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget,
-        ScopeKey, SecretMaterial, WorkspaceArchiveDestination, WorkspaceManifest,
-        WorkspaceRestorePort, WorkspaceStreamDescriptor,
+        AccessAdministrationPort, AppendCorrectionCommand, AuthenticateCredentialQuery,
+        CancellationSignal, CompleteRecoveryBootstrapRequest, CorrectionPort, CorrectionTarget,
+        CreateRecordCommand, ExportWorkspaceQuery, ExportWorkspaceRequest, IdentityPort,
+        ObservationAcceptancePort, PrepareRecoveryBootstrapRequest, RecoveryBootstrapPort,
+        RegisterNamespaceDefinitionCommand, ResolveReviewCommand, RestoreWorkspaceRequest,
+        ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial, VerifyWorkspaceQuery,
+        WorkspaceArchiveDestination, WorkspaceManifest, WorkspaceRestorePort,
+        WorkspaceStreamDescriptor, WorkspaceVerificationPort,
     };
     use fasti_contracts::CanonicalWorkspaceManifestProjection;
     use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
     use std::io::Cursor;
     use std::num::NonZeroU64;
+    use std::os::unix::process::ExitStatusExt as _;
+    use std::process::Command;
     use std::sync::{Arc, Mutex};
+
+    const CRASH_POINT_ENV: &str = "FASTI_TEST_RESTORE_CRASH_POINT";
+    const CRASH_ROOT_ENV: &str = "FASTI_TEST_RESTORE_CRASH_ROOT";
+    const CRASH_ATTEMPT_ENV: &str = "FASTI_TEST_RESTORE_CRASH_ATTEMPT";
+    const CRASH_ARCHIVE_ENV: &str = "FASTI_TEST_RESTORE_CRASH_ARCHIVE";
 
     #[derive(Default)]
     struct DestinationState {
@@ -2019,7 +2205,7 @@ mod tests {
             self: Box<Self>,
             _archive_digest: &Sha256Digest,
             _manifest_digest: &Sha256Digest,
-        ) -> io::Result<()> {
+        ) -> Result<(), fasti_application::WorkspaceArchiveCompletionError> {
             self.0.lock().expect("destination state").completed = true;
             Ok(())
         }
@@ -2075,10 +2261,11 @@ mod tests {
         archive_revision: u64,
         evidence_digest: Sha256Digest,
         evidence_bytes: Vec<u8>,
+        source_credential_hex: String,
     }
 
     fn full_fixture() -> FullFixture {
-        let node = TestNode::new();
+        let mut node = TestNode::new();
         let first = node
             .kernel
             .create_record(CreateRecordCommand::new(
@@ -2174,6 +2361,15 @@ mod tests {
                 "corrected fixture identity",
             ))
             .expect("append fixture correction");
+        let rotated = node
+            .kernel
+            .rotate_credential(fasti_application::RotateCredentialCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("rotate source credential");
+        let source_credential_hex = rotated.credential().expose_hex();
+        node.access = *rotated.access();
         grant_export(&node);
 
         let destination = Arc::new(Mutex::new(DestinationState::default()));
@@ -2196,6 +2392,7 @@ mod tests {
             archive_revision: outcome.workspace_revision(),
             evidence_digest: evidence.digest().clone(),
             evidence_bytes,
+            source_credential_hex,
         }
     }
 
@@ -2280,6 +2477,275 @@ mod tests {
                 .exists(),
             "failed import must remove its staging attempt"
         );
+    }
+
+    #[test]
+    #[ignore = "subprocess worker invoked by full_restore_sigkill_matrix"]
+    fn full_restore_crash_worker() {
+        let (Ok(root), Ok(attempt), Ok(archive)) = (
+            std::env::var(CRASH_ROOT_ENV),
+            std::env::var(CRASH_ATTEMPT_ENV),
+            std::env::var(CRASH_ARCHIVE_ENV),
+        ) else {
+            return;
+        };
+        let adapter = crate::StoppedNodePortabilityAdapter::new(root);
+        WorkspaceRestorePort::restore_workspace(
+            &adapter,
+            RestoreWorkspaceRequest::new(
+                attempt.parse().expect("restore attempt id"),
+                RequestCorrelationId::new_v7(),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(Cursor::new(
+                std::fs::read(archive).expect("read parent-owned archive"),
+            )),
+        )
+        .expect("configured crash point must terminate before restore returns");
+        panic!("configured restore crash point was not reached");
+    }
+
+    #[test]
+    fn full_restore_sigkill_matrix() {
+        #[derive(Clone, Copy)]
+        enum ExpectedState {
+            PreRename,
+            RecoverableCurrent,
+            Complete,
+        }
+
+        let cases = [
+            ("received.created", ExpectedState::PreRename),
+            ("received.written", ExpectedState::PreRename),
+            ("received.file_synced", ExpectedState::PreRename),
+            ("received.directory_synced", ExpectedState::PreRename),
+            ("staging.created", ExpectedState::PreRename),
+            ("staging.written", ExpectedState::PreRename),
+            ("staging.file_synced", ExpectedState::PreRename),
+            ("staging.directory_synced", ExpectedState::PreRename),
+            ("import.rows_written", ExpectedState::PreRename),
+            ("import.verified", ExpectedState::PreRename),
+            ("import.transaction_committed", ExpectedState::PreRename),
+            ("import.connection_closed", ExpectedState::PreRename),
+            ("import.database_synced", ExpectedState::PreRename),
+            ("import.sha256_synced", ExpectedState::PreRename),
+            ("import.payloads_synced", ExpectedState::PreRename),
+            ("import.attempt_synced", ExpectedState::PreRename),
+            ("import.staging_synced", ExpectedState::PreRename),
+            ("verified.created", ExpectedState::PreRename),
+            ("verified.written", ExpectedState::PreRename),
+            ("verified.file_synced", ExpectedState::PreRename),
+            ("verified.directory_synced", ExpectedState::PreRename),
+            ("marker.created", ExpectedState::PreRename),
+            ("marker.written", ExpectedState::PreRename),
+            ("marker.file_synced", ExpectedState::PreRename),
+            ("marker.directory_synced", ExpectedState::PreRename),
+            ("activating.created", ExpectedState::PreRename),
+            ("activating.written", ExpectedState::PreRename),
+            ("activating.file_synced", ExpectedState::PreRename),
+            ("activating.directory_synced", ExpectedState::PreRename),
+            ("activation.attempt_synced", ExpectedState::PreRename),
+            ("activation.staging_synced", ExpectedState::PreRename),
+            ("activation.renamed", ExpectedState::RecoverableCurrent),
+            ("activation.root_synced", ExpectedState::RecoverableCurrent),
+            ("complete.created", ExpectedState::RecoverableCurrent),
+            ("complete.written", ExpectedState::RecoverableCurrent),
+            ("complete.file_synced", ExpectedState::RecoverableCurrent),
+            ("complete.renamed", ExpectedState::Complete),
+            ("complete.directory_synced", ExpectedState::Complete),
+            ("activation.complete_root_synced", ExpectedState::Complete),
+        ];
+
+        let archive_root = tempfile::tempdir().expect("parent-owned crash archive root");
+        let archive_path = archive_root.path().join("workspace.fasti");
+        std::fs::write(&archive_path, full_fixture().archive).expect("write crash archive");
+        for (point, expected) in cases {
+            let root = tempfile::tempdir().expect("crash-matrix data root");
+            let attempt = RestoreAttemptId::new_v7();
+            let output = Command::new(std::env::current_exe().expect("current test binary"))
+                .args([
+                    "--exact",
+                    "restore_import::tests::full_restore_crash_worker",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env(CRASH_POINT_ENV, point)
+                .env(CRASH_ROOT_ENV, root.path())
+                .env(CRASH_ATTEMPT_ENV, attempt.to_string())
+                .env(CRASH_ARCHIVE_ENV, &archive_path)
+                .output()
+                .expect("run restore crash worker");
+            assert_eq!(
+                output.status.signal(),
+                Some(9),
+                "{point} did not terminate with SIGKILL; status={:?}; stdout={}; stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+
+            drop(
+                LockedDataRoot::acquire(root.path())
+                    .unwrap_or_else(|error| panic!("{point} leaked the data-root lock: {error}")),
+            );
+            let staged = root
+                .path()
+                .join(RESTORE_STAGING_DIRECTORY)
+                .join(attempt.to_string());
+            let current = root.path().join("current");
+            match expected {
+                ExpectedState::PreRename => {
+                    assert!(!current.exists(), "{point} exposed current before rename");
+                    assert!(staged.exists(), "{point} lost interrupted staging");
+                    assert!(matches!(
+                        crate::SqliteKernel::open(root.path()),
+                        Err(StoreOpenError::RestoreActivation)
+                    ));
+                    let retry_attempt = RestoreAttemptId::new_v7();
+                    let adapter = crate::StoppedNodePortabilityAdapter::new(root.path());
+                    WorkspaceRestorePort::restore_workspace(
+                        &adapter,
+                        RestoreWorkspaceRequest::new(
+                            retry_attempt,
+                            RequestCorrelationId::new_v7(),
+                            limits(),
+                            CancellationSignal::new(),
+                        ),
+                        Box::new(Cursor::new(
+                            std::fs::read(&archive_path).expect("read retry archive"),
+                        )),
+                    )
+                    .unwrap_or_else(|error| panic!("{point} did not reject and retry: {error:?}"));
+                    assert!(!staged.exists(), "{point} retained rejected staging");
+                    drop(
+                        crate::SqliteKernel::open(root.path()).unwrap_or_else(|error| {
+                            panic!("{point} retry did not open complete current: {error}")
+                        }),
+                    );
+                }
+                ExpectedState::RecoverableCurrent => {
+                    assert!(current.exists(), "{point} lost renamed current");
+                    assert!(!staged.exists(), "{point} retained renamed staging");
+                    drop(
+                        crate::SqliteKernel::open(root.path()).unwrap_or_else(|error| {
+                            panic!("{point} did not recover digest-proven current: {error}")
+                        }),
+                    );
+                    assert_eq!(
+                        std::fs::read(current.join("restore.complete"))
+                            .expect("recovered COMPLETE phase"),
+                        b"complete\n"
+                    );
+                }
+                ExpectedState::Complete => {
+                    assert!(current.exists(), "{point} lost complete current");
+                    drop(
+                        crate::SqliteKernel::open(root.path()).unwrap_or_else(|error| {
+                            panic!("{point} did not open complete current: {error}")
+                        }),
+                    );
+                }
+            }
+        }
+
+        for point in [
+            "rejected.created",
+            "rejected.written",
+            "rejected.file_synced",
+            "rejected.renamed",
+            "rejected.directory_synced",
+        ] {
+            let root = tempfile::tempdir().expect("rejection crash-matrix data root");
+            let root_handle = File::open(root.path()).expect("rejection data-root handle");
+            let stale_attempt = RestoreAttemptId::new_v7();
+            let (staging, attempt) = create_staging_attempt(
+                &root_handle,
+                RESTORE_STAGING_DIRECTORY,
+                &stale_attempt.to_string(),
+            )
+            .expect("stale staging attempt");
+            write_restore_phase(&attempt, RestoreStatus::Received).expect("stale received phase");
+            drop((staging, attempt, root_handle));
+
+            let retry_attempt = RestoreAttemptId::new_v7();
+            let output = Command::new(std::env::current_exe().expect("current test binary"))
+                .args([
+                    "--exact",
+                    "restore_import::tests::full_restore_crash_worker",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env(CRASH_POINT_ENV, point)
+                .env(CRASH_ROOT_ENV, root.path())
+                .env(CRASH_ATTEMPT_ENV, retry_attempt.to_string())
+                .env(CRASH_ARCHIVE_ENV, &archive_path)
+                .output()
+                .expect("run rejection crash worker");
+            assert_eq!(
+                output.status.signal(),
+                Some(9),
+                "{point} did not terminate with SIGKILL; status={:?}; stdout={}; stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            assert!(!root.path().join("current").exists());
+
+            let adapter = crate::StoppedNodePortabilityAdapter::new(root.path());
+            WorkspaceRestorePort::restore_workspace(
+                &adapter,
+                RestoreWorkspaceRequest::new(
+                    RestoreAttemptId::new_v7(),
+                    RequestCorrelationId::new_v7(),
+                    limits(),
+                    CancellationSignal::new(),
+                ),
+                Box::new(Cursor::new(
+                    std::fs::read(&archive_path).expect("read rejection retry archive"),
+                )),
+            )
+            .unwrap_or_else(|error| panic!("{point} rejection did not recover: {error:?}"));
+            drop(
+                crate::SqliteKernel::open(root.path())
+                    .unwrap_or_else(|error| panic!("{point} retry did not open: {error}")),
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_retry_preserves_interrupted_staging() {
+        let root = tempfile::tempdir().expect("restore root");
+        let root_handle = File::open(root.path()).expect("data-root handle");
+        let stale_attempt = RestoreAttemptId::new_v7();
+        let (staging, attempt) = create_staging_attempt(
+            &root_handle,
+            RESTORE_STAGING_DIRECTORY,
+            &stale_attempt.to_string(),
+        )
+        .expect("stale staging attempt");
+        write_restore_phase(&attempt, RestoreStatus::Received).expect("stale received phase");
+        drop((staging, attempt, root_handle));
+
+        let stale_path = root
+            .path()
+            .join(RESTORE_STAGING_DIRECTORY)
+            .join(stale_attempt.to_string());
+        let adapter = crate::StoppedNodePortabilityAdapter::new(root.path());
+        assert!(WorkspaceRestorePort::restore_workspace(
+            &adapter,
+            RestoreWorkspaceRequest::new(
+                RestoreAttemptId::new_v7(),
+                RequestCorrelationId::new_v7(),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(Cursor::new(b"not a fasti archive".to_vec())),
+        )
+        .is_err());
+        assert!(stale_path.is_dir());
+        assert!(!stale_path.join("restore.rejected").exists());
+        assert!(!root.path().join("current").exists());
     }
 
     #[test]
@@ -2719,6 +3185,36 @@ mod tests {
         assert_eq!(completed.restore_attempt_id(), attempt_id);
         assert_eq!(completed.access().workspace_id(), workspace_id);
         assert_eq!(completed.access().profile_id(), profile_id);
+
+        let restored = crate::SqliteKernel::open(restore_root.path()).expect("open recovered node");
+        let rejected = restored
+            .authenticate_credential(AuthenticateCredentialQuery::new(
+                RequestCorrelationId::new_v7(),
+                SecretMaterial::try_from_hex(&fixture.source_credential_hex)
+                    .expect("copy source credential"),
+            ))
+            .expect_err("source credential must not survive restore");
+        assert_eq!(
+            rejected.code(),
+            fasti_application::ProblemCode::AuthenticationFailed
+        );
+        let recovered_access = restored
+            .authenticate_credential(AuthenticateCredentialQuery::new(
+                RequestCorrelationId::new_v7(),
+                SecretMaterial::from_bytes([7_u8; 32]),
+            ))
+            .expect("recovery credential authenticates");
+        assert_eq!(&recovered_access, completed.access());
+        let verified = restored
+            .verify_workspace(VerifyWorkspaceQuery::new(
+                RequestCorrelationId::new_v7(),
+                recovered_access,
+            ))
+            .expect("recovered workspace verifies");
+        assert_eq!(verified.workspace_id(), workspace_id);
+        assert_eq!(verified.observations_verified(), 1);
+        assert_eq!(verified.evidence_verified(), 1);
+        assert_eq!(verified.corrections_verified(), 1);
     }
 
     #[test]

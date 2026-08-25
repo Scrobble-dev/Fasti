@@ -27,6 +27,8 @@ use thiserror::Error;
 const MARKER_FORMAT_VERSION: u32 = 1;
 pub(crate) const RESTORE_STAGING_DIRECTORY: &str = "staging";
 pub(crate) const MARKER_FILE: &str = "restore.marker.json";
+const COMPLETE_PENDING_FILE: &str = "restore.complete.pending";
+const REJECTED_PENDING_FILE: &str = "restore.rejected.pending";
 pub(crate) const RESTORE_STATE_FILES: [&str; 7] = [
     "restore.received",
     "restore.staging",
@@ -180,20 +182,59 @@ fn phase(status: RestoreStatus) -> (&'static str, &'static str) {
     }
 }
 
+fn terminal_pending_file(status: RestoreStatus) -> Option<&'static str> {
+    match status {
+        RestoreStatus::Complete => Some(COMPLETE_PENDING_FILE),
+        RestoreStatus::Rejected => Some(REJECTED_PENDING_FILE),
+        _ => None,
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn crash_test_point(scope: &str, operation: &str) {
+    let expected = format!("{scope}.{operation}");
+    if std::env::var("FASTI_TEST_RESTORE_CRASH_POINT").as_deref() == Ok(expected.as_str()) {
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::KILL)
+            .expect("send SIGKILL to restore crash worker");
+    }
+}
+
+#[cfg(not(all(test, target_os = "linux")))]
+#[inline(always)]
+pub(crate) fn crash_test_point(_scope: &str, _operation: &str) {}
+
 pub(crate) fn write_restore_phase(
     attempt: &File,
     status: RestoreStatus,
 ) -> Result<(), RestoreActivationError> {
     let (name, value) = phase(status);
+    if let Some(pending) = terminal_pending_file(status) {
+        let mut file = open_new_file_beneath(attempt, Path::new(pending))?;
+        crash_test_point(value, "created");
+        file.write_all(value.as_bytes())?;
+        file.write_all(b"\n")?;
+        crash_test_point(value, "written");
+        sync_open_handle(&file)?;
+        crash_test_point(value, "file_synced");
+        activate_no_replace(attempt, pending, attempt, name)?;
+        crash_test_point(value, "renamed");
+        sync_open_handle(attempt)?;
+        crash_test_point(value, "directory_synced");
+        return Ok(());
+    }
     let mut file = open_new_file_beneath(attempt, Path::new(name))?;
+    crash_test_point(value, "created");
     file.write_all(value.as_bytes())?;
     file.write_all(b"\n")?;
+    crash_test_point(value, "written");
     sync_open_handle(&file)?;
+    crash_test_point(value, "file_synced");
     sync_open_handle(attempt)?;
+    crash_test_point(value, "directory_synced");
     Ok(())
 }
 
-fn require_restore_phase(
+pub(crate) fn require_restore_phase(
     directory: &File,
     status: RestoreStatus,
 ) -> Result<(), RestoreActivationError> {
@@ -214,9 +255,13 @@ fn write_marker(
     marker: &RestoreActivationMarker,
 ) -> Result<(), RestoreActivationError> {
     let mut file = open_new_file_beneath(attempt, Path::new(MARKER_FILE))?;
+    crash_test_point("marker", "created");
     file.write_all(&marker.canonical_bytes()?)?;
+    crash_test_point("marker", "written");
     sync_open_handle(&file)?;
+    crash_test_point("marker", "file_synced");
     sync_open_handle(attempt)?;
+    crash_test_point("marker", "directory_synced");
     Ok(())
 }
 
@@ -256,11 +301,16 @@ pub(crate) fn activate_verified_restore(
     write_marker(attempt, marker)?;
     write_restore_phase(attempt, RestoreStatus::Activating)?;
     sync_open_handle(attempt)?;
+    crash_test_point("activation", "attempt_synced");
     sync_open_handle(staging)?;
+    crash_test_point("activation", "staging_synced");
     activate_no_replace(staging, attempt_name, data_root, "current")?;
+    crash_test_point("activation", "renamed");
     sync_open_handle(data_root)?;
+    crash_test_point("activation", "root_synced");
     write_restore_phase(attempt, RestoreStatus::Complete)?;
     sync_open_handle(data_root)?;
+    crash_test_point("activation", "complete_root_synced");
     Ok(())
 }
 
@@ -321,6 +371,26 @@ fn open_optional_directory(
     }
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn discard_pending_restore_phase(
+    directory: &File,
+    status: RestoreStatus,
+) -> Result<(), RestoreActivationError> {
+    let pending = terminal_pending_file(status).ok_or(RestoreActivationError::InvalidPhase)?;
+    match rustix::fs::unlinkat(directory, pending, rustix::fs::AtFlags::empty()) {
+        Ok(()) | Err(rustix::io::Errno::NOENT) => Ok(()),
+        Err(error) => Err(io::Error::from_raw_os_error(error.raw_os_error()).into()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn discard_pending_restore_phase(
+    _directory: &File,
+    _status: RestoreStatus,
+) -> Result<(), RestoreActivationError> {
+    Err(ArchiveError::UnsupportedPlatform.into())
+}
+
 pub(crate) fn require_clean_restore_target(data_root: &File) -> Result<(), RestoreActivationError> {
     if open_optional_directory(data_root, "current")?.is_some() {
         return Err(RestoreActivationError::CurrentExists);
@@ -349,10 +419,15 @@ pub(crate) fn recover_current_activation(
     require_restore_phase(&current, RestoreStatus::Activating)?;
     read_marker(&current)?;
     match require_restore_phase(&current, RestoreStatus::Complete) {
-        Ok(()) => Ok(ActivationRecovery::AlreadyComplete),
+        Ok(()) => {
+            sync_open_handle(&current)?;
+            sync_open_handle(data_root)?;
+            Ok(ActivationRecovery::AlreadyComplete)
+        }
         Err(RestoreActivationError::Archive(ArchiveError::Io(error)))
             if error.kind() == io::ErrorKind::NotFound =>
         {
+            discard_pending_restore_phase(&current, RestoreStatus::Complete)?;
             write_restore_phase(&current, RestoreStatus::Complete)?;
             sync_open_handle(data_root)?;
             Ok(ActivationRecovery::CompletedAfterRename)

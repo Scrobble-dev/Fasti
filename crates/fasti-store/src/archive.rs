@@ -1,15 +1,21 @@
 //! Strict low-level primitives for the B3 `.fasti` archive profile.
 //!
-//! This module owns framing and hostile-input checks only. Database snapshot,
-//! restore orchestration, authorization, and startup recovery remain outside
-//! this boundary.
+//! This module owns framing, hostile-input checks, and atomic archive-file
+//! publication. Database snapshot, restore orchestration, authorization, and
+//! startup recovery remain outside this boundary.
 
+use fasti_application::{WorkspaceArchiveCompletionError, WorkspaceArchiveDestination};
+use fasti_domain::Sha256Digest;
+use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::rc::Rc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use thiserror::Error;
 
@@ -592,6 +598,253 @@ fn validate_activation_name(name: &str) -> Result<(), ArchiveError> {
     validate_canonical_path(name).map_err(|_| ArchiveError::UnsafeActivationName)
 }
 
+/// Linux same-filesystem destination for one atomically published `.fasti` file.
+///
+/// The partial archive is an unnamed `O_TMPFILE` inode. A crash before
+/// publication therefore leaves no pathname to sweep; publication links the
+/// verified inode to the final name without replacing an existing artifact.
+pub struct FilesystemArchiveDestination {
+    parent: File,
+    file: Option<File>,
+    final_name: OsString,
+    admitted_bytes: Cell<Option<u64>>,
+    written_bytes: u64,
+    hasher: Sha256,
+}
+
+impl FilesystemArchiveDestination {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, ArchiveError> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = path;
+            return Err(ArchiveError::UnsupportedPlatform);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let path = path.as_ref();
+            let final_name = path
+                .file_name()
+                .ok_or(ArchiveError::UnsafeActivationName)?
+                .to_owned();
+            let parent_path = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."));
+            let parent = File::from(
+                rustix::fs::open(
+                    parent_path,
+                    rustix::fs::OFlags::RDONLY
+                        | rustix::fs::OFlags::DIRECTORY
+                        | rustix::fs::OFlags::CLOEXEC
+                        | rustix::fs::OFlags::NOFOLLOW,
+                    rustix::fs::Mode::empty(),
+                )
+                .map_err(errno_to_archive_error)?,
+            );
+            match rustix::fs::statat(
+                &parent,
+                final_name.as_os_str(),
+                rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+            ) {
+                Ok(_) => return Err(ArchiveError::DestinationExists),
+                Err(rustix::io::Errno::NOENT) => {}
+                Err(error) => return Err(errno_to_archive_error(error)),
+            }
+            let file = File::from(
+                rustix::fs::openat(
+                    &parent,
+                    ".",
+                    rustix::fs::OFlags::RDWR
+                        | rustix::fs::OFlags::TMPFILE
+                        | rustix::fs::OFlags::CLOEXEC,
+                    rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
+                )
+                .map_err(errno_to_archive_error)?,
+            );
+            destination_crash_test_point("created");
+            Ok(Self {
+                parent,
+                file: Some(file),
+                final_name,
+                admitted_bytes: Cell::new(None),
+                written_bytes: 0,
+                hasher: Sha256::new(),
+            })
+        }
+    }
+
+    fn file(&mut self) -> io::Result<&mut File> {
+        self.file
+            .as_mut()
+            .ok_or_else(|| io::Error::other("archive destination is closed"))
+    }
+}
+
+impl Write for FilesystemArchiveDestination {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        let admitted = self
+            .admitted_bytes
+            .get()
+            .ok_or_else(|| io::Error::other("archive destination was not preflighted"))?;
+        let remaining = admitted
+            .checked_sub(self.written_bytes)
+            .ok_or_else(|| io::Error::other("archive destination capacity was exceeded"))?;
+        if remaining == 0 {
+            return Err(io::Error::other(
+                "archive destination capacity was exceeded",
+            ));
+        }
+        let limit = bytes
+            .len()
+            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        let written = self.file()?.write(&bytes[..limit])?;
+        self.hasher.update(&bytes[..written]);
+        self.written_bytes = self
+            .written_bytes
+            .checked_add(written as u64)
+            .ok_or_else(|| io::Error::other("archive destination byte count overflow"))?;
+        destination_crash_test_point("written");
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file()?.flush()?;
+        destination_crash_test_point("flushed");
+        Ok(())
+    }
+}
+
+impl WorkspaceArchiveDestination for FilesystemArchiveDestination {
+    fn preflight(&self, required_bytes: u64) -> io::Result<()> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = required_bytes;
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "archive destination is unsupported on this platform",
+            ));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if self.admitted_bytes.get().is_some() {
+                return Err(io::Error::other(
+                    "archive destination was already preflighted",
+                ));
+            }
+            let stats = rustix::fs::fstatvfs(&self.parent).map_err(errno_to_io_error)?;
+            let available = stats
+                .f_bavail
+                .checked_mul(stats.f_frsize)
+                .ok_or_else(|| io::Error::other("destination capacity overflow"))?;
+            if available < required_bytes {
+                return Err(io::Error::other("destination capacity is insufficient"));
+            }
+            self.admitted_bytes.set(Some(required_bytes));
+            destination_crash_test_point("preflighted");
+            Ok(())
+        }
+    }
+
+    fn complete(
+        mut self: Box<Self>,
+        archive_digest: &Sha256Digest,
+        _manifest_digest: &Sha256Digest,
+    ) -> Result<(), WorkspaceArchiveCompletionError> {
+        self.flush()?;
+        let file = self
+            .file
+            .as_ref()
+            .ok_or_else(|| io::Error::other("archive destination is closed"))?;
+        sync_open_handle(file).map_err(archive_error_to_io)?;
+        destination_crash_test_point("file_synced");
+        let actual_digest = format!("sha256:{:x}", self.hasher.clone().finalize());
+        if actual_digest != archive_digest.as_str() {
+            return Err(io::Error::other("archive destination digest mismatch").into());
+        }
+        #[cfg(not(target_os = "linux"))]
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "archive destination is unsupported on this platform",
+        ));
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd as _;
+            let source = format!("/proc/self/fd/{}", file.as_raw_fd());
+            rustix::fs::linkat(
+                rustix::fs::CWD,
+                source,
+                &self.parent,
+                self.final_name.as_os_str(),
+                rustix::fs::AtFlags::SYMLINK_FOLLOW,
+            )
+            .map_err(errno_to_io_error)
+            .map_err(WorkspaceArchiveCompletionError::Discarded)?;
+            destination_crash_test_point("linked");
+            if let Err(publication) = sync_destination_parent(&self.parent) {
+                self.file.take();
+                return Err(
+                    WorkspaceArchiveCompletionError::PublishedDurabilityIndeterminate(publication),
+                );
+            }
+            destination_crash_test_point("directory_synced");
+            self.file.take();
+            Ok(())
+        }
+    }
+
+    fn abort(mut self: Box<Self>) -> io::Result<()> {
+        destination_crash_test_point("abort_started");
+        self.file.take();
+        destination_crash_test_point("abort_closed");
+        Ok(())
+    }
+}
+
+fn archive_error_to_io(error: ArchiveError) -> io::Error {
+    match error {
+        ArchiveError::Io(error) => error,
+        ArchiveError::DestinationExists => {
+            io::Error::new(io::ErrorKind::AlreadyExists, "archive destination exists")
+        }
+        error => io::Error::other(error),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn errno_to_io_error(error: rustix::io::Errno) -> io::Error {
+    io::Error::from_raw_os_error(error.raw_os_error())
+}
+
+#[cfg(target_os = "linux")]
+fn sync_destination_parent(parent: &File) -> io::Result<()> {
+    #[cfg(test)]
+    {
+        static FAILURE_INJECTED: AtomicBool = AtomicBool::new(false);
+        if std::env::var("FASTI_TEST_DESTINATION_PARENT_SYNC_FAILURE").as_deref() == Ok("1")
+            && !FAILURE_INJECTED.swap(true, Ordering::SeqCst)
+        {
+            return Err(io::Error::other("injected destination parent sync failure"));
+        }
+    }
+    sync_open_handle(parent).map_err(archive_error_to_io)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+fn destination_crash_test_point(operation: &str) {
+    let expected = format!("destination.{operation}");
+    if std::env::var("FASTI_TEST_DESTINATION_CRASH_POINT").as_deref() == Ok(expected.as_str()) {
+        rustix::process::kill_process(rustix::process::getpid(), rustix::process::Signal::KILL)
+            .expect("send SIGKILL to destination crash worker");
+    }
+}
+
+#[cfg(not(all(test, target_os = "linux")))]
+#[inline(always)]
+fn destination_crash_test_point(_operation: &str) {}
+
 /// Opens or creates the owner-only staging parent, then creates one fresh
 /// owner-only attempt directory beneath it.
 ///
@@ -812,7 +1065,240 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use std::io::Cursor;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::process::ExitStatusExt as _;
+    #[cfg(target_os = "linux")]
+    use std::process::Command;
     use std::rc::Rc;
+
+    #[cfg(target_os = "linux")]
+    const DESTINATION_CRASH_POINT_ENV: &str = "FASTI_TEST_DESTINATION_CRASH_POINT";
+    #[cfg(target_os = "linux")]
+    const DESTINATION_CRASH_ROOT_ENV: &str = "FASTI_TEST_DESTINATION_CRASH_ROOT";
+    #[cfg(target_os = "linux")]
+    const DESTINATION_PARENT_SYNC_FAILURE_ENV: &str = "FASTI_TEST_DESTINATION_PARENT_SYNC_FAILURE";
+    #[cfg(target_os = "linux")]
+    const DESTINATION_BYTES: &[u8] = b"complete deterministic archive bytes";
+
+    #[cfg(target_os = "linux")]
+    fn destination_digest(bytes: &[u8]) -> Sha256Digest {
+        Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(bytes)))
+            .expect("destination digest")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn publish_destination(path: &Path) {
+        let mut destination = FilesystemArchiveDestination::new(path).expect("destination");
+        destination.preflight(1024).expect("capacity preflight");
+        destination
+            .write_all(DESTINATION_BYTES)
+            .expect("write destination");
+        let digest = destination_digest(DESTINATION_BYTES);
+        Box::new(destination)
+            .complete(&digest, &digest)
+            .expect("publish destination");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "subprocess worker invoked by filesystem_destination_sigkill_matrix"]
+    fn filesystem_destination_crash_worker() {
+        let Ok(root) = std::env::var(DESTINATION_CRASH_ROOT_ENV) else {
+            return;
+        };
+        let point = std::env::var(DESTINATION_CRASH_POINT_ENV).unwrap_or_default();
+        let path = Path::new(&root).join("workspace.fasti");
+        let mut destination = FilesystemArchiveDestination::new(path).expect("destination");
+        destination.preflight(1024).expect("capacity preflight");
+        destination
+            .write_all(DESTINATION_BYTES)
+            .expect("write destination");
+        destination.flush().expect("flush destination");
+        if point.contains("abort_") {
+            Box::new(destination).abort().expect("abort destination");
+        } else {
+            let digest = destination_digest(DESTINATION_BYTES);
+            Box::new(destination)
+                .complete(&digest, &digest)
+                .expect("complete destination");
+        }
+        panic!("configured destination crash point was not reached");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "subprocess worker invoked by filesystem_destination_reports_indeterminate_parent_sync"]
+    fn filesystem_destination_parent_sync_failure_worker() {
+        let Ok(root) = std::env::var(DESTINATION_CRASH_ROOT_ENV) else {
+            return;
+        };
+        let path = Path::new(&root).join("workspace.fasti");
+        let mut destination = FilesystemArchiveDestination::new(&path).expect("destination");
+        destination.preflight(1024).expect("capacity preflight");
+        destination
+            .write_all(DESTINATION_BYTES)
+            .expect("write destination");
+        let digest = destination_digest(DESTINATION_BYTES);
+        let error = Box::new(destination)
+            .complete(&digest, &digest)
+            .expect_err("directory sync failure must not return success");
+        assert!(matches!(
+            error,
+            WorkspaceArchiveCompletionError::PublishedDurabilityIndeterminate(_)
+        ));
+        assert_eq!(
+            std::fs::read(path).expect("linked complete archive"),
+            DESTINATION_BYTES
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filesystem_destination_is_bounded_digest_bound_and_no_replace() {
+        let root = tempfile::tempdir().expect("destination root");
+        let path = root.path().join("Backup 2026.fasti");
+
+        let mut bounded = FilesystemArchiveDestination::new(&path).expect("bounded destination");
+        bounded.preflight(1).expect("bounded preflight");
+        assert!(bounded.preflight(1024).is_err());
+        assert!(bounded.write_all(DESTINATION_BYTES).is_err());
+        Box::new(bounded)
+            .abort()
+            .expect("abort bounded destination");
+        assert!(!path.exists());
+
+        let mut mismatched =
+            FilesystemArchiveDestination::new(&path).expect("mismatched destination");
+        mismatched.preflight(1024).expect("mismatch preflight");
+        mismatched
+            .write_all(DESTINATION_BYTES)
+            .expect("write mismatched destination");
+        let wrong = destination_digest(b"wrong bytes");
+        assert!(Box::new(mismatched).complete(&wrong, &wrong).is_err());
+        assert!(!path.exists());
+
+        publish_destination(&path);
+        assert_eq!(
+            std::fs::read(&path).expect("published bytes"),
+            DESTINATION_BYTES
+        );
+        assert!(matches!(
+            FilesystemArchiveDestination::new(&path),
+            Err(ArchiveError::DestinationExists)
+        ));
+
+        let race_path = root.path().join("race.fasti");
+        let mut duplicate =
+            FilesystemArchiveDestination::new(&race_path).expect("duplicate destination");
+        duplicate.preflight(1024).expect("duplicate preflight");
+        duplicate
+            .write_all(b"replacement")
+            .expect("write duplicate destination");
+        std::fs::write(&race_path, DESTINATION_BYTES).expect("concurrent destination");
+        let digest = destination_digest(b"replacement");
+        let error = Box::new(duplicate)
+            .complete(&digest, &digest)
+            .expect_err("publication must not replace");
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(&race_path).expect("retained bytes"),
+            DESTINATION_BYTES
+        );
+
+        let symlink_path = root.path().join("symlink.fasti");
+        std::os::unix::fs::symlink(&path, &symlink_path).expect("destination symlink");
+        assert!(matches!(
+            FilesystemArchiveDestination::new(&symlink_path),
+            Err(ArchiveError::DestinationExists)
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filesystem_destination_reports_indeterminate_parent_sync() {
+        let root = tempfile::tempdir().expect("sync failure destination root");
+        let output = Command::new(std::env::current_exe().expect("current test binary"))
+            .args([
+                "--exact",
+                "archive::tests::filesystem_destination_parent_sync_failure_worker",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(DESTINATION_CRASH_ROOT_ENV, root.path())
+            .env(DESTINATION_PARENT_SYNC_FAILURE_ENV, "1")
+            .output()
+            .expect("run parent-sync failure worker");
+        assert!(
+            output.status.success(),
+            "parent-sync worker failed; stdout={}; stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let path = root.path().join("workspace.fasti");
+        assert_eq!(
+            std::fs::read(&path).expect("linked complete archive"),
+            DESTINATION_BYTES
+        );
+        assert!(matches!(
+            FilesystemArchiveDestination::new(&path),
+            Err(ArchiveError::DestinationExists)
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filesystem_destination_sigkill_matrix() {
+        for (point, published) in [
+            ("destination.created", false),
+            ("destination.preflighted", false),
+            ("destination.written", false),
+            ("destination.flushed", false),
+            ("destination.file_synced", false),
+            ("destination.linked", true),
+            ("destination.directory_synced", true),
+            ("destination.abort_started", false),
+            ("destination.abort_closed", false),
+        ] {
+            let root = tempfile::tempdir().expect("crash destination root");
+            let path = root.path().join("workspace.fasti");
+            let output = Command::new(std::env::current_exe().expect("current test binary"))
+                .args([
+                    "--exact",
+                    "archive::tests::filesystem_destination_crash_worker",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env(DESTINATION_CRASH_POINT_ENV, point)
+                .env(DESTINATION_CRASH_ROOT_ENV, root.path())
+                .output()
+                .expect("run destination crash worker");
+            assert_eq!(
+                output.status.signal(),
+                Some(9),
+                "{point} did not terminate with SIGKILL; status={:?}; stdout={}; stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            if published {
+                assert_eq!(
+                    std::fs::read(&path).expect("crash-published archive"),
+                    DESTINATION_BYTES,
+                    "{point} published alternate bytes"
+                );
+            } else {
+                assert!(!path.exists(), "{point} exposed an incomplete archive");
+                assert_eq!(
+                    std::fs::read_dir(root.path())
+                        .expect("destination directory")
+                        .count(),
+                    0,
+                    "{point} leaked a named partial"
+                );
+                publish_destination(&path);
+            }
+        }
+    }
 
     fn limits() -> ArchiveLimits {
         ArchiveLimits::new(16 * 1024 * 1024, 32, 8 * 1024 * 1024, 16 * 1024 * 1024)

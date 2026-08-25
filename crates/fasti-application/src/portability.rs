@@ -16,7 +16,7 @@ use fasti_domain::{
 };
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::io::{Read, Seek, Write};
+use std::io::{self, Read, Seek, Write};
 use std::num::NonZeroU64;
 use std::sync::{
     atomic::{AtomicBool, Ordering as AtomicOrdering},
@@ -663,14 +663,26 @@ pub enum PortabilityFailureReceiptError {
     OperationProblemMismatch,
 }
 
-/// Typed failure returned outside a partial archive destination.
-///
-/// An adapter must abort and discard the destination before returning this
-/// receipt. The receipt therefore remains available when partial bytes do not.
+/// State of the caller-owned archive destination after an export failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailedArchiveDestinationState {
+    /// No archive remains available at the requested destination.
+    Discarded,
+    /// Pre-publication cleanup failed. The caller must inspect the destination
+    /// before choosing a recovery action.
+    PartialCleanupIndeterminate,
+    /// A complete, digest-verified archive was linked, but directory durability
+    /// could not be confirmed. The caller must inspect the destination before
+    /// choosing a recovery action.
+    PublishedDurabilityIndeterminate,
+}
+
+/// Typed failure returned after the destination has left the caller's control.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortabilityFailureReceipt {
     operation: PortabilityFailureOperation,
     problem: Box<FastiProblem>,
+    archive_destination_state: Option<FailedArchiveDestinationState>,
 }
 
 fn validate_failure_problem(
@@ -693,27 +705,47 @@ impl PortabilityFailureReceipt {
         request: &ExportWorkspaceRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
+        Self::try_online_export_with_destination_state(
+            request,
+            problem,
+            FailedArchiveDestinationState::Discarded,
+        )
+    }
+
+    pub fn try_online_export_with_destination_state(
+        request: &ExportWorkspaceRequest,
+        problem: Box<FastiProblem>,
+        archive_destination_state: FailedArchiveDestinationState,
+    ) -> Result<Self, PortabilityFailureReceiptError> {
+        let destination_state_is_valid = archive_destination_state
+            == FailedArchiveDestinationState::Discarded
+            || problem.code() == crate::ProblemCode::StorageUnavailable;
         validate_failure_problem(
             &problem,
             CapabilityKey::ExportWorkspace,
             request.query().correlation_id(),
-            matches!(
-                problem.code(),
-                crate::ProblemCode::CapabilityUnavailable
-                    | crate::ProblemCode::Forbidden
-                    | crate::ProblemCode::CapacityExceeded
-                    | crate::ProblemCode::ExportCanceled
-                    | crate::ProblemCode::IntegrityFailed
-                    | crate::ProblemCode::StoppedNodeExportRequired
-                    | crate::ProblemCode::StorageUnavailable
-                    | crate::ProblemCode::UnsupportedPlatform
-            ),
+            destination_state_is_valid
+                && matches!(
+                    problem.code(),
+                    crate::ProblemCode::CapabilityUnavailable
+                        | crate::ProblemCode::Forbidden
+                        | crate::ProblemCode::CapacityExceeded
+                        | crate::ProblemCode::ExportCanceled
+                        | crate::ProblemCode::IntegrityFailed
+                        | crate::ProblemCode::StoppedNodeExportRequired
+                        | crate::ProblemCode::StorageUnavailable
+                        | crate::ProblemCode::UnsupportedPlatform
+                ),
         )?;
         let operation = PortabilityFailureOperation::OnlineExport {
             correlation_id: request.query().correlation_id(),
             workspace_id: request.query().access().workspace_id(),
         };
-        Ok(Self { operation, problem })
+        Ok(Self {
+            operation,
+            problem,
+            archive_destination_state: Some(archive_destination_state),
+        })
     }
 
     pub fn try_clean_restore(
@@ -741,34 +773,58 @@ impl PortabilityFailureReceipt {
             restore_attempt_id: request.restore_attempt_id(),
             correlation_id: request.correlation_id(),
         };
-        Ok(Self { operation, problem })
+        Ok(Self {
+            operation,
+            problem,
+            archive_destination_state: None,
+        })
     }
 
     pub fn try_stopped_node_export(
         request: &StoppedNodeExportRequest,
         problem: Box<FastiProblem>,
     ) -> Result<Self, PortabilityFailureReceiptError> {
+        Self::try_stopped_node_export_with_destination_state(
+            request,
+            problem,
+            FailedArchiveDestinationState::Discarded,
+        )
+    }
+
+    pub fn try_stopped_node_export_with_destination_state(
+        request: &StoppedNodeExportRequest,
+        problem: Box<FastiProblem>,
+        archive_destination_state: FailedArchiveDestinationState,
+    ) -> Result<Self, PortabilityFailureReceiptError> {
+        let destination_state_is_valid = archive_destination_state
+            == FailedArchiveDestinationState::Discarded
+            || problem.code() == crate::ProblemCode::StorageUnavailable;
         validate_failure_problem(
             &problem,
             CapabilityKey::ExportWorkspace,
             request.query().correlation_id(),
-            matches!(
-                problem.code(),
-                crate::ProblemCode::CapabilityUnavailable
-                    | crate::ProblemCode::Forbidden
-                    | crate::ProblemCode::CapacityExceeded
-                    | crate::ProblemCode::DataRootLocked
-                    | crate::ProblemCode::ExportCanceled
-                    | crate::ProblemCode::IntegrityFailed
-                    | crate::ProblemCode::StorageUnavailable
-                    | crate::ProblemCode::UnsupportedPlatform
-            ),
+            destination_state_is_valid
+                && matches!(
+                    problem.code(),
+                    crate::ProblemCode::CapabilityUnavailable
+                        | crate::ProblemCode::Forbidden
+                        | crate::ProblemCode::CapacityExceeded
+                        | crate::ProblemCode::DataRootLocked
+                        | crate::ProblemCode::ExportCanceled
+                        | crate::ProblemCode::IntegrityFailed
+                        | crate::ProblemCode::StorageUnavailable
+                        | crate::ProblemCode::UnsupportedPlatform
+                ),
         )?;
         let operation = PortabilityFailureOperation::StoppedNodeExport {
             correlation_id: request.query().correlation_id(),
             workspace_id: request.workspace_id(),
         };
-        Ok(Self { operation, problem })
+        Ok(Self {
+            operation,
+            problem,
+            archive_destination_state: Some(archive_destination_state),
+        })
     }
 
     pub fn try_recovery_bootstrap_prepare(
@@ -797,7 +853,11 @@ impl PortabilityFailureReceipt {
             workspace_id: request.workspace_id(),
             profile_id: request.profile_id(),
         };
-        Ok(Self { operation, problem })
+        Ok(Self {
+            operation,
+            problem,
+            archive_destination_state: None,
+        })
     }
 
     pub fn try_recovery_bootstrap_complete(
@@ -827,7 +887,11 @@ impl PortabilityFailureReceipt {
             profile_id: request.profile_id(),
             client_id: request.client_id(),
         };
-        Ok(Self { operation, problem })
+        Ok(Self {
+            operation,
+            problem,
+            archive_destination_state: None,
+        })
     }
 
     pub const fn operation(&self) -> PortabilityFailureOperation {
@@ -837,9 +901,60 @@ impl PortabilityFailureReceipt {
     pub fn problem(&self) -> &FastiProblem {
         &self.problem
     }
+
+    pub const fn archive_destination_state(&self) -> Option<FailedArchiveDestinationState> {
+        self.archive_destination_state
+    }
 }
 
 pub type PortabilityResult<T> = Result<T, PortabilityFailureReceipt>;
+
+#[derive(Debug)]
+pub enum WorkspaceArchiveCompletionError {
+    Discarded(io::Error),
+    PartialCleanupIndeterminate(io::Error),
+    PublishedDurabilityIndeterminate(io::Error),
+}
+
+impl WorkspaceArchiveCompletionError {
+    pub const fn destination_state(&self) -> FailedArchiveDestinationState {
+        match self {
+            Self::Discarded(_) => FailedArchiveDestinationState::Discarded,
+            Self::PartialCleanupIndeterminate(_) => {
+                FailedArchiveDestinationState::PartialCleanupIndeterminate
+            }
+            Self::PublishedDurabilityIndeterminate(_) => {
+                FailedArchiveDestinationState::PublishedDurabilityIndeterminate
+            }
+        }
+    }
+
+    pub fn kind(&self) -> io::ErrorKind {
+        match self {
+            Self::Discarded(error)
+            | Self::PartialCleanupIndeterminate(error)
+            | Self::PublishedDurabilityIndeterminate(error) => error.kind(),
+        }
+    }
+}
+
+impl From<io::Error> for WorkspaceArchiveCompletionError {
+    fn from(error: io::Error) -> Self {
+        Self::Discarded(error)
+    }
+}
+
+impl std::fmt::Display for WorkspaceArchiveCompletionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Discarded(error)
+            | Self::PartialCleanupIndeterminate(error)
+            | Self::PublishedDurabilityIndeterminate(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for WorkspaceArchiveCompletionError {}
 
 impl ExportWorkspaceRequest {
     pub fn new(
@@ -897,15 +1012,18 @@ pub trait WorkspaceArchiveDestination: Write + Send {
 
     /// Publish the completed artifact atomically.
     ///
-    /// This method consumes the destination. If publication fails, the
-    /// implementation must remove or otherwise make its partial artifact
-    /// unavailable before it returns the error; the caller can no longer call
-    /// [`Self::abort`].
+    /// This method consumes the destination. A pre-publication failure must
+    /// return [`WorkspaceArchiveCompletionError::Discarded`] after making the
+    /// partial artifact unavailable. A cleanup failure must return
+    /// [`WorkspaceArchiveCompletionError::PartialCleanupIndeterminate`]. If the
+    /// verified artifact was linked but its directory could not be synchronized, return
+    /// [`WorkspaceArchiveCompletionError::PublishedDurabilityIndeterminate`]
+    /// without attempting a racy rollback.
     fn complete(
         self: Box<Self>,
         archive_digest: &Sha256Digest,
         manifest_digest: &Sha256Digest,
-    ) -> std::io::Result<()>;
+    ) -> Result<(), WorkspaceArchiveCompletionError>;
 
     fn abort(self: Box<Self>) -> std::io::Result<()>;
 }
@@ -1414,7 +1532,7 @@ mod tests {
             self: Box<Self>,
             _archive_digest: &Sha256Digest,
             _manifest_digest: &Sha256Digest,
-        ) -> std::io::Result<()> {
+        ) -> Result<(), WorkspaceArchiveCompletionError> {
             Ok(())
         }
 
@@ -1832,6 +1950,32 @@ mod tests {
             Some(WorkspaceExportMode::Online)
         );
         assert_eq!(export.problem().code(), crate::ProblemCode::ExportCanceled);
+        assert_eq!(
+            export.archive_destination_state(),
+            Some(FailedArchiveDestinationState::Discarded)
+        );
+
+        let indeterminate = PortabilityFailureReceipt::try_online_export_with_destination_state(
+            &export_request,
+            Box::new(FastiProblem::storage_unavailable(
+                CapabilityKey::ExportWorkspace,
+                export_correlation,
+            )),
+            FailedArchiveDestinationState::PublishedDurabilityIndeterminate,
+        )
+        .expect("storage failure can report indeterminate publication durability");
+        assert_eq!(
+            indeterminate.archive_destination_state(),
+            Some(FailedArchiveDestinationState::PublishedDurabilityIndeterminate)
+        );
+        assert_eq!(
+            PortabilityFailureReceipt::try_online_export_with_destination_state(
+                &export_request,
+                Box::new(FastiProblem::export_canceled(export_correlation)),
+                FailedArchiveDestinationState::PublishedDurabilityIndeterminate,
+            ),
+            Err(PortabilityFailureReceiptError::OperationProblemMismatch)
+        );
 
         let online_unsupported = PortabilityFailureReceipt::try_online_export(
             &export_request,
@@ -1924,6 +2068,7 @@ mod tests {
         .expect("restore failure receipt");
         assert_eq!(restore.operation().correlation_id(), restore_correlation);
         assert_eq!(restore.operation().restore_attempt_id(), Some(attempt_id));
+        assert_eq!(restore.archive_destination_state(), None);
 
         let bootstrap_correlation = RequestCorrelationId::new_v7();
         let bootstrap_request = PrepareRecoveryBootstrapRequest::new(
