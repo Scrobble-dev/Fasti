@@ -209,7 +209,13 @@ profile="$1"; shift
 own_cgroup="/sys/fs/cgroup$(awk -F: '{print $3}' /proc/self/cgroup)"
 printf '%s\n' "$own_cgroup" > "$cgroup_file"
 if [[ "$profile" == "canonical-idle" ]]; then
-  unshare --user --map-root-user --net bash -c '
+  # A sudo-created scope is already root; remapping root can be denied by the host.
+  if (( EUID == 0 )); then
+    isolate=(unshare --net)
+  else
+    isolate=(unshare --user --map-root-user --net)
+  fi
+  "${isolate[@]}" bash -c '
     ip link set lo up
     if [[ -n "$(ip route show)" ]]; then
       echo "Canonical idle namespace unexpectedly has an IP route." >&2
