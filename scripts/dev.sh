@@ -114,8 +114,33 @@ _api_url_for_addr() {
   esac
 }
 
+_canonical_socket_addr() {
+  python3 - "$1" <<'PY'
+import ipaddress
+import sys
+
+value = sys.argv[1]
+if value.startswith("["):
+    end = value.find("]")
+    if end < 0 or value[end + 1 : end + 2] != ":":
+        raise SystemExit("invalid IPv6 socket address")
+    host = value[1:end]
+    port = value[end + 2 :]
+    address = f"[{ipaddress.ip_address(host).compressed}]"
+else:
+    host, port = value.rsplit(":", 1)
+    address = str(ipaddress.ip_address(host))
+port_number = int(port)
+if not 1 <= port_number <= 65535:
+    raise SystemExit("socket port must be between 1 and 65535")
+print(f"{address}:{port_number}")
+PY
+}
+
 _listener_fell_back() {
-  [[ "$1" != "$FASTI_LISTEN" ]]
+  local preferred=""
+  preferred="$(_canonical_socket_addr "$FASTI_LISTEN")" || return 0
+  [[ "$1" != "$preferred" ]]
 }
 
 _memory_ceiling_mib() {
@@ -488,6 +513,14 @@ _self_test() {
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
+  if FASTI_LISTEN='[0:0:0:0:0:0:0:1]:18420' _listener_fell_back '[::1]:18420'; then
+    echo "self-test treated equivalent IPv6 listener text as a fallback" >&2
+    return 1
+  fi
+  if ! FASTI_LISTEN='[::1]:18420' _listener_fell_back '[::1]:18421'; then
+    echo "self-test missed an IPv6 listener fallback" >&2
+    return 1
+  fi
   if FASTI_API_URL='http://userinfo-marker@127.0.0.1:18421?query-marker' "$0" --status >/dev/null 2>&1; then
     echo "self-test accepted credentials or a query in FASTI_API_URL" >&2
     return 1

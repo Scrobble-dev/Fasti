@@ -12,7 +12,6 @@ struct DesktopState {
     data_root: PathBuf,
     kernel: Mutex<Option<Arc<SqliteKernel>>>,
     setup_gate: Mutex<()>,
-    secrets: KeyringSetupSecretStore,
 }
 
 impl DesktopState {
@@ -36,7 +35,7 @@ impl DesktopState {
 #[tauri::command(async)]
 fn setup_status(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, DesktopProblem> {
     let kernel = state.kernel()?;
-    setup::inspect_setup(&kernel, &state.secrets)
+    setup::inspect_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
 }
 
 #[tauri::command(async)]
@@ -46,7 +45,7 @@ fn complete_setup(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, 
         .lock()
         .map_err(|_| DesktopProblem::storage("The setup lock is unavailable."))?;
     let kernel = state.kernel()?;
-    setup::complete_setup(&kernel, &state.secrets)
+    setup::complete_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
 }
 
 fn explicit_data_root(value: Option<OsString>) -> io::Result<PathBuf> {
@@ -65,12 +64,10 @@ fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let data_root = explicit_data_root(std::env::var_os("FASTI_DATA_ROOT"))?;
-            let secrets = KeyringSetupSecretStore::new(&data_root);
             app.manage(DesktopState {
                 data_root,
                 kernel: Mutex::new(None),
                 setup_gate: Mutex::new(()),
-                secrets,
             });
             Ok(())
         })
