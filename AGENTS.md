@@ -40,6 +40,7 @@ Provider identifiers are evidence, not canonical identity.
 - Adapters must not redefine business rules.
 - Reuse existing ownership before creating new abstractions.
 - Keep provider integrations modular.
+- Route governed outbound access through application policy. Provider declarations are maximum grants; operator allow lists only narrow them, and denies win.
 
 ## Contract changes
 
@@ -64,6 +65,7 @@ Generated files are outputs, not sources of truth.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
 - Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
+- Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
 
