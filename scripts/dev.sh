@@ -13,6 +13,7 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGDIR="$PROJECT_ROOT/.dev-logs"
 DATADIR="$PROJECT_ROOT/.dev-data"
+TRACKED_PIDS=()
 
 # _status reports Fasti daemon and web process status and probes API health on ports 8420 and 4000.
 _status() {
@@ -47,8 +48,12 @@ _status() {
 # _stop stops Fasti development processes and the `fasti-dev` Podman container.
 _stop() {
   echo "Stopping Fasti dev processes..."
-  pkill -f "target/.*/fastid" 2>/dev/null || true
-  pkill -f "vite.*apps/web" 2>/dev/null || true
+  for pid in "${TRACKED_PIDS[@]}"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      echo "  Stopping PID $pid..."
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
   podman stop fasti-dev 2>/dev/null || true
   sleep 0.5
   echo "All Fasti dev processes stopped."
@@ -93,6 +98,7 @@ _start_native() {
   
   "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
+  TRACKED_PIDS+=("$daemon_pid")
   echo "Fasti daemon started (PID: $daemon_pid, log: .dev-logs/fastid.log)"
 
   echo "Waiting for daemon health probe..."
@@ -115,6 +121,7 @@ _start_native() {
     cd "$PROJECT_ROOT/apps/web"
     pnpm run dev --host 127.0.0.1 --port 5173 > "$LOGDIR/vite.log" 2>&1 &
     local web_pid=$!
+    TRACKED_PIDS+=("$web_pid")
     echo "Web Workbench started (PID: $web_pid, log: .dev-logs/vite.log)"
     echo ""
     echo "┌─────────────────────────────────────────────────────────────┐"
