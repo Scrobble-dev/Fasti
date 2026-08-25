@@ -145,23 +145,26 @@ pub(crate) fn deep_b1_gates() -> [CommandGate; 3] {
         ),
         CommandGate::new(
             "package.arm64_oci_build",
-            "docker",
+            "podman",
             [
-                "buildx",
                 "build",
                 "--platform",
                 "linux/arm64",
-                "--load",
                 "--tag",
                 "fasti:deep-arm64",
                 ".",
             ],
-            "install Docker Buildx with arm64 execution support and repair the locked OCI package",
+            "install Podman with arm64 execution support and repair the locked OCI package",
         ),
         CommandGate::new(
             "package.arm64_oci_smoke",
             "bash",
-            ["scripts/smoke-oci.sh", "fasti:deep-arm64", "arm64"],
+            [
+                "scripts/smoke-oci.sh",
+                "fasti:deep-arm64",
+                "arm64",
+                "podman",
+            ],
             "repair the arm64 daemon/CLI package or its network-denied smoke journey",
         ),
     ]
@@ -213,8 +216,31 @@ mod tests {
             ]
         );
         assert!(gates[1].display().contains("linux/arm64"));
-        assert!(gates[1].display().contains("--load"));
+        assert!(gates[1].display().starts_with("\"podman\" \"build\""));
         assert!(gates[2].display().contains("scripts/smoke-oci.sh"));
         assert!(gates[2].display().contains("arm64"));
+        assert!(gates[2].display().contains("podman"));
+    }
+
+    #[test]
+    fn arm64_build_gate_no_longer_uses_docker_buildx_flags() {
+        let gates = deep_b1_gates();
+        let build_gate_display = gates[1].display();
+        assert!(!build_gate_display.contains("buildx"));
+        assert!(!build_gate_display.contains("--load"));
+        assert!(!build_gate_display.contains("\"docker\""));
+        assert_eq!(
+            build_gate_display,
+            "\"podman\" \"build\" \"--platform\" \"linux/arm64\" \"--tag\" \"fasti:deep-arm64\" \".\""
+        );
+    }
+
+    #[test]
+    fn arm64_smoke_gate_passes_the_runtime_argument_in_the_expected_order() {
+        let gates = deep_b1_gates();
+        assert_eq!(
+            gates[2].display(),
+            "\"bash\" \"scripts/smoke-oci.sh\" \"fasti:deep-arm64\" \"arm64\" \"podman\""
+        );
     }
 }
