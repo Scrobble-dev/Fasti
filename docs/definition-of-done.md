@@ -49,3 +49,12 @@ Acceptance evidence requires verified compliance against:
 6. **WCAG 2.2 Level AA Full Matrix**: 3px focus appearance with 2px offset, non-obscured focus, >= 4.5:1 / 7.0:1 contrast, single-pointer alternatives for drag actions, accessible authentication without cognitive tests.
 7. **EN 301 549 European Standard**: Full compliance across Clause 9 (Web), Clause 10 (Non-Web Docs), Clause 11 (Software/Desktop Assistive Technology interoperability with Orca/NVDA/VoiceOver), and Clause 12 (Documentation).
 8. **Neurodivergent (ADHD / AuDHD) Ergonomics**: Zero gamification streaks, zero vanity scores, persistent status bars (no disappearing toasts), and safe resumable workflows.
+
+## B8b — public release readiness
+
+- Content-digest checksums for native binaries and OCI images are generated per architecture and self-verified before publication as evidence.
+- A CycloneDX SBOM covers both the Rust workspace and the retained npm packages, and is schema-valid and non-empty.
+- A plain in-toto/SLSA-shaped provenance statement binds the exact commit, tree, and CI run that produced the checksums and SBOM — never through the `attest-build-provenance` action.
+- `cargo-deny` gates dependency licenses, advisories, and sources; any accepted gap (for example the isolated Tauri benchmark shell's inherited GTK3-binding advisories) is documented, not silently ignored.
+- Release notes extract mechanically from `CHANGELOG.md`; rollback is a documented manual procedure, not an auto-updater.
+- None of the above signs, attests, or publishes anything; `scripts/check-no-publish.sh` still passes after every change, and `cargo xtask test milestone --body B8b` stays fail-closed until B8a and B4 both close ahead of it.
