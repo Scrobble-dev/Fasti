@@ -28,12 +28,8 @@
     IconCode,
     IconPlus,
     IconTrash,
-    IconCopy,
-    IconCheck,
     IconDeviceTv,
-    IconServer,
     IconExternalLink,
-    IconSend,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -49,8 +45,6 @@
       prefs: Partial<WorkbenchPreferences>,
     ) => void;
     onSaveProviderKey?: (provider: string, key: string) => void;
-    onCreateToken?: (name: string, scopes: string[]) => void;
-    onDeleteToken?: (id: string) => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
   }
@@ -66,8 +60,6 @@
     onUpdateTheme,
     onUpdateWorkbenchPreferences,
     onSaveProviderKey,
-    onCreateToken,
-    onDeleteToken,
     onSaveOidc,
     onSaveApprise,
   }: Props = $props();
@@ -85,46 +77,42 @@
   // Local state for token generator
   let newTokenName = $state("");
   let selectedScopes: string[] = $state(["chronicle:write", "metadata:read"]);
-  let generatedTokenSecret = $state<string | null>(null);
-  let isCopied = $state(false);
-
-  // Local state for notification testing
-  let testNotificationSent = $state(false);
   let newAppriseUrl = $state("");
 
   // Local state for keys
   let editingKeyMap: Record<string, string> = $state({});
+  let oidcDraft = $state({
+    enabled: false,
+    issuerUrl: "",
+    clientId: "",
+    clientSecret: "",
+    redirectUri: "",
+    autoProvisionUsers: false,
+  });
+  let appriseDraft = $state({
+    enabled: false,
+    urls: [] as string[],
+    notifyOnReviewRequired: false,
+    notifyOnSyncError: false,
+    notifyOnMilestone: false,
+  });
 
-  function handleCreateTokenSubmit(e: Event): void {
-    e.preventDefault();
-    if (newTokenName.trim().length === 0) return;
-    const mockSecret = `fst_pat_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
-    generatedTokenSecret = mockSecret;
-    onCreateToken?.(newTokenName.trim(), selectedScopes);
-    newTokenName = "";
-  }
+  $effect(() => {
+    oidcDraft = { ...oidcConfig };
+  });
 
-  function handleCopySecret(): void {
-    if (generatedTokenSecret) {
-      navigator.clipboard.writeText(generatedTokenSecret);
-      isCopied = true;
-      setTimeout(() => (isCopied = false), 2000);
-    }
-  }
-
-  function handleSendTestNotification(): void {
-    testNotificationSent = true;
-    setTimeout(() => (testNotificationSent = false), 3000);
-  }
+  $effect(() => {
+    appriseDraft = { ...appriseConfig, urls: [...appriseConfig.urls] };
+  });
 
   function handleAddAppriseUrl(e: Event): void {
     e.preventDefault();
     if (newAppriseUrl.trim().length > 0) {
       const updated = {
-        ...appriseConfig,
-        urls: [...appriseConfig.urls, newAppriseUrl.trim()],
+        ...appriseDraft,
+        urls: [...appriseDraft.urls, newAppriseUrl.trim()],
       };
-      onSaveApprise?.(updated);
+      appriseDraft = updated;
       newAppriseUrl = "";
     }
   }
@@ -147,7 +135,9 @@
 
   function handleMoveNav(id: string, direction: -1 | 1): void {
     if (!workbenchPreferences) return;
-    const items = [...workbenchPreferences.navItems];
+    const items = [...workbenchPreferences.navItems].sort(
+      (a, b) => a.order - b.order,
+    );
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) return;
     const targetIdx = idx + direction;
@@ -169,7 +159,9 @@
 
   function handleMoveContext(id: string, direction: -1 | 1): void {
     if (!workbenchPreferences) return;
-    const items = [...workbenchPreferences.contextMenuItems];
+    const items = [...workbenchPreferences.contextMenuItems].sort(
+      (a, b) => a.order - b.order,
+    );
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) return;
     const targetIdx = idx + direction;
@@ -719,125 +711,10 @@
         <section class="section-pane">
           <h2 class="pane-title">NuvioTV & Media Server Connectors</h2>
           <p class="pane-desc">
-            Step-by-step pairing guides for automatic scrobbling from NuvioTV,
-            Kodi, Plex, Jellyfin, and MPRIS.
+            Connector setup is not available in this build. Fasti does not
+            publish ingest or webhook endpoints until the matching capability is
+            implemented.
           </p>
-
-          <!-- NuvioTV Instructions -->
-          <div class="connector-instruction-card highlight">
-            <div class="conn-header">
-              <IconDeviceTv size={24} class="conn-icon" />
-              <div>
-                <h3 class="conn-title">
-                  NuvioTV 2-Way Sync Engine (Milestone B7)
-                </h3>
-                <p class="conn-sub">
-                  Connect your living room TV or mobile player for bidirectional
-                  scrobbling.
-                </p>
-              </div>
-            </div>
-            <ol class="step-list">
-              <li>
-                Open <strong>NuvioTV</strong> on your Android TV, Apple TV, or mobile
-                device.
-              </li>
-              <li>
-                Go to <strong
-                  >Settings &rarr; Tracking &rarr; Fasti Connect</strong
-                >.
-              </li>
-              <li>
-                Select <strong>Scan QR Code</strong> or enter the Loopback Node
-                URL: <code>http://127.0.0.1:8420/api/v1/connect/nuvio</code>.
-              </li>
-              <li>
-                Authenticate using your local Fasti Access Token below. NuvioTV
-                will automatically synchronize watch progress without internet
-                dependencies.
-              </li>
-            </ol>
-          </div>
-
-          <!-- Plex & Tautulli Instructions -->
-          <div class="connector-instruction-card">
-            <div class="conn-header">
-              <IconServer size={24} />
-              <div>
-                <h3 class="conn-title">
-                  Plex & Tautulli Webhooks (Milestone B6)
-                </h3>
-                <p class="conn-sub">
-                  Receive instant playback events on start, pause, and 90%
-                  scrobble threshold.
-                </p>
-              </div>
-            </div>
-            <div class="webhook-box">
-              <label for="plex-webhook-url" class="wb-label"
-                >Your Fasti Plex Webhook URL:</label
-              >
-              <div class="copy-url-row">
-                <input
-                  id="plex-webhook-url"
-                  type="text"
-                  readonly
-                  value="http://127.0.0.1:8420/api/v1/webhooks/plex"
-                  class="url-input"
-                />
-                <button
-                  type="button"
-                  class="copy-btn"
-                  onclick={() =>
-                    navigator.clipboard.writeText(
-                      "http://127.0.0.1:8420/api/v1/webhooks/plex",
-                    )}
-                >
-                  <IconCopy size={14} /> Copy
-                </button>
-              </div>
-              <p class="wb-help">
-                Paste this into Plex &rarr; Settings &rarr; Webhooks.
-              </p>
-            </div>
-          </div>
-
-          <!-- Jellyfin & Emby Instructions -->
-          <div class="connector-instruction-card">
-            <div class="conn-header">
-              <IconServer size={24} />
-              <div>
-                <h3 class="conn-title">Jellyfin & Emby Webhook Plugin</h3>
-                <p class="conn-sub">
-                  Lossless JSON event ingest from open-source media servers.
-                </p>
-              </div>
-            </div>
-            <div class="webhook-box">
-              <label for="jellyfin-webhook-url" class="wb-label"
-                >Your Fasti Jellyfin Webhook URL:</label
-              >
-              <div class="copy-url-row">
-                <input
-                  id="jellyfin-webhook-url"
-                  type="text"
-                  readonly
-                  value="http://127.0.0.1:8420/api/v1/webhooks/jellyfin"
-                  class="url-input"
-                />
-                <button
-                  type="button"
-                  class="copy-btn"
-                  onclick={() =>
-                    navigator.clipboard.writeText(
-                      "http://127.0.0.1:8420/api/v1/webhooks/jellyfin",
-                    )}
-                >
-                  <IconCopy size={14} /> Copy
-                </button>
-              </div>
-            </div>
-          </div>
         </section>
 
         <!-- 4. Scoped Personal Access Tokens (PAT) -->
@@ -850,7 +727,10 @@
           </p>
 
           <!-- New Token Form -->
-          <form onsubmit={handleCreateTokenSubmit} class="token-form-card">
+          <form
+            onsubmit={(event) => event.preventDefault()}
+            class="token-form-card"
+          >
             <h3 class="form-title">Create New Access Token</h3>
             <div class="form-row">
               <input
@@ -859,9 +739,10 @@
                 bind:value={newTokenName}
                 class="token-name-input"
                 aria-label="Token description"
+                disabled
                 required
               />
-              <button type="submit" class="create-token-btn">
+              <button type="submit" class="create-token-btn" disabled>
                 <IconPlus size={16} /> Generate Token
               </button>
             </div>
@@ -872,6 +753,7 @@
                   <input
                     type="checkbox"
                     checked={selectedScopes.includes(sc.id)}
+                    disabled
                     onchange={(e) => {
                       if (e.currentTarget.checked)
                         selectedScopes = [...selectedScopes, sc.id];
@@ -886,28 +768,10 @@
               {/each}
             </div>
           </form>
-
-          <!-- Newly Generated Secret Modal Banner -->
-          {#if generatedTokenSecret}
-            <div class="secret-generated-banner">
-              <div>
-                <strong>Token Generated! Copy your secret now:</strong>
-                <p>This secret will never be shown again.</p>
-                <code class="secret-code">{generatedTokenSecret}</code>
-              </div>
-              <button
-                type="button"
-                class="copy-secret-btn"
-                onclick={handleCopySecret}
-              >
-                {#if isCopied}
-                  <IconCheck size={16} /> Copied!
-                {:else}
-                  <IconCopy size={16} /> Copy Secret
-                {/if}
-              </button>
-            </div>
-          {/if}
+          <p class="wb-help" role="status">
+            Token issuance is unavailable until an authorized application
+            command can return the one-time secret.
+          </p>
 
           <!-- Active Tokens Table -->
           <table class="tokens-table">
@@ -935,8 +799,8 @@
                     <button
                       type="button"
                       class="delete-tok-btn"
-                      onclick={() => onDeleteToken?.(tok.id)}
-                      title="Revoke Token"
+                      disabled
+                      title="Token revocation is not available in this build"
                     >
                       <IconTrash size={14} />
                     </button>
@@ -959,13 +823,13 @@
           <form
             onsubmit={(e) => {
               e.preventDefault();
-              onSaveOidc?.(oidcConfig);
+              onSaveOidc?.(oidcDraft);
             }}
             class="oidc-form"
           >
             <div class="form-toggle-row">
               <label class="toggle-label">
-                <input type="checkbox" bind:checked={oidcConfig.enabled} />
+                <input type="checkbox" bind:checked={oidcDraft.enabled} />
                 <strong>Enable Single Sign-On (OIDC)</strong>
               </label>
             </div>
@@ -975,7 +839,7 @@
               <input
                 id="oidc-issuer"
                 type="url"
-                bind:value={oidcConfig.issuerUrl}
+                bind:value={oidcDraft.issuerUrl}
                 class="form-input"
               />
             </div>
@@ -986,7 +850,7 @@
                 <input
                   id="oidc-client-id"
                   type="text"
-                  bind:value={oidcConfig.clientId}
+                  bind:value={oidcDraft.clientId}
                   class="form-input"
                 />
               </div>
@@ -995,7 +859,7 @@
                 <input
                   id="oidc-client-secret"
                   type="password"
-                  bind:value={oidcConfig.clientSecret}
+                  bind:value={oidcDraft.clientSecret}
                   class="form-input"
                 />
               </div>
@@ -1009,7 +873,7 @@
                 id="oidc-redirect-uri"
                 type="text"
                 readonly
-                bind:value={oidcConfig.redirectUri}
+                value={oidcDraft.redirectUri}
                 class="form-input mono"
               />
             </div>
@@ -1033,21 +897,21 @@
               <label class="chk-label">
                 <input
                   type="checkbox"
-                  bind:checked={appriseConfig.notifyOnReviewRequired}
+                  bind:checked={appriseDraft.notifyOnReviewRequired}
                 />
                 <span>Notify when Review Inbox requires attention</span>
               </label>
               <label class="chk-label">
                 <input
                   type="checkbox"
-                  bind:checked={appriseConfig.notifyOnSyncError}
+                  bind:checked={appriseDraft.notifyOnSyncError}
                 />
                 <span>Notify on sync and ingest connection errors</span>
               </label>
               <label class="chk-label">
                 <input
                   type="checkbox"
-                  bind:checked={appriseConfig.notifyOnMilestone}
+                  bind:checked={appriseDraft.notifyOnMilestone}
                 />
                 <span
                   >Notify when milestone achievements or backups complete</span
@@ -1057,7 +921,7 @@
 
             <h3 class="sub-heading">Configured Apprise URLs</h3>
             <ul class="apprise-urls-list">
-              {#each appriseConfig.urls as u}
+              {#each appriseDraft.urls as u}
                 <li class="apprise-url-item">
                   <code>{u}</code>
                 </li>
@@ -1075,19 +939,23 @@
               <button type="submit" class="btn-secondary">+ Add Service</button>
             </form>
 
+            <button
+              type="button"
+              class="btn-save"
+              onclick={() => onSaveApprise?.(appriseDraft)}
+            >
+              Save notification settings
+            </button>
+
             <div class="test-notify-row">
               <button
                 type="button"
                 class="btn-test"
-                onclick={handleSendTestNotification}
+                disabled
+                title="Test notifications are not available in this build"
               >
-                <IconSend size={16} /> Send Test Notification
+                Send Test Notification
               </button>
-              {#if testNotificationSent}
-                <span class="test-success"
-                  >✓ Test notification sent to all active endpoints!</span
-                >
-              {/if}
             </div>
           </div>
         </section>
@@ -1111,8 +979,9 @@
                       type="file"
                       accept={imp.ext}
                       class="hidden-file-input"
+                      disabled
                     />
-                    <span>Select {imp.name} File</span>
+                    <span>Importer unavailable</span>
                   </label>
                 </div>
               </div>
@@ -1386,72 +1255,6 @@
     cursor: pointer;
   }
 
-  .connector-instruction-card {
-    padding: 20px;
-    background: var(--fasti-surface-archive);
-    border-radius: 6px;
-    margin-bottom: 18px;
-  }
-
-  .connector-instruction-card.highlight {
-    border-left: 4px solid var(--fasti-brand-mark);
-  }
-
-  .conn-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-  :global(.conn-icon) {
-    color: var(--fasti-brand-mark);
-  }
-  .conn-title {
-    margin: 0;
-    font-size: 1.1rem;
-    font-weight: 600;
-  }
-  .conn-sub {
-    margin: 2px 0 0;
-    font-size: 0.85rem;
-    color: var(--fasti-text-muted);
-  }
-  .step-list {
-    margin: 0;
-    padding-left: 20px;
-    font-size: 0.9rem;
-    line-height: 1.7;
-  }
-
-  .copy-url-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-  }
-  .url-input {
-    flex: 1;
-    height: 36px;
-    padding: 6px 12px;
-    font-family: var(--fasti-font-mono);
-    font-size: 0.85rem;
-    background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-  }
-  .copy-btn {
-    padding: 6px 14px;
-    background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 600;
-    font-size: 0.85rem;
-  }
   .wb-help {
     font-size: 0.78rem;
     color: var(--fasti-text-muted);
@@ -1501,40 +1304,6 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .secret-generated-banner {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    background: color-mix(in srgb, var(--fasti-brand-gold) 20%, transparent);
-    border: 1px solid var(--fasti-brand-gold);
-    border-radius: 6px;
-    margin-bottom: 20px;
-  }
-
-  .secret-code {
-    font-family: var(--fasti-font-mono);
-    font-size: 1rem;
-    font-weight: 700;
-    background: var(--fasti-surface-paper);
-    padding: 4px 8px;
-    border-radius: 4px;
-    display: inline-block;
-    margin-top: 4px;
-  }
-  .copy-secret-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    background: var(--fasti-text-primary);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
   }
 
   .tokens-table {
@@ -1654,10 +1423,5 @@
     display: flex;
     align-items: center;
     gap: 12px;
-  }
-  .test-success {
-    color: var(--fasti-state-verified);
-    font-weight: 600;
-    font-size: 0.88rem;
   }
 </style>

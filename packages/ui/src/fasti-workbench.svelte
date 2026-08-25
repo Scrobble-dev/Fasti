@@ -17,7 +17,6 @@
     SAMPLE_RECONCILIATION,
     SAMPLE_DISCOVER_TRENDING,
     SAMPLE_CUSTOM_FIELDS,
-    SAMPLE_TOKENS,
     SAMPLE_PROVIDER_KEYS,
     SAMPLE_OIDC_CONFIG,
     SAMPLE_APPRISE_CONFIG,
@@ -52,7 +51,7 @@
   let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
   let chronicle = $state<ChronicleOccurrence[]>(SAMPLE_CHRONICLE);
   let reconciliationCases = $state(SAMPLE_RECONCILIATION);
-  let tokens = $state(SAMPLE_TOKENS);
+  let tokens = $state([]);
   let providerKeys = $state(SAMPLE_PROVIDER_KEYS);
   let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
   let appriseConfig = $state(SAMPLE_APPRISE_CONFIG);
@@ -473,41 +472,12 @@
     );
   }
 
-  function handleCreateToken(name: string, scopes: string[]): void {
-    const newToken = {
-      id: `tok_${Date.now()}`,
-      name,
-      tokenPrefix: `fst_pat_${Math.random().toString(36).substring(2, 8)}...`,
-      scopes,
-      createdAt: new Date().toISOString(),
-    };
-    tokens = [newToken, ...tokens];
-  }
-
-  function handleDeleteToken(id: string): void {
-    tokens = tokens.filter((t) => t.id !== id);
-  }
-
   function handleSaveOidc(config: OidcConfiguration): void {
     oidcConfig = { ...config };
   }
 
   function handleSaveApprise(config: AppriseNotificationConfig): void {
     appriseConfig = { ...config };
-  }
-
-  function handleAcceptCase(caseId: string): void {
-    reconciliationCases = reconciliationCases.filter((c) => c.id !== caseId);
-  }
-
-  function handleRejectCase(caseId: string): void {
-    reconciliationCases = reconciliationCases.filter((c) => c.id !== caseId);
-  }
-
-  function handleDeferCase(caseId: string): void {
-    reconciliationCases = reconciliationCases.map((c) =>
-      c.id === caseId ? { ...c, status: "deferred" } : c,
-    );
   }
 </script>
 
@@ -730,12 +700,7 @@
       {:else if activeSection === "calendar"}
         <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
       {:else if activeSection === "reconciliation"}
-        <ReconciliationView
-          cases={reconciliationCases}
-          onAcceptCase={handleAcceptCase}
-          onRejectCase={handleRejectCase}
-          onDeferCase={handleDeferCase}
-        />
+        <ReconciliationView cases={reconciliationCases} />
       {:else if activeSection === "connections" || activeSection === "sources"}
         <ConnectionsView />
       {:else if activeSection === "settings"}
@@ -751,8 +716,6 @@
           onUpdateWorkbenchPreferences={(prefs) =>
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
           onSaveProviderKey={handleSaveProviderKey}
-          onCreateToken={handleCreateToken}
-          onDeleteToken={handleDeleteToken}
           onSaveOidc={handleSaveOidc}
           onSaveApprise={handleSaveApprise}
         />

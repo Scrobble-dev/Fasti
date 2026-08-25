@@ -30,6 +30,16 @@ function packageEntryPath(packageRoot, entry) {
   return path;
 }
 
+function packageEntryExists(packageRoot, entry) {
+  const entryPath = packageEntryPath(packageRoot, entry);
+  if (entryPath === undefined) {
+    return false;
+  }
+  // packageEntryPath confines this dynamic path to the package root.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return existsSync(entryPath);
+}
+
 assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);
 assert.equal(packageEntryPath(repoRoot, "../outside"), undefined);
 assert.equal(packageEntryPath(repoRoot, "."), undefined);
@@ -80,23 +90,17 @@ for (const [directory, expectedName] of expectedPackages) {
   }
 
   const primaryEntry = manifest.main ?? manifest.svelte;
-  const primaryEntryPath = packageEntryPath(packageRoot, primaryEntry);
-  if (primaryEntryPath === undefined || !existsSync(primaryEntryPath)) {
+  if (!packageEntryExists(packageRoot, primaryEntry)) {
     failures.push(
       `${directory}: primary entrypoint does not resolve to an existing file`,
     );
   }
 
-  const typesPath = packageEntryPath(packageRoot, manifest.types);
-  if (typesPath === undefined || !existsSync(typesPath)) {
+  if (!packageEntryExists(packageRoot, manifest.types)) {
     failures.push(`${directory}: types does not resolve to an existing file`);
   }
 
-  const modulePath = packageEntryPath(packageRoot, manifest.module);
-  if (
-    manifest.module &&
-    (modulePath === undefined || !existsSync(modulePath))
-  ) {
+  if (manifest.module && !packageEntryExists(packageRoot, manifest.module)) {
     failures.push(
       `${directory}: module does not resolve to a built entrypoint`,
     );
