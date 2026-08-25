@@ -16,7 +16,13 @@ DATADIR="$PROJECT_ROOT/.dev-data"
 RUNDIR="$PROJECT_ROOT/.dev-run"
 FASTI_PORT="${FASTI_PORT:-8420}"
 FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:$FASTI_PORT}"
-FASTI_API_URL="${FASTI_API_URL:-http://127.0.0.1:$FASTI_PORT}"
+if [[ -z "${FASTI_API_URL:-}" ]]; then
+  case "$FASTI_LISTEN" in
+    0.0.0.0:*) FASTI_API_URL="http://127.0.0.1:${FASTI_LISTEN##*:}" ;;
+    \[::\]:*) FASTI_API_URL="http://[::1]:${FASTI_LISTEN##*:}" ;;
+    *) FASTI_API_URL="http://$FASTI_LISTEN" ;;
+  esac
+fi
 DEV_SCOPE="${FASTI_DEV_SCOPE:-$(basename "$PROJECT_ROOT")}"
 DEV_SCOPE="${DEV_SCOPE//[^A-Za-z0-9_.-]/-}"
 CONTAINER_NAME="fasti-dev-$DEV_SCOPE"
@@ -110,13 +116,15 @@ _status_line() {
 }
 
 _status() {
+  local health=""
   echo "=== Fasti Dev Status ($DEV_SCOPE) ==="
   _status_line "Daemon (fastid)" daemon
   echo ""
-  if curl --connect-timeout 2 --max-time 5 --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1; then
-    echo "  API Probe: HEALTHY ($(curl --connect-timeout 2 --max-time 5 -s "$FASTI_API_URL/api/v1/health"))"
+  echo "  API URL: $FASTI_API_URL"
+  if health="$(curl --connect-timeout 2 --max-time 5 --silent --fail "$FASTI_API_URL/api/v1/health" 2>/dev/null)"; then
+    echo "  API Probe: HEALTHY ($health)"
   else
-    echo "  API Probe: NOT REACHABLE ($FASTI_API_URL)"
+    echo "  API Probe: NOT REACHABLE"
   fi
 }
 
@@ -193,6 +201,11 @@ _self_test() {
   _stop_pidfile stale
   [[ ! -e "$RUNDIR/stale.pid" ]]
   ! FASTI_PORT=0 "$0" --status >/dev/null 2>&1
+  local status_output
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 "$0" --status)"
+  [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
+  [[ "$status_output" == *"http://localhost:18421"* ]]
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
   trap - EXIT
