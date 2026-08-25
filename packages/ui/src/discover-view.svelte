@@ -216,6 +216,8 @@
       {#each categories as cat}
         <button
           type="button"
+          role="radio"
+          aria-checked={selectedCategory === cat.id}
           class="cat-pill"
           class:active={selectedCategory === cat.id}
           onclick={() => (selectedCategory = cat.id)}

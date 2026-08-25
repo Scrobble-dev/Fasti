@@ -201,7 +201,7 @@ export class FastiClient {
     return this.#jsonOperation({
       method: operation.method,
       path: operation.path,
-      authenticated: false,
+      authenticated: operation.authenticated,
       problemContract: operation,
       retryMode: "never",
       body,
@@ -224,7 +224,7 @@ export class FastiClient {
     return this.#jsonOperation({
       method: operation.method,
       path: operation.path,
-      authenticated: false,
+      authenticated: operation.authenticated,
       problemContract: operation,
       retryMode: "never",
       body,

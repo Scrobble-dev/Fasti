@@ -1,5 +1,6 @@
+import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -11,6 +12,31 @@ const expectedPackages = new Map([
 ]);
 const buildablePackages = new Set(["sdk", "tokens", "ui"]);
 const failures = [];
+
+function packageEntryPath(packageRoot, entry) {
+  if (typeof entry !== "string" || isAbsolute(entry)) {
+    return undefined;
+  }
+  const path = resolve(packageRoot, entry);
+  const fromRoot = relative(packageRoot, path);
+  if (
+    fromRoot === "" ||
+    fromRoot === ".." ||
+    fromRoot.startsWith(`..${sep}`) ||
+    isAbsolute(fromRoot)
+  ) {
+    return undefined;
+  }
+  return path;
+}
+
+assert.equal(packageEntryPath(repoRoot, "/outside"), undefined);
+assert.equal(packageEntryPath(repoRoot, "../outside"), undefined);
+assert.equal(packageEntryPath(repoRoot, "."), undefined);
+assert.equal(
+  packageEntryPath(repoRoot, "package.json"),
+  join(repoRoot, "package.json"),
+);
 
 const actualDirectories = readdirSync(join(repoRoot, "packages"), {
   withFileTypes: true,
@@ -54,23 +80,23 @@ for (const [directory, expectedName] of expectedPackages) {
   }
 
   const primaryEntry = manifest.main ?? manifest.svelte;
-  if (
-    typeof primaryEntry !== "string" ||
-    !existsSync(join(packageRoot, primaryEntry))
-  ) {
+  const primaryEntryPath = packageEntryPath(packageRoot, primaryEntry);
+  if (primaryEntryPath === undefined || !existsSync(primaryEntryPath)) {
     failures.push(
       `${directory}: primary entrypoint does not resolve to an existing file`,
     );
   }
 
-  if (
-    typeof manifest.types !== "string" ||
-    !existsSync(join(packageRoot, manifest.types))
-  ) {
+  const typesPath = packageEntryPath(packageRoot, manifest.types);
+  if (typesPath === undefined || !existsSync(typesPath)) {
     failures.push(`${directory}: types does not resolve to an existing file`);
   }
 
-  if (manifest.module && !existsSync(join(packageRoot, manifest.module))) {
+  const modulePath = packageEntryPath(packageRoot, manifest.module);
+  if (
+    manifest.module &&
+    (modulePath === undefined || !existsSync(modulePath))
+  ) {
     failures.push(
       `${directory}: module does not resolve to a built entrypoint`,
     );

@@ -12,7 +12,7 @@
     readonly proof_cleanup_pending: boolean;
   }
 
-  let viewState: SetupViewState = $state("ready"); // Default to ready for web workbench
+  let viewState: SetupViewState = $state("loading");
   let problem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
   let isTauri = $state(false);
@@ -31,7 +31,10 @@
       viewState = "ready";
       return;
     }
-    const candidate = error as Partial<DesktopProblem>;
+    const candidate =
+      error !== null && typeof error === "object"
+        ? (error as Partial<DesktopProblem>)
+        : {};
     problem = {
       code: candidate.code ?? "desktop_host_unavailable",
       title: candidate.title ?? "Fasti desktop host is unavailable",

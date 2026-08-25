@@ -1626,10 +1626,10 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
             None => "undefined",
         };
 
-        // Derive authenticated from registry authorization; bootstrap operations explicitly
-        // send no credential during scoped enrollment because the proof is in the body
+        // Bootstrap proofs stay in request bodies. Existing bearer credentials must not
+        // be attached to either one-time setup operation.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
-        let authenticated = authorization != "scoped_enrollment";
+        let authenticated = expected.authenticated;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
