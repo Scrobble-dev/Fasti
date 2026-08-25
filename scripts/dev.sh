@@ -13,57 +13,62 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGDIR="$PROJECT_ROOT/.dev-logs"
 DATADIR="$PROJECT_ROOT/.dev-data"
+FASTI_PORT="${FASTI_PORT:-8420}"
+FASTI_WEB_PORT="${FASTI_WEB_PORT:-5173}"
+FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:${FASTI_PORT}}"
+FASTI_API_URL="${FASTI_API_URL:-http://127.0.0.1:${FASTI_PORT}}"
+FASTI_DEV_NAME="${FASTI_DEV_NAME:-fasti-dev-$(basename "$PROJECT_ROOT" | tr -cd '[:alnum:]_.-')}"
+
+_pid_running() {
+  local pid_file="$1"
+  [[ -f "$pid_file" ]] && kill -0 "$(<"$pid_file")" 2>/dev/null
+}
 
 _status() {
   echo "=== Fasti Dev Status ==="
-  local daemon_pid
-  local web_pid
-  daemon_pid=$(pgrep -f "target/.*/fastid" 2>/dev/null || true)
-  web_pid=$(pgrep -f "vite.*apps/web" 2>/dev/null || true)
-
-  if [[ -n "$daemon_pid" ]]; then
-    echo "  Daemon (fastid):  RUNNING (PID: $daemon_pid)"
+  if _pid_running "$LOGDIR/fastid.pid"; then
+    echo "  Daemon (fastid):  RUNNING (PID: $(<"$LOGDIR/fastid.pid"))"
   else
     echo "  Daemon (fastid):  NOT RUNNING"
   fi
 
-  if [[ -n "$web_pid" ]]; then
-    echo "  Web Shell (Vite): RUNNING (PID: $web_pid)"
+  if _pid_running "$LOGDIR/vite.pid"; then
+    echo "  Web Shell (Vite): RUNNING (PID: $(<"$LOGDIR/vite.pid"))"
   else
     echo "  Web Shell (Vite): NOT RUNNING"
   fi
 
   echo ""
-  if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
-    echo "  API Probe (8420): HEALTHY ($(curl -s http://127.0.0.1:8420/api/v1/health))"
-  elif curl --silent --fail http://127.0.0.1:4000/api/v1/health >/dev/null 2>&1; then
-    echo "  API Probe (4000): HEALTHY ($(curl -s http://127.0.0.1:4000/api/v1/health))"
+  if curl --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1; then
+    echo "  API Probe:        HEALTHY ($(curl -s "$FASTI_API_URL/api/v1/health"))"
   else
-    echo "  API Probe:        NOT REACHABLE"
+    echo "  API Probe:        NOT REACHABLE ($FASTI_API_URL)"
   fi
 }
 
 _stop() {
-  echo "Stopping Fasti dev processes..."
-  pkill -f "target/.*/fastid" 2>/dev/null || true
-  pkill -f "vite.*apps/web" 2>/dev/null || true
-  podman stop fasti-dev 2>/dev/null || true
-  sleep 0.5
-  echo "All Fasti dev processes stopped."
+  echo "Stopping this worktree's Fasti dev processes..."
+  for pid_file in "$LOGDIR/fastid.pid" "$LOGDIR/vite.pid"; do
+    if _pid_running "$pid_file"; then
+      kill "$(<"$pid_file")"
+    fi
+  done
+  podman stop "$FASTI_DEV_NAME" 2>/dev/null || true
+  echo "This worktree's Fasti dev processes stopped."
 }
 
 _start_podman() {
   echo "=== Launching Fasti Podman Container ==="
   mkdir -p "$DATADIR"
-  podman run -d --name fasti-dev --rm \
-    --publish 8420:8420 \
+  podman run -d --name "$FASTI_DEV_NAME" --rm \
+    --publish "127.0.0.1:${FASTI_PORT}:8420" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
-    localhost/fasti:test 2>/dev/null || podman restart fasti-dev 2>/dev/null || true
+    localhost/fasti:test 2>/dev/null || podman restart "$FASTI_DEV_NAME" 2>/dev/null || true
 
   sleep 1
-  echo "Fasti Podman container running on http://127.0.0.1:8420"
-  echo "API Health: $(curl -s http://127.0.0.1:8420/api/v1/health || echo 'starting...')"
+  echo "Fasti Podman container running on $FASTI_API_URL"
+  echo "API Health: $(curl -s "$FASTI_API_URL/api/v1/health" || echo 'starting...')"
 }
 
 _start_desktop() {
@@ -77,41 +82,43 @@ _start_native() {
 
   echo "=== 1. Compiling & Starting Fasti Daemon ==="
   cargo build --locked --bin fastid
-  export FASTI_LISTEN=127.0.0.1:8420
+  export FASTI_LISTEN FASTI_API_URL FASTI_WEB_PORT
   export FASTI_DATA_ROOT="$DATADIR"
   
   "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
+  printf '%s\n' "$daemon_pid" > "$LOGDIR/fastid.pid"
   echo "Fasti daemon started (PID: $daemon_pid, log: .dev-logs/fastid.log)"
 
   echo "Waiting for daemon health probe..."
   for _ in $(seq 1 10); do
-    if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
+    if curl --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1; then
       break
     fi
     sleep 0.5
   done
 
-  if curl --silent --fail http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
-    echo "✓ Fasti daemon is healthy on http://127.0.0.1:8420"
+  if curl --silent --fail "$FASTI_API_URL/api/v1/health" >/dev/null 2>&1; then
+    echo "Fasti daemon is healthy on $FASTI_API_URL"
   else
-    echo "⚠️ Daemon did not respond in time, check .dev-logs/fastid.log"
+    echo "Daemon did not respond in time. Check .dev-logs/fastid.log."
   fi
 
   echo ""
   echo "=== 2. Starting Fasti Web Workbench (Vite + Svelte 5) ==="
   if [[ -d "$PROJECT_ROOT/apps/web" ]]; then
     cd "$PROJECT_ROOT/apps/web"
-    pnpm run dev --host 127.0.0.1 --port 5173 > "$LOGDIR/vite.log" 2>&1 &
+    pnpm run dev --host 127.0.0.1 --port "$FASTI_WEB_PORT" > "$LOGDIR/vite.log" 2>&1 &
     local web_pid=$!
+    printf '%s\n' "$web_pid" > "$LOGDIR/vite.pid"
     echo "Web Workbench started (PID: $web_pid, log: .dev-logs/vite.log)"
     echo ""
     echo "┌─────────────────────────────────────────────────────────────┐"
     echo "│ Fasti Workbench is live!                                    │"
     echo "│                                                             │"
-    echo "│ • Web Interface:  http://127.0.0.1:5173                     │"
-    echo "│ • Local Daemon:   http://127.0.0.1:8420                     │"
-    echo "│ • Health Probe:   http://127.0.0.1:8420/api/v1/health       │"
+    echo "│ Web Interface:  http://127.0.0.1:$FASTI_WEB_PORT"
+    echo "│ Local Daemon:   $FASTI_API_URL"
+    echo "│ Health Probe:   $FASTI_API_URL/api/v1/health"
     echo "│ • Data Directory: $DATADIR                                  │"
     echo "└─────────────────────────────────────────────────────────────┘"
     echo ""

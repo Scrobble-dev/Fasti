@@ -1,0 +1,14 @@
+services:
+  fasti:
+    build:
+      context: .
+    environment:
+      FASTI_DATA_ROOT: /data
+      FASTI_LISTEN: 0.0.0.0:8420
+    ports:
+      - "127.0.0.1:${FASTI_PORT:-8420}:8420"
+    volumes:
+      - fasti-data:/data
+
+volumes:
+  fasti-data:
