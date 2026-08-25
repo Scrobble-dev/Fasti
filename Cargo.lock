@@ -435,6 +435,7 @@ dependencies = [
  "fasti-domain",
  "serde",
  "serde_json",
+ "sha2",
  "static_assertions",
  "uuid",
 ]

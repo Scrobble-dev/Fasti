@@ -12,6 +12,7 @@ description = "Fasti capabilities, application ports, and typed problem catalog"
 chrono = { workspace = true, optional = true }
 fasti-domain = { workspace = true }
 serde = { workspace = true }
+sha2 = "0.10.9"
 uuid = { workspace = true, optional = true }
 
 [features]
