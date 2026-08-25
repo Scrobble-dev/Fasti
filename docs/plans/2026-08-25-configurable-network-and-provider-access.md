@@ -6,7 +6,7 @@
 
 **Branch:** `codex/configurable-network-providers`
 
-**PR dependencies:** repair and land PR #51 before replacing or reducing PR #44; PR #52 is not a dependency.
+**PR dependencies:** repair and land PR #51; land PR #53 as the truthful shell that supersedes PR #44; then port this verified feature slice onto that clean base. PR #52 is not a dependency.
 
 ## Outcome
 
@@ -19,10 +19,12 @@ The first complete slice supports native `fastid`, Docker or Podman, the Tauri d
 The work exceeds eight files because it crosses four delivery boundaries and repairs a false UI surface. The user accepted the complete option. The implementation remains split into reviewable vertical slices:
 
 1. repair the PR #51 governance baseline;
-2. replace the false Settings and Discover behavior on the PR #44 source branch;
+2. use the PR #44 source branch to prove the replacement for false Settings and Discover behavior;
 3. add endpoint, port, trust, and policy configuration;
 4. add one real provider path before broadening provider coverage;
 5. prove native, container, desktop, and Android configuration paths.
+
+The current local implementation is proof on the PR #44 source lineage. It is not the final landing unit. PR #53 appeared during implementation and now supplies the smaller truthful shell. After PRs #51 and #53 land, port only the verified endpoint, provider, Settings, delivery, and documentation commits onto that base.
 
 The plan does not introduce a generic policy language, a Fasti TLS server, a certificate authority, a plugin runtime, or remote multi-tenant access.
 
@@ -382,7 +384,9 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
 ## Completion gates
 
 - PR #51 is green or the feature remains explicitly stacked and non-mergeable.
-- PR #44 is replaced or reduced; its fake controls are not carried forward.
+- PR #53 is green and becomes the truthful shell base.
+- PR #44 is closed or reduced after PR #53 lands; its fake controls are not carried forward.
+- The feature is ported from this proof branch onto the clean PR #53 successor before submission.
 - Focused tests and the canonical PR gate pass from a clean tree.
 - Contract generation is deterministic and all non-applicable surfaces have reasons.
 - Native, Docker, Podman, Tauri desktop, and Android port/endpoint paths have real artifacts or explicit failed gates.
@@ -400,7 +404,8 @@ Lane A runs first. After its clean baseline, lanes C, D, and E may run in parall
 - The Linux desktop release embeds `https://fasti.internal:9443`; SHA-256 is `7f5ccd756832afb7a8c112dcff65bfedd2dee007cf5d988cf8a29fb4b94dbe87`.
 - The Android ARM64 release APK is 23,541,387 bytes; SHA-256 is `6307333247483e67b5d8046e51bfbf38cbfc462ea415270f89076471f7868a54`. It contains the ARM64 native library and the configured origin, targets Android 36 with minimum Android 24, trusts system CAs in release, and adds user-installed CAs only through Android debug overrides. The artifact is unsigned, as expected before release signing. No Android device was connected, so installed-device runtime remains a release check.
 - Impeccable reports no findings in the changed UI files. Three whole-tree warnings remain in unchanged legacy components and are outside this slice.
-- PR #51 remains the landing prerequisite. PR #44 still needs replacement or reduction, and PR #52 remains independent. No branch was merged, force-pushed, or rewritten.
+- GitHub refresh at `2026-08-25T18:33Z` found four open PRs. PR #51 is 5 commits ahead and 8 behind `dev`, with a failed canonical gate, 10 active threads, and 3 of 5 signed commits. PR #53 is 4 commits ahead with all commits signed, no active threads, and checks still running; it explicitly supersedes PR #44. PR #44 is now 39 commits ahead with a passing canonical gate, but it remains blocked by Codacy, 12 active threads, 16 unsigned commits, and a 103-file scope. PR #52 remains independent and blocked by Codacy, patch coverage, 6 active threads, and 10 unsigned commits.
+- No branch was merged, force-pushed, rewritten, or otherwise changed during the PR audit.
 
 ## Review summary
 
