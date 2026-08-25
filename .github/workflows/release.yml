@@ -175,7 +175,7 @@ jobs:
       - name: Generate the pnpm workspace SBOM
         run: |
           mkdir -p target/fasti-evidence/b8b/sbom
-          npx --yes @cyclonedx/cyclonedx-npm --ignore-npm-errors --output-format json --output-file target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json
+          pnpm exec cyclonedx-npm --ignore-npm-errors --output-format json --output-file target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json
       - name: Sanity-check the SBOM is CycloneDX and non-empty
         run: jq -e '.bomFormat == "CycloneDX" and (.components | length) > 0' target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json > /dev/null
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -291,7 +291,13 @@ jobs:
         with:
           node-version: 22
       - name: Extract this tag's release notes from CHANGELOG.md
-        run: node scripts/generate-release-notes.mjs "${{ github.ref_name }}"
+        # The tag name is passed via env, not interpolated directly into the
+        # shell command -- ${{ }} expansion happens before the shell parses
+        # the line, so a tag containing shell metacharacters (e.g. `$(...)`)
+        # would otherwise be interpreted as shell syntax, not a literal string.
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/generate-release-notes.mjs "$RELEASE_TAG"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fasti-b8b-release-notes-attempt-${{ github.run_attempt }}

@@ -2,4 +2,5 @@ packages:
   - "packages/*"
 allowBuilds:
   "@scarf/scarf": false
+  libxmljs2: true
   nx: true

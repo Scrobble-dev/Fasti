@@ -24,13 +24,14 @@
   "devDependencies": {
     "@apidevtools/swagger-parser": "12.1.0",
     "@asyncapi/parser": "3.6.3",
+    "@cyclonedx/cyclonedx-npm": "6.0.1",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "canonicalize": "2.1.0",
     "jsonld": "9.0.0",
+    "nx": "23.1.1",
     "prettier": "^3.9.6",
     "typescript": "^7.0.2",
-    "yaml": "2.9.0",
-    "nx": "23.1.1"
+    "yaml": "2.9.0"
   }
 }
