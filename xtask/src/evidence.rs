@@ -51,6 +51,15 @@ pub(crate) enum Body {
 }
 
 impl Body {
+    /// Converts the body identifier to its canonical string representation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(Body::B8b.as_str(), "B8b");
+    /// ```
+    ///
+    /// Returns the canonical identifier for each body variant.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::B0 => "B0",
@@ -493,6 +502,39 @@ pub(crate) fn print_schema() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Generates, verifies, and writes a B1 milestone evidence manifest.
+
+///
+
+/// Invalid manifests are removed, and generation or verification failures produce
+
+/// an incomplete candidate containing diagnostic information.
+
+///
+
+/// # Examples
+
+///
+
+/// ```no_run
+
+/// use std::path::Path;
+
+///
+
+/// let manifest_path = create_b1_milestone_manifest(
+
+///     Path::new("."),
+
+///     Path::new("target/fasti-evidence/b1-manifest.json"),
+
+/// )?;
+
+/// assert!(manifest_path.exists());
+
+/// # Ok::<(), anyhow::Error>(())
+
+/// ```
 pub(crate) fn create_b1_milestone_manifest(
     root: &Path,
     manifest_path: &Path,
@@ -524,6 +566,32 @@ pub(crate) fn create_b1_milestone_manifest(
     }
 }
 
+/// Generates, verifies, and writes a B8b milestone evidence manifest.
+///
+/// On generation or immediate verification failure, removes any invalid manifest
+/// and writes an incomplete candidate for diagnostics.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// let manifest = create_b8b_milestone_manifest(
+///     Path::new("."),
+///     Path::new("target/fasti-evidence/b8b-manifest.json"),
+/// )?;
+/// assert!(manifest.exists());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the output path is unsafe, generation fails, or the
+/// generated manifest fails verification.
+pub(crate) fn create_b8b_milestone_manifest(
+root: &Path,
+manifest_path: &Path,
+) -> anyhow::Result<PathBuf> {
 pub(crate) fn create_b8b_milestone_manifest(
     root: &Path,
     manifest_path: &Path,
@@ -555,6 +623,25 @@ pub(crate) fn create_b8b_milestone_manifest(
     }
 }
 
+/// Builds a canonical B8b release-readiness evidence manifest from the required evidence files.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// let manifest = build_b8b_milestone_manifest(
+///     Path::new("."),
+///     Path::new("target/fasti-evidence/b8b-manifest.json"),
+/// )?;
+/// # anyhow::Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// The generated manifest is written atomically to `manifest_path`.
+///
+/// # Errors
+///
+/// Returns an error when required evidence is missing, validation fails, or the manifest cannot be written.
 fn build_b8b_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Result<PathBuf> {
     let source = current_source_binding(root)?;
     verify_source_binding(root, &source)?;
@@ -712,6 +799,36 @@ fn build_b8b_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Re
     Ok(manifest_path.to_path_buf())
 }
 
+/// Lists directory entries whose names end with the specified suffix, in sorted order.
+///
+/// The search is limited to the immediate contents of `directory`.
+///
+/// # Errors
+///
+/// Returns an error if the directory cannot be read or an entry cannot be inspected.
+///
+/// # Examples
+///
+/// ```
+/// use std::fs;
+///
+/// let directory = std::env::temp_dir().join(format!(
+///     "list-files-with-extension-{}",
+///     std::process::id()
+/// ));
+/// fs::create_dir_all(&directory).unwrap();
+/// fs::write(directory.join("b.json"), b"").unwrap();
+/// fs::write(directory.join("a.json"), b"").unwrap();
+/// fs::write(directory.join("readme.txt"), b"").unwrap();
+///
+/// let files = list_files_with_extension(&directory, ".json").unwrap();
+/// assert_eq!(
+///     files.iter().map(|path| path.file_name().unwrap()).collect::<Vec<_>>(),
+///     vec!["a.json", "b.json"]
+/// );
+///
+/// fs::remove_dir_all(directory).unwrap();
+/// ```
 fn list_files_with_extension(directory: &Path, suffix: &str) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in fs::read_dir(directory)
@@ -728,6 +845,20 @@ fn list_files_with_extension(directory: &Path, suffix: &str) -> anyhow::Result<V
     Ok(files)
 }
 
+/// Verifies that a manifest is valid and declares the B8b milestone body.
+///
+/// # Errors
+///
+/// Returns an error if verification fails or if the manifest declares a different body.
+///
+/// # Examples
+///
+/// ```no_run
+/// let root = std::path::Path::new(".");
+/// let manifest = std::path::Path::new("b8b-manifest.json");
+/// verify_b8b_milestone(root, manifest)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 pub(crate) fn verify_b8b_milestone(root: &Path, manifest_path: &Path) -> anyhow::Result<()> {
     let verified = verify(root, manifest_path)?;
     ensure!(
@@ -737,6 +868,25 @@ pub(crate) fn verify_b8b_milestone(root: &Path, manifest_path: &Path) -> anyhow:
     Ok(())
 }
 
+/// Verifies that a B8b evidence manifest satisfies its prerequisite and completeness requirements.
+///
+/// This requires a passing B8a manifest and validates B8b command, result, review, QA,
+/// receipt, evidence, source-binding, and corpus requirements.
+///
+/// # Errors
+///
+/// Returns an error if the B8a prerequisite is missing or failing, or if the B8b
+/// manifest fails any required validation.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// verify_b8b_manifest_requirements(
+///     root,
+///     &manifest,
+/// )?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn verify_b8b_manifest_requirements(
     root: &Path,
     manifest: &EvidenceManifest,
@@ -863,6 +1013,27 @@ fn verify_b8b_manifest_requirements(
     Ok(())
 }
 
+/// Resolves and validates a milestone manifest output path beneath `target/fasti-evidence`.
+///
+/// The path must be a regular `.json` file within the evidence directory and must not
+/// contain symlink components.
+///
+/// # Examples
+///
+/// ```
+/// # use std::path::Path;
+/// #
+/// let root = Path::new("/project");
+/// let output = safe_manifest_output_path(
+///     root,
+///     Path::new("target/fasti-evidence/b1-manifest.json"),
+/// )?;
+/// assert_eq!(
+///     output,
+///     root.join("target/fasti-evidence/b1-manifest.json")
+/// );
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn safe_manifest_output_path(root: &Path, requested: &Path) -> anyhow::Result<PathBuf> {
     let absolute = if requested.is_absolute() {
         requested.to_path_buf()
@@ -886,6 +1057,25 @@ fn safe_manifest_output_path(root: &Path, requested: &Path) -> anyhow::Result<Pa
     Ok(absolute)
 }
 
+/// Builds and writes a verified B1 milestone evidence manifest from the repository's collected evidence.
+///
+/// # Arguments
+///
+/// * `root` — Repository root containing the B1 evidence and source files.
+/// * `manifest_path` — Destination path for the generated manifest.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+///
+/// let manifest_path = build_b1_milestone_manifest(
+///     Path::new("."),
+///     Path::new("target/fasti-evidence/b1-manifest.json"),
+/// )?;
+/// assert!(manifest_path.ends_with("b1-manifest.json"));
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn build_b1_milestone_manifest(root: &Path, manifest_path: &Path) -> anyhow::Result<PathBuf> {
     let source = current_source_binding(root)?;
     verify_source_binding(root, &source)?;
@@ -1078,6 +1268,26 @@ fn verify_envelope(root: &Path, manifest_path: &Path) -> anyhow::Result<Verified
     })
 }
 
+/// Verifies an evidence manifest and applies the closure policy for its body.
+///
+/// # Errors
+///
+/// Returns an error if envelope verification fails or if the manifest's body-specific
+/// requirements are not satisfied.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use std::path::Path;
+/// # fn example() -> anyhow::Result<()> {
+/// let verified = verify(
+///     Path::new("."),
+///     Path::new("evidence/manifest.json"),
+/// )?;
+/// println!("verified {} evidence files", verified.manifest.evidence.len());
+/// # Ok(())
+/// # }
+/// ```
 pub(crate) fn verify(root: &Path, manifest_path: &Path) -> anyhow::Result<VerifiedManifest> {
     let verified = verify_envelope(root, manifest_path)?;
     match verified.manifest.body {
@@ -1105,6 +1315,20 @@ pub(crate) fn verify_b1_milestone(root: &Path, manifest_path: &Path) -> anyhow::
     Ok(())
 }
 
+/// Verifies that a B1 evidence manifest satisfies all milestone requirements.
+///
+/// # Errors
+///
+/// Returns an error when the manifest is incomplete, fails any B1-specific
+/// validation, has invalid evidence bindings, or cannot be verified against
+/// the repository snapshot.
+///
+/// # Examples
+///
+/// ```ignore
+/// let result = verify_b1_manifest_requirements(root, &manifest);
+/// assert!(result.is_ok());
+/// ```
 fn verify_b1_manifest_requirements(root: &Path, manifest: &EvidenceManifest) -> anyhow::Result<()> {
     ensure!(
         manifest.command == "cargo xtask test milestone --body B1",
@@ -1666,6 +1890,22 @@ fn reject_symlink_components(root: &Path, relative: &Path) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Validates the semantic requirements for an evidence entry and its receipt bindings.
+///
+/// # Examples
+///
+/// ```no_run
+/// validate_entry_semantics(source_root, evidence_root, &entry, &source, &ci)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Arguments
+///
+/// * `source_root` - Repository root containing the bound source revision.
+/// * `evidence_root` - Root directory containing the evidence files.
+/// * `entry` - Evidence entry whose path and contents are validated.
+/// * `source` - Source revision binding expected by applicable receipts.
+/// * `ci` - CI binding expected by applicable receipts.
 fn validate_entry_semantics(
     source_root: &Path,
     evidence_root: &Path,
@@ -3271,6 +3511,32 @@ fn verify_tauri_artifact_binding(root: &Path, entries: &[EvidenceEntry]) -> anyh
     Ok(())
 }
 
+/// Validates the mandatory QA receipt against the expected source, milestone, review command, and design-review requirements.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let receipt = validate_qa_receipt(
+///     root,
+///     entries,
+///     source,
+///     expected_body,
+///     "cargo test --workspace",
+///     DesignReviewStatus::NotApplicable,
+/// )?;
+/// assert_eq!(receipt.status, ResultStatus::Pass);
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Parameters
+///
+/// - `expected_design_review_status` specifies the design-review outcome required
+///   for the milestone; headless reviews must also provide a reason and indicate
+///   that no rendered UI or UX changed.
+///
+/// # Returns
+///
+/// The validated QA receipt.
 fn validate_qa_receipt(
     root: &Path,
     entries: &[EvidenceEntry],
@@ -3586,6 +3852,30 @@ fn command_output(root: &Path, program: &str, args: &[&str]) -> anyhow::Result<S
     Ok(rendered.to_owned())
 }
 
+/// Writes an incomplete diagnostic candidate describing why milestone manifest generation failed.
+///
+/// The candidate is marked as incomplete and must not be treated as a passing evidence manifest.
+///
+/// # Examples
+///
+/// ```
+/// let path = std::env::temp_dir().join(format!(
+///     "fasti-incomplete-{}.json",
+///     std::process::id()
+/// ));
+///
+/// write_incomplete_candidate(
+///     std::path::Path::new("."),
+///     &path,
+///     &anyhow::anyhow!("validation failed"),
+///     Body::B1,
+/// )?;
+///
+/// let contents = std::fs::read_to_string(&path)?;
+/// assert!(contents.contains("\"status\":\"incomplete\""));
+/// std::fs::remove_file(path)?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn write_incomplete_candidate(
     root: &Path,
     path: &Path,

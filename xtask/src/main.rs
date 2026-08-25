@@ -138,6 +138,26 @@ fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Runs the selected milestone gate and creates its evidence manifest when applicable.
+///
+/// # Examples
+///
+/// ```
+/// let result = run_milestone(
+///     std::path::Path::new("."),
+///     BodyArg::B8a,
+///     None,
+/// );
+/// assert!(result.is_err());
+/// ```
+///
+/// # Errors
+///
+/// Returns an error when the selected milestone is unavailable, prerequisites
+/// are missing or invalid, or gate verification fails.
+///
+/// `manifest` specifies the output path for the milestone evidence manifest.
+/// When omitted, the default path under `target/fasti-evidence` is used.
 fn run_milestone(
     root: &std::path::Path,
     body: BodyArg,

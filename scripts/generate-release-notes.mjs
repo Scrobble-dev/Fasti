@@ -18,6 +18,13 @@ const SEMVER_TAG_PATTERN =
 // from tag/version data at all, not just escaping it.
 const HEADING_PATTERN = /^##\s*\[([^\]]+)\][^\n]*\n/gm;
 
+/**
+ * Extracts the release notes for a semantic version tag from changelog content.
+ * @param {string} changelog - The changelog content containing version headings.
+ * @param {string} tag - The semantic version tag, optionally prefixed with `v`.
+ * @returns {string} The matching release notes section, trimmed and terminated with a newline.
+ * @throws {Error} If the tag is invalid or the changelog has no matching version section.
+ */
 export function extractReleaseNotes(changelog, tag) {
   if (typeof tag !== "string" || !SEMVER_TAG_PATTERN.test(tag)) {
     throw new Error(

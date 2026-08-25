@@ -14,15 +14,34 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Computes the SHA-256 digest of a file.
+ * @param {string} path - The path to the file.
+ * @return {Promise<string>} The digest as a hexadecimal string.
+ */
 async function sha256(path) {
   const bytes = await readFile(path);
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/**
+ * Executes a Git command in the specified repository.
+ * @param {string} root - The repository path used as the command's working directory.
+ * @param {...string} args - The Git command arguments.
+ * @return {string} The trimmed UTF-8 command output.
+ */
 function git(root, ...args) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
 }
 
+/**
+ * Generates an in-toto/SLSA provenance statement for artifact files.
+ * @param {string} root - Repository root used to obtain Git commit and tree identifiers.
+ * @param {string[]} subjectPaths - Artifact paths to include in the statement.
+ * @param {Object} [env={}] - Environment values used for build and run metadata.
+ * @returns {Object} The provenance statement containing artifact digests and build metadata.
+ * @throws {Error} If no subject paths are provided.
+ */
 export async function generateProvenance(root, subjectPaths, env = {}) {
   if (subjectPaths.length === 0) {
     throw new Error("generateProvenance requires at least one subject path");
