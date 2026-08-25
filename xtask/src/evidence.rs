@@ -4876,6 +4876,167 @@ mod tests {
     }
 
     #[test]
+    fn b8b_security_review_accepts_a_clean_receipt() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let source = current_source_binding(root.path()).expect("source binding");
+        let ci = current_ci_binding().expect("ci binding");
+
+        let relative_path =
+            PathBuf::from("target/fasti-evidence/b8b/security-review/b8b-security-review.json");
+        let receipt_path = root.path().join(&relative_path);
+        fs::create_dir_all(receipt_path.parent().unwrap()).expect("create security-review dir");
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec(&serde_json::json!({
+                "source": {"git_commit": source.git_commit, "git_tree": source.git_tree},
+                "cargo_deny": {
+                    "advisories_errors": 0,
+                    "bans_errors": 0,
+                    "licenses_errors": 0,
+                    "sources_errors": 0
+                },
+                "cargo_audit": {"vulnerabilities_found": 0}
+            }))
+            .expect("serialize fixture receipt"),
+        )
+        .expect("write fixture receipt");
+
+        let entry = EvidenceEntry {
+            id: "b8b-security-review".to_owned(),
+            kind: EvidenceKind::B8bReceipt,
+            path: relative_path,
+            sha256: sha256_bytes(&fs::read(&receipt_path).expect("read fixture receipt")),
+            status: ResultStatus::Pass,
+        };
+
+        validate_entry_semantics(root.path(), root.path(), &entry, &source, &ci)
+            .expect("a clean security-review receipt must validate");
+    }
+
+    #[test]
+    fn b8b_receipt_kind_skips_cargo_deny_checks_for_other_entry_ids() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let source = current_source_binding(root.path()).expect("source binding");
+        let ci = current_ci_binding().expect("ci binding");
+
+        let relative_path =
+            PathBuf::from("target/fasti-evidence/b8b/provenance/provenance-statement.json");
+        let receipt_path = root.path().join(&relative_path);
+        fs::create_dir_all(receipt_path.parent().unwrap()).expect("create provenance dir");
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec(&serde_json::json!({
+                "source": {"git_commit": source.git_commit, "git_tree": source.git_tree}
+            }))
+            .expect("serialize fixture receipt"),
+        )
+        .expect("write fixture receipt");
+
+        let entry = EvidenceEntry {
+            id: "b8b-provenance".to_owned(),
+            kind: EvidenceKind::B8bReceipt,
+            path: relative_path,
+            sha256: sha256_bytes(&fs::read(&receipt_path).expect("read fixture receipt")),
+            status: ResultStatus::Pass,
+        };
+
+        validate_entry_semantics(root.path(), root.path(), &entry, &source, &ci).expect(
+            "a non-security-review B8bReceipt entry must not require cargo_deny/cargo_audit",
+        );
+    }
+
+    #[test]
+    fn validate_qa_receipt_accepts_a_passing_non_headless_design_review() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let source = current_source_binding(root.path()).expect("source binding");
+
+        let relative_path = PathBuf::from("target/fasti-evidence/b8b/qa/b8b-qa.json");
+        let receipt_path = root.path().join(&relative_path);
+        fs::create_dir_all(receipt_path.parent().unwrap()).expect("create qa dir");
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": "fasti.qa-review.v1",
+                "kind": "fasti.qa-review",
+                "body": "B8b",
+                "status": "pass",
+                "reviewed_commit": source.git_commit,
+                "reviewed_tree": source.git_tree,
+                "review_command": "/qa",
+                "open_findings": 0,
+                "rendered_ui_or_ux_changed": false,
+                "design_review": {
+                    "status": "pass",
+                    "reason": "reviewed against the approved B4 design contract"
+                }
+            }))
+            .expect("serialize fixture qa receipt"),
+        )
+        .expect("write fixture qa receipt");
+
+        let entry = evidence_entry(root.path(), "b8b-qa", EvidenceKind::QaReview, relative_path)
+            .expect("build qa evidence entry");
+
+        let receipt = validate_qa_receipt(
+            root.path(),
+            std::slice::from_ref(&entry),
+            &source,
+            Body::B8b,
+            "/qa",
+            DesignReviewStatus::Pass,
+        )
+        .expect("a passing non-headless QA receipt must validate");
+        assert_eq!(receipt.design_review.status, DesignReviewStatus::Pass);
+    }
+
+    #[test]
+    fn validate_qa_receipt_rejects_a_non_headless_receipt_missing_a_pass_design_review() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let source = current_source_binding(root.path()).expect("source binding");
+
+        let relative_path = PathBuf::from("target/fasti-evidence/b8b/qa/b8b-qa.json");
+        let receipt_path = root.path().join(&relative_path);
+        fs::create_dir_all(receipt_path.parent().unwrap()).expect("create qa dir");
+        fs::write(
+            &receipt_path,
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": "fasti.qa-review.v1",
+                "kind": "fasti.qa-review",
+                "body": "B8b",
+                "status": "pass",
+                "reviewed_commit": source.git_commit,
+                "reviewed_tree": source.git_tree,
+                "review_command": "/qa",
+                "open_findings": 0,
+                "rendered_ui_or_ux_changed": false,
+                "design_review": {"status": "fail", "reason": "B4 has not shipped yet"}
+            }))
+            .expect("serialize fixture qa receipt"),
+        )
+        .expect("write fixture qa receipt");
+
+        let entry = evidence_entry(root.path(), "b8b-qa", EvidenceKind::QaReview, relative_path)
+            .expect("build qa evidence entry");
+
+        let error = validate_qa_receipt(
+            root.path(),
+            std::slice::from_ref(&entry),
+            &source,
+            Body::B8b,
+            "/qa",
+            DesignReviewStatus::Pass,
+        )
+        .expect_err("a non-Pass design review must be rejected when Pass is required");
+        assert!(error
+            .to_string()
+            .contains("design review status does not match"));
+    }
+
+    #[test]
     fn strict_shape_recomputes_summary_and_schema_binding() {
         let mut envelope = manifest(entry("qa", "target/qa.json"));
         validate_manifest_shape(&envelope).expect("valid manifest shape");

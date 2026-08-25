@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { generateProvenance } from "../../scripts/generate-provenance.mjs";
@@ -69,4 +70,29 @@ test("rejects being called with no subjects", async () => {
   await withGitFixture(async (root) => {
     await assert.rejects(() => generateProvenance(root, [], {}));
   });
+});
+
+const repositoryRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const scriptPath = resolve(repositoryRoot, "scripts/generate-provenance.mjs");
+
+test("CLI entrypoint writes a provenance statement for a real subject file", () => {
+  const outputPath = resolve(
+    repositoryRoot,
+    "target/fasti-evidence/b8b/provenance/provenance-statement.json",
+  );
+  execFileSync("node", [scriptPath, resolve(repositoryRoot, "package.json")], {
+    cwd: repositoryRoot,
+  });
+  return readFile(outputPath, "utf8").then((contents) => {
+    const written = JSON.parse(contents);
+    assert.equal(written._type, "https://in-toto.io/Statement/v1");
+    assert.equal(written.subject[0].name, "package.json");
+  });
+});
+
+test("CLI entrypoint exits nonzero with usage text when called without a subject", () => {
+  assert.throws(() => execFileSync("node", [scriptPath], { stdio: "pipe" }));
 });

@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { extractReleaseNotes } from "../../scripts/generate-release-notes.mjs";
+
+const repositoryRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const scriptPath = resolve(
+  repositoryRoot,
+  "scripts/generate-release-notes.mjs",
+);
 
 const fixtureChangelog = `# Changelog
 
@@ -58,5 +70,18 @@ test("rejects a tag that isn't a semantic version before it ever reaches RegExp"
   assert.throws(
     () => extractReleaseNotes(fixtureChangelog, "v1.0.0)(.*"),
     /must be a semantic version/,
+  );
+});
+
+test("CLI entrypoint prints usage and exits nonzero when called without a tag", () => {
+  assert.throws(() => execFileSync("node", [scriptPath], { stdio: "pipe" }));
+});
+
+test("CLI entrypoint exits nonzero for a tag with no matching CHANGELOG section", () => {
+  assert.throws(() =>
+    execFileSync("node", [scriptPath, "v9.9.9"], {
+      cwd: repositoryRoot,
+      stdio: "pipe",
+    }),
   );
 });

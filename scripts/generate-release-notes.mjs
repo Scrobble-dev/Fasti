@@ -11,6 +11,9 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const SEMVER_TAG_PATTERN =
   /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+// Fixed pattern, never built from input -- avoids constructing any RegExp
+// from tag/version data at all, not just escaping it.
+const HEADING_PATTERN = /^##\s*\[([^\]]+)\][^\n]*\n/gm;
 
 export function extractReleaseNotes(changelog, tag) {
   if (typeof tag !== "string" || !SEMVER_TAG_PATTERN.test(tag)) {
@@ -19,24 +22,17 @@ export function extractReleaseNotes(changelog, tag) {
     );
   }
   const version = tag.replace(/^v/, "");
-  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const headingPattern = new RegExp(
-    `^##\\s*\\[${escapedVersion}\\][^\\n]*\\n`,
-    "m",
-  );
-  const startMatch = headingPattern.exec(changelog);
-  if (!startMatch) {
+  const headings = [...changelog.matchAll(HEADING_PATTERN)];
+  const index = headings.findIndex((heading) => heading[1] === version);
+  if (index === -1) {
     throw new Error(
       `CHANGELOG.md has no "## [${version}]" section; rename [Unreleased] to [${version}] before tagging`,
     );
   }
-  const start = startMatch.index + startMatch[0].length;
-  const rest = changelog.slice(start);
-  const nextHeadingMatch = /^##\s*\[/m.exec(rest);
-  const section = nextHeadingMatch
-    ? rest.slice(0, nextHeadingMatch.index)
-    : rest;
-  return section.trim() + "\n";
+  const start = headings[index].index + headings[index][0].length;
+  const end =
+    index + 1 < headings.length ? headings[index + 1].index : changelog.length;
+  return changelog.slice(start, end).trim() + "\n";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
