@@ -1,5 +1,5 @@
 # Rust build outputs
-/target/
+target/
 **/*.rs.bk
 Cargo.lock.backup
 
@@ -8,6 +8,10 @@ node_modules/
 dist/
 !benchmarks/b1/tauri-shell/dist/
 !benchmarks/b1/tauri-shell/dist/index.html
+gen/
+!benchmarks/b1/tauri-shell/src-tauri/gen/
+.svelte-check/
+.svelte-kit/
 .pnpm-store/
 .next/
 .turbo/

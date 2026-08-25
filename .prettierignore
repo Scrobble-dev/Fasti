@@ -4,3 +4,5 @@ contracts/generated/
 packages/schemas/schemas/
 contracts/examples/v1/system.capabilities.success.json
 packages/sdk/src/generated.ts
+.svelte-check/
+.svelte-kit/

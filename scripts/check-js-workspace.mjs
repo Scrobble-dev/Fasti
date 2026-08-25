@@ -7,8 +7,9 @@ const expectedPackages = new Map([
   ["sdk", "@fasti/sdk"],
   ["schemas", "@fasti/schemas"],
   ["tokens", "@fasti/tokens"],
+  ["ui", "@fasti/ui"],
 ]);
-const buildablePackages = new Set(["sdk", "tokens"]);
+const buildablePackages = new Set(["sdk", "tokens", "ui"]);
 const failures = [];
 
 const actualDirectories = readdirSync(join(repoRoot, "packages"), {
@@ -52,13 +53,21 @@ for (const [directory, expectedName] of expectedPackages) {
     }
   }
 
-  for (const field of ["main", "types"]) {
-    const target = manifest[field];
-    if (typeof target !== "string" || !existsSync(join(packageRoot, target))) {
-      failures.push(
-        `${directory}: ${field} does not resolve to a built entrypoint`,
-      );
-    }
+  const primaryEntry = manifest.main ?? manifest.svelte;
+  if (
+    typeof primaryEntry !== "string" ||
+    !existsSync(join(packageRoot, primaryEntry))
+  ) {
+    failures.push(
+      `${directory}: primary entrypoint does not resolve to an existing file`,
+    );
+  }
+
+  if (
+    typeof manifest.types !== "string" ||
+    !existsSync(join(packageRoot, manifest.types))
+  ) {
+    failures.push(`${directory}: types does not resolve to an existing file`);
   }
 
   if (manifest.module && !existsSync(join(packageRoot, manifest.module))) {

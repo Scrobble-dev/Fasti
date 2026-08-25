@@ -1,0 +1,24 @@
+{
+  "name": "@fasti/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fasti local administration interface",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "svelte-check --tsgo --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@fasti/tokens": "workspace:*",
+    "@fasti/ui": "workspace:*",
+    "@tauri-apps/api": "2.11.1",
+    "svelte": "5.56.10"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "svelte-check": "4.7.6",
+    "typescript": "6.0.3",
+    "vite": "8.2.2"
+  }
+}
