@@ -27,9 +27,9 @@ text, non-empty grain set, and licence posture. Pattern and normalization remain
 declarations. B2 does not execute them.
 
 The application Identity port registers a definition under the authenticated
-workspace and the existing `identity_write` authorization. Registration is
-idempotent for the same definition. It rejects a different definition for the
-same workspace key.
+workspace. `CapabilityKey::AttachIdentifier` binds registration to
+`ScopeKey::IdentityWrite` (`identity_write`). Registration is idempotent for the
+same definition. It rejects a different definition for the same workspace key.
 
 SQLite stores one definition row per workspace and key. Identifier attachment
 requires both the declared key and the claim grain. A database trigger applies

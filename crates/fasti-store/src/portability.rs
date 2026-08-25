@@ -54,7 +54,8 @@ pub(crate) fn map_offline_open_error(
         StoreOpenError::Sqlite(error) if transient_sqlite_error(&error) => Box::new(
             FastiProblem::storage_unavailable(capability, correlation_id),
         ),
-        StoreOpenError::Io(_)
+        StoreOpenError::UnsupportedPlatform
+        | StoreOpenError::Io(_)
         | StoreOpenError::UnsafePath { .. }
         | StoreOpenError::Sqlite(_)
         | StoreOpenError::JournalMode(_)
@@ -657,6 +658,17 @@ mod tests {
         assert!(CapabilityKey::VerifyWorkspace
             .allowed_problem_codes()
             .contains(&ProblemCode::DataRootLocked));
+    }
+
+    #[test]
+    fn offline_verify_fails_closed_when_platform_locking_is_unsupported() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let problem =
+            map_offline_verify_open_error(StoreOpenError::UnsupportedPlatform, correlation_id);
+
+        assert_eq!(problem.code(), ProblemCode::IntegrityFailed);
+        assert_eq!(problem.capability(), CapabilityKey::VerifyWorkspace);
+        assert_eq!(problem.correlation_id(), correlation_id);
     }
 
     fn sqlite_open_error(result_code: i32) -> StoreOpenError {

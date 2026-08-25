@@ -21,9 +21,6 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 
-#[cfg(not(target_os = "linux"))]
-use std::fs::OpenOptions;
-
 pub const DEFAULT_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const MAX_EVIDENCE_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_TEMP_EVIDENCE_BYTES: u64 = 32 * 1024 * 1024;
@@ -36,6 +33,8 @@ pub const MAX_CONCURRENT_UPLOADS: usize = 4;
 
 #[derive(Debug, Error)]
 pub enum StoreOpenError {
+    #[error("this platform does not provide the required data-root locking semantics")]
+    UnsupportedPlatform,
     #[error("failed to prepare the Fasti data root: {0}")]
     Io(#[from] std::io::Error),
     #[error("refusing unsafe data path {path:?}: {reason}")]
@@ -72,6 +71,7 @@ pub struct LockedDataRoot {
 }
 
 impl LockedDataRoot {
+    #[cfg(unix)]
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
         let path = path.as_ref().to_path_buf();
         prepare_private_directory(&path)?;
@@ -87,6 +87,11 @@ impl LockedDataRoot {
             root_directory,
             _lock: lock,
         })
+    }
+
+    #[cfg(not(unix))]
+    pub fn acquire(_path: impl AsRef<Path>) -> Result<Self, StoreOpenError> {
+        Err(StoreOpenError::UnsupportedPlatform)
     }
 
     pub fn path(&self) -> &Path {
@@ -301,16 +306,20 @@ fn open_data_root_lock(root_directory: &File) -> Result<File, StoreOpenError> {
     Ok(File::from(fd))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(not(target_os = "linux"), unix))]
 fn open_data_root_lock(data_root: &Path) -> Result<File, StoreOpenError> {
     let path = data_root.join("fasti.lock");
     reject_unsafe_existing_file(&path)?;
-    Ok(OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)?)
+    let fd = rustix::fs::open(
+        &path,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    Ok(File::from(fd))
 }
 
 fn unsafe_path(path: &Path, reason: &'static str) -> StoreOpenError {

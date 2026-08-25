@@ -748,6 +748,22 @@ mod tests {
             .expect("enable foreign keys");
         migrate_v1(&connection).expect("create version one database");
         seed_version_one_rows(&connection);
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO records(record_id, workspace_id, grain, status, created_at)
+                    VALUES ('rec_seed', 'wsp_seed', 'film', 'active',
+                            '2026-08-24T00:00:05Z');
+                INSERT INTO external_identifiers(
+                    external_identifier_id, workspace_id, record_id, namespace,
+                    grain, value, created_at
+                ) VALUES (
+                    'xid_seed', 'wsp_seed', 'rec_seed', 'imdb', 'film',
+                    'tt0000001', '2026-08-24T00:00:06Z'
+                );
+                "#,
+            )
+            .expect("seed version one identifier");
 
         migrate(&connection).expect("upgrade populated database");
 
@@ -760,6 +776,8 @@ mod tests {
             ("clients", "client_id", "cli_seed"),
             ("evidence", "evidence_id", "evd_seed"),
             ("observations", "observation_id", "obs_seed"),
+            ("records", "record_id", "rec_seed"),
+            ("external_identifiers", "external_identifier_id", "xid_seed"),
         ] {
             let found: i64 = connection
                 .query_row(
@@ -781,6 +799,15 @@ mod tests {
         assert_eq!(
             observed, r#"{"claim":"seed"}"#,
             "observation payload was rewritten during the upgrade"
+        );
+        assert!(
+            connection
+                .execute(
+                    "UPDATE external_identifiers SET grain = 'film' WHERE external_identifier_id = 'xid_seed'",
+                    [],
+                )
+                .is_err(),
+            "a migrated identifier needs an explicit namespace registration before identity updates"
         );
 
         // Foreign keys must still resolve after the schema changed underneath

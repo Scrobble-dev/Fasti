@@ -290,8 +290,9 @@ cargo test -p fasti-store archive::tests::filesystem_destination_sigkill_matrix 
 cargo test -p fasti-store restore_import::tests::full_restore_sigkill_matrix --locked -- --exact
 ```
 
-The governed contract verifier must show that the public registry and generated
-public artifacts remain unchanged.
+The governed contract verifier must show that public restore activation remains
+absent. Generated metadata records its governed `local_operator` authorization
+with no scopes.
 
 ## Related records
 

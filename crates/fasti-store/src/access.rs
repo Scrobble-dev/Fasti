@@ -100,6 +100,7 @@ struct RecoveryNodeState {
 
 fn load_recovery_node_state(
     transaction: &Transaction<'_>,
+    owned_only: bool,
 ) -> Result<Option<RecoveryNodeState>, RecoveryTransactionError> {
     recovery_sql(
         transaction
@@ -108,9 +109,11 @@ fn load_recovery_node_state(
                 SELECT initialized, workspace_id, profile_id, client_id,
                        initialization_digest, initialization_expires_at,
                        initialization_consumed_at, recovery_restore_attempt_id
-                FROM node_state WHERE singleton = 1
+                FROM node_state
+                WHERE singleton = 1
+                  AND (?1 = 0 OR recovery_restore_attempt_id IS NOT NULL)
                 "#,
-                [],
+                params![owned_only],
                 |row| {
                     Ok(RecoveryNodeState {
                         initialized: row.get(0)?,
@@ -513,6 +516,7 @@ impl AccessAdministrationPort for SqliteKernel {
                            initialization_digest, initialization_expires_at,
                            initialization_consumed_at
                     FROM node_state WHERE singleton = 1
+                      AND recovery_restore_attempt_id IS NULL
                     "#,
                     [],
                     |row| {
@@ -1067,7 +1071,7 @@ impl SqliteKernel {
                 return Err(RecoveryTransactionError::Validation);
             }
 
-            let state = load_recovery_node_state(&transaction)?;
+            let state = load_recovery_node_state(&transaction, false)?;
             if state.is_none() {
                 if request.replace_pending() {
                     return Err(RecoveryTransactionError::Validation);
@@ -1184,8 +1188,8 @@ impl SqliteKernel {
                 recovery_sql(connection.transaction_with_behavior(TransactionBehavior::Immediate))?;
             let completed_at = now();
             let completed_at_text = timestamp(completed_at);
-            let state = load_recovery_node_state(&transaction)?
-                .ok_or(RecoveryTransactionError::Integrity)?;
+            let state = load_recovery_node_state(&transaction, true)?
+                .ok_or(RecoveryTransactionError::BootstrapClosed)?;
 
             if state.restore_attempt_id.as_deref()
                 != Some(request.restore_attempt_id().to_string().as_str())
@@ -1309,12 +1313,6 @@ impl SqliteKernel {
             } else {
                 if state.initialization_digest.is_some()
                     || state.initialization_expires_at.is_some()
-                    || auth_table_counts(&transaction)?
-                        != (
-                            2,
-                            1,
-                            i64::try_from(FULL_ADMIN_SCOPES.len()).unwrap_or(i64::MAX),
-                        )
                 {
                     return Err(RecoveryTransactionError::Integrity);
                 }
@@ -1343,21 +1341,34 @@ impl SqliteKernel {
                 let rows = rows
                     .collect::<rusqlite::Result<Vec<_>>>()
                     .map_err(|_| RecoveryTransactionError::Storage)?;
-                if rows.len() != 2 || rows.iter().any(|row| row.2 != 1) {
+                let proof = rows
+                    .iter()
+                    .find(|row| row.3 == "revoked" && verify_digest(&row.1, &proof_digest))
+                    .ok_or(RecoveryTransactionError::BootstrapClosed)?;
+                let mut completion_credentials = rows
+                    .iter()
+                    .filter(|row| row.0 != proof.0 && row.2 == proof.2);
+                let completion_credential = completion_credentials
+                    .next()
+                    .ok_or(RecoveryTransactionError::Integrity)?;
+                if completion_credentials.next().is_some() {
                     return Err(RecoveryTransactionError::Integrity);
                 }
-                let active = rows
-                    .iter()
-                    .find(|row| row.3 == "active")
-                    .ok_or(RecoveryTransactionError::Integrity)?;
-                let revoked = rows
-                    .iter()
-                    .find(|row| row.3 == "revoked")
-                    .ok_or(RecoveryTransactionError::Integrity)?;
-                if !verify_digest(&revoked.1, &proof_digest)
-                    || !verify_digest(&active.1, &final_digest)
+                if !verify_digest(&completion_credential.1, &final_digest)
+                    || completion_credential.3 != "active"
                 {
                     return Err(RecoveryTransactionError::BootstrapClosed);
+                }
+                if auth_table_counts(&transaction)?
+                    != (
+                        2,
+                        1,
+                        i64::try_from(FULL_ADMIN_SCOPES.len()).unwrap_or(i64::MAX),
+                    )
+                    || rows.len() != 2
+                    || rows.iter().any(|row| row.2 != 1)
+                {
+                    return Err(RecoveryTransactionError::Integrity);
                 }
                 let (grant,): (String,) = recovery_sql(transaction.query_row(
                     r#"
@@ -1385,7 +1396,11 @@ impl SqliteKernel {
                 if scopes != sorted_full_admin_scope_keys() {
                     return Err(RecoveryTransactionError::Integrity);
                 }
-                (active.0.clone(), grant, active.2)
+                (
+                    completion_credential.0.clone(),
+                    grant,
+                    completion_credential.2,
+                )
             };
 
             let credential_id = credential_id
@@ -1889,6 +1904,34 @@ mod tests {
     }
 
     #[test]
+    fn recovery_proof_cannot_use_first_client_enrollment() {
+        let node = RecoveryNode::new();
+        let prepared = node.prepare(false);
+        let proof_hex = prepared.initialization_proof().expose_hex();
+        let before = node.snapshot();
+
+        let error = match node
+            .kernel
+            .enroll_first_client(EnrollFirstClientCommand::new(
+                RequestCorrelationId::new_v7(),
+                SecretMaterial::try_from_hex(&proof_hex).expect("copy recovery proof"),
+            )) {
+            Ok(_) => panic!("recovery proof must not use initial enrollment"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code(), ProblemCode::BootstrapClosed);
+        assert_eq!(node.snapshot(), before);
+        node.kernel
+            .complete_recovery_bootstrap_transaction(node.complete_request(
+                prepared.client_id(),
+                &proof_hex,
+                &fixed_secret(62),
+            ))
+            .expect("owned recovery completion remains available");
+    }
+
+    #[test]
     fn explicit_replacement_removes_only_the_unconsumed_recovery_provisional() {
         let node = RecoveryNode::new();
         let first = node.prepare(false);
@@ -2178,6 +2221,44 @@ mod tests {
             .expect("final caller-owned credential authenticates");
         assert_eq!(&authenticated, completed.access());
         assert_plaintext_secrets_absent(&node, &[&proof_hex, &credential_hex]);
+    }
+
+    #[test]
+    fn recovery_completion_replay_closes_after_credential_rotation() {
+        let node = RecoveryNode::new();
+        let prepared = node.prepare(false);
+        let proof_hex = prepared.initialization_proof().expose_hex();
+        let credential_hex = fixed_secret(84);
+        let completed = node
+            .kernel
+            .complete_recovery_bootstrap_transaction(node.complete_request(
+                prepared.client_id(),
+                &proof_hex,
+                &credential_hex,
+            ))
+            .expect("complete recovery");
+        let rotated = node
+            .kernel
+            .rotate_credential(RotateCredentialCommand::new(
+                RequestCorrelationId::new_v7(),
+                *completed.access(),
+            ))
+            .expect("rotate recovered credential");
+        let rotated_hex = rotated.credential().expose_hex();
+        let after_rotation = node.snapshot();
+
+        for candidate in [&credential_hex, &rotated_hex] {
+            let error = node
+                .kernel
+                .complete_recovery_bootstrap_transaction(node.complete_request(
+                    prepared.client_id(),
+                    &proof_hex,
+                    candidate,
+                ))
+                .expect_err("rotated recovery pair must not replay");
+            assert_eq!(error.problem().code(), ProblemCode::BootstrapClosed);
+            assert_eq!(node.snapshot(), after_rotation);
+        }
     }
 
     #[test]

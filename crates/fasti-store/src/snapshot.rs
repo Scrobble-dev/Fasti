@@ -82,10 +82,11 @@ pub enum SnapshotError {
     InvalidProgress,
     #[error("snapshot filesystem operation failed: {0}")]
     Io(#[from] std::io::Error),
-    #[error("failed to remove incomplete snapshot {path:?}: {source}")]
+    #[error("failed to remove incomplete snapshot {path:?} after {cause}: {source}")]
     Cleanup {
         path: PathBuf,
         source: std::io::Error,
+        cause: Box<SnapshotError>,
     },
     #[error("snapshot SQLite operation failed: {0}")]
     Sqlite(#[from] rusqlite::Error),
@@ -223,6 +224,7 @@ where
             Err(source) => Err(SnapshotError::Cleanup {
                 path: destination.to_path_buf(),
                 source,
+                cause: Box::new(error),
             }),
         },
     }
@@ -532,6 +534,30 @@ mod tests {
         for path in destination_files(&destination) {
             assert!(!path.exists(), "incomplete snapshot remained at {path:?}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_failure_preserves_the_snapshot_error() {
+        let (root, kernel) = loaded_kernel();
+        let destination = root.path().join("cleanup-failure.sqlite3");
+        let moved = root.path().join("cleanup-failure-moved.sqlite3");
+
+        let error = kernel
+            .snapshot_database(&destination, limits(), |_| {
+                fs::rename(&destination, &moved).expect("move open snapshot");
+                fs::create_dir(&destination).expect("block incomplete-file cleanup");
+                ControlFlow::Break(())
+            })
+            .expect_err("cleanup must report both failures");
+
+        assert!(matches!(
+            error,
+            SnapshotError::Cleanup { cause, .. }
+                if matches!(*cause, SnapshotError::Cancelled)
+        ));
+        fs::remove_dir(destination).expect("remove cleanup blocker");
+        fs::remove_file(moved).expect("remove moved snapshot");
     }
 
     #[test]
