@@ -1,17 +1,21 @@
 # Error: `conflicting_exact_external_ids`
 
-**Error Code:** `identity_conflict.conflicting_exact_external_ids`  
-**HTTP Status:** `409 Conflict`
+**Status:** Governed design draft; not implemented
+
+**Target body:** B1 problem catalogue and B2 identity behavior
+
+**Provisional semantic:** conflicting exact external identifiers must not be merged automatically.
 
 ---
 
-## Explanation
-This error occurs when an observation or import row supplies two or more exact external identifiers (for example, a TMDB TV ID and a TVDB Series ID) that currently resolve to different, separate Fasti records.
+## Intended condition
 
-## Safe State Guarantee
-* **Zero Merging:** Fasti does not guess or automatically combine the two candidate records.
-* **Zero History Movement:** No Chronicle events or user progress states are modified.
+This future problem applies when an observation or import row supplies two or more exact external identifiers that resolve to incompatible candidate Records. B1 must assign the canonical typed problem code and transport mapping before any handler or SDK can expose it.
 
-## Remediation Steps
-1. Inspect the two candidate records in **Review Matches** (`/settings/identity/review`).
-2. Remove or correct the conflicting external identifier on the source system, or submit an explicit manual merge with preview if the records truly represent the same media item.
+## Required safe state
+
+- Do not guess or combine candidate Records.
+- Do not move occurrences, progress, ratings, notes, tags, or list membership.
+- Preserve the supplied evidence and create resumable review state once B2 implements that capability.
+
+No current B0 route, HTTP status, review screen, or manual-merge operation is associated with this draft.

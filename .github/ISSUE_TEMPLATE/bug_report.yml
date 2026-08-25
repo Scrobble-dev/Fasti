@@ -5,13 +5,13 @@ labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
-      value: "Thanks for reporting an issue! Please provide detailed reproduction steps so maintainers can diagnose the root cause."
+      value: "Fasti has no supported public release yet. Report reproducible behavior from a named commit or local OCI image; use Discussions for planned capabilities."
   - type: input
     id: version
     attributes:
       label: Fasti Version / Commit
       description: What version of Fasti or commit SHA were you running?
-      placeholder: "e.g. 0.1.0-alpha (dev-2026-08-21)"
+      placeholder: "e.g. commit 8fc8173 or local image digest sha256:..."
     validations:
       required: true
   - type: dropdown
@@ -19,14 +19,14 @@ body:
     attributes:
       label: Affected Component
       options:
-        - "fastid (Server Daemon)"
-        - "fasti-web (Web Client)"
-        - "fasti-desktop (Tauri Shell)"
-        - "fasti-cli (CLI Utility)"
-        - "fasti-store / SQLite Ledger"
-        - "fasti-sync / Replication"
-        - "fasti-player / Playback"
-        - "fasti-connectors / Importer"
+        - "fastid health-only daemon"
+        - "fasti guarded CLI"
+        - "Rust workspace scaffold"
+        - "Retained TypeScript packages"
+        - "Governed contract drafts / fixtures"
+        - "Local daemon-and-CLI OCI image"
+        - "Documentation / workflow policy"
+        - "Brand preview / design assets"
     validations:
       required: true
   - type: dropdown
@@ -34,10 +34,10 @@ body:
     attributes:
       label: Operating System / Deployment
       options:
-        - "Docker / Podman Container"
-        - "Linux (systemd / bare metal)"
-        - "macOS"
-        - "Windows"
+        - "Local Docker / Podman image"
+        - "Linux source checkout"
+        - "macOS source checkout"
+        - "Windows / WSL2 source checkout"
     validations:
       required: true
   - type: textarea
@@ -45,7 +45,7 @@ body:
     attributes:
       label: Steps to Reproduce
       description: Explain step-by-step how to trigger the issue.
-      placeholder: "1. Start fastid daemon...\n2. Ingest event with ID...\n3. Observe projection error..."
+      placeholder: "1. Check out commit...\n2. Run the exact command...\n3. Observe the error and exit status..."
     validations:
       required: true
   - type: textarea

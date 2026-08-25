@@ -1,7 +1,8 @@
 {
   "name": "@fasti/schemas",
   "version": "0.1.0",
-  "description": "JSON Schemas for Fasti Activity Events, Projections, and Export Bundles",
+  "private": true,
+  "description": "Governed draft JSON Schemas retained for B1 contract reconciliation",
   "license": "AGPL-3.0-or-later",
   "files": [
     "schemas"

@@ -1,0 +1,405 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/device-hypotheses.schema.json",
+  "title": "Fasti device qualification hypotheses",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "policy",
+    "performance_gate_owner",
+    "devices"
+  ],
+  "properties": {
+    "$schema": { "const": "./device-hypotheses.schema.json" },
+    "schema_version": { "const": "fasti.b1.device-hypotheses.v3" },
+    "policy": {
+      "const": "A device is not qualified until its observed runner fingerprint, exact source artifacts and contracts, and validated evidence receipt are correlated; calibrated secondary status additionally requires validated champion evidence."
+    },
+    "performance_gate_owner": { "const": "Ryan Winkler" },
+    "devices": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": { "$ref": "#/$defs/device" }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "nullableString": {
+      "oneOf": [{ "$ref": "#/$defs/nonEmptyString" }, { "type": "null" }]
+    },
+    "profile": {
+      "enum": [
+        "raspberry_pi_5_champion",
+        "j4125_calibrated",
+        "ugoos_am6b_plus",
+        "xiaomi_box_m3",
+        "nvidia_shield",
+        "representative_tv"
+      ]
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "git_commit",
+        "git_tree",
+        "native_fastid_sha256",
+        "oci_image_id",
+        "oci_source_labels",
+        "build_recipe_path",
+        "build_recipe_sha256",
+        "build_context_archive_sha256"
+      ],
+      "properties": {
+        "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "git_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "native_fastid_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "oci_image_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "oci_source_labels": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "org.opencontainers.image.revision",
+            "dev.scrobble.fasti.source.tree",
+            "dev.scrobble.fasti.contracts",
+            "dev.scrobble.fasti.build.recipe.sha256",
+            "dev.scrobble.fasti.build.context.archive.sha256"
+          ],
+          "properties": {
+            "org.opencontainers.image.revision": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.source.tree": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.contracts": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            "dev.scrobble.fasti.build.recipe.sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "dev.scrobble.fasti.build.context.archive.sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "build_recipe_path": { "const": "benchmarks/b1/Dockerfile" },
+        "build_recipe_sha256": { "$ref": "#/$defs/sha256" },
+        "build_context_archive_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "idleCpuStatus": {
+      "enum": ["pass", "fail"]
+    },
+    "evidenceCorrelationState": {
+      "enum": [
+        "blocking_unassigned",
+        "assigned_pending_evidence",
+        "evidence_validated",
+        "qualified",
+        "calibrated"
+      ]
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^evidence/[A-Za-z0-9._-]+\\.json$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "results": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "budget_statuses",
+        "artifact_budget_statuses",
+        "idle_cpu_statuses",
+        "all_applicable_budgets_passed"
+      ],
+      "properties": {
+        "budget_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "idle_target",
+            "normal_target",
+            "heavy_target",
+            "absolute_ceiling"
+          ],
+          "properties": {
+            "idle_target": { "enum": ["pass", "fail"] },
+            "normal_target": { "const": "not_applicable" },
+            "heavy_target": { "const": "not_applicable" },
+            "absolute_ceiling": { "enum": ["pass", "fail"] }
+          }
+        },
+        "artifact_budget_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "native_runtime_installed",
+            "native_archive_compressed",
+            "oci_image_compressed",
+            "oci_image_unpacked",
+            "contract_pack_compressed"
+          ],
+          "properties": {
+            "native_runtime_installed": { "const": "not_applicable" },
+            "native_archive_compressed": { "const": "not_applicable" },
+            "oci_image_compressed": { "enum": ["pass", "fail"] },
+            "oci_image_unpacked": { "enum": ["pass", "fail"] },
+            "contract_pack_compressed": { "enum": ["pass", "fail"] }
+          }
+        },
+        "idle_cpu_statuses": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["native_fastid_idle", "oci_fastid_idle"],
+          "properties": {
+            "native_fastid_idle": { "$ref": "#/$defs/idleCpuStatus" },
+            "oci_fastid_idle": { "$ref": "#/$defs/idleCpuStatus" }
+          }
+        },
+        "all_applicable_budgets_passed": { "type": "boolean" }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference_profile",
+        "state",
+        "method",
+        "reference_evidence_ref",
+        "measured_relation"
+      ],
+      "properties": {
+        "reference_profile": { "const": "raspberry_pi_5_champion" },
+        "state": {
+          "enum": ["not_started", "method_assigned", "validated"]
+        },
+        "method": { "$ref": "#/$defs/nullableString" },
+        "reference_evidence_ref": {
+          "oneOf": [{ "$ref": "#/$defs/evidenceRef" }, { "type": "null" }]
+        },
+        "measured_relation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "idle_target_ratio_j4125_to_champion",
+                "absolute_ceiling_ratio_j4125_to_champion"
+              ],
+              "properties": {
+                "idle_target_ratio_j4125_to_champion": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "absolute_ceiling_ratio_j4125_to_champion": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              }
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "packagingSpike": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "owner",
+        "phases",
+        "status",
+        "target",
+        "install_route",
+        "storage_constraints",
+        "background_environment",
+        "authoritative_source_urls"
+      ],
+      "properties": {
+        "owner": { "const": "Ryan Winkler" },
+        "phases": {
+          "type": "array",
+          "prefixItems": [{ "const": "B4" }, { "const": "B8" }],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "status": { "const": "documented_unverified" },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model",
+            "os_target",
+            "firmware_target",
+            "runtime_capture_requirement"
+          ],
+          "properties": {
+            "model": { "$ref": "#/$defs/nonEmptyString" },
+            "os_target": { "$ref": "#/$defs/nonEmptyString" },
+            "firmware_target": { "$ref": "#/$defs/nullableString" },
+            "runtime_capture_requirement": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "install_route": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "package_format",
+            "routes",
+            "post_install_network_policy"
+          ],
+          "properties": {
+            "package_format": { "const": "locally signed APK" },
+            "routes": {
+              "type": "array",
+              "prefixItems": [
+                { "const": "ADB over USB" },
+                { "const": "device-local package installer" }
+              ],
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "post_install_network_policy": { "const": "network-denied" }
+          }
+        },
+        "storage_constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory",
+            "internal_storage",
+            "expansion_and_capacity_requirement"
+          ],
+          "properties": {
+            "memory": { "$ref": "#/$defs/nonEmptyString" },
+            "internal_storage": { "$ref": "#/$defs/nonEmptyString" },
+            "expansion_and_capacity_requirement": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "background_environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["services_to_capture", "measurement_requirement"],
+          "properties": {
+            "services_to_capture": {
+              "type": "array",
+              "minItems": 4,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/nonEmptyString" }
+            },
+            "measurement_requirement": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "authoritative_source_urls": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^https://[^\\s]+$" }
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "display_name",
+        "role",
+        "hypothesis",
+        "qualification_state",
+        "custodian",
+        "runner_fingerprint",
+        "artifact_ref",
+        "contract_ref",
+        "evidence_ref",
+        "results",
+        "blocking_reason",
+        "calibration",
+        "spike"
+      ],
+      "properties": {
+        "profile": { "$ref": "#/$defs/profile" },
+        "display_name": { "$ref": "#/$defs/nonEmptyString" },
+        "role": {
+          "enum": ["champion", "calibrated_secondary", "packaging_hypothesis"]
+        },
+        "hypothesis": { "$ref": "#/$defs/nonEmptyString" },
+        "qualification_state": {
+          "$ref": "#/$defs/evidenceCorrelationState"
+        },
+        "custodian": { "$ref": "#/$defs/nullableString" },
+        "runner_fingerprint": {
+          "oneOf": [
+            {
+              "$ref": "https://fasti.scrobble.dev/schemas/benchmarks/b1/evidence.schema.json#/$defs/runner"
+            },
+            { "type": "null" }
+          ]
+        },
+        "artifact_ref": {
+          "oneOf": [{ "$ref": "#/$defs/artifactRef" }, { "type": "null" }]
+        },
+        "contract_ref": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "type": "null" }
+          ]
+        },
+        "evidence_ref": {
+          "oneOf": [{ "$ref": "#/$defs/evidenceRef" }, { "type": "null" }]
+        },
+        "results": {
+          "oneOf": [{ "$ref": "#/$defs/results" }, { "type": "null" }]
+        },
+        "blocking_reason": { "$ref": "#/$defs/nullableString" },
+        "calibration": {
+          "oneOf": [{ "$ref": "#/$defs/calibration" }, { "type": "null" }]
+        },
+        "spike": {
+          "oneOf": [{ "$ref": "#/$defs/packagingSpike" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "role": { "const": "packaging_hypothesis" } },
+            "required": ["role"]
+          },
+          "then": {
+            "properties": { "spike": { "$ref": "#/$defs/packagingSpike" } }
+          },
+          "else": { "properties": { "spike": { "type": "null" } } }
+        }
+      ]
+    }
+  }
+}

@@ -1,30 +1,30 @@
-name: Import / Migration Issue
-description: Report data loss, incorrect timestamp mapping, or failure during history migration
-title: "import: [Source system name] migration issue"
-labels: ["importer", "data-integrity"]
+name: Source-Shape Fixture / Migration Design Issue
+description: Report a defect in a governed migration fixture or discuss evidence mapping before import capabilities exist
+title: "fixture: [Source shape] mapping issue"
+labels: ["fixtures", "data-integrity"]
 body:
   - type: markdown
     attributes:
-      value: "Fasti prioritizes lossless history migration. If an import corrupted timestamps or dropped rewatch counts, let us know!"
-  - type: dropdown
+      value: "No production importer exists. Begin adapter or migration proposals in Discussions. Use this form only for a reproducible defect in a governed source-shape fixture or accepted conformance case; it makes no compatibility claim."
+  - type: input
+    id: discussion
+    attributes:
+      label: Prior Discussion URL
+      description: Link the scope-alignment Discussion for this source shape.
+    validations:
+      required: true
+  - type: input
     id: source
     attributes:
-      label: Originating Source
-      options:
-        - "Floppy"
-        - "Trakt.tv"
-        - "Letterboxd"
-        - "Last.fm"
-        - "Plex"
-        - "Jellyfin"
-        - "Custom Export"
+      label: Source Shape and Fixture Version
+      placeholder: "e.g. synthetic Yamtrack-shaped history v1; not a compatibility claim"
     validations:
       required: true
   - type: textarea
     id: issue_details
     attributes:
       label: Discrepancy Description
-      description: What specific fields or timestamps were lost, mapped incorrectly, or duplicated?
+      description: What evidence, grain, timestamp, duplicate, or loss expectation in the governed fixture is wrong?
       placeholder: "e.g. Letterboxd rewatch entries on 2024-05-12 were collapsed into a single watch event."
     validations:
       required: true
@@ -32,5 +32,5 @@ body:
     id: sanitized_sample
     attributes:
       label: Sanitized Sample Input
-      description: A small JSON or CSV snippet demonstrating the failing structure (remove private names).
+      description: A minimal synthetic JSON or CSV snippet. Remove names, credentials, identifiers, and personal media history.
       render: json

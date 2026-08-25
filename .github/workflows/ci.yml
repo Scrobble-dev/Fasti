@@ -10,65 +10,222 @@ permissions:
   contents: read
 
 jobs:
-  rust-check:
-    name: Rust Checks & Tests
+  b1-portable-gate:
+    name: Canonical B1 PR gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
         with:
           components: rustfmt, clippy
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Formatting check
-        run: cargo fmt --all -- --check
-
-      - name: Clippy linting
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Run workspace unit tests
-        run: cargo test --workspace
-
-  ts-check:
-    name: TypeScript Checks & Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: 20
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
         with:
-          version: 9
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Prettier check
-        run: pnpm format:check
-
-      - name: TypeScript typecheck
-        run: pnpm typecheck
-
-      - name: Run workspace tests
-        run: pnpm test
-
-  schema-validation:
-    name: Schema & Fixture Invariants
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify JSON syntax in fixtures
+          version: 11.22.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: Install locked Tauri Linux build prerequisites
         run: |
-          for f in fixtures/activity/*.json; do
-            python3 -m json.tool "$f" > /dev/null || exit 1
-          done
-          echo "All activity fixtures validated successfully."
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+      - run: pnpm install --frozen-lockfile
+      - name: Fetch both locked Rust dependency graphs
+        run: |
+          cargo fetch --locked
+          cargo fetch --manifest-path benchmarks/b1/tauri-shell/src-tauri/Cargo.toml --locked
+      - name: Run governed contracts and portable benchmark sentinels
+        run: cargo xtask test pr
+
+  rust:
+    name: Rust workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: cargo metadata --locked --format-version 1 --no-deps
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo build --workspace --all-targets --locked
+
+  javascript:
+    name: Retained JavaScript packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: npx nx run-many -t build
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: npx nx fix-ci
+        if: always()
+
+  repository-truth:
+    name: B0 repository truth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: bash scripts/check-repository-truth.sh
+      - run: bash scripts/check-no-publish.sh
+      - run: bash scripts/test-no-publish-policy.sh
+      - run: node scripts/check-doc-links.mjs
+
+  oci:
+    name: Daemon and CLI OCI smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build strict OCI image
+        run: docker build --tag fasti:b0 .
+      - name: Verify non-root, health, false-success, and idle-memory gates
+        run: bash scripts/smoke-oci.sh fasti:b0
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Build native binaries
+        run: cargo build --locked --release --bin fastid --bin fasti
+      - name: Verify the native path works with the network denied
+        run: bash scripts/smoke-native.sh target/release
+
+  low-hardware-envelope:
+    name: Low-hardware envelope (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - name: Build the daemon under test
+        run: cargo build --locked --release --bin fastid
+      - name: Capture exact-source OCI and contract artifact budgets
+        run: |
+          pnpm install --frozen-lockfile
+          python3 -B scripts/benchmark-b1.py artifact-capture \
+            --image "fasti:b1-${{ matrix.arch }}" \
+            --native-binary target/release/fastid \
+            --output "target/fasti-artifact-stage/${{ matrix.arch }}/receipt.json"
+      # The self-test runs first on purpose. A memory gate that cannot fail
+      # would report success forever, so the envelope proves it enforces its
+      # limits before any measurement taken with it is trusted.
+      - name: Prove the envelope enforces its limits
+        run: bash scripts/test-bench-envelope.sh
+      # bench-envelope.sh refuses to write into an existing receipt directory,
+      # by design: evidence is write-once so a bug can never silently
+      # overwrite a prior measurement. But target/fasti-evidence sits inside
+      # the directory Swatinem/rust-cache saves and restores, so a cache hit
+      # from an earlier run reintroduces last time's directory and trips that
+      # same guard on an otherwise-clean run. The cache's job is build
+      # speed, not evidence state, so clear it explicitly before measuring.
+      - name: Clear cache-restored envelope evidence before a fresh measurement
+        run: rm -rf target/fasti-evidence
+      - name: Measure the canonical daemon idle window inside the enforced envelope
+        env:
+          FASTI_ENVELOPE_ARCH: ${{ matrix.arch }}
+        run: |
+          bash scripts/bench-envelope.sh \
+            --target idle \
+            --profile canonical-idle \
+            --receipt "target/fasti-evidence/envelope/${{ matrix.arch }}/receipt.json" \
+            --artifact target/release/fastid \
+            --build-profile release \
+            --artifact-budget-receipt "target/fasti-artifact-stage/${{ matrix.arch }}/receipt.json" \
+            -- bash scripts/bench-daemon-idle.sh target/release/fastid
+      - name: Retain the exact envelope receipt and measured daemon
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fasti-b1-envelope-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: target/fasti-evidence/envelope/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 30
+
+  review-source-snapshot:
+    name: Exact tracked source snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Archive the exact reviewed tree
+        run: |
+          git archive --format=tar.gz --output=/tmp/fasti-source.tar.gz HEAD
+          sha256sum /tmp/fasti-source.tar.gz > /tmp/fasti-source.tar.gz.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fasti-source-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            /tmp/fasti-source.tar.gz
+            /tmp/fasti-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage:
+    name: Code coverage (Rust & JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: taiki-e/install-action@f347db2dee5edb1a4bddcbed2220c6e7828a0fad # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - name: Generate Rust coverage
+        # cargo llvm-cov does not create the parent directory for --output-path.
+        # The JS coverage step creates it, but runs after this one.
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --locked --lcov --output-path coverage/rust-lcov.info
+      - name: Generate JavaScript coverage
+        run: pnpm run test:coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/rust-lcov.info,coverage/js-lcov.info
+          fail_ci_if_error: false

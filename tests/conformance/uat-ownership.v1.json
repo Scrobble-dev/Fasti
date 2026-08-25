@@ -1,0 +1,486 @@
+{
+  "version": "1.0.0",
+  "source": "uat-matrix.csv",
+  "cases": [
+    {
+      "id": "ID-001",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "The stable identity invariant starts in B2, but this acceptance case requires a real provider preference switch from B5."
+    },
+    {
+      "id": "ID-002",
+      "status": "deferred",
+      "owner_body": "b6",
+      "reason": "A SIMKL-shaped import belongs to provider-neutral source conformance; no provider compatibility is claimed before B6."
+    },
+    {
+      "id": "ID-003",
+      "status": "contract-b1",
+      "owner_body": "b2",
+      "reason": "B1 fixes unresolved-safe observation semantics in a non-durable fixture; B2 must prove durable use and export."
+    },
+    {
+      "id": "ID-004",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Automatic exact-ID agreement requires the B2 identity store, resolver, and transactional acceptance path."
+    },
+    {
+      "id": "ID-005",
+      "status": "contract-b1",
+      "owner_body": "b2",
+      "reason": "B1 fixes the conflict problem contract; B2 must prove conflicted acceptance and no-mutation direct attachment."
+    },
+    {
+      "id": "ID-006",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Candidate-only title matching requires B2 review state and proof that no authoritative merge occurs."
+    },
+    {
+      "id": "ID-007",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider redirect ingestion and retention require the B5 enrichment and provenance pipeline."
+    },
+    {
+      "id": "ID-008",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider absence handling and redirect review require the B5 enrichment runtime and retained last-good state."
+    },
+    {
+      "id": "ID-009",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Negative identity assertions must be persisted and enforced by the B2 resolver before this case is executable."
+    },
+    {
+      "id": "ID-010",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Known-absence lookup policy and expiry depend on the B5 provider enrichment and cache policy."
+    },
+    {
+      "id": "ID-011",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Range offsets are part of the B5 directional mapping-pack engine and are not implemented in B1."
+    },
+    {
+      "id": "ID-012",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Multi-season range resolution requires the B5 directional mapping-pack engine."
+    },
+    {
+      "id": "ID-013",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Parallel numbering spaces require B5 mapping semantics and provider-neutral projection evidence."
+    },
+    {
+      "id": "ID-014",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Bidirectional one-to-many mapping behavior requires the B5 mapping-pack engine."
+    },
+    {
+      "id": "ID-015",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Bidirectional many-to-one mapping behavior requires the B5 mapping-pack engine."
+    },
+    {
+      "id": "ID-016",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Explicit non-contiguous coverage and gap preservation require B5 mapping-pack validation."
+    },
+    {
+      "id": "ID-017",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Numbering-space collision prevention requires the B5 mapping model and executable fixtures."
+    },
+    {
+      "id": "ID-018",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Ordering selection and provenance belong to B5 enrichment and projection behavior."
+    },
+    {
+      "id": "ID-019",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Alternate-cut record relationships require the B5 media mapping model and fixtures."
+    },
+    {
+      "id": "ID-020",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Cross-medium related and negative assertions require the B5 mapping engine."
+    },
+    {
+      "id": "ID-021",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Mapping-pack upgrade preview and immutable history require the B5 pack lifecycle."
+    },
+    {
+      "id": "ID-022",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Assertion revocation and dependent review require the B5 pack lifecycle and durable review integration."
+    },
+    {
+      "id": "ID-023",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Digest-gated pack activation and last-good retention require the B5 pack lifecycle."
+    },
+    {
+      "id": "ID-024",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Licensing-route rejection and quarantine require the B5 provider and pack policy layer."
+    },
+    {
+      "id": "ID-025",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Overlay isolation and reapplication require the B5 mapping-pack update model."
+    },
+    {
+      "id": "ID-026",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Field-level source selection and provenance are B5 enrichment behavior."
+    },
+    {
+      "id": "ID-027",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Last-good provider projections under network denial require the B5 enrichment cache."
+    },
+    {
+      "id": "ID-028",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider disablement without identity movement requires the B5 enrichment lifecycle."
+    },
+    {
+      "id": "ID-029",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Manifest installation and common provider flow belong to B5 declarative enrichment."
+    },
+    {
+      "id": "ID-030",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Missing-template behavior requires a B5 provider manifest runtime and its local-identity fallback."
+    },
+    {
+      "id": "ID-031",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider response drift and last-good retention require B5 schema enforcement."
+    },
+    {
+      "id": "ID-032",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Bounded provider retry and backoff policy belongs to the B5 enrichment adapter boundary."
+    },
+    {
+      "id": "ID-033",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider cache deletion must be proven against the B5 cache and B2 identity store."
+    },
+    {
+      "id": "ID-034",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Temporary-record persistence budgets require the B5 browse cache and performance corpus."
+    },
+    {
+      "id": "ID-035",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Typed custom descriptive fields and round-trip behavior belong to B5 enrichment."
+    },
+    {
+      "id": "ID-036",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Candidate-key promotion preview requires the B5 field and identity orchestration layer."
+    },
+    {
+      "id": "ID-037",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Versioned custom namespaces require the B5 extensibility contract and resolver integration."
+    },
+    {
+      "id": "ID-038",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Exact remediation for untyped field definitions requires the B5 custom-field validator."
+    },
+    {
+      "id": "ID-039",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider preference for games requires B5 enrichment while retaining B2 identity."
+    },
+    {
+      "id": "ID-040",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Work and release grain projection for game variants belongs to B5 media enrichment."
+    },
+    {
+      "id": "ID-041",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Book work, edition, and ISBN enrichment requires the B5 media-type model."
+    },
+    {
+      "id": "ID-042",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Reused ISBN conflict behavior requires B5 book enrichment over B2 conflict primitives."
+    },
+    {
+      "id": "ID-043",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Music recording and release grain projection belongs to B5 media enrichment."
+    },
+    {
+      "id": "ID-044",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Podcast feed and GUID source behavior requires the B5 enrichment pipeline."
+    },
+    {
+      "id": "ID-045",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Unexpected podcast GUID changes require B5 candidate and review orchestration."
+    },
+    {
+      "id": "ID-046",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "A fully local record without external identifiers requires the B2 durable record and history model."
+    },
+    {
+      "id": "ID-047",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Per-row accounting for mixed import outcomes requires the B2 identity-seed orchestration and receipts."
+    },
+    {
+      "id": "ID-048",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Checkpoint resume without duplicate identity requires B2 durable operations and idempotency."
+    },
+    {
+      "id": "ID-049",
+      "status": "deferred",
+      "owner_body": "b3",
+      "reason": "Restore equality for unresolved state and overlays belongs to B3 portability."
+    },
+    {
+      "id": "ID-050",
+      "status": "deferred",
+      "owner_body": "b3",
+      "reason": "Append-only correction while retaining original evidence and time belongs to B3."
+    },
+    {
+      "id": "ID-051",
+      "status": "deferred",
+      "owner_body": "b3",
+      "reason": "Audited merge reversal requires the B3 correction chain and durable B2 state."
+    },
+    {
+      "id": "ID-052",
+      "status": "deferred",
+      "owner_body": "b3",
+      "reason": "Composite-record split preview and assignment require B3 correction operations."
+    },
+    {
+      "id": "ID-053",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Workspace-isolated private bindings require the B2 authorization and identity store."
+    },
+    {
+      "id": "ID-054",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Profile-specific field projections require B5 enrichment over stable B2 record identity."
+    },
+    {
+      "id": "ID-055",
+      "status": "contract-b1",
+      "owner_body": "b2",
+      "reason": "B1 proves a network-independent non-durable observation contract; B2 must prove a durable local commit."
+    },
+    {
+      "id": "ID-056",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Missing or corrupt mapping-index recovery requires the B5 mapping runtime and durable safe-write path."
+    },
+    {
+      "id": "ID-057",
+      "status": "contract-b1",
+      "owner_body": "b2",
+      "reason": "B1 proves fixture-level operation replay semantics; B2 must prove durable duplicate delivery and rewatch behavior."
+    },
+    {
+      "id": "ID-058",
+      "status": "deferred",
+      "owner_body": "post-b8",
+      "reason": "Cross-device decision convergence requires the explicitly unnumbered later multi-node synchronization body."
+    },
+    {
+      "id": "ID-059",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Missing-scope denial for any caller requires B2 transaction-level authorization on a real identity mutation."
+    },
+    {
+      "id": "ID-060",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Redirect-hop private-address rejection belongs to the B5 provider network policy."
+    },
+    {
+      "id": "ID-061",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Bounded mapping-pack rejection and last-good activation require the B5 pack loader."
+    },
+    {
+      "id": "ID-062",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Provider URL and error redaction require the B5 adapter boundary and log inspection."
+    },
+    {
+      "id": "ID-063",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Canonical record routes and alias resolution require the B2 HTTP identity adapter."
+    },
+    {
+      "id": "ID-064",
+      "status": "contract-b1",
+      "owner_body": "b2",
+      "reason": "B1 fixes structured safe-state problem fields; B2 must execute the exact-ID conflict path."
+    },
+    {
+      "id": "ID-065",
+      "status": "contract-b1",
+      "owner_body": "b1",
+      "reason": "B1 generates and validates capability and scope metadata, but full discovery content is not yet a production runtime claim."
+    },
+    {
+      "id": "ID-066",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "Atomic per-item results for mixed batches require the B2 durable application and HTTP paths."
+    },
+    {
+      "id": "ID-067",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "Equivalent mouse, keyboard, and touch quick actions belong to the B4 media interface and design review."
+    },
+    {
+      "id": "ID-068",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "The no-source record explanation and governed actions require the B4 media interface."
+    },
+    {
+      "id": "ID-069",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "The empty review state and entry rules require the B4 media interface."
+    },
+    {
+      "id": "ID-070",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "The missing-provider-key explanation and alternatives require the B4 media interface."
+    },
+    {
+      "id": "ID-071",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "Screen-reader candidate review requires the B4 rendered interface and accessibility evidence."
+    },
+    {
+      "id": "ID-072",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "Keyboard-only preview and focus return require the B4 rendered interface and design review."
+    },
+    {
+      "id": "ID-073",
+      "status": "deferred",
+      "owner_body": "b4",
+      "reason": "Review-position and decision continuity require the B4 interface over durable B2 review state."
+    },
+    {
+      "id": "ID-074",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "A persistent mapping-activation recovery notice requires both the B4 interface and the B5 pack lifecycle."
+    },
+    {
+      "id": "ID-075",
+      "status": "deferred",
+      "owner_body": "b2",
+      "reason": "The large-corpus memory and latency qualification is a B2 physical-runner gate, not a B1 baseline."
+    },
+    {
+      "id": "ID-076",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Bounded mapping-index rebuild and atomic swap require the B5 mapping runtime."
+    },
+    {
+      "id": "ID-077",
+      "status": "deferred",
+      "owner_body": "b3",
+      "reason": "Clean-restore equality for IDs, digests, counts, links, and unresolved state belongs to B3."
+    },
+    {
+      "id": "ID-078",
+      "status": "contract-b1",
+      "owner_body": "b2",
+      "reason": "B1 supplies local OKF contract links; B2 must provide executable identity-error recovery knowledge."
+    },
+    {
+      "id": "ID-079",
+      "status": "deferred",
+      "owner_body": "b6",
+      "reason": "A provider template and reference conformance command belong to B6 source conformance."
+    },
+    {
+      "id": "ID-080",
+      "status": "deferred",
+      "owner_body": "b5",
+      "reason": "Predictable provider switching and rollback require B5 enrichment integrated with the reviewed B4 interface."
+    }
+  ]
+}

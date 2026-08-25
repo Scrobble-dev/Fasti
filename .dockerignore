@@ -1,0 +1,10 @@
+.git
+.github
+.gstack
+node_modules
+target
+**/dist
+*.db
+*.db-shm
+*.db-wal
+*.fasti

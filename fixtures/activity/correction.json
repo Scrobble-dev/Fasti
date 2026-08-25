@@ -2,7 +2,7 @@
   "event_id": "01917542-5f6b-7c10-9830-a11b2c33d440",
   "schema_version": "1.0",
   "actor_id": "user_local_01",
-  "device_id": "fasti_web_browser",
+  "device_id": "manual_fixture_editor",
   "device_seq": 143,
   "kind": "media.corrected",
   "media": {
@@ -23,7 +23,7 @@
   },
   "provenance": {
     "channel": "manual",
-    "client": "fasti-web/0.1.0"
+    "client": "manual-correction-fixture/example"
   },
   "correction_of": "01917540-8b1b-7a30-8a10-b99a0f44e820",
   "tombstone_of": null

@@ -1,69 +1,62 @@
 # Security Policy
 
-The Fasti project takes the security and privacy of your media chronicle seriously. This document outlines our vulnerability disclosure process, threat model, and built-in security guarantees.
+Fasti is currently a development source tree. No version is supported for production use and no patched public build is promised yet. Security reports are still welcome because the project is defining identity, evidence, access, recovery, and local distribution boundaries where mistakes would be costly later.
 
----
+## Reporting a vulnerability
 
-## 1. Supported Versions
+Do not open a public issue for an undisclosed vulnerability.
 
-We provide security updates and patches for the following versions:
+Report privately through [GitHub Security Advisories](https://github.com/Scrobble-dev/Fasti/security/advisories/new) or email `security@scrobble.dev`. Include the affected commit or artifact, impact, reproduction steps or a minimal proof, and any suggested mitigation. Do not include real personal media history, credentials, tokens, or private provider data when a synthetic fixture can reproduce the issue.
 
-| Version | Supported |
-|---|---|
-| `0.1.x` (Current development) | :white_check_mark: |
-| `< 0.1.0` | :x: |
+The project will acknowledge and investigate reports as maintainer availability permits, keep the reporter informed, and agree on disclosure timing where coordination is appropriate. This development-stage policy does not promise a fixed response SLA or a published patched binary.
 
----
+## Implemented review controls
 
-## 2. Reporting a Vulnerability
+- Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value.
+- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
+- Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
+- The event-submission route is absent rather than returning an unauthenticated false committed receipt.
+- Planned export, restore, and verify commands exit nonzero and change no data.
+- The active source contains no analytics or phone-home implementation.
+- The B2 review kernel opens owner-only data directories and files, requires SQLite foreign keys, WAL, `synchronous=FULL`, and a bounded busy timeout, and refuses unsupported settings.
+- Node initialization and first-client enrollment are transactional. The one-time proof expires, is consumed once, and is cleared after successful enrollment. Long-lived credential material is stored as a digest rather than plaintext.
+- Credential authentication binds the selected profile, client, grant, credential epoch, and workspace. Ambiguous active grants, ungranted profiles, revoked state, and cross-workspace grants fail closed.
+- Evidence upload authorizes before temporary-file creation, enforces concurrent and byte budgets, hashes while streaming, rechecks authorization before durable promotion, and verifies existing content before deduplication.
+- Operation receipts bind workspace, client, operation, capability, and semantic digest. Replay and receipt streams remain profile/client scoped and bounded.
+- B2-only bootstrap, authentication, integrity, storage, cursor, evidence, identity, and review failures are accepted by the internal kernel policy but remain absent from finalized B1 public contract output.
 
-If you discover or suspect a security vulnerability in Fasti:
+These controls make the development baseline and B2 review implementation safer; they do not mount B2 in production or make Fasti a supported service.
 
-1. **Do NOT open a public GitHub issue.**
-2. Report the vulnerability privately via GitHub Security Advisories at [https://github.com/Scrobble-dev/Fasti/security/advisories/new](https://github.com/Scrobble-dev/Fasti/security/advisories/new) or by emailing the security team at **`security@scrobble.dev`**.
-3. Please include in your report:
-   * A description of the vulnerability and its potential impact.
-   * Step-by-step reproduction instructions or a minimal proof of concept.
-   * The affected component (`fastid`, `fasti-store`, `fasti-sync`, web UI, Tauri desktop, etc.).
-   * Any proposed mitigations or patches if available.
+## Current threat model
 
-### Response Timeline
-* **Initial Response:** Within 48 hours acknowledging receipt of the report.
-* **Triage & Assessment:** Within 7 days with a severity evaluation and remediation timeline.
-* **Coordinated Disclosure:** We will work with the reporter on a mutually agreed timeline before publicly disclosing the vulnerability and publishing patched builds.
+The current source tree protects these assets:
 
----
+- stable local identity and media history;
+- original observations and evidence;
+- profile, client, credential, grant, and receipt integrity;
+- generated contract meaning;
+- benchmark and hardware qualification evidence;
+- private runner bundles and CI results.
 
-## 3. Core Security & Privacy Invariants
+Treat unauthenticated network clients, hostile local processes, provider input, archives, paths, structured data, pull requests, dependencies, actions, base images, and concurrent file changes as untrusted.
 
-Fasti is designed with a defense-in-depth security posture tailored for self-hosted environments:
+Current trust boundaries are the production loopback listener, the feature-gated conformance listener, delivery adapters into application policy, source and CI into generated artifacts, and runner files into exact-commit bundles. Native, OCI, and later package formats must expose the same governed behavior.
 
-```
-[Untrusted Network]
-         │
-         ▼ (Firewall / Reverse Proxy)
-┌────────────────────────────────────────────────────────┐
-│ Fasti Security Perimeter                               │
-│                                                        │
-│  [1. Strict Loopback / Private Bind by Default]        │
-│  [2. Scoped API Tokens with Capability Boundaries]     │
-│  [3. WebAuthn / Passkeys for Operator Authentication]  │
-│  [4. Zero Outbound Telemetry / Zero Third-Party Phone] │
-│  [5. Sanitized Connector Metadata Ingestion]           │
-│                                                        │
-└────────────────────────────────────────────────────────┘
-```
+The system must fail closed when authorization, durability, limits, source identity, evidence, or hardware identity is missing or stale. Missing behavior must not return a success receipt. Provider data must not become canonical identity. Secrets must not enter URLs, arguments, logs, screenshots, fixtures, or proof bundles.
 
-1. **Private by Default:**
-   * `fastid` binds to `127.0.0.1` by default unless explicitly configured for network exposure behind a verified reverse proxy or VPN.
-   * Registration is closed automatically after the initial owner account bootstrap.
-2. **Zero Telemetry:**
-   * Fasti contains no phone-home analytics, user tracking, or hidden telemetry reporting. Crash diagnostics are purely local and opt-in.
-3. **Least-Privilege Scoping:**
-   * API tokens are strictly scoped (e.g., `events:write`, `history:read`, `admin:sync`).
-   * Desktop webviews running under Tauri v2 operate with locked-down capabilities without unrestricted shell or filesystem access.
-4. **SSRF & Connector Hardening:**
-   * External metadata connectors validate URLs against strict allowlists, rejecting private subnet ranges (`10.0.0.0/8`, `192.168.0.0/16`, `127.0.0.0/8`, link-local) to prevent Server-Side Request Forgery.
-5. **Secure Cryptographic Storage:**
-   * Passwords and credentials use memory-hard hashing (Argon2id) compliant with RFC 9106.
-   * Database backups and exports cleanly separate personal credentials from portable media history.
+## Remaining proof obligations
+
+B2-B8 must still prove, rather than merely document:
+
+- first-client enrollment, closed bootstrap, rotation, revocation, expiry, current-epoch authorization, and profile isolation under process-crash, restart, concurrency, and supported physical-storage tests;
+- strict body, stream, byte, temporary-space, archive, and concurrency limits before expensive work;
+- streamed evidence hashing, same-filesystem durable promotion, orphan quotas, and safe cleanup;
+- SQLite durability settings verified by readback, bounded writer transactions, receipt replay, and crash or controlled power-cut survival;
+- archive traversal, decompression-bomb, Unicode/path ambiguity, SQL injection, header confusion, stale-credential, SSRF, and hostile-JSON defenses;
+- secrets external to images and proof bundles, permission-restricted credential delivery, and no credentials in command arguments or logs;
+- explicit local-origin and browser security policy when B4 adds a UI;
+- dependency, SBOM, signing, trust-root, update, and recovery evidence before B8 publishes a release.
+
+Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. A supported network-exposure guide cannot exist until the access and threat-model gates pass.
+
+See [the constitution](docs/constitution.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md).

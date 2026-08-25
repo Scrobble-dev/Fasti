@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/benchmarks/b1/runner-bundle.schema.json",
+  "title": "Fasti B1 private runner bundle manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schema_version",
+    "created_at",
+    "source",
+    "bundle",
+    "handoff"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "https://fasti.scrobble.dev/schemas/benchmarks/b1/runner-bundle.schema.json"
+    },
+    "schema_version": { "const": "fasti.b1.runner-bundle.v1" },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "git_tree", "contract_ref", "tree_state"],
+      "properties": {
+        "git_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "git_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "contract_ref": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "tree_state": { "const": "clean" }
+      }
+    },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "sha256", "size_bytes", "head_ref"],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*\\.bundle$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "head_ref": { "const": "HEAD" }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkout_mode", "public_remote_required", "bundle_scope"],
+      "properties": {
+        "checkout_mode": { "const": "detached_exact_commit" },
+        "public_remote_required": { "const": false },
+        "bundle_scope": {
+          "const": "self_contained_objects_reachable_from_exact_head_only"
+        }
+      }
+    }
+  }
+}

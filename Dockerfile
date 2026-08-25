@@ -1,38 +1,36 @@
-# syntax=docker/dockerfile:1
-
-# Stage 1: Build Frontend
-FROM node:20-alpine AS web-builder
+# Multi-architecture Docker Official Image index digests resolved on 2026-08-22.
+# The tags remain readable; the digests make the build inputs immutable.
+FROM rust:1.97-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS rust-builder
+RUN apk add --no-cache musl-dev
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9 --activate
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./
-COPY packages/ ./packages/
-COPY apps/web/ ./apps/web/
-RUN pnpm install --frozen-lockfile || pnpm install
-RUN pnpm --filter @fasti/web build || mkdir -p /app/apps/web/dist
 
-# Stage 2: Build Rust Backend
-FROM rust:1.80-alpine AS rust-builder
-RUN apk add --no-cache musl-dev sqlite-dev
-WORKDIR /app
-COPY Cargo.toml ./
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 COPY apps/fastid/ ./apps/fastid/
-RUN cargo build --release --bin fastid
+COPY xtask/ ./xtask/
+COPY contracts/ ./contracts/
 
-# Stage 3: Runtime
-FROM alpine:3.20 AS runtime
-RUN apk add --no-cache ca-certificates tzdata sqlite-libs
-WORKDIR /app
+RUN cargo build --locked --release --bin fastid --bin fasti
 
-# Create non-root user
-RUN addgroup -S fasti && adduser -S fasti -G fasti
-USER fasti:fasti
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
+ARG FASTI_SOURCE_COMMIT=""
+ARG FASTI_SOURCE_TREE=""
+ARG FASTI_CONTRACT_REF=""
+LABEL org.opencontainers.image.revision="${FASTI_SOURCE_COMMIT}" \
+      dev.scrobble.fasti.source.tree="${FASTI_SOURCE_TREE}" \
+      dev.scrobble.fasti.contracts="${FASTI_CONTRACT_REF}"
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S fasti \
+    && adduser -S fasti -G fasti
 
 COPY --from=rust-builder /app/target/release/fastid /usr/local/bin/fastid
-COPY --from=web-builder /app/apps/web/dist /app/static
+COPY --from=rust-builder /app/target/release/fasti /usr/local/bin/fasti
 
-ENV FASTI_PORT=8420
-ENV FASTI_STATIC_DIR=/app/static
+ENV FASTI_LISTEN=0.0.0.0:8420
 EXPOSE 8420
+USER fasti:fasti
 
-ENTRYPOINT ["fastid"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=3s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8420/api/v1/health || exit 1
+
+CMD ["/usr/local/bin/fastid"]

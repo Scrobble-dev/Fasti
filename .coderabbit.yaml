@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+tone_instructions: >
+  Be concise and highly specific. Focus strictly on architectural integrity, correctness,
+  safety, and domain boundaries. Do not comment on stylistic formatting or minor linting
+  (already enforced by rustfmt and clippy).
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "dev"
+      - "release"
+      - "main"
+
+  path_filters:
+    - "!contracts/generated/**"
+    - "!contracts/examples/**"
+    - "!fixtures/**"
+    - "!brand/**"
+    - "!Cargo.lock"
+    - "!pnpm-lock.yaml"
+    - "!target/**"
+
+  path_instructions:
+    - path: "crates/fasti-domain/**"
+      instructions: >
+        Enforce strict domain boundaries: fasti-domain MUST NOT depend on axum, rusqlite,
+        tokio, tracing, fasti-api, fasti-store, or any adapter/runtime layer. Domain rules
+        own identity and meaning.
+
+    - path: "crates/fasti-application/**"
+      instructions: >
+        fasti-application MUST NOT depend on adapter or schema runtime packages (axum,
+        rusqlite, tokio, tracing-subscriber, fasti-api, fasti-store). It coordinates domain
+        capabilities and ports.
+
+    - path: ".github/workflows/**"
+      instructions: >
+        Strict security invariant: Every external action `uses:` MUST be pinned to a full
+        40-character hexadecimal commit SHA followed by a `# version` comment. No tags or
+        branch names allowed.
+
+    - path: "**"
+      instructions: >
+        1. Product boundary: "Fasti records. Players play." Reject any playback, stream decoding,
+           stream selection, or player controls.
+        2. Verify Developer Certificate of Origin (DCO) commit sign-off and AGPL-3.0 compliance.
+        3. Reject any hardcoded secrets, test credentials, or auth tokens in code or fixtures.
+        4. Respect bounded memory budgets (64 MiB idle, 192 MiB ceiling).
+
+chat:
+  auto_reply: true

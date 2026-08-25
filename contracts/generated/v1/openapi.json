@@ -1,0 +1,194 @@
+{
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ProblemActionDto": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "additionalProperties": false,
+        "description": "RFC 9457 representation of the one application problem model.",
+        "properties": {
+          "actual": {
+            "type": "null"
+          },
+          "capability_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "next_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemActionDto"
+            },
+            "maxItems": 1,
+            "minItems": 1,
+            "type": "array"
+          },
+          "param": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "retryability": {
+            "type": "string"
+          },
+          "safe_state": {
+            "type": "string"
+          },
+          "status": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "violations": {
+            "items": {
+              "$ref": "#/components/schemas/ViolationDto"
+            },
+            "maxItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "capability_id",
+          "safe_state",
+          "retryability",
+          "next_actions",
+          "correlation_id",
+          "actual",
+          "violations"
+        ],
+        "type": "object"
+      },
+      "ViolationDto": {
+        "additionalProperties": false,
+        "properties": {
+          "actual": {
+            "type": "null"
+          },
+          "code": {
+            "type": "string"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "pointer": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pointer",
+          "reason",
+          "expected",
+          "actual"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "email": "hello@scrobble.dev",
+      "name": "Fasti Contributors"
+    },
+    "description": "HTTP REST API routes, handlers, and JSON contracts for Fasti",
+    "license": {
+      "identifier": "AGPL-3.0-or-later",
+      "name": "AGPL-3.0-or-later"
+    },
+    "title": "fasti-api",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "health_check",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "system.health.success": {
+                    "value": {
+                      "status": "healthy",
+                      "version": "0.1.0"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "The Fasti service is healthy"
+          }
+        },
+        "tags": [
+          "system"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "system.health",
+        "x-fasti-example-ids": [
+          "system.health.success"
+        ],
+        "x-fasti-problem-codes": [],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    }
+  }
+}

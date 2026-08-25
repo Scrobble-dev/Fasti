@@ -1,0 +1,9 @@
+{
+  "capability_id": "observation.accept",
+  "correlation_id": "req_018f0e0e7f7b70008000000000000014",
+  "receipt_id": "rcp_018f0e0e7f7b70008000000000000001",
+  "operation_id": "op_018f0e0e7f7b70008000000000000003",
+  "observation_id": "obs_018f0e0e7f7b70008000000000000007",
+  "resolution": "unresolved",
+  "committed_at": "2026-08-21T17:44:16.001Z"
+}

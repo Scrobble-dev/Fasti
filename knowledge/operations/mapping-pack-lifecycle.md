@@ -1,15 +1,18 @@
 # Operation: Mapping Pack Lifecycle
 
-Mapping packs supply directional identity assertions (e.g. anime cour episode offsets, season crosswalks) from curated upstreams.
+**Status:** Governed design draft; not implemented
 
----
+**Target body:** B5 enrichment and B6 provider-neutral conformance
 
-## Lifecycle Steps
+Mapping packs may eventually supply directional identity assertions, such as anime cour episode offsets or season crosswalks, from curated upstreams. B0 provides no download, verification, compilation, activation, rollback, command, or UI capability.
 
-1. **Governed Download:** Retrieve pack archive and cryptographic digest.
-2. **Signature & Schema Verification:** Validate manifest schema version and publisher signature.
-3. **Licence & Lineage Check:** Verify source lineage is documented and permissible.
-4. **Disposable Index Compilation:** Build local SQLite lookup indexes without touching canonical user state.
-5. **Conflict Preview:** Generate a diff of affected records and detect any conflicts with existing history.
-6. **Atomic Activation:** Swap active mapping index pointer atomically.
-7. **Retain Rollback:** Preserve the previous active version for immediate one-click rollback if anomalies arise.
+## Required future acceptance sequence
+
+1. Validate the governed manifest and declared integrity mechanism.
+2. Verify licence posture, source lineage, version, and limits.
+3. Compile disposable lookup indexes without changing canonical user state.
+4. Preview identity conflicts and affected Records.
+5. Activate through an explicit, crash-safe application capability.
+6. Preserve a bounded rollback path and provenance for every derived assertion.
+
+B5/B6 must turn this sequence into contracts and executable evidence before it becomes an operator procedure.

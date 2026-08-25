@@ -1,6 +1,6 @@
 # Getting Help with Fasti
 
-We want your experience with Fasti to be smooth, reliable, and transparent.
+Fasti is currently a development source tree, not a supported public release. Help is community-based and capabilities labelled for later bodies should not be filed as production regressions.
 
 ---
 
@@ -8,6 +8,8 @@ We want your experience with Fasti to be smooth, reliable, and transparent.
 
 Before opening an issue, check our documentation:
 * [Architecture Overview](docs/architecture/overview.md)
+* [Capability Ledger](docs/capability-ledger.md)
+* [Roadmap](ROADMAP.md)
 * [Design & Brand System](brand/DESIGN.md)
 * [Scrobble.dev Specification](https://scrobble.dev)
 
@@ -15,7 +17,7 @@ Before opening an issue, check our documentation:
 
 ## 2. Community Discussions
 
-For open questions, feature brainstorming, homelab setup advice, and ecosystem discussions:
+For open questions, feature planning, provider recipes, packaging hypotheses, and ecosystem discussions:
 * Join GitHub Discussions at [https://github.com/Scrobble-dev/Fasti/discussions](https://github.com/Scrobble-dev/Fasti/discussions).
 
 ---
@@ -23,7 +25,7 @@ For open questions, feature brainstorming, homelab setup advice, and ecosystem d
 ## 3. Reporting Issues
 
 * **Bugs & Regressions:** Use our [Bug Report Form](.github/ISSUE_TEMPLATE/bug_report.yml).
-* **Import & Migration Fidelity:** Use our [Import Issue Form](.github/ISSUE_TEMPLATE/import_issue.yml).
-* **Sync & Reconnection Gaps:** Use our [Sync Issue Form](.github/ISSUE_TEMPLATE/sync_issue.yml).
 * **Accessibility Issues:** Use our [Accessibility Issue Form](.github/ISSUE_TEMPLATE/accessibility_issue.yml).
 * **Security Vulnerabilities:** Follow the private disclosure instructions in [`SECURITY.md`](SECURITY.md).
+
+Import, enrichment, replication, Nuvio, player-observation, TV, and package proposals begin in Discussions. Use an issue only after the Discussion identifies an implemented capability and reproducible defect.

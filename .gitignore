@@ -6,15 +6,13 @@ Cargo.lock.backup
 # Node / pnpm / frontend
 node_modules/
 dist/
+!benchmarks/b1/tauri-shell/dist/
+!benchmarks/b1/tauri-shell/dist/index.html
 .pnpm-store/
 .next/
 .turbo/
 build/
 *.tsbuildinfo
-
-# Tauri build outputs
-/apps/desktop/src-tauri/target/
-/apps/desktop/src-tauri/gen/
 
 # SQLite & local runtime data
 *.db
@@ -49,3 +47,13 @@ coverage/
 lcov.info
 *.profdata
 *.profraw
+/benchmarks/b1/evidence/
+/benchmarks/b1/tauri-shell/evidence/
+__pycache__/
+*.py[cod]
+
+
+
+.nx/cache
+.nx/workspace-data
+.nx/migrate-runs

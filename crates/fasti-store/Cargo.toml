@@ -5,13 +5,24 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "SQLite persistence, WAL management, transactional migrations, and backup verification for Fasti"
+publish.workspace = true
+description = "Fasti SQLite and filesystem adapters for the local kernel"
 
 [dependencies]
-fasti-core = { workspace = true }
-fasti-activity = { workspace = true }
+chrono = { workspace = true }
+fasti-application = { workspace = true }
+fasti-contracts = { workspace = true }
+fasti-domain = { workspace = true }
+getrandom = { workspace = true }
 rusqlite = { workspace = true }
+rustix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = "0.10.9"
+tar = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+rustix = { workspace = true, features = ["process"] }
+tempfile = "3.27.0"

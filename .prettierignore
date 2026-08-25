@@ -1,0 +1,6 @@
+# Generated deterministically by `cargo xtask contract generate` and verified
+# byte-for-byte by the contract gate. Authored sources remain Prettier-owned.
+contracts/generated/
+packages/schemas/schemas/
+contracts/examples/v1/system.capabilities.success.json
+packages/sdk/src/generated.ts

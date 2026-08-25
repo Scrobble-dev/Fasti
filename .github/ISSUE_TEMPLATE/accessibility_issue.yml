@@ -5,7 +5,15 @@ labels: ["accessibility", "ux"]
 body:
   - type: markdown
     attributes:
-      value: "Fasti holds a strict WCAG 2.2 AA and cognitive accessibility standard. Please describe any barrier encountered."
+      value: "Fasti holds a strict WCAG 2.2 AA and cognitive accessibility standard. B0 has no product UI; report barriers in the current README, brand preview, or repository surfaces here. Discuss future product UI before implementation."
+  - type: input
+    id: surface
+    attributes:
+      label: Affected surface and commit
+      description: Name the current surface and include the commit SHA or URL you tested.
+      placeholder: "brand/preview.html at 8fc8173"
+    validations:
+      required: true
   - type: dropdown
     id: barrier_type
     attributes:
@@ -26,3 +34,9 @@ body:
       placeholder: "Describe the element, the assistive tech used, and the barrier experienced."
     validations:
       required: true
+  - type: checkboxes
+    id: future_ui_discussion
+    attributes:
+      label: Future UI work
+      options:
+        - label: If this proposes a new product UI or interaction, I opened a Discussion before implementation.

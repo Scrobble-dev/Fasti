@@ -1,0 +1,124 @@
+{
+  "$defs": {
+    "ProblemActionDto": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "ViolationDto": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "type": "null"
+        },
+        "code": {
+          "type": "string"
+        },
+        "expected": {
+          "type": "string"
+        },
+        "pointer": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "pointer",
+        "reason",
+        "expected",
+        "actual"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "RFC 9457 representation of the one application problem model.",
+  "properties": {
+    "actual": {
+      "type": "null"
+    },
+    "capability_id": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "correlation_id": {
+      "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "next_actions": {
+      "items": {
+        "$ref": "#/$defs/ProblemActionDto"
+      },
+      "maxItems": 1,
+      "minItems": 1,
+      "type": "array"
+    },
+    "param": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retryability": {
+      "type": "string"
+    },
+    "safe_state": {
+      "type": "string"
+    },
+    "status": {
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "title": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "violations": {
+      "items": {
+        "$ref": "#/$defs/ViolationDto"
+      },
+      "maxItems": 32,
+      "type": "array"
+    }
+  },
+  "required": [
+    "type",
+    "title",
+    "status",
+    "detail",
+    "code",
+    "capability_id",
+    "safe_state",
+    "retryability",
+    "next_actions",
+    "correlation_id",
+    "actual",
+    "violations"
+  ],
+  "title": "ProblemDetails",
+  "type": "object"
+}

@@ -1,0 +1,20 @@
+{
+  "type": "https://fasti.scrobble.dev/v1/problems/receipt-not-found",
+  "title": "Receipt not found",
+  "status": 404,
+  "detail": "no receipt is available for the requested identifier",
+  "code": "receipt_not_found",
+  "capability_id": "receipt.replay",
+  "safe_state": "no_mutation",
+  "retryability": "not_retryable",
+  "next_actions": [
+    {
+      "id": "verify_receipt_id",
+      "label": "Verify the receipt ID and request context"
+    }
+  ],
+  "correlation_id": "req_018f0e0e7f7b70008000000000000022",
+  "param": "/receipt_id",
+  "actual": null,
+  "violations": []
+}

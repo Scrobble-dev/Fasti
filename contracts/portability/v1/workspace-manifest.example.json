@@ -1,0 +1,121 @@
+{
+  "manifest": {
+    "format": "fasti.workspace.manifest",
+    "format_version": 1,
+    "workspace_id": "wsp_018f0e0e7f7b70008000000000000000",
+    "export_scope": "full_workspace",
+    "archive_profile": "zstd-l3-w22",
+    "restore_policy": "clean_only",
+    "recovery_grant_policy": "require_fresh_bootstrap",
+    "workspace_revision": 1,
+    "contract_version": "1.0.0",
+    "migration_version": 2,
+    "migration_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "streams": [
+      {
+        "entity": "workspaces",
+        "row_count": 1,
+        "byte_length": 128,
+        "digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+      },
+      {
+        "entity": "profiles",
+        "row_count": 1,
+        "byte_length": 128,
+        "digest": "sha256:0202020202020202020202020202020202020202020202020202020202020202"
+      },
+      {
+        "entity": "clients",
+        "row_count": 1,
+        "byte_length": 128,
+        "digest": "sha256:0303030303030303030303030303030303030303030303030303030303030303"
+      },
+      {
+        "entity": "records",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:0404040404040404040404040404040404040404040404040404040404040404"
+      },
+      {
+        "entity": "namespaces",
+        "row_count": 1,
+        "byte_length": 160,
+        "digest": "sha256:0505050505050505050505050505050505050505050505050505050505050505"
+      },
+      {
+        "entity": "external_identifiers",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:0606060606060606060606060606060606060606060606060606060606060606"
+      },
+      {
+        "entity": "evidence",
+        "row_count": 1,
+        "byte_length": 192,
+        "digest": "sha256:0707070707070707070707070707070707070707070707070707070707070707"
+      },
+      {
+        "entity": "observations",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:0808080808080808080808080808080808080808080808080808080808080808"
+      },
+      {
+        "entity": "observation_clues",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:0909090909090909090909090909090909090909090909090909090909090909"
+      },
+      {
+        "entity": "occurrences",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1010101010101010101010101010101010101010101010101010101010101010"
+      },
+      {
+        "entity": "interpretations",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      {
+        "entity": "review_items",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      {
+        "entity": "review_candidates",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      {
+        "entity": "corrections",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1414141414141414141414141414141414141414141414141414141414141414"
+      },
+      {
+        "entity": "receipts",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1515151515151515151515151515151515151515151515151515151515151515"
+      },
+      {
+        "entity": "operations",
+        "row_count": 0,
+        "byte_length": 0,
+        "digest": "sha256:1616161616161616161616161616161616161616161616161616161616161616"
+      }
+    ],
+    "blobs": [
+      {
+        "evidence_id": "evd_018f0e0e7f7b70008000000000000001",
+        "byte_length": 21,
+        "digest": "sha256:abababababababababababababababababababababababababababababababab"
+      }
+    ]
+  },
+  "manifest_digest": "sha256:caf6143ace824b10a83f4d4d9ad0a72f65479840f657e0094e6ef8b3415fbd72"
+}

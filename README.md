@@ -6,25 +6,19 @@
 
 <br/><br/>
 
-### *Every story, kept in time.*
+### _Every story, kept in time._
 
-**A self-hosted-first media chronicle and player for what you watch, read, hear and play.**  
-Built on the open activity language developed at [Scrobble.dev](https://scrobble.dev).
+**An identity-first, self-hosted system of record for what you watch, read, hear, and play.**
+**Fasti records. Players play.**
 
 <br/>
 
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Sponsor](https://img.shields.io/badge/Sponsor-GitHub%20Sponsors-EA4AAA.svg?logo=github-sponsors)](https://github.com/sponsors/ryan-winkler)
-[![Open Collective](https://img.shields.io/badge/Donate-Open%20Collective-7B8099.svg?logo=open-collective)](https://opencollective.com/scrobble)
-[![Ko-fi](https://img.shields.io/badge/Donate-Ko--fi-FF5E5B.svg?logo=kofi)](https://ko-fi.com/ryanw_eu)
-[![Revolut](https://img.shields.io/badge/Donate-Revolut-0075EB.svg)](https://revolut.me/ryanwi)
-[![Scrobble.dev Profile](https://img.shields.io/badge/Scrobble.dev-Profile_0.1-1E4FA3.svg)](https://scrobble.dev)
-[![Architecture: Local-First](https://img.shields.io/badge/Architecture-Local--First-2E6F63.svg)](docs/architecture/overview.md)
 
 <br/>
 
-[Overview](#what-is-fasti) • [The Book of Days](#the-book-of-days) • [Architecture](#architecture) • [Relationship to Scrobble.dev](#relationship-to-scrobbledev) • [Brand & Design](#brand--design-system) • [Quick Start](#quick-start) • [Roadmap](#roadmap) • [Sponsor](#supporting-fasti)
+[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b3-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 <br/>
 
@@ -32,226 +26,223 @@ Built on the open activity language developed at [Scrobble.dev](https://scrobble
 
 </div>
 
----
+## Purpose
 
-## What is Fasti?
+Media history is usually split across services, devices, readers, trackers, and launchers. Each source remembers only part of what happened and usually owns the identity it assigned.
 
-We increasingly experience culture through rented, fragmented interfaces. A film lives in one streaming catalogue, an episodic series in another, music on a subscription service, books on an e-reader, and games across multiple launchers. 
+Fasti is being built to keep a provider-neutral local record instead. A stable Fasti Record owns its local identity. Provider identifiers, observations, interpretations, corrections, and evidence attach to that Record without allowing a metadata provider to own it.
 
-Each service remembers a fragment of your life: progress percentages, playback timestamps, ratings, and library memberships. When a service shuts down, changes its terms, or fails to export your history, that part of your cultural memory vanishes with it.
+An unresolved or conflicted item remains valid data. Fasti must preserve what was observed, state what it does not know, and require an explicit decision when evidence cannot support an automatic link.
 
-**Fasti is a personal media chronicle with playback built in.**
+Fasti has no playback engine and no transcoding or decoding responsibility. Players, readers, services, and import tools can report observations through governed adapters once those capabilities are implemented.
 
-It records what you watch, read, hear, and play as durable, immutable events with complete provenance. It works locally and survives disconnection, synchronises seamlessly between your own devices without a central cloud, and ensures your history remains portable, correctable, and entirely under your control.
+## Current status
 
-> **A scrobble records the moment. Fasti keeps the story.**
+This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
 
----
+The production daemon deliberately exposes only behavior it can prove:
 
-## The Book of Days
+| Surface                                 | Current state                                                                                                                                            |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document                                                                                 |
+| B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability  |
+| B2 local kernel                         | Implemented behind application ports and SQLite/filesystem adapters for review; not constructed by `fastid`, not a public route, and not a release claim |
+| B3 correction and portability           | Implemented behind application ports and Linux SQLite/filesystem adapters for review; not mounted by `fastid` or `fasti` and not a release claim         |
+| `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
+| `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
+| `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
+| Web UI                                  | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
+| Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
+| Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
 
-Historically, the Roman *fasti* were chronological registers and calendars. Ovid’s *Fasti* took that calendrical framework and wove days, observances, origins, and human experiences into narrative. 
+The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
 
-Fasti adopts this philosophy:
+The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, identity records, observations, review state, and durable receipts behind application ports. These paths are exercised by the Rust suites but remain unavailable through the production composition root. Finalized B1 problems remain the public contract; B2-only authentication, bootstrap, integrity, storage, cursor, evidence, identity, and review failures stay staged until their owning public surfaces are activated.
 
-```
-THE EVENT          Something happened.
-                   (A track played, a chapter read, an episode completed)
+## Constitution
 
-THE RECORD         We preserve what we know with evidence:
-                   occurred_at · observed_at · received_at · source · provenance
+The controlling engineering rules are in [the Fasti constitution](docs/constitution.md). The short form is:
 
-THE STORY          Over time, those records become a meaningful personal chronicle.
-```
+1. Stable local identity belongs to Fasti Records, never to a metadata provider.
+2. Evidence and original observations are preserved; interpretations can be revised append-only.
+3. Each rule and public meaning has one owner. Adapters consume that owner, and dependencies point toward the governed rules.
+4. OpenAPI 3.1 via Utoipa, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, and generated SDK parity must agree before a capability is complete.
+5. Local operation, network-denied proof, alternative packaging, low memory use, accessibility, and recovery are release evidence, not aspirations.
+6. Every implementation body requires QA. Rendered UI or UX changes also require design review.
 
-### Core Commitments
+See the [glossary](docs/glossary.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md) for the shared vocabulary and gates.
 
-1. **Facts Before Projections:** History is an immutable append-only event ledger. Current progress, resume positions, and library lists are derived, deterministic projections that can be rebuilt at any time.
-2. **Local-First & Offline-Durable:** A node or desktop client records activity immediately into local SQLite storage. Synchronisation is a background exchange of replicas, not a blocker for playback or logging.
-3. **Memory with Provenance:** Fasti never collapses different times into one timestamp. When Plex reports an episode was watched yesterday at 21:00, Fasti records when it occurred, when it was observed, and when your node received it.
-4. **Correction Without Fiction:** Mistakes happen. Corrections and removals are recorded as new events that supersede older records without pretending the mistake never occurred—unless you explicitly request an irreversible privacy erasure.
-5. **Durable Portability:** You can export your entire chronicle in standard, documented formats at any moment, and restore it cleanly on a fresh installation.
+## Current B0-B3 review architecture
 
----
+The active workspace has an inward-facing ownership spine and executable B1 contract surfaces:
 
-## Architecture in Sixty Seconds
+```text
+apps/fastid          production, health-only daemon composition root
+crates/fasti-domain  typed IDs, time values, and domain invariants
+crates/fasti-application
+                     use cases, authorization, B1 fixture behavior, B2 ports, and typed problems
+crates/fasti-contracts
+                     shared public DTOs and generated capability identifiers
+crates/fasti-api     production Utoipa health API plus a separately gated loopback fixture
+crates/fasti-cli     local capability discovery and explicit B3 nonzero guards
+crates/fasti-store   B2 kernel plus staged B3 correction, export, verify, restore, and recovery adapters; not production-mounted
 
-Fasti is structured as a modular Rust and TypeScript monorepo designed for lightweight, high-performance execution on everything from single-board computers (Raspberry Pi) and home NAS servers to native desktop environments.
-
-```
-                   ┌──────────────────────────────────────┐
-                   │             Scrobble.dev             │
-                   │   profiles · schemas · conformance   │
-                   └──────────────────┬───────────────────┘
-                                      │ defines vocabulary
-                                      ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                              Fasti Monorepo                            │
-│                                                                        │
-│   ┌─────────────────────┐   Sync Protocol    ┌─────────────────────┐   │
-│   │    Fasti Desktop    │ ◄────────────────► │     Fasti Node      │   │
-│   │    (Tauri Shell)    │                    │     (fastid API)    │   │
-│   └──────────┬──────────┘                    └──────────┬──────────┘   │
-│              │                                          │              │
-│              ▼                                          ▼              │
-│   ┌─────────────────────┐                    ┌─────────────────────┐   │
-│   │     Fasti Core      │                    │     Fasti Core      │   │
-│   │ (Domain Invariants) │                    │ (Domain Invariants) │   │
-│   └──────────┬──────────┘                    └──────────┬──────────┘   │
-│              │                                          │              │
-│              ▼                                          ▼              │
-│   ┌─────────────────────┐                    ┌─────────────────────┐   │
-│   │    Local SQLite     │                    │  Event Ledger + WAL │   │
-│   │    (Single Node)    │                    │   + Projections     │   │
-│   └─────────────────────┘                    └─────────────────────┘   │
-└────────────────────────────────────────────────────────────────────────┘
+contracts            authoritative registry, authored semantics, examples, and generated artifacts
+packages/sdk         generated typed TypeScript HTTP/SSE client
+packages/schemas     governed JSON Schema 2020-12 inputs
+packages/tokens      approved design-token projection
+xtask                deterministic generation and fail-closed verification
 ```
 
-### Monorepo Structure
+Player, replication, connector, provider-keyed projection, presentation, desktop, and placeholder web packages are not active workspace boundaries. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
 
-* **`apps/fastid`**: Standalone self-hosted daemon providing HTTP/REST APIs, ingestion webhooks, and sync endpoints.
-* **`apps/web`**: Responsive, accessible web client built with TypeScript and modern web standards.
-* **`apps/desktop`**: Native desktop application built on Tauri v2 with embedded playback support.
-* **`crates/fasti-core`**: Core domain logic, UUIDv7 generation, timestamp semantics, and actor/device primitives.
-* **`crates/fasti-activity`**: Event envelope parsing, validation, idempotency calculations, and receipt generation.
-* **`crates/fasti-store`**: SQLite storage engine, WAL management, transactional migrations, and backup verification.
-* **`crates/fasti-projections`**: Deterministic materialised view engine (resume queues, history indexes, library states).
-* **`crates/fasti-sync`**: Logical replica sync protocol, cursor management, outbox/inbox queues, and sequence gap detection.
-* **`crates/fasti-player`**: Playback state machine, observation adapters, and player engine abstractions.
-* **`crates/fasti-connectors`**: Source importers (Floppy, Trakt, Plex, Jellyfin, Last.fm, Letterboxd) with loss accounting.
-* **`crates/fasti-cli`**: Command-line administrative utility for database management, migrations, imports, and exports.
-* **`packages/tokens`**: Vendor-neutral design tokens formatted to W3C DTCG 2025.10 standards.
-* **`packages/schemas`**: Canonical JSON Schema definitions for activity events and export bundles.
-* **`packages/sdk`**: Strongly-typed TypeScript client SDK.
-* **`packages/ui`**: Shared UI component library styled around Atkinson Hyperlegible Next and Newsreader.
+Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately.
 
----
+## Contract gates
 
-## Relationship to Scrobble.dev
+B1 has a machine-readable capability registry as the authoritative public ledger. Deterministic generation projects that meaning into:
 
-Fasti maintains a strict constitutional separation between **the standard** and **the product**:
+- a production OpenAPI 3.1 document generated from the one mounted health handler;
+- a separate OpenAPI 3.1 document for real, feature-gated conformance handlers and shared public DTOs;
+- AsyncAPI 3.x transport binding for the `receipt.stream` SSE channel;
+- JSON Schema 2020-12 for public payloads;
+- JSON-LD 1.1 vocabularies and contexts with expansion tests;
+- OKF, semantic examples, permissions, problems, and knowledge links;
+- a generated TypeScript HTTP/SSE SDK with typed parsing, problems, bounded input, and governed reconnect behavior;
+- local `fasti capability list` and `fasti capability show <id>` views of the same public registry.
 
-| Project | Role | Governance & Licensing |
-|---|---|---|
-| **[Scrobble.dev](https://scrobble.dev)** | Defines open vocabularies, activity profiles, machine-readable schemas, and conformance fixtures. | Community Specification License 1.0 / Apache-2.0 / CC0 |
-| **[Fasti](https://github.com/Scrobble-dev/Fasti)** | A self-hosted-first chronicle and player that implements Scrobble.dev specifications. | AGPL-3.0-or-later (Open Source) |
+`cargo xtask contract verify --locked` fails closed on registry, generation, drift, semantic examples, standards, SDK, Rust, package, and repository-truth gates and emits a software receipt only after all checks pass. The B2 implementation does not silently add its reserved failures to the B1 public output. Exact-head CI verifies that OpenAPI, AsyncAPI, JSON Schema, JSON-LD, OKF, examples, and the SDK remain unchanged unless their owning public contract changes. Historical receipts do not close B1: the milestone verifier requires current contract, QA, raw-gate, Tauri, and two-architecture low-hardware envelope evidence. See [contracts/README.md](contracts/README.md) for ownership and current locations.
 
-* Fasti has no privileged authority to alter Scrobble.dev specifications.
-* Any third-party application, media player, or platform is free to implement Scrobble.dev specifications without using Fasti or needing a licence from Fasti.
-* Fasti's compatibility is verified against Scrobble.dev's independent test fixtures.
+## Performance and portability targets
 
----
+Fasti targets small self-hosted hardware rather than treating it as an afterthought:
 
-## Quick Start
+- 64 MiB idle target;
+- 96 MiB normal-operation target;
+- 160 MiB heavy-operation target;
+- 192 MiB absolute process-tree ceiling;
+- a kernel-enforced 192 MiB, one-vCPU, zero-swap CI envelope with a 600-second warm-up and 900-second route-less idle measurement on x86_64 and aarch64;
+- optional Raspberry Pi 5 and J4125 comparison specifications;
+- Ugoos AM6B+, Xiaomi Box M3, Nvidia Shield, and representative TV hardware as explicit packaging hypotheses.
 
-### Prerequisites
-* Rust toolchain (1.80+ recommended)
-* Node.js (20+ LTS) and `pnpm` (9+)
+The B1 performance gate retains the exact measured release daemon, raw idle observations, OCI image, and contract pack. It recomputes the kernel controls, memory, CPU, architecture, and applicable artifact budgets. Only two receipts that declare the same workflow run attempt for one exact `dev` push can qualify. Pull-request runs are regression checks, not milestone evidence. The optional device profiles do not block B1.
 
-### Build the Workspace
+## Development
+
+There is no supported installation yet. The shortest contributor path runs the production daemon's one truthful capability. With the Rust toolchain and dependencies available:
 
 ```bash
-# Clone the repository
+cargo run --locked -p fastid
+```
+
+In a second terminal:
+
+```bash
+curl --fail --silent http://127.0.0.1:8420/api/v1/health
+```
+
+The exact response is `{"status":"healthy","version":"0.1.0"}`.
+
+That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
+
+To inspect the governed public capability identifiers without starting a service:
+
+```bash
+cargo run --locked -p fasti-cli -- capability list
+```
+
+Contract authors can run the loopback-only, nondurable B1 fixture with:
+
+```bash
+cargo run --locked -p fasti-api \
+  --features conformance-fixture \
+  --bin b1-conformance-server -- 127.0.0.1:8421
+```
+
+The fixture prints one JSON readiness line declaring `"availability":"fixture_only"` and `"durability":"none"`. Its command help is available through the same Cargo invocation with `-- --help`. See the [contract ownership guide](contracts/README.md) and the [local TypeScript SDK guide](packages/sdk/README.md) for the bounded integration-author path.
+
+The full source baseline uses the tool versions selected by CI and OCI:
+
+- Rust `1.97.1`;
+- Node.js `22`;
+- pnpm `11.22.0`.
+
+```bash
 git clone https://github.com/Scrobble-dev/Fasti.git
 cd Fasti
 
-# Verify Rust crates
-cargo check --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo xtask contract verify --locked
 
-# Install JavaScript dependencies and build packages
-pnpm install
-pnpm build
+pnpm install --frozen-lockfile
+pnpm format:check
+pnpm typecheck
+pnpm test
+
+bash scripts/check-repository-truth.sh
+bash scripts/check-no-publish.sh
+node scripts/check-doc-links.mjs
+
+podman build --tag fasti:b0 .
+bash scripts/smoke-oci.sh fasti:b0 "" podman
 ```
 
----
+The staged B3 portability slice has runnable internal gates. These commands do not activate the guarded CLI:
 
-## Brand & Design System
+```bash
+cargo test -p fasti-store archive::tests::filesystem_destination_sigkill_matrix --locked -- --exact
+cargo test -p fasti-store restore_import::tests::full_restore_sigkill_matrix --locked -- --exact
+cargo test -p fasti-store restore_import::tests::full_import_activation_survives_owner_drop_and_opens_exact_database --locked -- --exact
+cargo test -p fasti-store stopped_portability::tests::stopped_adapter_restore_refuses_a_live_data_root_before_archive_input --locked -- --exact
+```
 
-Fasti and Scrobble.dev follow the **Modern Annal / Living Marginalia** design standard: an archival editorial aesthetic combining quiet horological instrumentation with publication-grade typography.
+The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate accepts Docker or Podman explicitly and verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. The B1 deep gate binds Podman and its exact version in the receipt. That one-shot container sample is a regression sentinel, not the two-architecture envelope package required by the B1 milestone verifier. Override the default command to inspect a guarded command, for example `podman run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3 public activation.
 
-<div align="center">
-  <table border="0">
-    <tr>
-      <td align="center" width="50%">
-        <a href="brand/logos/org-icon.svg">
-          <img src="brand/assets/org-icon.png" width="140" alt="Scrobble.dev Organization Icon" style="border-radius: 28px;">
-        </a>
-        <br/><strong>Scrobble-dev Organization Icon</strong>
-        <br/><em>Syntax Bracket & Crosswalk Node</em>
-      </td>
-      <td align="center" width="50%">
-        <a href="brand/logos/fasti-icon.svg">
-          <img src="brand/assets/fasti-icon.png" width="140" alt="Fasti Flagship App Icon" style="border-radius: 28px;">
-        </a>
-        <br/><strong>Fasti Flagship App Icon</strong>
-        <br/><em>Living Chronicle & Ledger Mark</em>
-      </td>
-    </tr>
-  </table>
-</div>
+## Brand and design system
 
-* **Typography Hierarchy:**
-  * **The Story (Editorial Display):** *Newsreader* (Serif)
-  * **The Interface (Product UI & Navigation):** *Atkinson Hyperlegible* (Sans-serif)
-  * **The Evidence (Event IDs, Hashes, Code):** *IBM Plex Mono* / *Atkinson Mono* (Monospace)
-* **Core Palette (WCAG 2.2 AAA / AA):** Warm Archive (`#F2EFE6`), Paper Surface (`#FFFDF8`), Carbon Ink (`#181716`), Fasti Oxblood (`#8B2E2A`), Chronicle Blue (`#1E4FA3`), and Verdigris (`#2E6F63`).
-* **Ergonomics & Accessibility:** Strict 44px minimum touch targets, WCAG 2.2 AA/AAA baseline, and ADHD/AuDHD state continuity standards.
+The approved [brand and design system](brand/DESIGN.md) is a protected input. B0 preserves its tokens, logos, boards, preview assets, accessibility rules, and ADHD/AuDHD state-continuity requirements byte-for-byte.
 
-Explore the complete system:
-* 🎨 **Interactive Brand Showcase:** Open [`brand/preview.html`](brand/preview.html) in any browser (`open "brand/preview.html"`) for live theme switching, component specimens, and token inspection.
-* 📖 **Design System Guide:** [`brand/DESIGN.md`](brand/DESIGN.md)
-* 📐 **Vector Assets & Logos:** [`brand/logos/`](brand/logos/) (`org-icon.svg`, `fasti-icon.svg`, `fasti-lockup.svg`, `scrobble-dev-lockup.svg`)
-* 📦 **W3C DTCG Tokens:** [`brand/tokens/tokens.json`](brand/tokens/tokens.json)
+The product interface arrives after the headless contract and local kernel. Its fixed direction is media-first navigation, poster and row views, a collapsible rail, visible quick actions for activity, watchlist, collection, and rate/note, and a Tabler-based theme panel governed by Fasti tokens. There is no playback control and no persistent “offline ready” badge.
 
----
+## Relationship to Scrobble.dev
+
+[Scrobble.dev](https://scrobble.dev) defines neutral vocabularies, schemas, crosswalks, fixtures, and conformance rules. Fasti is an AGPL implementation that must earn compatibility through those independent contracts. Fasti does not control the standard, and another project does not need Fasti to implement it.
 
 ## Roadmap
 
-* [x] **Phase 0: Foundation & Governance** — Licensing, repository architecture, DCO sign-off, design tokens, issue workflows.
-* [ ] **Phase 1: Event Ledger Kernel** — Rust domain core, immutable SQLite event ledger, UUIDv7 timestamps, export/restore engine.
-* [ ] **Phase 2: Fasti Node & Web** — `fastid` daemon, local authentication with Passkeys/WebAuthn, web chronicle interface.
-* [ ] **Phase 3: Desktop Shell & Playback** — Tauri v2 desktop application, observation pipeline, player adapter.
-* [ ] **Phase 4: Multi-Device Synchronisation** — Logical replica exchange, offline queue reconciliation, sequence gap recovery.
-* [ ] **Phase 5: 1.0 Release Gate** — Independent Scrobble.dev conformance verification, third-party accessibility audit, reproducible release attestations.
+- **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
+- **B1: Executable contract spine** — software surfaces are executable and drift-proof; closure still requires a current aggregate manifest with QA, Tauri, and same-attempt x86_64/aarch64 envelope receipts.
+- **B2: Local kernel** — implementation is present behind internal ports for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
+- **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
+- **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
 
-See [`ROADMAP.md`](ROADMAP.md) for detailed milestone dependencies.
-
----
+Nuvio adaptation does not begin before the B7 provider gate, applicable B8 evidence, and maintainer agreement. See [ROADMAP.md](ROADMAP.md) for the dependency order.
 
 ## Contributing
 
-We welcome contributions from developers, designers, archivists, and media enthusiasts!
+Fasti is an open community project under AGPL-3.0-or-later and DCO 1.1. Collaboration on code, documentation, fixtures, accessibility, security, provider patterns, recipes, and design is encouraged.
 
-1. All code contributions must be signed off under the **Developer Certificate of Origin (DCO 1.1)** by including a `Signed-off-by: Name <email>` line (`git commit -s`).
-2. Please read our [`CONTRIBUTING.md`](CONTRIBUTING.md) for branch guidelines, code style, and contribution lanes.
-3. Review our [`GOVERNANCE.md`](GOVERNANCE.md) to understand RFC procedures and project decision-making.
-4. All participants are expected to uphold our [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
+Before writing code or opening a pull request, begin or join a GitHub Discussion and align the problem, bounded context, scope, and required review gates. This is technical and product scope alignment, not legal approval. A CLA or legal review is not required.
 
----
+Then follow [CONTRIBUTING.md](CONTRIBUTING.md), sign commits with the [Developer Certificate of Origin](https://developercertificate.org/) using `git commit -s`, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 
-Security and privacy are fundamental to personal history. Fasti is private by default, transmits no telemetry, and operates without mandatory central cloud dependencies.
-
-To report a vulnerability, please follow the coordinated disclosure policy in [`SECURITY.md`](SECURITY.md).
-
----
+No Fasti release is currently supported for production use. Please still report suspected vulnerabilities privately through the process in [SECURITY.md](SECURITY.md); do not open a public issue for an undisclosed security problem.
 
 ## Supporting Fasti
 
-Fasti is an independent, community-driven open-source project. We believe personal cultural history belongs to you—not closed corporate platforms or subscription walled gardens.
+Fasti is independent and community-driven. Financial support helps fund infrastructure, accessibility testing, hardware qualification, and open vocabulary work:
 
-If you find Fasti valuable, consider sponsoring our development to help fund infrastructure, accessibility testing, and open vocabulary development:
-
-* **[Sponsor via GitHub Sponsors](https://github.com/sponsors/ryan-winkler)**
-* **[Donate via Open Collective](https://opencollective.com/scrobble)**
-* **[Support via Ko-fi](https://ko-fi.com/ryanw_eu)**
-* **[Direct Contribution via Revolut](https://revolut.me/ryanwi)**
-
----
+- [GitHub Sponsors](https://github.com/sponsors/ryan-winkler)
+- [Open Collective](https://opencollective.com/scrobble)
+- [Ko-fi](https://ko-fi.com/ryanw_eu)
+- [Revolut](https://revolut.me/ryanwi)
 
 ## Licence
 
-Fasti is open-source software licensed under the **[GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later)](LICENSE)**.
+Fasti is open-source software licensed under the [GNU Affero General Public License v3.0 or later](LICENSE), identified as `AGPL-3.0-or-later`. The current contribution terms are AGPL plus DCO. Any possible future noncommercial or paid-commercial model is an owner policy question and is not a present collaboration gate.
 
-Scrobble.dev specification assets and schemas are published under the Community Specification License 1.0 and Apache-2.0.
+Scrobble.dev specification assets use the licence designated by their source repository. Files copied into Fasti remain governed by the licence notices included with those files.
