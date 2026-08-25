@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import {
     SetupPanel,
+    FastiWorkbench,
     type DesktopProblem,
     type SetupViewState,
   } from "@fasti/ui";
@@ -12,9 +12,10 @@
     readonly proof_cleanup_pending: boolean;
   }
 
-  let viewState: SetupViewState = $state("loading");
+  let viewState: SetupViewState = $state("ready"); // Default to ready for web workbench
   let problem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
+  let isTauri = $state(false);
 
   function applyStatus(status: SetupStatus): void {
     viewState = status.phase;
@@ -23,6 +24,11 @@
   }
 
   function applyProblem(error: unknown): void {
+    // If not in Tauri, default gracefully to web workbench
+    if (!("__TAURI_INTERNALS__" in window)) {
+      viewState = "ready";
+      return;
+    }
     const candidate = error as Partial<DesktopProblem>;
     problem = {
       code: candidate.code ?? "desktop_host_unavailable",
@@ -38,17 +44,23 @@
   }
 
   async function inspect(): Promise<void> {
-    viewState = "loading";
-    try {
-      applyStatus(await invoke<SetupStatus>("setup_status"));
-    } catch (error) {
-      applyProblem(error);
+    if ("__TAURI_INTERNALS__" in window) {
+      isTauri = true;
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        applyStatus(await invoke<SetupStatus>("setup_status"));
+      } catch (error) {
+        applyProblem(error);
+      }
+    } else {
+      // Standalone web mode - ready
+      viewState = "ready";
     }
   }
 
   async function setup(): Promise<void> {
-    viewState = "loading";
     try {
+      const { invoke } = await import("@tauri-apps/api/core");
       applyStatus(await invoke<SetupStatus>("complete_setup"));
     } catch (error) {
       applyProblem(error);
@@ -59,4 +71,9 @@
 </script>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
-<SetupPanel state={viewState} {problem} {cleanupPending} onSetup={setup} />
+
+{#if viewState === "ready"}
+  <FastiWorkbench />
+{:else}
+  <SetupPanel state={viewState} {problem} {cleanupPending} onSetup={setup} />
+{/if}
