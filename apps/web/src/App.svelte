@@ -1,13 +1,9 @@
 <script lang="ts">
-  import {
-    FastiClient,
-    FastiProtocolError,
-    type HealthResponse,
-  } from "@fasti/sdk";
+  import { FastiClient, FastiProtocolError } from "@fasti/sdk";
   import {
     StatusPanel,
+    type StatusPanelState,
     type StatusProblem,
-    type StatusViewState,
   } from "@fasti/ui";
   import { onMount, tick } from "svelte";
   import markDark from "../../../brand/logos/fasti-mark-dark.svg?url";
@@ -20,9 +16,7 @@
     retryPolicy: { maxAttempts: 1 },
   });
 
-  let viewState: StatusViewState = $state("loading");
-  let health: HealthResponse | undefined = $state();
-  let problem: StatusProblem | undefined = $state();
+  let status: StatusPanelState = $state({ view: "loading" });
   let theme: Theme = $state(resolveTheme());
   let request: AbortController | undefined;
 
@@ -46,21 +40,17 @@
     request?.abort();
     const currentRequest = new AbortController();
     request = currentRequest;
-    viewState = "loading";
-    health = undefined;
-    problem = undefined;
+    status = { view: "loading" };
     try {
       const response = await client.health({ signal: currentRequest.signal });
       if (request !== currentRequest) return;
-      health = response;
-      viewState = "healthy";
+      status = { view: "healthy", health: response };
     } catch (error) {
       if (currentRequest.signal.aborted || request !== currentRequest) return;
-      problem = problemFor(error);
-      viewState = "blocked";
+      status = { view: "blocked", problem: problemFor(error) };
       if (restoreRetryFocus) {
         await tick();
-        if (request === currentRequest && viewState === "blocked") {
+        if (request === currentRequest && status.view === "blocked") {
           document.getElementById("retry-health")?.focus();
         }
       }
@@ -84,9 +74,7 @@
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <StatusPanel
-  state={viewState}
-  {health}
-  {problem}
+  {status}
   {theme}
   mark={theme === "dark" ? markDark : markLight}
   onRetry={retry}

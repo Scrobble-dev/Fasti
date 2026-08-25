@@ -137,7 +137,7 @@ heuristic review does not replace usability testing with representative users.
 | JSON-LD | Not applicable: the harness adds no linked-data entity or vocabulary. |
 | Offline behavior | Browser tests make no third-party request. The local service path remains loopback-only in this harness. |
 | Request resources | One request, one abort controller, one three-second timeout, and no automatic retry bound work. Retry and unmount abort stale work. |
-| Bundle evidence | Production build: 3.03 kB HTML, 5.03 kB CSS, and 141.92 kB JavaScript; JavaScript is 35.54 kB gzip. |
+| Bundle evidence | Production build: 3.03 kB HTML, 5.03 kB CSS, and 141.84 kB JavaScript; JavaScript is 35.48 kB gzip. |
 | Memory claim | Cleanup paths are present, but one browser snapshot cannot prove zero leaks. Repeated packaged navigation remains a release gate. |
 
 ## WCAG 2.2 Level AA implementation map

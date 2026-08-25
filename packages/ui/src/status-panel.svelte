@@ -1,24 +1,19 @@
 <script lang="ts">
-  import type { HealthResponse } from "@fasti/sdk";
   import IconAlertTriangle from "@tabler/icons-svelte/icons/alert-triangle";
   import IconCheck from "@tabler/icons-svelte/icons/check";
   import IconMoon from "@tabler/icons-svelte/icons/moon";
   import IconRefresh from "@tabler/icons-svelte/icons/refresh";
   import IconSun from "@tabler/icons-svelte/icons/sun";
-  import type { StatusProblem, StatusViewState } from "./status-types.js";
+  import type { StatusPanelState } from "./status-types.js";
 
   let {
-    state,
-    health = undefined,
-    problem = undefined,
+    status,
     theme,
     mark,
     onRetry,
     onToggleTheme,
   }: {
-    state: StatusViewState;
-    health?: HealthResponse;
-    problem?: StatusProblem;
+    status: StatusPanelState;
     theme: "light" | "dark";
     mark: string;
     onRetry: () => void;
@@ -54,7 +49,7 @@
       </p>
 
       <div class="state-region">
-        {#if state === "loading"}
+        {#if status.view === "loading"}
           <div class="state-heading" role="status" aria-atomic="true">
             <span class="state-icon spinner" aria-hidden="true">
               <IconRefresh size={28} stroke={1.8} />
@@ -64,7 +59,7 @@
               <p>Waiting for the health response.</p>
             </div>
           </div>
-        {:else if state === "healthy" && health}
+        {:else if status.view === "healthy"}
           <div class="state-heading available" role="status" aria-atomic="true">
             <span class="state-icon" aria-hidden="true">
               <IconCheck size={28} stroke={2} />
@@ -77,22 +72,22 @@
           <dl>
             <div>
               <dt>Status</dt>
-              <dd>{health.status}</dd>
+              <dd>{status.health.status}</dd>
             </div>
             <div>
               <dt>Version</dt>
-              <dd>{health.version}</dd>
+              <dd>{status.health.version}</dd>
             </div>
           </dl>
-        {:else if state === "blocked" && problem}
+        {:else}
           <div class="state-heading problem" role="alert">
             <span class="state-icon" aria-hidden="true">
               <IconAlertTriangle size={28} stroke={1.8} />
             </span>
             <div>
-              <h2>{problem.title}</h2>
-              <p>{problem.detail}</p>
-              <p><strong>Recovery:</strong> {problem.recovery}</p>
+              <h2>{status.problem.title}</h2>
+              <p>{status.problem.detail}</p>
+              <p><strong>Recovery:</strong> {status.problem.recovery}</p>
             </div>
           </div>
           <p class="command-help">
