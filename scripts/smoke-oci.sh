@@ -43,7 +43,7 @@ trap cleanup EXIT
 host_port="$("$oci_runtime" port "$container_id" 8420/tcp | head -1 | awk -F: '{print $NF}')"
 
 for attempt in $(seq 1 30); do
-  if health_body="$(curl --fail --silent "http://127.0.0.1:${host_port}/api/v1/health")"; then
+  if health_body="$(curl --fail --silent --connect-timeout 5 --max-time 10 "http://127.0.0.1:${host_port}/api/v1/health")"; then
     break
   fi
 
@@ -67,6 +67,8 @@ PY
 
 post_status="$(
   curl --silent --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 5 \
+    --max-time 10 \
     --request POST \
     --header 'content-type: application/json' \
     --data '{}' \
@@ -80,6 +82,8 @@ fi
 
 bootstrap_status="$(
   curl --silent --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 5 \
+    --max-time 10 \
     --request POST \
     --header 'content-type: application/json' \
     --data '{}' \
@@ -156,5 +160,5 @@ if ((memory_bytes > memory_limit_bytes)); then
 fi
 
 image_size_bytes="$("$oci_runtime" image inspect "$image" --format '{{.Size}}')"
-printf 'PASS: runtime=%s image=%s user=fasti:fasti health=healthy network_denied=pass post_events=404 cli_verify=nonzero idle_memory=%s idle_limit=%sMiB image_size_bytes=%s\n' \
+printf 'PASS: runtime=%s image=%s user=fasti:fasti health=healthy network_denied=pass post_events=404 post_initialization=404 cli_verify=nonzero idle_memory=%s idle_limit=%sMiB image_size_bytes=%s\n' \
   "$oci_runtime" "$image" "$memory_sample" "$idle_limit_mib" "$image_size_bytes"
