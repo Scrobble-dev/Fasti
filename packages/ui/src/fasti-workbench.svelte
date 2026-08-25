@@ -674,16 +674,7 @@
           />
         {/if}
       {:else if activeSection === "discover"}
-        <DiscoverView
-          trendingRecords={[]}
-          {availableCollections}
-          contextMenuConfigs={workbenchPreferences.contextMenuItems}
-          onSelectRecord={handleSelectRecord}
-          onUpdateStatus={handleUpdateStatus}
-          onUpdateProgress={handleUpdateProgress}
-          onSaveReview={handleSaveReview}
-          onSaveCollection={handleSaveCollection}
-        />
+        <DiscoverView />
       {:else if activeSection === "detail" && selectedRecord}
         <MediaDetailView
           record={selectedRecord}
