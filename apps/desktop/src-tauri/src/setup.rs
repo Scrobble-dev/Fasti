@@ -9,7 +9,7 @@ use serde::Serialize;
 const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum SetupSecret {
+pub(crate) enum SetupSecret {
     Proof,
     Credential,
 }
@@ -99,7 +99,7 @@ impl SetupStatus {
     }
 }
 
-trait SetupSecretStore: Send + Sync {
+pub(crate) trait SetupSecretStore: Send + Sync {
     fn load(&self, secret: SetupSecret) -> Result<Option<SecretMaterial>, DesktopProblem>;
     fn store(&self, secret: SetupSecret, value: &SecretMaterial) -> Result<(), DesktopProblem>;
     fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem>;
@@ -161,14 +161,6 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     }
 }
 
-fn random_secret() -> Result<SecretMaterial, DesktopProblem> {
-    let mut bytes = [0_u8; 32];
-    getrandom::fill(&mut bytes).map_err(|_| {
-        DesktopProblem::secure_storage("The operating system did not provide secure randomness.")
-    })?;
-    Ok(SecretMaterial::from_bytes(bytes))
-}
-
 fn authenticate(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
@@ -185,14 +177,6 @@ fn authenticate(
         Err(problem) if problem.code() == ProblemCode::AuthenticationFailed => Ok(None),
         Err(problem) => Err(DesktopProblem::application(&problem)),
     }
-}
-
-fn ensure_secret(store: &impl SetupSecretStore, secret: SetupSecret) -> Result<(), DesktopProblem> {
-    if store.load(secret)?.is_none() {
-        let value = random_secret()?;
-        store.store(secret, &value)?;
-    }
-    Ok(())
 }
 
 fn ready_status(store: &impl SetupSecretStore) -> SetupStatus {
