@@ -81,13 +81,13 @@ _stop_pidfile() {
   if pid="$(_tracked_pid "$name")"; then
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
     for _ in {1..10}; do
-      kill -0 "$pid" 2>/dev/null || break
+      [[ "$(_tracked_pid "$name" 2>/dev/null || true)" == "$pid" ]] || break
       sleep 0.1
     done
-    if kill -0 "$pid" 2>/dev/null; then
+    if [[ "$(_tracked_pid "$name" 2>/dev/null || true)" == "$pid" ]]; then
       kill -KILL -- "-$pid" 2>/dev/null || kill -KILL "$pid" 2>/dev/null || true
       for _ in {1..10}; do
-        kill -0 "$pid" 2>/dev/null || break
+        [[ "$(_tracked_pid "$name" 2>/dev/null || true)" == "$pid" ]] || break
         sleep 0.1
       done
     fi
