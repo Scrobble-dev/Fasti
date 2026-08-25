@@ -38,7 +38,7 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. The B1 milestone also remains open on physical Raspberry Pi 5 and J4125 evidence.
+This repository is an engineering baseline, not a supported public release. No published container, package, web application, desktop application, import adapter, replication service, or supported installation exists yet. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
 
 The production daemon deliberately exposes only behavior it can prove:
 
@@ -111,7 +111,7 @@ B1 has a machine-readable capability registry as the authoritative public ledger
 - a generated TypeScript HTTP/SSE SDK with typed parsing, problems, bounded input, and governed reconnect behavior;
 - local `fasti capability list` and `fasti capability show <id>` views of the same public registry.
 
-`cargo xtask contract verify --locked` fails closed on registry, generation, drift, semantic examples, standards, SDK, Rust, package, and repository-truth gates and emits a software receipt only after all checks pass. The B2 implementation does not silently add its reserved failures to the B1 public output. Exact-head CI verifies that OpenAPI, AsyncAPI, JSON Schema, JSON-LD, OKF, examples, and the SDK remain unchanged unless their owning public contract changes. Historical receipts do not close B1: named Raspberry Pi 5 and J4125 RAM evidence is still required. See [contracts/README.md](contracts/README.md) for ownership and current locations.
+`cargo xtask contract verify --locked` fails closed on registry, generation, drift, semantic examples, standards, SDK, Rust, package, and repository-truth gates and emits a software receipt only after all checks pass. The B2 implementation does not silently add its reserved failures to the B1 public output. Exact-head CI verifies that OpenAPI, AsyncAPI, JSON Schema, JSON-LD, OKF, examples, and the SDK remain unchanged unless their owning public contract changes. Historical receipts do not close B1: the milestone verifier requires current contract, QA, raw-gate, Tauri, and two-architecture low-hardware envelope evidence. See [contracts/README.md](contracts/README.md) for ownership and current locations.
 
 ## Performance and portability targets
 
@@ -121,10 +121,11 @@ Fasti targets small self-hosted hardware rather than treating it as an afterthou
 - 96 MiB normal-operation target;
 - 160 MiB heavy-operation target;
 - 192 MiB absolute process-tree ceiling;
-- Raspberry Pi 5 champion profile and a calibrated J4125-class x86 profile;
+- a kernel-enforced 192 MiB, one-vCPU, zero-swap CI envelope with a 600-second warm-up and 900-second route-less idle measurement on x86_64 and aarch64;
+- optional Raspberry Pi 5 and J4125 comparison specifications;
 - Ugoos AM6B+, Xiaomi Box M3, Nvidia Shield, and representative TV hardware as explicit packaging hypotheses.
 
-These are gates only when measured on the named artifact and hardware profile. B1 remains open until named physical Raspberry Pi 5 and J4125 measurements exist; host estimates and software contract receipts are not substitutes.
+The B1 performance gate retains the exact measured release daemon, raw idle observations, OCI image, and contract pack. It recomputes the kernel controls, memory, CPU, architecture, and applicable artifact budgets. Only two receipts that declare the same workflow run attempt for one exact `dev` push can qualify. Pull-request runs are regression checks, not milestone evidence. The optional device profiles do not block B1.
 
 ## Development
 
@@ -197,7 +198,7 @@ cargo test -p fasti-store restore_import::tests::full_import_activation_survives
 cargo test -p fasti-store stopped_portability::tests::stopped_adapter_restore_refuses_a_live_data_root_before_archive_input --locked -- --exact
 ```
 
-The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. That one-shot container sample is a regression sentinel, not the Raspberry Pi 5 or J4125 performance receipt required to close B1. Override the default command to inspect a guarded command, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3 public activation.
+The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user, and is never pushed by repository automation. The shared smoke gate verifies process health, absent production routes, guarded CLI failure, and a 64 MiB host-side idle-memory threshold. That one-shot container sample is a regression sentinel, not the two-architecture envelope package required by the B1 milestone verifier. Override the default command to inspect a guarded command, for example `docker run --rm fasti:b0 /usr/local/bin/fasti verify`; it must exit nonzero until B3 public activation.
 
 ## Brand and design system
 
@@ -212,7 +213,7 @@ The product interface arrives after the headless contract and local kernel. Its 
 ## Roadmap
 
 - **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
-- **B1: Executable contract spine** — software surfaces are executable and drift-proof, and the headless QA/developer-experience reviews pass; closure still requires physical Pi 5/J4125 RAM evidence.
+- **B1: Executable contract spine** — software surfaces are executable and drift-proof; closure still requires a current aggregate manifest with QA, Tauri, and same-attempt x86_64/aarch64 envelope receipts.
 - **B2: Local kernel** — implementation is present behind internal ports for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
 - **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
 - **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.

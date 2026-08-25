@@ -53,7 +53,7 @@ Fixture successes always declare `fixture_only` availability and `none` durabili
 cargo xtask contract verify --locked
 ```
 
-The receipt from that command is software evidence only. Physical Raspberry Pi 5 and J4125 measurements remain separate B1 evidence.
+The receipt from that command is software evidence only. The B1 milestone separately requires the exact-head aggregate evidence package, including Tauri and same-workflow-attempt x86_64/aarch64 low-hardware envelope receipts.
 
 ## Error and retry behavior
 

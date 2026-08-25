@@ -1,6 +1,7 @@
 {
   "$schema": "./physical-profiles.schema.json",
-  "schema_version": "fasti.b1.physical-profiles.v1",
+  "schema_version": "fasti.b1.physical-profiles.v2",
+  "milestone_role": "optional_non_gating_spec_targets",
   "hardware_profile_derivation": "physical_profile_policy_v1",
   "profiles": {
     "raspberry_pi_5_champion": {
