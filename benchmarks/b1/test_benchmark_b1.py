@@ -790,6 +790,47 @@ class ImmutableSourceTests(unittest.TestCase):
                     },
                 )
 
+    def test_image_inspection_selects_the_exact_host_platform(self) -> None:
+        inspection = json.dumps(
+            [{"Id": self.image_id, "Config": {"Labels": self.labels}}]
+        )
+        for machine, expected in [
+            ("x86_64", "linux/amd64"),
+            ("aarch64", "linux/arm64"),
+        ]:
+            with (
+                self.subTest(machine=machine),
+                patch.object(benchmark.platform, "machine", return_value=machine),
+                patch.object(
+                    benchmark, "run_checked", return_value=inspection
+                ) as run_checked,
+            ):
+                observed = benchmark.inspect_bound_image(
+                    "fasti:mutable", self._source()
+                )
+                self.assertEqual(observed["id"], self.image_id)
+                run_checked.assert_called_once_with(
+                    [
+                        "docker",
+                        "image",
+                        "inspect",
+                        "--platform",
+                        expected,
+                        "fasti:mutable",
+                    ]
+                )
+                self.assertEqual(
+                    benchmark.docker_save_command(self.image_id),
+                    [
+                        "docker",
+                        "image",
+                        "save",
+                        "--platform",
+                        expected,
+                        self.image_id,
+                    ],
+                )
+
     def test_measurement_command_refuses_mutable_tag(self) -> None:
         with self.assertRaisesRegex(benchmark.CaptureError, "immutable image ID"):
             benchmark.oci_run_command("subject", "fasti:mutable", "exec true")
