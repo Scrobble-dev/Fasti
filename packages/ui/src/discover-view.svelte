@@ -3,6 +3,8 @@
     ContextMenuItemConfig,
     MediaRecord,
     MediaKind,
+    OutboundAccessPolicy,
+    ProviderCandidate,
     WatchStatus,
   } from "./types.js";
   import {
@@ -14,7 +16,6 @@
     IconFlame,
     IconAward,
     IconCalendarEvent,
-    IconRefresh,
     IconAdjustments,
     IconMessage,
     IconFolder,
@@ -40,6 +41,12 @@
     onSaveReview?: (recordId: string, rating: number, notes: string) => void;
     onSaveCollection?: (recordId: string, collections: string[]) => void;
     contextMenuConfigs?: ContextMenuItemConfig[];
+    providerPolicy: OutboundAccessPolicy;
+    onSearchProvider: (
+      provider: string,
+      query: string,
+      policy: OutboundAccessPolicy,
+    ) => Promise<ProviderCandidate[]>;
   }
 
   let {
@@ -50,10 +57,15 @@
     onSaveReview,
     onSaveCollection,
     contextMenuConfigs,
+    providerPolicy,
+    onSearchProvider,
   }: Props = $props();
 
   let selectedCategory: MediaKind | "all" = $state("all");
   let searchQuery = $state("");
+  let providerResults = $state<ProviderCandidate[]>([]);
+  let providerSearchState = $state<"idle" | "loading" | "results" | "empty" | "error">("idle");
+  let providerSearchMessage = $state("");
 
   // Modal Dialog States
   let activeModalRecord = $state<MediaRecord | null>(null);
@@ -85,16 +97,37 @@
     trendingRecords.filter((rec) => {
       const matchCat =
         selectedCategory === "all" || rec.mediaKind === selectedCategory;
-      const matchSearch =
-        searchQuery.trim() === "" ||
-        rec.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (rec.genres &&
-          rec.genres.some((g) =>
-            g.toLowerCase().includes(searchQuery.toLowerCase()),
-          ));
-      return matchCat && matchSearch;
+      return matchCat;
     }),
   );
+
+  async function searchProvider(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (!query || providerSearchState === "loading") return;
+    providerResults = [];
+    providerSearchMessage = "";
+    providerSearchState = "loading";
+    try {
+      providerResults = await onSearchProvider(
+        "google-books",
+        query,
+        providerPolicy,
+      );
+      providerSearchState = providerResults.length > 0 ? "results" : "empty";
+      providerSearchMessage = providerResults.length > 0
+        ? `${providerResults.length} Google Books results.`
+        : "Google Books returned no matching titles.";
+    } catch (error) {
+      const value = error !== null && typeof error === "object"
+        ? error as { title?: string; detail?: string; next_action?: string }
+        : {};
+      providerSearchState = "error";
+      providerSearchMessage = [value.title, value.detail, value.next_action]
+        .filter(Boolean)
+        .join(" ") || "Fasti could not search Google Books.";
+    }
+  }
 
   function handleToggleWatched(rec: MediaRecord): void {
     const nextStatus: WatchStatus =
@@ -185,48 +218,67 @@
     <div>
       <div class="heading-row">
         <IconCompass size={28} class="discover-icon" />
-        <h1 class="view-title">Discover & Explore</h1>
+        <h1 class="view-title">Discover</h1>
       </div>
       <p class="view-subtitle">
-        Explore global trending media, top-rated classics, and upcoming
-        broadcasts.
+        Search Google Books. Provider results stay separate from local records.
       </p>
-    </div>
-
-    <div class="header-actions">
-      <button
-        type="button"
-        class="refresh-btn"
-        aria-label="Refresh Recommendations"
-        disabled
-        title="Feed refresh is not available in this build"
-      >
-        <IconRefresh size={16} /> Refresh Feeds
-      </button>
     </div>
   </header>
 
-  <!-- Global Online + Library Search Bar -->
   <div class="search-section">
-    <div class="search-bar-wrap">
+    <form class="search-bar-wrap" onsubmit={searchProvider}>
       <IconSearch size={18} class="search-icon" />
       <input
         type="search"
-        placeholder="Search titles online across TMDB, TVDB, AniList, MAL, OpenLibrary, RAWG..."
+        placeholder="Search Google Books"
         bind:value={searchQuery}
         class="online-search-input"
-        aria-label="Search online media"
+        aria-label="Search Google Books"
+        maxlength="256"
       />
-      {#if searchQuery.trim().length > 0}
-        <span class="search-badge">Online Index Active</span>
-      {/if}
-    </div>
+      <button
+        type="submit"
+        class="provider-search-btn"
+        disabled={!searchQuery.trim() || providerSearchState === "loading"}
+      >{providerSearchState === "loading" ? "Searching…" : "Search"}</button>
+    </form>
 
-    <!-- Category Pill Filter -->
+    {#if providerSearchState !== "idle"}
+      <p
+        class="provider-search-status"
+        class:error={providerSearchState === "error"}
+        role={providerSearchState === "error" ? "alert" : "status"}
+        aria-live="polite"
+      >
+        {providerSearchState === "loading"
+          ? "Searching Google Books…"
+          : providerSearchMessage}
+      </p>
+    {/if}
+
+    {#if providerResults.length > 0}
+      <ul class="provider-results" aria-label="Google Books results">
+        {#each providerResults as result (`${result.provider}:${result.provider_id}`)}
+          <li>
+            <div>
+              <h2>{result.title}</h2>
+              {#if result.description}<p>{result.description}</p>{/if}
+            </div>
+            <span>{result.kind}</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
+    <h2 class="local-heading">Demonstration library</h2>
+    <p class="section-tagline">
+      These local sample records demonstrate the interface. They are not live recommendations.
+    </p>
     <div
       class="categories-bar"
       role="radiogroup"
-      aria-label="Filter discover by media kind"
+      aria-label="Filter demonstration records by media kind"
     >
       {#each categories as cat}
         <button
@@ -243,15 +295,14 @@
     </div>
   </div>
 
-  <!-- Row 1: Trending Right Now -->
-  <section class="feed-section" aria-label="Trending Media">
+  <section class="feed-section" aria-label="Demonstration media">
     <div class="section-header-row">
       <div class="title-with-icon">
         <IconFlame size={20} class="trend-flame-icon" />
-        <h2 class="section-title">Trending Right Now</h2>
+        <h2 class="section-title">Sample records</h2>
       </div>
       <span class="section-tagline"
-        >What media lovers are tracking and scrobbling this week</span
+        >Local demonstration data</span
       >
     </div>
 
@@ -321,15 +372,14 @@
     </div>
   </section>
 
-  <!-- Row 2: All-Time Greats & Must-Reads -->
-  <section class="feed-section" aria-label="All-Time Greats">
+  <section class="feed-section" aria-label="More demonstration media">
     <div class="section-header-row">
       <div class="title-with-icon">
         <IconAward size={20} class="award-icon" />
-        <h2 class="section-title">All-Time Greats & Acclaimed Runs</h2>
+        <h2 class="section-title">More sample records</h2>
       </div>
       <span class="section-tagline"
-        >Essential classics with top-tier community acclaim</span
+        >Local demonstration data</span
       >
     </div>
 
@@ -505,6 +555,7 @@
     position: relative;
     display: flex;
     align-items: center;
+    gap: 8px;
   }
   :global(.search-icon) {
     position: absolute;
@@ -512,7 +563,8 @@
     color: var(--fasti-text-muted);
   }
   .online-search-input {
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     height: 48px;
     padding: 12px 16px 12px 46px;
     background: var(--fasti-surface-paper);
@@ -526,20 +578,65 @@
   .online-search-input:focus {
     outline: 2px solid var(--fasti-action-primary);
   }
-  .search-badge {
-    position: absolute;
-    right: 14px;
-    font-family: var(--fasti-font-mono);
-    font-size: 0.72rem;
-    font-weight: 700;
-    padding: 3px 8px;
+  .provider-search-btn {
+    min-height: 48px;
+    padding: 0 20px;
+    border: 1px solid var(--fasti-action-primary);
     border-radius: 4px;
-    background: color-mix(
-      in srgb,
-      var(--fasti-state-verified) 15%,
-      transparent
-    );
-    color: var(--fasti-state-verified);
+    background: var(--fasti-action-primary);
+    color: white;
+    font-weight: 700;
+  }
+  .provider-search-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  .provider-search-status {
+    margin: 0;
+    padding: 10px 12px;
+    border-left: 3px solid var(--fasti-state-verified);
+    background: var(--fasti-surface-paper);
+  }
+  .provider-search-status.error {
+    border-left-color: var(--fasti-brand-mark);
+  }
+  .provider-results {
+    display: grid;
+    gap: 1px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    list-style: none;
+  }
+  .provider-results li {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px;
+    background: var(--fasti-surface-paper);
+  }
+  .provider-results h2,
+  .provider-results p {
+    margin: 0;
+  }
+  .provider-results h2 {
+    font-size: 1rem;
+  }
+  .provider-results p,
+  .provider-results span {
+    margin-top: 4px;
+    color: var(--fasti-text-muted);
+    font-size: 0.85rem;
+  }
+  .provider-results span {
+    font-family: var(--fasti-font-mono);
+    text-transform: uppercase;
+  }
+  .local-heading {
+    margin: 14px 0 -10px;
+    font-family: var(--fasti-font-display);
+    font-size: 1.45rem;
   }
 
   .categories-bar {

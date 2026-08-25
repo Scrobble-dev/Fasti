@@ -7,7 +7,9 @@
     MediaRecord,
     WatchStatus,
     ChronicleOccurrence,
-    ProviderApiKeyConfig,
+    OutboundAccessPolicy,
+    ProviderCandidate,
+    ProviderCredentialStatus,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
@@ -20,7 +22,6 @@
     SAMPLE_RECONCILIATION,
     SAMPLE_DISCOVER_TRENDING,
     SAMPLE_CUSTOM_FIELDS,
-    SAMPLE_PROVIDER_KEYS,
     SAMPLE_OIDC_CONFIG,
     SAMPLE_APPRISE_CONFIG,
     DEFAULT_THEME_SETTINGS,
@@ -49,19 +50,35 @@
 
   interface Props {
     connectionEndpoint: ConnectionEndpoint;
+    providerCredentials: ProviderCredentialStatus[];
     onSaveConnection: (value: string) => Promise<ConnectionEndpoint>;
     onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
+    onSaveProviderKey: (
+      provider: string,
+      key: string | null,
+    ) => Promise<void>;
+    onSearchProvider: (
+      provider: string,
+      query: string,
+      policy: OutboundAccessPolicy,
+    ) => Promise<ProviderCandidate[]>;
   }
 
-  let { connectionEndpoint, onSaveConnection, onTestConnection }: Props =
-    $props();
+  let {
+    connectionEndpoint,
+    providerCredentials,
+    onSaveConnection,
+    onTestConnection,
+    onSaveProviderKey,
+    onSearchProvider,
+  }: Props = $props();
 
   let activeSection: ActiveNavSection = $state("home");
   let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
   let chronicle = $state<ChronicleOccurrence[]>(SAMPLE_CHRONICLE);
   let reconciliationCases = $state(SAMPLE_RECONCILIATION);
   let tokens = $state([]);
-  let providerKeys = $state(SAMPLE_PROVIDER_KEYS);
+  let providerPolicy = $state<OutboundAccessPolicy>(initialProviderPolicy());
   let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
   let appriseConfig = $state(SAMPLE_APPRISE_CONFIG);
   let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
@@ -73,6 +90,54 @@
   let searchQuery = $state("");
   let mediaScope = $state("all");
   let nodeHealthy = $state<boolean | null>(null);
+
+  function policy(denied: Set<string>): OutboundAccessPolicy {
+    return {
+      allow_providers: denied.has("provider") ? [] : ["google-books"],
+      deny_providers: denied.has("provider") ? ["google-books"] : [],
+      allow_capabilities: denied.has("capability") ? [] : ["metadata.search"],
+      deny_capabilities: denied.has("capability") ? ["metadata.search"] : [],
+      allow_hosts: denied.has("host") ? [] : ["www.googleapis.com"],
+      deny_hosts: denied.has("host") ? ["www.googleapis.com"] : [],
+      allow_networks: denied.has("network") ? [] : ["public"],
+      deny_networks: denied.has("network") ? ["public"] : [],
+    };
+  }
+
+  function initialProviderPolicy(): OutboundAccessPolicy {
+    if (typeof window === "undefined") return policy(new Set());
+    try {
+      const saved = JSON.parse(
+        window.localStorage.getItem("fasti.provider-policy.v1") ?? "{}",
+      ) as { denied?: unknown };
+      const denied = Array.isArray(saved.denied)
+        ? new Set(
+            saved.denied.filter((value): value is string =>
+              ["provider", "capability", "host", "network"].includes(
+                String(value),
+              ),
+            ),
+          )
+        : new Set<string>();
+      return policy(denied);
+    } catch {
+      return policy(new Set());
+    }
+  }
+
+  function handleUpdateProviderPolicy(value: OutboundAccessPolicy): void {
+    providerPolicy = value;
+    const denied = [
+      value.deny_providers.length > 0 && "provider",
+      value.deny_capabilities.length > 0 && "capability",
+      value.deny_hosts.length > 0 && "host",
+      value.deny_networks.length > 0 && "network",
+    ].filter(Boolean);
+    window.localStorage.setItem(
+      "fasti.provider-policy.v1",
+      JSON.stringify({ denied }),
+    );
+  }
 
   const selectedRecord = $derived(
     records.find((r) => r.id === selectedRecordId),
@@ -348,12 +413,9 @@
   });
 
   async function checkNodeHealth(): Promise<void> {
-    if (typeof fetch === "undefined") return;
     try {
-      const res = await fetch("/api/v1/health", {
-        signal: AbortSignal.timeout(3000),
-      });
-      nodeHealthy = res.ok;
+      await onTestConnection(connectionEndpoint.url);
+      nodeHealthy = true;
     } catch {
       nodeHealthy = false;
     }
@@ -499,14 +561,6 @@
 
   function handleUpdateTheme(updates: Partial<ThemeSettings>): void {
     themeSettings = { ...themeSettings, ...updates };
-  }
-
-  function handleSaveProviderKey(provider: string, key: string): void {
-    providerKeys = providerKeys.map((p) =>
-      p.provider === provider
-        ? { ...p, apiKey: key, isConfigured: key.trim().length > 0 }
-        : p,
-    );
   }
 
   function handleSaveOidc(config: OidcConfiguration): void {
@@ -665,6 +719,8 @@
       {:else if activeSection === "discover"}
         <DiscoverView
           trendingRecords={SAMPLE_DISCOVER_TRENDING}
+          {providerPolicy}
+          {onSearchProvider}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
           onUpdateStatus={handleUpdateStatus}
@@ -703,7 +759,8 @@
           {connectionEndpoint}
           customFields={SAMPLE_CUSTOM_FIELDS}
           {tokens}
-          {providerKeys}
+          {providerCredentials}
+          {providerPolicy}
           {oidcConfig}
           {appriseConfig}
           {themeSettings}
@@ -713,7 +770,8 @@
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
           {onSaveConnection}
           {onTestConnection}
-          onSaveProviderKey={handleSaveProviderKey}
+          {onSaveProviderKey}
+          onUpdateProviderPolicy={handleUpdateProviderPolicy}
           onSaveOidc={handleSaveOidc}
           onSaveApprise={handleSaveApprise}
         />

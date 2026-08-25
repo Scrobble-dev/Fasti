@@ -3,6 +3,9 @@
     SetupPanel,
     FastiWorkbench,
     type DesktopProblem,
+    type OutboundAccessPolicy,
+    type ProviderCandidate,
+    type ProviderCredentialStatus,
     type SetupViewState,
   } from "@fasti/ui";
   import {
@@ -21,6 +24,16 @@
   let problem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
   let isTauri = $state(false);
+  let providerCredentials = $state<ProviderCredentialStatus[]>([
+    {
+      provider: "google-books",
+      label: "Google Books",
+      configured: false,
+      source: "none",
+      writable: false,
+      docs_url: "https://developers.google.com/books/docs/v1/using",
+    },
+  ]);
   const managedApiUrl = import.meta.env.VITE_FASTI_API_URL as string;
   const apiUrlManaged = import.meta.env.VITE_FASTI_API_URL_MANAGED as boolean;
   let connection = $state<ConnectionEndpoint>(initialConnection());
@@ -72,6 +85,58 @@
     return { endpoint: value, status: health.status, version: health.version };
   }
 
+  async function loadProviderCredentials(): Promise<void> {
+    if (!isTauri) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      providerCredentials = await invoke<ProviderCredentialStatus[]>(
+        "provider_credential_status",
+      );
+    } catch (error) {
+      console.warn("[Fasti UI] Provider credential status unavailable:", error);
+    }
+  }
+
+  async function saveProviderKey(
+    provider: string,
+    key: string | null,
+  ): Promise<void> {
+    if (!isTauri) {
+      throw {
+        code: "desktop_provider_required",
+        title: "Open Fasti Desktop",
+        detail: "The browser cannot read or write provider credentials.",
+        next_action: "Open Fasti Desktop, then manage the provider key.",
+      } satisfies DesktopProblem;
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    providerCredentials = await invoke<ProviderCredentialStatus[]>(
+      "save_provider_key",
+      { provider, key },
+    );
+  }
+
+  async function searchProvider(
+    provider: string,
+    query: string,
+    policy: OutboundAccessPolicy,
+  ): Promise<ProviderCandidate[]> {
+    if (!isTauri) {
+      throw {
+        code: "desktop_provider_required",
+        title: "Open Fasti Desktop",
+        detail: "Provider search is not exposed to an unauthenticated browser.",
+        next_action: "Open Fasti Desktop, then run the search again.",
+      } satisfies DesktopProblem;
+    }
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<ProviderCandidate[]>("search_provider", {
+      provider,
+      query,
+      policy,
+    });
+  }
+
   function applyStatus(status: SetupStatus): void {
     console.info("[Fasti UI] Host status:", status);
     viewState = status.phase;
@@ -109,6 +174,7 @@
       try {
         const { invoke } = await import("@tauri-apps/api/core");
         applyStatus(await invoke<SetupStatus>("setup_status"));
+        await loadProviderCredentials();
       } catch (error) {
         console.error("[Fasti UI] Tauri setup_status failed:", error);
         applyProblem(error);
@@ -124,6 +190,7 @@
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       applyStatus(await invoke<SetupStatus>("complete_setup"));
+      await loadProviderCredentials();
     } catch (error) {
       console.error("[Fasti UI] Tauri complete_setup failed:", error);
       applyProblem(error);
@@ -138,8 +205,11 @@
 {#if viewState === "ready"}
   <FastiWorkbench
     connectionEndpoint={connection}
+    {providerCredentials}
     onSaveConnection={saveConnection}
     onTestConnection={testConnection}
+    onSaveProviderKey={saveProviderKey}
+    onSearchProvider={searchProvider}
   />
 {:else}
   <SetupPanel state={viewState} {problem} {cleanupPending} onSetup={setup} />

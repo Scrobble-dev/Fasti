@@ -150,12 +150,42 @@ export interface ScopedApiToken {
   readonly lastUsedAt?: string;
 }
 
-export interface ProviderApiKeyConfig {
+export interface ProviderCredentialStatus {
   readonly provider: string;
   readonly label: string;
-  readonly apiKey: string;
-  readonly isConfigured: boolean;
-  readonly docsUrl: string;
+  readonly configured: boolean;
+  readonly source: "none" | "keyring" | "environment";
+  readonly writable: boolean;
+  readonly docs_url: string;
+}
+
+export type NetworkClass =
+  | "public"
+  | "loopback"
+  | "private"
+  | "link_local"
+  | "multicast"
+  | "unspecified"
+  | "documentation";
+
+export interface OutboundAccessPolicy {
+  readonly allow_providers: string[];
+  readonly deny_providers: string[];
+  readonly allow_capabilities: string[];
+  readonly deny_capabilities: string[];
+  readonly allow_hosts: string[];
+  readonly deny_hosts: string[];
+  readonly allow_networks: NetworkClass[];
+  readonly deny_networks: NetworkClass[];
+}
+
+export interface ProviderCandidate {
+  readonly provider: string;
+  readonly provider_id: string;
+  readonly title: string;
+  readonly kind: string;
+  readonly description?: string;
+  readonly image_url?: string;
 }
 
 export interface ConnectionTestStatus {

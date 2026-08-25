@@ -3,7 +3,8 @@
     ConnectionTestStatus,
     CustomFieldDefinition,
     ScopedApiToken,
-    ProviderApiKeyConfig,
+    OutboundAccessPolicy,
+    ProviderCredentialStatus,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
@@ -39,7 +40,8 @@
     connectionEndpoint: ConnectionEndpoint;
     customFields: CustomFieldDefinition[];
     tokens: ScopedApiToken[];
-    providerKeys: ProviderApiKeyConfig[];
+    providerCredentials: ProviderCredentialStatus[];
+    providerPolicy: OutboundAccessPolicy;
     oidcConfig: OidcConfiguration;
     appriseConfig: AppriseNotificationConfig;
     themeSettings: ThemeSettings;
@@ -50,7 +52,11 @@
     ) => void;
     onSaveConnection: (value: string) => Promise<ConnectionEndpoint>;
     onTestConnection: (value: string) => Promise<ConnectionTestStatus>;
-    onSaveProviderKey?: (provider: string, key: string) => void;
+    onSaveProviderKey: (
+      provider: string,
+      key: string | null,
+    ) => Promise<void>;
+    onUpdateProviderPolicy: (policy: OutboundAccessPolicy) => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
   }
@@ -59,7 +65,8 @@
     connectionEndpoint,
     customFields,
     tokens,
-    providerKeys,
+    providerCredentials,
+    providerPolicy,
     oidcConfig,
     appriseConfig,
     themeSettings,
@@ -69,6 +76,7 @@
     onSaveConnection,
     onTestConnection,
     onSaveProviderKey,
+    onUpdateProviderPolicy,
     onSaveOidc,
     onSaveApprise,
   }: Props = $props();
@@ -91,6 +99,11 @@
 
   // Local state for keys
   let editingKeyMap: Record<string, string> = $state({});
+  let savingProvider = $state<string | null>(null);
+  let providerNotice = $state<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
   let oidcDraft = $state({
     enabled: false,
     issuerUrl: "",
@@ -110,6 +123,84 @@
   $effect(() => {
     oidcDraft = { ...oidcConfig };
   });
+
+  function providerError(error: unknown): string {
+    if (error !== null && typeof error === "object") {
+      const value = error as { title?: string; detail?: string };
+      return [value.title, value.detail].filter(Boolean).join(" ");
+    }
+    return "Fasti could not update the provider credential.";
+  }
+
+  async function saveCredential(
+    provider: string,
+    key: string | null,
+  ): Promise<void> {
+    savingProvider = provider;
+    providerNotice = null;
+    try {
+      await onSaveProviderKey(provider, key);
+      editingKeyMap[provider] = "";
+      providerNotice = {
+        kind: "success",
+        message: key ? "The key is stored in the system credential store." : "The saved key was removed.",
+      };
+    } catch (error) {
+      providerNotice = { kind: "error", message: providerError(error) };
+    } finally {
+      savingProvider = null;
+    }
+  }
+
+  type PolicyDimension = "provider" | "capability" | "host" | "network";
+
+  function policyAllows(dimension: PolicyDimension): boolean {
+    return {
+      provider: providerPolicy.deny_providers.length === 0,
+      capability: providerPolicy.deny_capabilities.length === 0,
+      host: providerPolicy.deny_hosts.length === 0,
+      network: providerPolicy.deny_networks.length === 0,
+    }[dimension];
+  }
+
+  function setPolicy(dimension: PolicyDimension, allow: boolean): void {
+    const value: OutboundAccessPolicy = {
+      ...providerPolicy,
+      allow_providers:
+        dimension === "provider"
+          ? allow ? ["google-books"] : []
+          : providerPolicy.allow_providers,
+      deny_providers:
+        dimension === "provider"
+          ? allow ? [] : ["google-books"]
+          : providerPolicy.deny_providers,
+      allow_capabilities:
+        dimension === "capability"
+          ? allow ? ["metadata.search"] : []
+          : providerPolicy.allow_capabilities,
+      deny_capabilities:
+        dimension === "capability"
+          ? allow ? [] : ["metadata.search"]
+          : providerPolicy.deny_capabilities,
+      allow_hosts:
+        dimension === "host"
+          ? allow ? ["www.googleapis.com"] : []
+          : providerPolicy.allow_hosts,
+      deny_hosts:
+        dimension === "host"
+          ? allow ? [] : ["www.googleapis.com"]
+          : providerPolicy.deny_hosts,
+      allow_networks:
+        dimension === "network"
+          ? allow ? ["public"] : []
+          : providerPolicy.allow_networks,
+      deny_networks:
+        dimension === "network"
+          ? allow ? [] : ["public"]
+          : providerPolicy.deny_networks,
+    };
+    onUpdateProviderPolicy(value);
+  }
 
   $effect(() => {
     appriseDraft = { ...appriseConfig, urls: [...appriseConfig.urls] };
@@ -699,20 +790,20 @@
         <!-- 3. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
-          <h2 class="pane-title">Metadata Providers & API Credentials</h2>
+          <h2 class="pane-title">Provider access</h2>
           <p class="pane-desc">
-            Provide your API keys to enable real-time online searches and rich
-            poster, cast, and episode downloads.
+            Google Books search is available in Fasti Desktop. A key is optional.
+            Fasti never returns saved keys to this interface.
           </p>
 
           <div class="providers-list">
-            {#each providerKeys as prov}
+            {#each providerCredentials as prov}
               <div class="provider-key-card">
                 <div class="provider-key-header">
                   <div>
                     <h3 class="provider-title">{prov.label}</h3>
                     <a
-                      href={prov.docsUrl}
+                      href={prov.docs_url}
                       target="_blank"
                       rel="noopener"
                       class="docs-link"
@@ -722,35 +813,104 @@
                   </div>
                   <span
                     class="prov-status-chip"
-                    class:configured={prov.isConfigured}
+                    class:configured={prov.configured}
                   >
-                    {prov.isConfigured ? "Active & Verified" : "Not Configured"}
+                    {prov.configured
+                      ? `Key: ${prov.source}`
+                      : "Public quota; no key"}
                   </span>
                 </div>
 
                 <div class="key-input-row">
                   <input
                     type="password"
-                    placeholder="Enter API Key / Access Token..."
-                    value={editingKeyMap[prov.provider] ?? prov.apiKey}
+                    placeholder="Enter a new Google Books API key"
+                    value={editingKeyMap[prov.provider] ?? ""}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
-                    aria-label="API Key for {prov.label}"
+                    aria-label="New API key for {prov.label}"
+                    autocomplete="off"
+                    spellcheck="false"
+                    disabled={!prov.writable || savingProvider === prov.provider}
                   />
                   <button
                     type="button"
                     class="save-key-btn"
-                    onclick={() => {
-                      const val = editingKeyMap[prov.provider] ?? prov.apiKey;
-                      onSaveProviderKey?.(prov.provider, val);
-                    }}
+                    disabled={!prov.writable || savingProvider === prov.provider || !(editingKeyMap[prov.provider] ?? "").trim()}
+                    onclick={() => void saveCredential(prov.provider, editingKeyMap[prov.provider] ?? "")}
                   >
-                    Save Key
+                    {savingProvider === prov.provider ? "Saving…" : "Save key"}
                   </button>
+                  {#if prov.configured && prov.source === "keyring"}
+                    <button
+                      type="button"
+                      class="remove-key-btn"
+                      disabled={savingProvider === prov.provider}
+                      onclick={() => void saveCredential(prov.provider, null)}
+                    >Remove key</button>
+                  {/if}
                 </div>
+                {#if !prov.writable}
+                  <p class="provider-help">
+                    {prov.source === "environment"
+                      ? "GOOGLE_BOOKS_API_KEY manages this key. Change the environment secret, then restart Fasti."
+                      : "Open Fasti Desktop to manage credentials and run provider searches."}
+                  </p>
+                {/if}
               </div>
             {/each}
+          </div>
+
+          {#if providerNotice}
+            <p
+              class="provider-notice"
+              class:error={providerNotice.kind === "error"}
+              role={providerNotice.kind === "error" ? "alert" : "status"}
+            >{providerNotice.message}</p>
+          {/if}
+
+          <div class="policy-section">
+            <h3 class="form-title">Effective outbound policy</h3>
+            <p class="provider-help">
+              Each allow is limited by the provider manifest. A deny always wins.
+              Private, loopback, link-local, multicast, documentation, and
+              unspecified networks remain outside this provider manifest.
+            </p>
+            <div class="policy-list">
+              <label class="policy-row">
+                <span><strong>Provider</strong><small>google-books</small></span>
+                <select
+                  aria-label="Google Books provider access"
+                  value={policyAllows("provider") ? "allow" : "deny"}
+                  onchange={(event) => setPolicy("provider", event.currentTarget.value === "allow")}
+                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+              </label>
+              <label class="policy-row">
+                <span><strong>Capability</strong><small>metadata.search</small></span>
+                <select
+                  aria-label="Metadata search capability access"
+                  value={policyAllows("capability") ? "allow" : "deny"}
+                  onchange={(event) => setPolicy("capability", event.currentTarget.value === "allow")}
+                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+              </label>
+              <label class="policy-row">
+                <span><strong>Host</strong><small>www.googleapis.com</small></span>
+                <select
+                  aria-label="Google Books host access"
+                  value={policyAllows("host") ? "allow" : "deny"}
+                  onchange={(event) => setPolicy("host", event.currentTarget.value === "allow")}
+                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+              </label>
+              <label class="policy-row">
+                <span><strong>Network</strong><small>Public addresses only</small></span>
+                <select
+                  aria-label="Public network access"
+                  value={policyAllows("network") ? "allow" : "deny"}
+                  onchange={(event) => setPolicy("network", event.currentTarget.value === "allow")}
+                ><option value="allow">Allow</option><option value="deny">Deny</option></select>
+              </label>
+            </div>
           </div>
         </section>
 
@@ -1297,6 +1457,7 @@
   }
 
   .save-key-btn {
+    min-height: 44px;
     padding: 8px 18px;
     background: var(--fasti-action-primary);
     color: white;
@@ -1304,6 +1465,80 @@
     border: none;
     border-radius: 4px;
     cursor: pointer;
+  }
+
+  .save-key-btn:disabled,
+  .remove-key-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .remove-key-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 1px solid color-mix(in srgb, var(--fasti-brand-mark) 45%, transparent);
+    border-radius: 4px;
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-brand-mark);
+    font-weight: 600;
+  }
+
+  .provider-help,
+  .provider-notice {
+    margin: 10px 0 0;
+    color: var(--fasti-text-muted);
+    font-size: 0.85rem;
+  }
+
+  .provider-notice {
+    padding: 12px;
+    border-left: 3px solid var(--fasti-state-verified);
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+  }
+
+  .provider-notice.error {
+    border-left-color: var(--fasti-brand-mark);
+  }
+
+  .policy-section {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid color-mix(in srgb, var(--fasti-text-muted) 24%, transparent);
+  }
+
+  .policy-list {
+    display: grid;
+    gap: 1px;
+    margin-top: 12px;
+    background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .policy-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 56px;
+    padding: 8px 12px;
+    background: var(--fasti-surface-paper);
+  }
+
+  .policy-row span,
+  .policy-row small {
+    display: block;
+  }
+
+  .policy-row small {
+    margin-top: 2px;
+    color: var(--fasti-text-muted);
+    font-family: var(--fasti-font-mono);
+  }
+
+  .policy-row select {
+    min-width: 104px;
+    min-height: 44px;
   }
 
   .wb-help {
@@ -1498,6 +1733,12 @@
 
     .settings-content-card {
       padding: 18px 16px;
+    }
+
+    .provider-key-header,
+    .key-input-row {
+      align-items: stretch;
+      flex-direction: column;
     }
   }
 </style>

@@ -4,7 +4,6 @@ import type {
   ReconciliationCase,
   CustomFieldDefinition,
   ScopedApiToken,
-  ProviderApiKeyConfig,
   OidcConfiguration,
   AppriseNotificationConfig,
   ThemeSettings,
@@ -968,51 +967,6 @@ export const SAMPLE_TOKENS: ScopedApiToken[] = [
     scopes: ["chronicle:read", "metadata:read"],
     createdAt: "2026-08-15T14:30:00Z",
     lastUsedAt: "2026-08-24T22:00:00Z",
-  },
-];
-
-export const SAMPLE_PROVIDER_KEYS: ProviderApiKeyConfig[] = [
-  {
-    provider: "tmdb",
-    label: "TheMovieDatabase (TMDB)",
-    apiKey: "eyJh... (Configured)",
-    isConfigured: true,
-    docsUrl: "https://developer.themoviedb.org/docs",
-  },
-  {
-    provider: "tvdb",
-    label: "TheTVDB v4",
-    apiKey: "",
-    isConfigured: false,
-    docsUrl: "https://thetvdb.github.io/v4-api/",
-  },
-  {
-    provider: "anilist",
-    label: "AniList GraphQL (Anime/Manga)",
-    apiKey: "anilist_oauth_active",
-    isConfigured: true,
-    docsUrl: "https://anilist.gitbook.io/anilist-apiv2-docs/",
-  },
-  {
-    provider: "mal",
-    label: "MyAnimeList API v2",
-    apiKey: "",
-    isConfigured: false,
-    docsUrl: "https://myanimelist.net/apiconfig/references/api/v2",
-  },
-  {
-    provider: "rawg",
-    label: "RAWG Video Games Database",
-    apiKey: "",
-    isConfigured: false,
-    docsUrl: "https://rawg.io/apidocs",
-  },
-  {
-    provider: "openlibrary",
-    label: "OpenLibrary (Books)",
-    apiKey: "Public / No Key Needed",
-    isConfigured: true,
-    docsUrl: "https://openlibrary.org/developers/api",
   },
 ];
 
