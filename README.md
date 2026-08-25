@@ -14,6 +14,7 @@
 <br/>
 
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14234/badge)](https://www.bestpractices.dev/projects/14234)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 <br/>
@@ -148,7 +149,18 @@ The exact response is `{"status":"healthy","version":"0.1.0"}`.
 
 That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
 
-With `fastid` still running, the local browser QA harness uses that same health contract:
+The scoped launcher provides the same health-only native path and an optional Podman path:
+
+```bash
+FASTI_PORT=19420 ./scripts/dev.sh
+FASTI_PORT=19420 ./scripts/dev.sh --podman
+./scripts/dev.sh --status
+./scripts/dev.sh --stop
+```
+
+`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. The launcher tracks only this worktree's process and container.
+
+With `fastid` still running on its default port, the local browser QA harness uses that same health contract:
 
 ```bash
 pnpm install --frozen-lockfile

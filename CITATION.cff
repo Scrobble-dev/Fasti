@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use or reference Fasti in research or software development, please cite it as below."
+title: "Fasti: An Identity-First, Self-Hosted System of Record for Media Activity"
+authors:
+  - name: "Fasti Contributors"
+    website: "https://github.com/Scrobble-dev"
+version: 0.1.0
+license: AGPL-3.0-or-later
+repository-code: "https://github.com/Scrobble-dev/Fasti"
+url: "https://github.com/Scrobble-dev/Fasti"
+abstract: "Fasti is an open-source project for an identity-first local system of record for media activity. It preserves observations and governed history without playing media."
+keywords:
+  - "scrobble"
+  - "scrobbling"
+  - "media-tracker"
+  - "self-hosted"
+  - "digital-preservation"
+  - "local-first"
+  - "rust"
+  - "sqlite"
+  - "interoperability"
