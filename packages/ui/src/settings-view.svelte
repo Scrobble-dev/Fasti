@@ -1,272 +1,769 @@
 <script lang="ts">
-  import type { CustomFieldDefinition, ScopedApiToken } from "./types.js";
+  import type {
+    CustomFieldDefinition,
+    ScopedApiToken,
+    ProviderApiKeyConfig,
+    OidcConfiguration,
+    AppriseNotificationConfig,
+    ThemeSettings,
+  } from "./types.js";
   import {
-    IconSettings,
-    IconDatabaseImport,
     IconKey,
-    IconAdjustments,
+    IconPalette,
+    IconDevices,
+    IconUserCheck,
+    IconBell,
+    IconDatabaseImport,
+    IconCode,
     IconPlus,
     IconTrash,
+    IconCopy,
     IconCheck,
-    IconShieldCheck,
+    IconDeviceTv,
+    IconServer,
+    IconExternalLink,
+    IconSend,
   } from "@tabler/icons-svelte";
 
   interface Props {
     customFields: CustomFieldDefinition[];
     tokens: ScopedApiToken[];
+    providerKeys: ProviderApiKeyConfig[];
+    oidcConfig: OidcConfiguration;
+    appriseConfig: AppriseNotificationConfig;
+    themeSettings: ThemeSettings;
+    onUpdateTheme?: (theme: Partial<ThemeSettings>) => void;
+    onSaveProviderKey?: (provider: string, key: string) => void;
+    onCreateToken?: (name: string, scopes: string[]) => void;
+    onDeleteToken?: (id: string) => void;
+    onSaveOidc?: (config: OidcConfiguration) => void;
+    onSaveApprise?: (config: AppriseNotificationConfig) => void;
   }
 
-  let { customFields, tokens }: Props = $props();
+  let {
+    customFields,
+    tokens,
+    providerKeys,
+    oidcConfig,
+    appriseConfig,
+    themeSettings,
+    onUpdateTheme,
+    onSaveProviderKey,
+    onCreateToken,
+    onDeleteToken,
+    onSaveOidc,
+    onSaveApprise,
+  }: Props = $props();
 
-  let activeTab: "schema" | "import" | "tokens" | "a11y" = $state("schema");
+  let activeSettingsSection:
+    | "appearance"
+    | "providers"
+    | "connectors"
+    | "tokens"
+    | "oidc"
+    | "notifications"
+    | "importers" = $state("appearance");
 
-  let newFieldKey = $state("");
-  let newFieldLabel = $state("");
-  let newFieldTarget = $state("game");
-
+  // Local state for token generator
   let newTokenName = $state("");
-  let generatedToken: string | null = $state(null);
+  let selectedScopes: string[] = $state(["chronicle:write", "metadata:read"]);
+  let generatedTokenSecret = $state<string | null>(null);
+  let isCopied = $state(false);
+
+  // Local state for notification testing
+  let testNotificationSent = $state(false);
+  let newAppriseUrl = $state("");
+
+  // Local state for keys
+  let editingKeyMap: Record<string, string> = $state({});
+
+  function handleCreateTokenSubmit(e: Event): void {
+    e.preventDefault();
+    if (newTokenName.trim().length === 0) return;
+    const mockSecret = `fst_pat_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+    generatedTokenSecret = mockSecret;
+    onCreateToken?.(newTokenName.trim(), selectedScopes);
+    newTokenName = "";
+  }
+
+  function handleCopySecret(): void {
+    if (generatedTokenSecret) {
+      navigator.clipboard.writeText(generatedTokenSecret);
+      isCopied = true;
+      setTimeout(() => (isCopied = false), 2000);
+    }
+  }
+
+  function handleSendTestNotification(): void {
+    testNotificationSent = true;
+    setTimeout(() => (testNotificationSent = false), 3000);
+  }
+
+  function handleAddAppriseUrl(e: Event): void {
+    e.preventDefault();
+    if (newAppriseUrl.trim().length > 0) {
+      const updated = {
+        ...appriseConfig,
+        urls: [...appriseConfig.urls, newAppriseUrl.trim()],
+      };
+      onSaveApprise?.(updated);
+      newAppriseUrl = "";
+    }
+  }
 </script>
 
 <div class="settings-container">
-  <header class="view-header">
+  <header class="settings-header">
     <div>
       <h1 class="view-title">Settings & Studio</h1>
       <p class="view-subtitle">
-        Manage custom schemas, import archives, API tokens, and accessibility.
+        Configure metadata API keys, appearance themes, media server connectors,
+        and security.
       </p>
     </div>
   </header>
 
-  <!-- Settings Navigation Tabs -->
-  <nav class="settings-tabs" aria-label="Settings categories">
-    <button
-      type="button"
-      class="tab-btn"
-      class:active={activeTab === "schema"}
-      onclick={() => (activeTab = "schema")}
-    >
-      <IconAdjustments size={16} /> Custom Types & Fields
-    </button>
-    <button
-      type="button"
-      class="tab-btn"
-      class:active={activeTab === "import"}
-      onclick={() => (activeTab = "import")}
-    >
-      <IconDatabaseImport size={16} /> Importers & Migration
-    </button>
-    <button
-      type="button"
-      class="tab-btn"
-      class:active={activeTab === "tokens"}
-      onclick={() => (activeTab = "tokens")}
-    >
-      <IconKey size={16} /> Scoped API Tokens
-    </button>
-    <button
-      type="button"
-      class="tab-btn"
-      class:active={activeTab === "a11y"}
-      onclick={() => (activeTab = "a11y")}
-    >
-      <IconShieldCheck size={16} /> Accessibility & Display
-    </button>
-  </nav>
+  <div class="settings-layout">
+    <!-- Left Settings Navigation -->
+    <nav class="settings-nav" aria-label="Settings subnavigation">
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "appearance"}
+        onclick={() => (activeSettingsSection = "appearance")}
+      >
+        <IconPalette size={18} /> Appearance & Theme
+      </button>
 
-  <main class="settings-body">
-    {#if activeTab === "schema"}
-      <section class="section-pane">
-        <h2 class="pane-heading">Custom Field Definitions</h2>
-        <p class="pane-desc">
-          Add dynamic, typed fields with dotted hierarchy. Identity promotion
-          requires explicit namespace registration to avoid collisions.
-        </p>
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "providers"}
+        onclick={() => (activeSettingsSection = "providers")}
+      >
+        <IconKey size={18} /> Metadata Providers & Keys
+      </button>
 
-        <table class="settings-table">
-          <thead>
-            <tr>
-              <th scope="col">Field Key</th>
-              <th scope="col">Display Label</th>
-              <th scope="col">Target Grain</th>
-              <th scope="col">Value Type</th>
-              <th scope="col">Namespace</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each customFields as field}
-              <tr>
-                <td class="mono"><code>{field.key}</code></td>
-                <td><strong>{field.label}</strong></td>
-                <td><span class="type-tag">{field.targetType}</span></td>
-                <td class="mono">{field.valueType}</td>
-                <td class="mono">{field.registeredNamespace ?? "—"}</td>
-              </tr>
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "connectors"}
+        onclick={() => (activeSettingsSection = "connectors")}
+      >
+        <IconDeviceTv size={18} /> Nuvio & Media Connectors
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "tokens"}
+        onclick={() => (activeSettingsSection = "tokens")}
+      >
+        <IconCode size={18} /> Personal Access Tokens (PAT)
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "oidc"}
+        onclick={() => (activeSettingsSection = "oidc")}
+      >
+        <IconUserCheck size={18} /> Single Sign-On (OIDC)
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "notifications"}
+        onclick={() => (activeSettingsSection = "notifications")}
+      >
+        <IconBell size={18} /> Notifications & Apprise
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "importers"}
+        onclick={() => (activeSettingsSection = "importers")}
+      >
+        <IconDatabaseImport size={18} /> Lossless Importers & Backups
+      </button>
+    </nav>
+
+    <!-- Right Settings Content Panel -->
+    <main class="settings-content-card">
+      <!-- 1. Appearance & Theme Editor (Tabler Style) -->
+      {#if activeSettingsSection === "appearance"}
+        <section class="section-pane">
+          <h2 class="pane-title">Appearance & Theme Editor</h2>
+          <p class="pane-desc">
+            Customize color schemes, density, and typography scale.
+          </p>
+
+          <!-- Color Mode -->
+          <div class="setting-group">
+            <h3 class="group-title">Color Scheme Mode</h3>
+            <div class="options-grid-3">
+              <button
+                type="button"
+                class="theme-card-btn"
+                class:selected={themeSettings.mode === "light"}
+                onclick={() => onUpdateTheme?.({ mode: "light" })}
+              >
+                <div class="preview-swatch light-swatch"></div>
+                <div class="swatch-label">
+                  <strong>Light (Archival Paper)</strong>
+                  <span>Warm off-white #FFFDF8</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                class="theme-card-btn"
+                class:selected={themeSettings.mode === "dark"}
+                onclick={() => onUpdateTheme?.({ mode: "dark" })}
+              >
+                <div class="preview-swatch dark-swatch"></div>
+                <div class="swatch-label">
+                  <strong>Dark (Slate Modern)</strong>
+                  <span>Rich charcoal #1E1E24</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                class="theme-card-btn"
+                class:selected={themeSettings.mode === "night"}
+                onclick={() => onUpdateTheme?.({ mode: "night" })}
+              >
+                <div class="preview-swatch night-swatch"></div>
+                <div class="swatch-label">
+                  <strong>Night (OLED True Black)</strong>
+                  <span>Deep #000000 high-contrast</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- Accent Color Swatches -->
+          <div class="setting-group">
+            <h3 class="group-title">Accent Color Palette</h3>
+            <div class="accents-row">
+              {#each [{ id: "oxblood", name: "Fasti Oxblood", hex: "#8B2E2A" }, { id: "blue", name: "Chronicle Blue", hex: "#1E4FA3" }, { id: "verdigris", name: "Verdigris", hex: "#2E6F63" }, { id: "gold", name: "Horological Gold", hex: "#D4AF37" }, { id: "purple", name: "Royal Purple", hex: "#7E22CE" }, { id: "rose", name: "Rose Crimson", hex: "#E11D48" }] as acc}
+                <button
+                  type="button"
+                  class="accent-btn"
+                  class:selected={themeSettings.accentColor === acc.id}
+                  style="--accent-hex: {acc.hex}"
+                  onclick={() =>
+                    onUpdateTheme?.({ accentColor: acc.id as any })}
+                  title={acc.name}
+                >
+                  <span class="accent-circle"></span>
+                  <span class="accent-name">{acc.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <!-- Layout Density -->
+          <div class="setting-group">
+            <h3 class="group-title">Layout Density</h3>
+            <div class="options-grid-3">
+              {#each [{ id: "compact", title: "Compact", desc: "Tighter rows, maximum information density" }, { id: "normal", title: "Normal", desc: "Balanced spacing, standard margins" }, { id: "spacious", title: "Spacious", desc: "Relaxed editorial breathing room" }] as d}
+                <button
+                  type="button"
+                  class="density-btn"
+                  class:selected={themeSettings.density === d.id}
+                  onclick={() => onUpdateTheme?.({ density: d.id as any })}
+                >
+                  <strong>{d.title}</strong>
+                  <span>{d.desc}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        </section>
+
+        <!-- 2. Metadata Providers & Keys -->
+      {:else if activeSettingsSection === "providers"}
+        <section class="section-pane">
+          <h2 class="pane-title">Metadata Providers & API Credentials</h2>
+          <p class="pane-desc">
+            Provide your API keys to enable real-time online searches and rich
+            poster, cast, and episode downloads.
+          </p>
+
+          <div class="providers-list">
+            {#each providerKeys as prov}
+              <div class="provider-key-card">
+                <div class="provider-key-header">
+                  <div>
+                    <h3 class="provider-title">{prov.label}</h3>
+                    <a
+                      href={prov.docsUrl}
+                      target="_blank"
+                      rel="noopener"
+                      class="docs-link"
+                    >
+                      API Documentation <IconExternalLink size={12} />
+                    </a>
+                  </div>
+                  <span
+                    class="prov-status-chip"
+                    class:configured={prov.isConfigured}
+                  >
+                    {prov.isConfigured ? "Active & Verified" : "Not Configured"}
+                  </span>
+                </div>
+
+                <div class="key-input-row">
+                  <input
+                    type="password"
+                    placeholder="Enter API Key / Access Token..."
+                    value={editingKeyMap[prov.provider] ?? prov.apiKey}
+                    oninput={(e) =>
+                      (editingKeyMap[prov.provider] = e.currentTarget.value)}
+                    class="api-key-input"
+                    aria-label="API Key for {prov.label}"
+                  />
+                  <button
+                    type="button"
+                    class="save-key-btn"
+                    onclick={() => {
+                      const val = editingKeyMap[prov.provider] ?? prov.apiKey;
+                      onSaveProviderKey?.(prov.provider, val);
+                    }}
+                  >
+                    Save Key
+                  </button>
+                </div>
+              </div>
             {/each}
-          </tbody>
-        </table>
-
-        <div class="add-box">
-          <h3 class="add-title">Add Custom Field Definition</h3>
-          <div class="input-row">
-            <input
-              type="text"
-              placeholder="e.g. games.gog_product_id"
-              bind:value={newFieldKey}
-              class="text-input mono"
-              aria-label="Field Key"
-            />
-            <input
-              type="text"
-              placeholder="e.g. GOG Product ID"
-              bind:value={newFieldLabel}
-              class="text-input"
-              aria-label="Display Label"
-            />
-            <button type="button" class="btn-primary">
-              <IconPlus size={16} /> Add Field
-            </button>
           </div>
-        </div>
-      </section>
-    {:else if activeTab === "import"}
-      <section class="section-pane">
-        <h2 class="pane-heading">Historical Tracker Importers</h2>
-        <p class="pane-desc">
-          Zero-data-loss archive migration. Fasti preserves every row, rewatch
-          timestamp, and partial identifier without forced auto-merging.
-        </p>
+        </section>
 
-        <div class="importer-grid">
-          <div class="importer-card">
-            <h3 class="importer-name">Floppy Database / JSON</h3>
-            <p class="importer-meta">
-              Direct lossless import of Floppy history, ratings, lists, notes,
-              and custom types.
-            </p>
-            <button type="button" class="btn-secondary"
-              >Import Floppy Archive</button
-            >
-          </div>
+        <!-- 3. Nuvio & Media Server Connectors -->
+      {:else if activeSettingsSection === "connectors"}
+        <section class="section-pane">
+          <h2 class="pane-title">NuvioTV & Media Server Connectors</h2>
+          <p class="pane-desc">
+            Step-by-step pairing guides for automatic scrobbling from NuvioTV,
+            Kodi, Plex, Jellyfin, and MPRIS.
+          </p>
 
-          <div class="importer-card">
-            <h3 class="importer-name">Yamtrack CSV / Export</h3>
-            <p class="importer-meta">
-              Ingests legacy Yamtrack media logs and custom tags with
-              deterministic checkpointing.
-            </p>
-            <button type="button" class="btn-secondary"
-              >Import Yamtrack CSV</button
-            >
-          </div>
-
-          <div class="importer-card">
-            <h3 class="importer-name">SIMKL JSON Export</h3>
-            <p class="importer-meta">
-              Ingests anime/movie/TV history preserving multi-provider crosswalk
-              IDs (IMDb/Kitsu/MAL).
-            </p>
-            <button type="button" class="btn-secondary"
-              >Import SIMKL Export</button
-            >
-          </div>
-
-          <div class="importer-card">
-            <h3 class="importer-name">Trakt.tv History ZIP</h3>
-            <p class="importer-meta">
-              Imports Trakt watched history, ratings, watchlist, and custom
-              collections.
-            </p>
-            <button type="button" class="btn-secondary"
-              >Import Trakt Archive</button
-            >
-          </div>
-        </div>
-      </section>
-    {:else if activeTab === "tokens"}
-      <section class="section-pane">
-        <h2 class="pane-heading">Scoped Personal Access Tokens (PAT)</h2>
-        <p class="pane-desc">
-          Generate fine-grained bearer credentials with restricted capability
-          scopes for media players and webhooks.
-        </p>
-
-        <div class="tokens-list">
-          {#each tokens as tok}
-            <div class="token-row">
+          <!-- NuvioTV Instructions -->
+          <div class="connector-instruction-card highlight">
+            <div class="conn-header">
+              <IconDeviceTv size={24} class="conn-icon" />
               <div>
-                <h4 class="token-name">{tok.name}</h4>
-                <code class="token-code">{tok.tokenPrefix}</code>
+                <h3 class="conn-title">
+                  NuvioTV 2-Way Sync Engine (Milestone B7)
+                </h3>
+                <p class="conn-sub">
+                  Connect your living room TV or mobile player for bidirectional
+                  scrobbling.
+                </p>
               </div>
-              <div class="token-scopes">
-                {#each tok.scopes as sc}
-                  <span class="scope-chip">{sc}</span>
-                {/each}
+            </div>
+            <ol class="step-list">
+              <li>
+                Open <strong>NuvioTV</strong> on your Android TV, Apple TV, or mobile
+                device.
+              </li>
+              <li>
+                Go to <strong
+                  >Settings &rarr; Tracking &rarr; Fasti Connect</strong
+                >.
+              </li>
+              <li>
+                Select <strong>Scan QR Code</strong> or enter the Loopback Node
+                URL: <code>http://127.0.0.1:8420/api/v1/connect/nuvio</code>.
+              </li>
+              <li>
+                Authenticate using your local Fasti Access Token below. NuvioTV
+                will automatically synchronize watch progress without internet
+                dependencies.
+              </li>
+            </ol>
+          </div>
+
+          <!-- Plex & Tautulli Instructions -->
+          <div class="connector-instruction-card">
+            <div class="conn-header">
+              <IconServer size={24} />
+              <div>
+                <h3 class="conn-title">
+                  Plex & Tautulli Webhooks (Milestone B6)
+                </h3>
+                <p class="conn-sub">
+                  Receive instant playback events on start, pause, and 90%
+                  scrobble threshold.
+                </p>
               </div>
             </div>
-          {/each}
-        </div>
-      </section>
-    {:else if activeTab === "a11y"}
-      <section class="section-pane">
-        <h2 class="pane-heading">
-          Accessibility & Neurodiversity (ADHD/AuDHD)
-        </h2>
-        <p class="pane-desc">
-          Certified WCAG 2.2 AAA standards, persistent non-toast status bars,
-          and reduced-distraction ergonomic defaults.
-        </p>
-
-        <div class="a11y-toggles">
-          <div class="toggle-card">
-            <div>
-              <h4 class="toggle-title">High-Contrast Focus Outlines</h4>
-              <p class="toggle-desc">
-                Enforces 3px solid Horological Gold focus rings on all
-                interactive elements.
+            <div class="webhook-box">
+              <label for="plex-webhook-url" class="wb-label"
+                >Your Fasti Plex Webhook URL:</label
+              >
+              <div class="copy-url-row">
+                <input
+                  id="plex-webhook-url"
+                  type="text"
+                  readonly
+                  value="http://127.0.0.1:8420/api/v1/webhooks/plex"
+                  class="url-input"
+                />
+                <button
+                  type="button"
+                  class="copy-btn"
+                  onclick={() =>
+                    navigator.clipboard.writeText(
+                      "http://127.0.0.1:8420/api/v1/webhooks/plex",
+                    )}
+                >
+                  <IconCopy size={14} /> Copy
+                </button>
+              </div>
+              <p class="wb-help">
+                Paste this into Plex &rarr; Settings &rarr; Webhooks.
               </p>
             </div>
-            <span class="active-badge">Active (AAA)</span>
           </div>
 
-          <div class="toggle-card">
-            <div>
-              <h4 class="toggle-title">Persistent Status Bars</h4>
-              <p class="toggle-desc">
-                Disables ephemeral disappearing toasts; all system errors remain
-                visible in status regions.
-              </p>
+          <!-- Jellyfin & Emby Instructions -->
+          <div class="connector-instruction-card">
+            <div class="conn-header">
+              <IconServer size={24} />
+              <div>
+                <h3 class="conn-title">Jellyfin & Emby Webhook Plugin</h3>
+                <p class="conn-sub">
+                  Lossless JSON event ingest from open-source media servers.
+                </p>
+              </div>
             </div>
-            <span class="active-badge">Enforced</span>
+            <div class="webhook-box">
+              <label for="jellyfin-webhook-url" class="wb-label"
+                >Your Fasti Jellyfin Webhook URL:</label
+              >
+              <div class="copy-url-row">
+                <input
+                  id="jellyfin-webhook-url"
+                  type="text"
+                  readonly
+                  value="http://127.0.0.1:8420/api/v1/webhooks/jellyfin"
+                  class="url-input"
+                />
+                <button
+                  type="button"
+                  class="copy-btn"
+                  onclick={() =>
+                    navigator.clipboard.writeText(
+                      "http://127.0.0.1:8420/api/v1/webhooks/jellyfin",
+                    )}
+                >
+                  <IconCopy size={14} /> Copy
+                </button>
+              </div>
+            </div>
           </div>
+        </section>
 
-          <div class="toggle-card">
-            <div>
-              <h4 class="toggle-title">Reduced Motion Respect</h4>
-              <p class="toggle-desc">
-                Automatically disables animations when prefers-reduced-motion is
-                signaled.
-              </p>
+        <!-- 4. Scoped Personal Access Tokens (PAT) -->
+      {:else if activeSettingsSection === "tokens"}
+        <section class="section-pane">
+          <h2 class="pane-title">Personal Access Tokens (PAT)</h2>
+          <p class="pane-desc">
+            Generate cryptographically verified Bearer tokens for scripts and
+            devices.
+          </p>
+
+          <!-- New Token Form -->
+          <form onsubmit={handleCreateTokenSubmit} class="token-form-card">
+            <h3 class="form-title">Create New Access Token</h3>
+            <div class="form-row">
+              <input
+                type="text"
+                placeholder="Token description (e.g. Living Room Apple TV)..."
+                bind:value={newTokenName}
+                class="token-name-input"
+                aria-label="Token description"
+                required
+              />
+              <button type="submit" class="create-token-btn">
+                <IconPlus size={16} /> Generate Token
+              </button>
             </div>
-            <span class="active-badge">Enforced</span>
+
+            <div class="scopes-checkboxes">
+              {#each [{ id: "chronicle:write", label: "chronicle:write (Log watch events)" }, { id: "chronicle:read", label: "chronicle:read (Read activity history)" }, { id: "metadata:read", label: "metadata:read (Search titles)" }, { id: "identity:resolve", label: "identity:resolve (Review Inbox)" }] as sc}
+                <label class="scope-chk-label">
+                  <input
+                    type="checkbox"
+                    checked={selectedScopes.includes(sc.id)}
+                    onchange={(e) => {
+                      if (e.currentTarget.checked)
+                        selectedScopes = [...selectedScopes, sc.id];
+                      else
+                        selectedScopes = selectedScopes.filter(
+                          (s) => s !== sc.id,
+                        );
+                    }}
+                  />
+                  <span>{sc.label}</span>
+                </label>
+              {/each}
+            </div>
+          </form>
+
+          <!-- Newly Generated Secret Modal Banner -->
+          {#if generatedTokenSecret}
+            <div class="secret-generated-banner">
+              <div>
+                <strong>Token Generated! Copy your secret now:</strong>
+                <p>This secret will never be shown again.</p>
+                <code class="secret-code">{generatedTokenSecret}</code>
+              </div>
+              <button
+                type="button"
+                class="copy-secret-btn"
+                onclick={handleCopySecret}
+              >
+                {#if isCopied}
+                  <IconCheck size={16} /> Copied!
+                {:else}
+                  <IconCopy size={16} /> Copy Secret
+                {/if}
+              </button>
+            </div>
+          {/if}
+
+          <!-- Active Tokens Table -->
+          <table class="tokens-table">
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Prefix</th>
+                <th scope="col">Scopes</th>
+                <th scope="col">Created</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each tokens as tok (tok.id)}
+                <tr>
+                  <td><strong>{tok.name}</strong></td>
+                  <td><code>{tok.tokenPrefix}</code></td>
+                  <td>
+                    {#each tok.scopes as s}
+                      <span class="scope-pill">{s}</span>
+                    {/each}
+                  </td>
+                  <td>{new Date(tok.createdAt).toLocaleDateString()}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="delete-tok-btn"
+                      onclick={() => onDeleteToken?.(tok.id)}
+                      title="Revoke Token"
+                    >
+                      <IconTrash size={14} />
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </section>
+
+        <!-- 5. Single Sign-On (OIDC) -->
+      {:else if activeSettingsSection === "oidc"}
+        <section class="section-pane">
+          <h2 class="pane-title">Single Sign-On & OpenID Connect (OIDC)</h2>
+          <p class="pane-desc">
+            Authenticate with Authentik, Authelia, Keycloak, or your identity
+            provider.
+          </p>
+
+          <form
+            onsubmit={(e) => {
+              e.preventDefault();
+              onSaveOidc?.(oidcConfig);
+            }}
+            class="oidc-form"
+          >
+            <div class="form-toggle-row">
+              <label class="toggle-label">
+                <input type="checkbox" bind:checked={oidcConfig.enabled} />
+                <strong>Enable Single Sign-On (OIDC)</strong>
+              </label>
+            </div>
+
+            <div class="form-field">
+              <label for="oidc-issuer">OIDC Issuer Discovery URL</label>
+              <input
+                id="oidc-issuer"
+                type="url"
+                bind:value={oidcConfig.issuerUrl}
+                class="form-input"
+              />
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-field">
+                <label for="oidc-client-id">Client ID</label>
+                <input
+                  id="oidc-client-id"
+                  type="text"
+                  bind:value={oidcConfig.clientId}
+                  class="form-input"
+                />
+              </div>
+              <div class="form-field">
+                <label for="oidc-client-secret">Client Secret</label>
+                <input
+                  id="oidc-client-secret"
+                  type="password"
+                  bind:value={oidcConfig.clientSecret}
+                  class="form-input"
+                />
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label for="oidc-redirect-uri"
+                >Authorized Redirect Callback URI</label
+              >
+              <input
+                id="oidc-redirect-uri"
+                type="text"
+                readonly
+                bind:value={oidcConfig.redirectUri}
+                class="form-input mono"
+              />
+            </div>
+
+            <button type="submit" class="btn-save"
+              >Save OIDC Configuration</button
+            >
+          </form>
+        </section>
+
+        <!-- 6. Notifications & Apprise -->
+      {:else if activeSettingsSection === "notifications"}
+        <section class="section-pane">
+          <h2 class="pane-title">Notifications & Apprise Webhooks</h2>
+          <p class="pane-desc">
+            Push notifications to Discord, Telegram, Pushover, Gotify, or Slack.
+          </p>
+
+          <div class="apprise-box">
+            <div class="notify-triggers">
+              <label class="chk-label">
+                <input
+                  type="checkbox"
+                  bind:checked={appriseConfig.notifyOnReviewRequired}
+                />
+                <span>Notify when Review Inbox requires attention</span>
+              </label>
+              <label class="chk-label">
+                <input
+                  type="checkbox"
+                  bind:checked={appriseConfig.notifyOnSyncError}
+                />
+                <span>Notify on sync and ingest connection errors</span>
+              </label>
+              <label class="chk-label">
+                <input
+                  type="checkbox"
+                  bind:checked={appriseConfig.notifyOnMilestone}
+                />
+                <span
+                  >Notify when milestone achievements or backups complete</span
+                >
+              </label>
+            </div>
+
+            <h3 class="sub-heading">Configured Apprise URLs</h3>
+            <ul class="apprise-urls-list">
+              {#each appriseConfig.urls as u}
+                <li class="apprise-url-item">
+                  <code>{u}</code>
+                </li>
+              {/each}
+            </ul>
+
+            <form onsubmit={handleAddAppriseUrl} class="add-url-form">
+              <input
+                type="text"
+                placeholder="discord://webhook_id/webhook_token or telegram://bot_token/chat_id..."
+                bind:value={newAppriseUrl}
+                class="form-input"
+                aria-label="New Apprise URL"
+              />
+              <button type="submit" class="btn-secondary">+ Add Service</button>
+            </form>
+
+            <div class="test-notify-row">
+              <button
+                type="button"
+                class="btn-test"
+                onclick={handleSendTestNotification}
+              >
+                <IconSend size={16} /> Send Test Notification
+              </button>
+              {#if testNotificationSent}
+                <span class="test-success"
+                  >✓ Test notification sent to all active endpoints!</span
+                >
+              {/if}
+            </div>
           </div>
-        </div>
-      </section>
-    {/if}
-  </main>
+        </section>
+
+        <!-- 7. Lossless Importers & Backups -->
+      {:else if activeSettingsSection === "importers"}
+        <section class="section-pane">
+          <h2 class="pane-title">Lossless Importers & Migrations</h2>
+          <p class="pane-desc">
+            Migrate your entire scrobble and media history with zero data loss.
+          </p>
+
+          <div class="importers-grid">
+            {#each [{ name: "Floppy / Yamtrack", desc: "Import full history, custom fields, and tags from Floppy SQLite/JSON.", ext: ".json, .db" }, { name: "SIMKL Archive", desc: "Import TV, Anime, and Movie tracking records from SIMKL CSV/JSON.", ext: ".csv, .json" }, { name: "Trakt.tv Export", desc: "Import Trakt scrobbles, ratings, and watchlists.", ext: ".csv" }, { name: "MyAnimeList / AniList", desc: "Import anime and manga lists via XML / JSON format.", ext: ".xml, .json" }] as imp}
+              <div class="importer-card">
+                <h3 class="imp-title">{imp.name}</h3>
+                <p class="imp-desc">{imp.desc}</p>
+                <div class="imp-action-row">
+                  <label class="file-upload-btn">
+                    <input
+                      type="file"
+                      accept={imp.ext}
+                      class="hidden-file-input"
+                    />
+                    <span>Select {imp.name} File</span>
+                  </label>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </section>
+      {/if}
+    </main>
+  </div>
 </div>
 
 <style>
   .settings-container {
-    max-width: 960px;
+    max-width: 1200px;
     margin: 0 auto;
     padding: 32px 24px;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 28px;
   }
 
-  .view-header {
+  .settings-header {
     border-bottom: 2px solid
       color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
     padding-bottom: 16px;
@@ -276,135 +773,240 @@
     font-family: var(--fasti-font-display);
     font-size: 2.4rem;
     font-weight: 600;
-    margin: 0 0 4px;
+    margin: 0;
     color: var(--fasti-text-primary);
   }
 
   .view-subtitle {
-    margin: 0;
+    margin: 4px 0 0;
     color: var(--fasti-text-muted);
     font-size: 0.95rem;
   }
 
-  .settings-tabs {
-    display: flex;
-    gap: 4px;
-    border-bottom: 2px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  .settings-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 28px;
   }
 
-  .tab-btn {
-    display: inline-flex;
+  .settings-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .nav-tab-btn {
+    display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
+    gap: 10px;
+    padding: 12px 16px;
     background: transparent;
     border: none;
-    border-bottom: 2px solid transparent;
-    font-size: 0.92rem;
-    font-weight: 500;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
     color: var(--fasti-text-muted);
     cursor: pointer;
-    margin-bottom: -2px;
+    text-align: left;
   }
 
-  .tab-btn.active {
+  .nav-tab-btn:hover {
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+  }
+
+  .nav-tab-btn.active {
+    background: var(--fasti-surface-paper);
     color: var(--fasti-action-primary);
-    border-bottom-color: var(--fasti-action-primary);
-    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   }
 
-  .settings-body {
+  .settings-content-card {
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
-    padding: 24px;
+    border-radius: 8px;
+    padding: 28px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
   }
 
-  .pane-heading {
+  .pane-title {
     font-family: var(--fasti-font-display);
-    font-size: 1.4rem;
+    font-size: 1.6rem;
     font-weight: 600;
     margin: 0 0 4px;
     color: var(--fasti-text-primary);
   }
 
   .pane-desc {
+    font-size: 0.92rem;
     color: var(--fasti-text-muted);
-    font-size: 0.88rem;
-    margin: 0 0 20px;
-    max-width: 65ch;
+    margin: 0 0 24px;
   }
 
-  .settings-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.88rem;
-    text-align: left;
+  .setting-group {
     margin-bottom: 24px;
   }
 
-  .settings-table th,
-  .settings-table td {
-    padding: 10px 14px;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+  .group-title {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: var(--fasti-text-muted);
+    margin: 0 0 12px;
   }
 
-  .settings-table th {
+  .options-grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  .theme-card-btn,
+  .density-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 14px;
     background: var(--fasti-surface-archive);
-    font-family: var(--fasti-font-mono);
+    border: 2px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .theme-card-btn.selected,
+  .density-btn.selected {
+    border-color: var(--fasti-action-primary);
+    background: var(--fasti-surface-paper);
+  }
+
+  .preview-swatch {
+    width: 100%;
+    height: 36px;
+    border-radius: 4px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+  }
+
+  .light-swatch {
+    background: #fffdf8;
+  }
+  .dark-swatch {
+    background: #1e1e24;
+  }
+  .night-swatch {
+    background: #000000;
+  }
+
+  .swatch-label strong {
+    display: block;
+    font-size: 0.9rem;
+  }
+  .swatch-label span {
     font-size: 0.75rem;
-    text-transform: uppercase;
     color: var(--fasti-text-muted);
   }
 
-  .mono {
-    font-family: var(--fasti-font-mono);
+  .accents-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 
-  .type-tag {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    padding: 2px 6px;
+  .accent-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 20px;
     background: var(--fasti-surface-archive);
-    border-radius: 3px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
   }
 
-  .add-box {
-    padding: 16px;
+  .accent-btn.selected {
+    border-color: var(--accent-hex);
+  }
+
+  .accent-circle {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent-hex);
+  }
+
+  .providers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .provider-key-card {
+    padding: 18px;
     background: var(--fasti-surface-archive);
     border-radius: 6px;
   }
 
-  .add-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    margin: 0 0 10px;
+  .provider-key-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
   }
 
-  .input-row {
+  .provider-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0;
+  }
+  .docs-link {
+    font-size: 0.78rem;
+    color: var(--fasti-action-primary);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    text-decoration: none;
+  }
+  .prov-status-chip {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.1);
+  }
+  .prov-status-chip.configured {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-verified) 20%,
+      transparent
+    );
+    color: var(--fasti-state-verified);
+    font-weight: 700;
+  }
+
+  .key-input-row {
     display: flex;
     gap: 10px;
   }
 
-  .text-input {
+  .api-key-input {
     flex: 1;
-    height: 38px;
-    padding: 8px 12px;
+    height: 40px;
+    padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.9rem;
     background: var(--fasti-surface-paper);
   }
 
-  .btn-primary {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
+  .save-key-btn {
+    padding: 8px 18px;
     background: var(--fasti-action-primary);
     color: white;
     font-weight: 600;
@@ -413,122 +1015,278 @@
     cursor: pointer;
   }
 
-  .importer-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    gap: 16px;
+  .connector-instruction-card {
+    padding: 20px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+    margin-bottom: 18px;
   }
 
-  .importer-card {
-    background: var(--fasti-surface-archive);
+  .connector-instruction-card.highlight {
+    border-left: 4px solid var(--fasti-brand-mark);
+  }
+
+  .conn-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  :global(.conn-icon) {
+    color: var(--fasti-brand-mark);
+  }
+  .conn-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+  .conn-sub {
+    margin: 2px 0 0;
+    font-size: 0.85rem;
+    color: var(--fasti-text-muted);
+  }
+  .step-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+
+  .copy-url-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .url-input {
+    flex: 1;
+    height: 36px;
+    padding: 6px 12px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.85rem;
+    background: var(--fasti-surface-paper);
     border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border-radius: 6px;
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+  }
+  .copy-btn {
+    padding: 6px 14px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .wb-help {
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+    margin: 6px 0 0;
+  }
+
+  .token-form-card {
     padding: 18px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+    margin-bottom: 20px;
+  }
+  .form-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .token-name-input {
+    flex: 1;
+    height: 40px;
+    padding: 8px 14px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    background: var(--fasti-surface-paper);
+  }
+  .create-token-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    background: var(--fasti-action-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .scopes-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .scope-chk-label {
+    font-size: 0.82rem;
+    font-family: var(--fasti-font-mono);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .secret-generated-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: color-mix(in srgb, var(--fasti-brand-gold) 20%, transparent);
+    border: 1px solid var(--fasti-brand-gold);
+    border-radius: 6px;
+    margin-bottom: 20px;
+  }
+
+  .secret-code {
+    font-family: var(--fasti-font-mono);
+    font-size: 1rem;
+    font-weight: 700;
+    background: var(--fasti-surface-paper);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 4px;
+  }
+  .copy-secret-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--fasti-text-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .tokens-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    text-align: left;
+  }
+  .tokens-table th,
+  .tokens-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+  }
+  .scope-pill {
+    font-size: 0.72rem;
+    font-family: var(--fasti-font-mono);
+    padding: 2px 6px;
+    background: var(--fasti-surface-archive);
+    border-radius: 3px;
+    margin-right: 4px;
+  }
+  .delete-tok-btn {
+    background: transparent;
+    border: none;
+    color: #e11d48;
+    cursor: pointer;
+    padding: 4px;
+  }
+
+  .importers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+  }
+  .importer-card {
+    padding: 18px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    gap: 12px;
   }
-
-  .importer-name {
-    font-family: var(--fasti-font-display);
-    font-size: 1.15rem;
-    margin: 0;
+  .imp-title {
+    font-size: 1.05rem;
+    margin: 0 0 6px;
   }
-
-  .importer-meta {
-    font-size: 0.85rem;
+  .imp-desc {
+    font-size: 0.82rem;
     color: var(--fasti-text-muted);
-    margin: 0;
+    margin: 0 0 14px;
   }
-
-  .btn-secondary {
-    align-self: flex-start;
+  .file-upload-btn {
+    display: block;
+    text-align: center;
     padding: 8px 14px;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
+    font-weight: 600;
     font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .hidden-file-input {
+    display: none;
+  }
+
+  .oidc-form,
+  .apprise-box {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .form-field label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--fasti-text-muted);
+  }
+  .form-input {
+    height: 38px;
+    padding: 8px 12px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    background: var(--fasti-surface-paper);
+  }
+  .btn-save {
+    padding: 10px 20px;
+    background: var(--fasti-action-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-start;
+  }
+  .btn-test {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
     font-weight: 600;
     cursor: pointer;
   }
-
-  .tokens-list {
+  .test-notify-row {
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 12px;
   }
-
-  .token-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    background: var(--fasti-surface-archive);
-    border-radius: 4px;
-  }
-
-  .token-name {
-    margin: 0 0 2px;
-    font-size: 0.95rem;
-  }
-
-  .token-code {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.78rem;
-    color: var(--fasti-text-muted);
-  }
-
-  .token-scopes {
-    display: flex;
-    gap: 6px;
-  }
-
-  .scope-chip {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.72rem;
-    background: color-mix(
-      in srgb,
-      var(--fasti-action-primary) 15%,
-      transparent
-    );
-    color: var(--fasti-action-primary);
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-
-  .a11y-toggles {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .toggle-card {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 14px 18px;
-    background: var(--fasti-surface-archive);
-    border-radius: 4px;
-  }
-
-  .toggle-title {
-    margin: 0 0 2px;
-    font-size: 0.95rem;
-  }
-
-  .toggle-desc {
-    margin: 0;
-    font-size: 0.82rem;
-    color: var(--fasti-text-muted);
-  }
-
-  .active-badge {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.75rem;
-    font-weight: 700;
+  .test-success {
     color: var(--fasti-state-verified);
+    font-weight: 600;
+    font-size: 0.88rem;
   }
 </style>

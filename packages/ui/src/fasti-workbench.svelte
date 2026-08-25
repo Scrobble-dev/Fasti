@@ -1,14 +1,28 @@
 <script lang="ts">
-  import type { ActiveNavSection, MediaRecord, WatchStatus } from "./types.js";
+  import type {
+    ActiveNavSection,
+    MediaRecord,
+    WatchStatus,
+    ProviderApiKeyConfig,
+    OidcConfiguration,
+    AppriseNotificationConfig,
+    ThemeSettings,
+  } from "./types.js";
   import {
     SAMPLE_RECORDS,
     SAMPLE_CHRONICLE,
     SAMPLE_RECONCILIATION,
+    SAMPLE_DISCOVER_TRENDING,
     SAMPLE_CUSTOM_FIELDS,
     SAMPLE_TOKENS,
+    SAMPLE_PROVIDER_KEYS,
+    SAMPLE_OIDC_CONFIG,
+    SAMPLE_APPRISE_CONFIG,
+    DEFAULT_THEME_SETTINGS,
   } from "./mock-data.js";
   import NavSidebar from "./nav-sidebar.svelte";
   import ChronicleView from "./chronicle-view.svelte";
+  import DiscoverView from "./discover-view.svelte";
   import LibraryView from "./library-view.svelte";
   import MediaDetailView from "./media-detail-view.svelte";
   import ReconciliationView from "./reconciliation-view.svelte";
@@ -20,6 +34,11 @@
   let records = $state<MediaRecord[]>(SAMPLE_RECORDS);
   let chronicle = $state(SAMPLE_CHRONICLE);
   let reconciliationCases = $state(SAMPLE_RECONCILIATION);
+  let tokens = $state(SAMPLE_TOKENS);
+  let providerKeys = $state(SAMPLE_PROVIDER_KEYS);
+  let oidcConfig = $state(SAMPLE_OIDC_CONFIG);
+  let appriseConfig = $state(SAMPLE_APPRISE_CONFIG);
+  let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
   let selectedRecordId = $state<string | null>(null);
 
   const selectedRecord = $derived(
@@ -84,6 +103,61 @@
     });
   }
 
+  function handleUpdateNotes(recordId: string, notes: string): void {
+    records = records.map((r) =>
+      r.id === recordId ? { ...r, userNotes: notes } : r,
+    );
+  }
+
+  function handleAddTag(recordId: string, tag: string): void {
+    records = records.map((r) =>
+      r.id === recordId && !r.tags.includes(tag)
+        ? { ...r, tags: [...r.tags, tag] }
+        : r,
+    );
+  }
+
+  function handleRemoveTag(recordId: string, tag: string): void {
+    records = records.map((r) =>
+      r.id === recordId ? { ...r, tags: r.tags.filter((t) => t !== tag) } : r,
+    );
+  }
+
+  function handleUpdateTheme(updates: Partial<ThemeSettings>): void {
+    themeSettings = { ...themeSettings, ...updates };
+  }
+
+  function handleSaveProviderKey(provider: string, key: string): void {
+    providerKeys = providerKeys.map((p) =>
+      p.provider === provider
+        ? { ...p, apiKey: key, isConfigured: key.trim().length > 0 }
+        : p,
+    );
+  }
+
+  function handleCreateToken(name: string, scopes: string[]): void {
+    const newToken = {
+      id: `tok_${Date.now()}`,
+      name,
+      tokenPrefix: `fst_pat_${Math.random().toString(36).substring(2, 8)}...`,
+      scopes,
+      createdAt: new Date().toISOString(),
+    };
+    tokens = [newToken, ...tokens];
+  }
+
+  function handleDeleteToken(id: string): void {
+    tokens = tokens.filter((t) => t.id !== id);
+  }
+
+  function handleSaveOidc(config: OidcConfiguration): void {
+    oidcConfig = { ...config };
+  }
+
+  function handleSaveApprise(config: AppriseNotificationConfig): void {
+    appriseConfig = { ...config };
+  }
+
   function handleAcceptCase(caseId: string): void {
     reconciliationCases = reconciliationCases.filter((c) => c.id !== caseId);
   }
@@ -99,17 +173,24 @@
   }
 </script>
 
-<div class="workbench-layout">
+<div
+  class="workbench-root theme-{themeSettings.mode} density-{themeSettings.density} accent-{themeSettings.accentColor}"
+>
   <NavSidebar
     {activeSection}
     {openReviewCount}
     onSelectSection={handleSelectSection}
   />
 
-  <main id="main-content" class="workbench-viewport" tabindex="-1">
+  <div class="viewport-canvas">
     {#if activeSection === "chronicle"}
       <ChronicleView
         occurrences={chronicle}
+        onSelectRecord={handleSelectRecord}
+      />
+    {:else if activeSection === "discover"}
+      <DiscoverView
+        trendingRecords={SAMPLE_DISCOVER_TRENDING}
         onSelectRecord={handleSelectRecord}
       />
     {:else if activeSection === "library"}
@@ -121,7 +202,14 @@
         onUpdateStatus={handleUpdateStatus}
         onUpdateRating={handleUpdateRating}
         onToggleEpisode={handleToggleEpisode}
+        onUpdateNotes={handleUpdateNotes}
+        onAddTag={handleAddTag}
+        onRemoveTag={handleRemoveTag}
       />
+    {:else if activeSection === "up_next"}
+      <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
+    {:else if activeSection === "calendar"}
+      <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
     {:else if activeSection === "reconciliation"}
       <ReconciliationView
         cases={reconciliationCases}
@@ -129,34 +217,38 @@
         onRejectCase={handleRejectCase}
         onDeferCase={handleDeferCase}
       />
-    {:else if activeSection === "up_next" || activeSection === "calendar"}
-      <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
     {:else if activeSection === "connections"}
       <ConnectionsView />
     {:else if activeSection === "settings"}
       <SettingsView
         customFields={SAMPLE_CUSTOM_FIELDS}
-        tokens={SAMPLE_TOKENS}
+        {tokens}
+        {providerKeys}
+        {oidcConfig}
+        {appriseConfig}
+        {themeSettings}
+        onUpdateTheme={handleUpdateTheme}
+        onSaveProviderKey={handleSaveProviderKey}
+        onCreateToken={handleCreateToken}
+        onDeleteToken={handleDeleteToken}
+        onSaveOidc={handleSaveOidc}
+        onSaveApprise={handleSaveApprise}
       />
     {/if}
-  </main>
+  </div>
 </div>
 
 <style>
-  .workbench-layout {
+  .workbench-root {
     display: flex;
-    width: 100vw;
-    height: 100vh;
-    overflow: hidden;
-    background: var(--fasti-surface-archive);
+    min-height: 100vh;
+    background-color: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
   }
 
-  .workbench-viewport {
+  .viewport-canvas {
     flex: 1;
-    height: 100vh;
     overflow-y: auto;
-    background: var(--fasti-surface-archive);
-    outline: none;
+    max-height: 100vh;
   }
 </style>

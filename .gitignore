@@ -61,3 +61,5 @@ __pycache__/
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+.dev-data/
+.dev-logs/

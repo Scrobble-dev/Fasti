@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Fasti local administration interface",
   "scripts": {
+    "dev": "vite",
     "build": "vite build",
     "typecheck": "svelte-check --tsgo --tsconfig ./tsconfig.json"
   },

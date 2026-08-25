@@ -2,6 +2,7 @@
   import type { ActiveNavSection } from "./types.js";
   import {
     IconClock,
+    IconCompass,
     IconLayoutGrid,
     IconPlayerPlay,
     IconCalendar,
@@ -25,6 +26,11 @@
       id: "chronicle" as ActiveNavSection,
       label: "Chronicle",
       icon: IconClock,
+    },
+    {
+      id: "discover" as ActiveNavSection,
+      label: "Discover",
+      icon: IconCompass,
     },
     {
       id: "library" as ActiveNavSection,

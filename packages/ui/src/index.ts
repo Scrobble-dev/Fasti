@@ -1,6 +1,7 @@
 export { default as SetupPanel } from "./setup-panel.svelte";
 export { default as NavSidebar } from "./nav-sidebar.svelte";
 export { default as ChronicleView } from "./chronicle-view.svelte";
+export { default as DiscoverView } from "./discover-view.svelte";
 export { default as LibraryView } from "./library-view.svelte";
 export { default as MediaDetailView } from "./media-detail-view.svelte";
 export { default as ReconciliationView } from "./reconciliation-view.svelte";
