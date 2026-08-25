@@ -384,18 +384,47 @@ def parse_cpu_governors() -> dict[str, Any]:
     }
 
 
-def parse_temperature() -> dict[str, Any]:
+def parse_temperature(
+    thermal_root: Path = Path("/sys/class/thermal"),
+    hwmon_root: Path = Path("/sys/class/hwmon"),
+) -> dict[str, Any]:
     candidates: list[tuple[str, Path]] = []
-    for zone in sorted(Path("/sys/class/thermal").glob("thermal_zone*")):
+    for zone in sorted(thermal_root.glob("thermal_zone*")):
         try:
             sensor = (zone / "type").read_text(encoding="ascii").strip()
         except (FileNotFoundError, PermissionError):
             sensor = zone.name
         candidates.append((sensor, zone / "temp"))
+    for hwmon in sorted(hwmon_root.glob("hwmon*")):
+        try:
+            chip = (hwmon / "name").read_text(encoding="ascii").strip()
+        except (FileNotFoundError, PermissionError):
+            continue
+        if chip not in {"coretemp", "k10temp"}:
+            continue
+        for path in sorted(hwmon.glob("temp*_input")):
+            label_path = path.with_name(path.name.removesuffix("_input") + "_label")
+            try:
+                label = label_path.read_text(encoding="ascii").strip()
+            except (FileNotFoundError, PermissionError):
+                label = path.name.removesuffix("_input")
+            candidates.append((f"{chip}:{label}", path))
     preferred = sorted(
         candidates,
         key=lambda item: (
-            not any(marker in item[0].casefold() for marker in ["cpu", "soc", "x86_pkg_temp"]),
+            not any(
+                marker in item[0].casefold()
+                for marker in [
+                    "cpu",
+                    "soc",
+                    "x86_pkg_temp",
+                    "coretemp",
+                    "k10temp",
+                    "package",
+                    "tctl",
+                    "tdie",
+                ]
+            ),
             item[0],
         ),
     )
@@ -411,7 +440,9 @@ def parse_temperature() -> dict[str, Any]:
                 "sensor": sensor,
                 "celsius": round(celsius, 3),
             }
-    raise CaptureError("no plausible CPU/SoC thermal reading was available in /sys/class/thermal")
+    raise CaptureError(
+        "no plausible CPU/SoC thermal reading was available in /sys/class/{thermal,hwmon}"
+    )
 
 
 def top_level_block_device(source: str) -> str:
@@ -1114,7 +1145,10 @@ def preflight(args: argparse.Namespace) -> dict[str, Any]:
         "read /etc/machine-id, retain only domain-separated SHA-256 fingerprint",
         "read /proc/cpuinfo:flags or features",
         "read /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-        "read /sys/class/thermal/thermal_zone*/{type,temp}",
+        (
+            "read /sys/class/thermal/thermal_zone*/{type,temp} or CPU "
+            "/sys/class/hwmon/hwmon*/temp*_input"
+        ),
         command_text(["findmnt", "-n", "-o", "SOURCE,FSTYPE,OPTIONS", "-T", "/"]),
         "read lsblk root-device parent chain and hash serial/WWN without retaining raw identifiers",
         "read allowlisted non-secret udev storage classification properties",

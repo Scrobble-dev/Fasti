@@ -369,7 +369,10 @@ def collect_environment(os_image_path: Path) -> tuple[dict[str, Any], Any]:
             "read /etc/os-release",
             "read /sys/class/dmi/id/{bios_vendor,bios_version,bios_date}",
             "read /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-            "read /sys/class/thermal/thermal_zone*/{type,temp}",
+            (
+                "read /sys/class/thermal/thermal_zone*/{type,temp} or CPU "
+                "/sys/class/hwmon/hwmon*/temp*_input"
+            ),
             command_text(["findmnt", "-n", "-o", "SOURCE,FSTYPE,OPTIONS", "-T", str(ROOT)]),
             "read lsblk root-device parent chain and hash stable identifiers",
             command_text(["pkg-config", "--modversion", "webkit2gtk-4.1"]),

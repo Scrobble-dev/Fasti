@@ -27,6 +27,31 @@ SPEC.loader.exec_module(benchmark)
 
 
 class HardwareProfileTests(unittest.TestCase):
+    def test_temperature_falls_back_to_cpu_hwmon(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            thermal_root = root / "thermal"
+            thermal_root.mkdir()
+            generic = thermal_root / "thermal_zone0"
+            generic.mkdir()
+            (generic / "type").write_text("acpitz\n", encoding="ascii")
+            (generic / "temp").write_text("42000\n", encoding="ascii")
+            hwmon_root = root / "hwmon"
+            unrelated = hwmon_root / "hwmon0"
+            unrelated.mkdir(parents=True)
+            (unrelated / "name").write_text("nvme\n", encoding="ascii")
+            (unrelated / "temp1_input").write_text("41000\n", encoding="ascii")
+            cpu = hwmon_root / "hwmon1"
+            cpu.mkdir()
+            (cpu / "name").write_text("k10temp\n", encoding="ascii")
+            (cpu / "temp1_label").write_text("Tctl\n", encoding="ascii")
+            (cpu / "temp1_input").write_text("91250\n", encoding="ascii")
+
+            reading = benchmark.parse_temperature(thermal_root, hwmon_root)
+
+        self.assertEqual(reading["sensor"], "k10temp:Tctl")
+        self.assertEqual(reading["celsius"], 91.25)
+
     def test_profiles_are_derived_from_observed_fingerprint(self) -> None:
         self.assertEqual(
             benchmark.derive_hardware_profile(
