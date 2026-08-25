@@ -1,7 +1,7 @@
 name: Contributor Task / Good First Issue
 description: Maintainer-defined scoped task, documentation fix, or fixture addition ready for community work
 title: "task: [Concise task title]"
-labels: ["help wanted", "good first issue"]
+labels: ["help wanted", "good first issue", "contributor-ready"]
 body:
   - type: markdown
     attributes:
@@ -14,6 +14,16 @@ body:
       placeholder: "FASTI-123"
     validations:
       required: false
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty & Time Estimate
+      options:
+        - "Quick (< 30 min) — Good First Issue"
+        - "Moderate (1–3 hours) — Help Wanted"
+        - "Deep (1–2 days) — Requires Domain Alignment"
+    validations:
+      required: true
   - type: textarea
     id: outcome
     attributes:

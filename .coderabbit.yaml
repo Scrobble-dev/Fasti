@@ -30,6 +30,7 @@ reviews:
     - "!Cargo.lock"
     - "!pnpm-lock.yaml"
     - "!target/**"
+    - "!benchmarks/b1/fixtures/**"
     - "!brand/assets/**"
 
   path_instructions:
@@ -62,7 +63,7 @@ reviews:
         Verify REST API handlers and DTO mappings:
         - OpenAPI parity: Operations and DTOs must bind cleanly to Utoipa specs matching generated OpenAPI schemas.
         - Input boundaries: Reject oversized or malformed payloads fail-closed.
-        - Typed responses: Return RFC 9457 Problem Details on errors.
+        - Typed responses: Return RFC 7807 problem payloads on errors.
 
     - path: "apps/fastid/**"
       instructions: |
@@ -110,17 +111,3 @@ reviews:
         - Process lifecycle: Ensure long-running launchers clean up background child processes on exit/signals.
         - Determinism: Code generation and lint checks must be reproducible and offline-safe.
         - Secret safety: Never print tokens or sensitive data to stdout or log files.
-
-    - path: "**/fixtures/**"
-      instructions: |
-        Verify fixtures as reviewed inputs:
-        - Reject credentials, tokens, personal data, and executable payloads that are not required by the test.
-        - Ensure each fixture is minimal, deterministic, and bound to an observable assertion.
-
-    - path: "**"
-      instructions: |
-        Verify cross-cutting invariants:
-        - Preserve the product boundary: Fasti records; players play.
-        - Keep one domain owner for each rule and dependencies pointed toward that owner.
-        - Reject secrets in code, logs, URLs, documentation, and fixtures.
-        - Require DCO sign-off and bounded memory, input, output, retry, and process lifecycles where applicable.

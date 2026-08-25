@@ -6,16 +6,21 @@
   "description": "An identity-first, self-hosted system of record for media activity. Fasti records; players play.",
   "license": "https://spdx.org/licenses/AGPL-3.0-or-later",
   "codeRepository": "https://github.com/Scrobble-dev/Fasti",
-  "url": "https://github.com/Scrobble-dev/Fasti",
+  "url": "https://scrobble.dev",
   "programmingLanguage": [
     "Rust",
     "TypeScript"
+  ],
+  "runtimePlatform": [
+    "Linux",
+    "macOS",
+    "Windows"
   ],
   "author": [
     {
       "@type": "Organization",
       "name": "Fasti Contributors",
-      "url": "https://github.com/Scrobble-dev"
+      "url": "https://scrobble.dev"
     }
   ],
   "keywords": [
@@ -25,8 +30,10 @@
     "self-hosted",
     "digital-preservation",
     "local-first",
+    "offline-first",
     "rust",
     "sqlite",
+    "tauri",
     "interoperability"
   ],
   "version": "0.1.0",

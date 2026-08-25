@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Regression coverage for consumed bootstrap proofs, explicit profile-bound credential authentication, ambiguous active grants, ungranted profiles, and cross-workspace grant rejection.
 - Retained B1 daemon, OCI image, contract pack, source snapshot, and raw one-second performance observations with verifier-owned integrity checks.
 - Review-candidate web and desktop presentation surfaces backed by the retained contract SDK and explicit host capabilities.
+- B8b non-publishing release-readiness evidence: per-architecture checksums, CycloneDX SBOM (Rust and npm), an in-toto/SLSA-shaped provenance statement, a `cargo-deny` final security review, a manual rollback runbook, and mechanical release-notes extraction, gated behind a fail-closed `cargo xtask test milestone --body B8b`.
+- `cargo-deny` (`deny.toml`) license, advisory, and source policy for the main workspace and the isolated Tauri benchmark shell.
 
 ### Changed
 
