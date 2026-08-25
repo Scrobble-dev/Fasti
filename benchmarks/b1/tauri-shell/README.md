@@ -41,7 +41,7 @@ python3 -B scripts/benchmark-tauri-b1.py capture \
 
 The checked-in harness, Cargo lockfile, fixture tree, commit, repository tree, artifact digest, exact commands, OS image, firmware, filesystem, storage, CPU governor, temperature, WebKit runtime, local display-session proof, five raw cgroup samples, derived summaries, and worst observed cgroup peak are bound into the receipt. The exact measured binary is retained at mode `0600` under `evidence/artifacts/sha256-…-fasti-b1-tauri-shell`; its path, digest, and size are part of the receipt and the milestone manifest binds it as a `BuiltArtifact`. The validator refuses symlinks and escape paths and hashes one descriptor-owned byte snapshot.
 
-The ignored `evidence/` directory is a private digest-bound evidence package. Transfer the receipt and its referenced artifact together through protected private storage; the exact-source runner bundle deliberately excludes both. Do not publish hardware receipts or measured binaries merely because the source repository is public. B1 milestone acceptance requires this governed Linux package as well as the physical Raspberry Pi 5 and J4125 packages specified by the controlling test plan.
+The ignored `evidence/` directory is a private digest-bound evidence package. Transfer the receipt and its referenced artifact together through protected private storage; the exact-source runner bundle deliberately excludes both. Do not publish hardware receipts or measured binaries merely because the source repository is public. B1 milestone acceptance requires this governed Linux package as well as the same-run x86_64 and aarch64 low-hardware envelope packages.
 
 Validate any receipt independently:
 

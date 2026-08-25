@@ -25,7 +25,7 @@ From B1 onward, every implemented capability has a registry entry and an explici
 - Applicable core journeys pass with the network denied.
 - Failed, interrupted, duplicated, stale, conflicted, oversized, storage-full, and restart paths preserve explicit recoverable state.
 - Successful receipts survive the body-specific durability fault model.
-- Memory, CPU, startup, latency, throughput, storage, and artifact-size claims include the exact artifact, environment, repetitions, and named hardware profile.
+- Memory, CPU, startup, latency, throughput, storage, and artifact-size claims include the exact artifact, enforced environment, architecture, repetitions, and named hardware when a claim is device-specific.
 - 192 MiB full-process memory is an absolute ceiling; lower 64/96/160 MiB targets remain visible even when the ceiling passes.
 
 ## User capability

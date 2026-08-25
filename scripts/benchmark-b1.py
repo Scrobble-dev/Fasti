@@ -9,6 +9,7 @@ with Docker's `--network none` and require cgroup v2 counters.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -21,11 +22,12 @@ import stat
 import statistics
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -56,7 +58,15 @@ IDLE_CPU_P95_LIMIT_PERCENT = float(
     LOCKED_BUDGETS["idle_cpu_percent_one_core"]["p95"]
 )
 ARTIFACT_LIMITS = LOCKED_BUDGETS["artifact_bytes"]
+SAVED_OCI_UNPACKED_SAFETY_CEILING_BYTES = (
+    4 * ARTIFACT_LIMITS["oci_image_unpacked"]
+)
+SAVED_OCI_ARCHIVE_SAFETY_CEILING_BYTES = (
+    SAVED_OCI_UNPACKED_SAFETY_CEILING_BYTES + 16 * 1024 * 1024
+)
+SAVED_OCI_ENTRY_SAFETY_CEILING = 4096
 SAMPLE_INTERVAL_MS = int(LOCKED_BUDGETS["timing_seconds"]["sample_interval_ms"])
+CONTRACT_SDK_BUILD_COMMAND = ("pnpm", "--filter", "@fasti/sdk", "build")
 IMAGE_SOURCE_LABELS = {
     "git_commit": "org.opencontainers.image.revision",
     "git_tree": "dev.scrobble.fasti.source.tree",
@@ -889,6 +899,18 @@ def verify_local_docker() -> dict[str, str]:
         "socket_path": str(socket_path),
         "locality": "verified_local_unix_socket",
     }
+
+
+def host_architecture() -> tuple[str, str]:
+    architecture = {
+        "AMD64": ("x86_64", "linux/amd64"),
+        "x86_64": ("x86_64", "linux/amd64"),
+        "aarch64": ("aarch64", "linux/arm64"),
+        "arm64": ("aarch64", "linux/arm64"),
+    }.get(platform.machine())
+    if architecture is None:
+        raise CaptureError(f"unsupported artifact capture architecture: {platform.machine()}")
+    return architecture
 
 
 def inspect_bound_image(image_ref: str, expected_source: dict[str, str]) -> dict[str, Any]:
@@ -2196,17 +2218,351 @@ def publish_content_addressed_artifact(
     }
 
 
+def saved_oci_layer_bytes(
+    archive_path: Path,
+    image_id: str,
+    source: dict[str, Any],
+    unpacked_safety_ceiling_bytes: int = SAVED_OCI_UNPACKED_SAFETY_CEILING_BYTES,
+) -> int:
+    image_digest = image_id.removeprefix("sha256:")
+    if not re.fullmatch(r"[0-9a-f]{64}", image_digest):
+        raise CaptureError("Docker save image ID must be an immutable sha256 digest")
+
+    if archive_path.stat().st_size > SAVED_OCI_ARCHIVE_SAFETY_CEILING_BYTES:
+        raise CaptureError("Docker save exceeds the compressed archive safety ceiling")
+
+    with tarfile.open(archive_path, "r:gz") as archive:
+        members: dict[str, tarfile.TarInfo] = {}
+        for entry_count, member in enumerate(archive, start=1):
+            if entry_count > SAVED_OCI_ENTRY_SAFETY_CEILING:
+                raise CaptureError("Docker save exceeds the archive entry safety ceiling")
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or not path.parts or any(
+                part in {"", ".", ".."} for part in path.parts
+            ):
+                raise CaptureError(f"Docker save contains an unsafe path: {member.name!r}")
+            if member.name in members:
+                raise CaptureError(f"Docker save contains a duplicate path: {member.name}")
+            members[member.name] = member
+
+        def read_member(name: str, maximum: int = 1024 * 1024) -> bytes:
+            member = members.get(name)
+            if member is None or not member.isfile() or member.size > maximum:
+                raise CaptureError(f"Docker save omits a bounded regular {name}")
+            stream = archive.extractfile(member)
+            if stream is None:
+                raise CaptureError(f"Docker save cannot read {name}")
+            payload = stream.read(maximum + 1)
+            if len(payload) != member.size or len(payload) > maximum:
+                raise CaptureError(f"Docker save cannot read bounded {name}")
+            return payload
+
+        def descriptor_path(descriptor: Any) -> str:
+            if not isinstance(descriptor, dict):
+                raise CaptureError("Docker save contains an invalid OCI descriptor")
+            digest = descriptor.get("digest")
+            size = descriptor.get("size")
+            if (
+                not isinstance(digest, str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+                or not isinstance(size, int)
+                or isinstance(size, bool)
+                or size < 0
+            ):
+                raise CaptureError("Docker save contains an invalid OCI descriptor")
+            return f"blobs/sha256/{digest.removeprefix('sha256:')}"
+
+        def read_descriptor(descriptor: Any, maximum: int) -> bytes:
+            path = descriptor_path(descriptor)
+            member = members.get(path)
+            if (
+                member is None
+                or not member.isfile()
+                or member.size != descriptor["size"]
+            ):
+                raise CaptureError(
+                    f"Docker save OCI descriptor size does not match {path}"
+                )
+            payload = read_member(path, maximum)
+            if hashlib.sha256(payload).hexdigest() != descriptor["digest"].removeprefix(
+                "sha256:"
+            ):
+                raise CaptureError(
+                    f"Docker save OCI descriptor digest does not match {path}"
+                )
+            return payload
+
+        manifest = json.loads(read_member("manifest.json").decode("utf-8"))
+        if not isinstance(manifest, list) or len(manifest) != 1:
+            raise CaptureError("Docker save must contain exactly one image manifest")
+        image = manifest[0]
+        if not isinstance(image, dict) or not isinstance(image.get("Config"), str):
+            raise CaptureError("Docker save contains an invalid image manifest")
+        config_path = image["Config"]
+        layers = image.get("Layers")
+        if (
+            not isinstance(layers, list)
+            or not layers
+            or not all(isinstance(layer, str) for layer in layers)
+            or len(layers) != len(set(layers))
+        ):
+            raise CaptureError("Docker save layer inventory is empty or duplicated")
+
+        has_oci_layout = "oci-layout" in members
+        has_oci_index = "index.json" in members
+        if has_oci_layout != has_oci_index:
+            raise CaptureError("Docker save contains an incomplete OCI image layout")
+        if has_oci_layout:
+            layout = json.loads(read_member("oci-layout").decode("utf-8"))
+            if (
+                not isinstance(layout, dict)
+                or layout.get("imageLayoutVersion") != "1.0.0"
+            ):
+                raise CaptureError("Docker save contains an invalid OCI image layout")
+            index = json.loads(read_member("index.json").decode("utf-8"))
+            if (
+                not isinstance(index, dict)
+                or index.get("schemaVersion") != 2
+                or not isinstance(index.get("manifests"), list)
+                or not index["manifests"]
+            ):
+                raise CaptureError("Docker save contains an invalid OCI image index")
+            for descriptor in index["manifests"]:
+                descriptor_path(descriptor)
+
+            manifest_media_types = {
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.docker.distribution.manifest.v2+json",
+            }
+            index_media_types = {
+                "application/vnd.oci.image.index.v1+json",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+            }
+            target_descriptors = [
+                descriptor
+                for descriptor in index["manifests"]
+                if isinstance(descriptor, dict)
+                and descriptor.get("digest") == image_id
+            ]
+            if len(target_descriptors) > 1:
+                raise CaptureError(
+                    "Docker save OCI index duplicates the immutable image ID"
+                )
+            uses_target_identity = len(target_descriptors) == 1
+            graph_roots = (
+                target_descriptors if uses_target_identity else index["manifests"]
+            )
+
+            candidates: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            visited: set[str] = set()
+
+            def visit_descriptor(descriptor: Any, depth: int = 0) -> None:
+                path = descriptor_path(descriptor)
+                digest = descriptor["digest"]
+                media_type = descriptor.get("mediaType")
+                if depth > 16 or digest in visited:
+                    raise CaptureError("Docker save OCI descriptor graph is ambiguous")
+                visited.add(digest)
+                payload = read_descriptor(descriptor, 1024 * 1024)
+                document = json.loads(payload.decode("utf-8"))
+                if media_type in manifest_media_types:
+                    if not isinstance(document, dict) or document.get("schemaVersion") != 2:
+                        raise CaptureError(f"Docker save contains an invalid OCI manifest: {path}")
+                    candidates.append((descriptor, document))
+                    return
+                if media_type not in index_media_types:
+                    raise CaptureError(
+                        "Docker save contains an unsupported OCI descriptor "
+                        f"media type: {media_type!r}"
+                    )
+                children = document.get("manifests") if isinstance(document, dict) else None
+                if (
+                    not isinstance(document, dict)
+                    or document.get("schemaVersion") != 2
+                    or not isinstance(children, list)
+                    or not children
+                ):
+                    raise CaptureError(f"Docker save contains an invalid OCI index: {path}")
+                for child in children:
+                    visit_descriptor(child, depth + 1)
+
+            for root in graph_roots:
+                visit_descriptor(root)
+            matches: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+            for _, candidate in candidates:
+                config_descriptor = candidate.get("config")
+                layer_descriptors = candidate.get("layers")
+                if not isinstance(layer_descriptors, list) or not layer_descriptors:
+                    raise CaptureError("Docker save contains an invalid OCI layer inventory")
+                candidate_config_path = descriptor_path(config_descriptor)
+                candidate_layer_paths = [
+                    descriptor_path(descriptor) for descriptor in layer_descriptors
+                ]
+                identity_matches = uses_target_identity or (
+                    config_descriptor.get("digest") == image_id
+                )
+                if (
+                    identity_matches
+                    and candidate_config_path == config_path
+                    and candidate_layer_paths == layers
+                ):
+                    matches.append((config_descriptor, layer_descriptors))
+            if len(matches) != 1:
+                raise CaptureError(
+                    "Docker save OCI graph does not bind the immutable image ID to "
+                    "exactly one manifest.json image"
+                )
+
+            config_descriptor, layer_descriptors = matches[0]
+            if config_descriptor.get("mediaType") not in {
+                "application/vnd.oci.image.config.v1+json",
+                "application/vnd.docker.container.image.v1+json",
+            }:
+                raise CaptureError("Docker save contains an unsupported OCI config media type")
+            config_bytes = read_descriptor(config_descriptor, 1024 * 1024)
+            config = json.loads(config_bytes.decode("utf-8"))
+            if not isinstance(config, dict):
+                raise CaptureError("Docker save contains an invalid OCI image config")
+            config_metadata = config.get("config")
+            rootfs = config.get("rootfs")
+            if (
+                not isinstance(config_metadata, dict)
+                or not isinstance(rootfs, dict)
+                or config.get("os") != "linux"
+                or rootfs.get("type") != "layers"
+            ):
+                raise CaptureError("Docker save contains an invalid OCI image config")
+            labels = config_metadata.get("Labels", {})
+            if not isinstance(labels, dict):
+                raise CaptureError("Docker save contains an invalid OCI image config")
+            for source_key, label in IMAGE_SOURCE_LABELS.items():
+                if labels.get(label) != source[source_key]:
+                    raise CaptureError(f"Docker save config label is stale: {label}")
+            diff_ids = rootfs.get("diff_ids")
+            if not isinstance(diff_ids, list) or len(diff_ids) != len(layer_descriptors):
+                raise CaptureError(
+                    "Docker save config layer identity does not match its manifest"
+                )
+
+            compression_by_media_type = {
+                "application/vnd.oci.image.layer.v1.tar": "identity",
+                "application/vnd.oci.image.layer.nondistributable.v1.tar": "identity",
+                "application/vnd.docker.image.rootfs.diff.tar": "identity",
+                "application/vnd.oci.image.layer.v1.tar+gzip": "gzip",
+                "application/vnd.oci.image.layer.nondistributable.v1.tar+gzip": "gzip",
+                "application/vnd.docker.image.rootfs.diff.tar.gzip": "gzip",
+                "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip": "gzip",
+            }
+            unpacked_total = 0
+            for descriptor, diff_id in zip(layer_descriptors, diff_ids, strict=True):
+                path = descriptor_path(descriptor)
+                member = members.get(path)
+                compression = compression_by_media_type.get(descriptor.get("mediaType"))
+                if compression is None:
+                    raise CaptureError(
+                        "Docker save contains an unsupported OCI layer compression"
+                    )
+                if (
+                    member is None
+                    or not member.isfile()
+                    or member.size != descriptor["size"]
+                    or member.size > unpacked_safety_ceiling_bytes + 1024 * 1024
+                ):
+                    raise CaptureError(
+                        f"Docker save OCI descriptor size does not match {path}"
+                    )
+                stream = archive.extractfile(member)
+                if stream is None:
+                    raise CaptureError(f"Docker save cannot read layer {path}")
+                blob_digest = hashlib.sha256()
+                diff_digest = hashlib.sha256()
+                layer_unpacked = 0
+                with tempfile.TemporaryFile() as payload:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                        blob_digest.update(chunk)
+                        payload.write(chunk)
+                    if payload.tell() != member.size or blob_digest.hexdigest() != descriptor[
+                        "digest"
+                    ].removeprefix("sha256:"):
+                        raise CaptureError(
+                            f"Docker save OCI descriptor digest does not match {path}"
+                        )
+                    payload.seek(0)
+                    layer_stream = (
+                        gzip.GzipFile(fileobj=payload, mode="rb")
+                        if compression == "gzip"
+                        else payload
+                    )
+                    try:
+                        for chunk in iter(lambda: layer_stream.read(1024 * 1024), b""):
+                            layer_unpacked += len(chunk)
+                            if (
+                                unpacked_total + layer_unpacked
+                                > unpacked_safety_ceiling_bytes
+                            ):
+                                raise CaptureError(
+                                    "Docker save OCI layers exceed the bounded unpacked size"
+                                )
+                            diff_digest.update(chunk)
+                    except (EOFError, OSError) as error:
+                        raise CaptureError(
+                            f"Docker save cannot decompress OCI layer {path}"
+                        ) from error
+                    finally:
+                        if compression == "gzip":
+                            layer_stream.close()
+                if diff_id != f"sha256:{diff_digest.hexdigest()}":
+                    raise CaptureError("Docker save layer bytes do not match the image config")
+                unpacked_total += layer_unpacked
+            return unpacked_total
+
+        expected_config = f"{image_digest}.json"
+        if config_path != expected_config:
+            raise CaptureError("Docker save config does not match the immutable image ID")
+        layer_members = {
+            name
+            for name, member in members.items()
+            if name.endswith(".tar") and member.isfile()
+        }
+        if layer_members != set(layers):
+            raise CaptureError("Docker save layer files do not match its manifest")
+
+        config_bytes = read_member(expected_config)
+        if hashlib.sha256(config_bytes).hexdigest() != image_digest:
+            raise CaptureError("Docker save config digest does not match the image ID")
+        config = json.loads(config_bytes.decode("utf-8"))
+        if (
+            not isinstance(config, dict)
+            or config.get("os") != "linux"
+            or not isinstance(config.get("rootfs"), dict)
+            or config["rootfs"].get("type") != "layers"
+        ):
+            raise CaptureError("Docker save config must target Linux layers")
+        labels = config.get("config", {}).get("Labels", {})
+        for source_key, label in IMAGE_SOURCE_LABELS.items():
+            if labels.get(label) != source[source_key]:
+                raise CaptureError(f"Docker save config label is stale: {label}")
+        diff_ids = config["rootfs"].get("diff_ids")
+        if not isinstance(diff_ids, list) or len(diff_ids) != len(layers):
+            raise CaptureError("Docker save config layer identity does not match its manifest")
+        unpacked_total = sum(members[layer].size for layer in layers)
+        if unpacked_total > unpacked_safety_ceiling_bytes:
+            raise CaptureError("Docker save layers exceed the bounded unpacked size")
+        for layer, diff_id in zip(layers, diff_ids, strict=True):
+            stream = archive.extractfile(members[layer])
+            if stream is None:
+                raise CaptureError(f"Docker save cannot read layer {layer}")
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+            if diff_id != f"sha256:{digest.hexdigest()}":
+                raise CaptureError("Docker save layer bytes do not match the image config")
+        return unpacked_total
+
+
 def artifact_sizes(
-    args: argparse.Namespace,
+    args: argparse.Namespace, context: dict[str, Any]
 ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
-    image_size_command = [
-        "docker",
-        "image",
-        "inspect",
-        "--format",
-        "{{.Size}}",
-        args.immutable_image,
-    ]
     binary_size_command = [
         "docker",
         "run",
@@ -2234,7 +2590,7 @@ def artifact_sizes(
         contract_context = temp / "contract-context"
         contract_context_provenance = create_exact_git_archive_context(contract_context)
         sdk_install_command = ["pnpm", "--offline", "install", "--frozen-lockfile"]
-        sdk_build_command = ["pnpm", "--offline", "--filter", "@fasti/sdk", "build"]
+        sdk_build_command = list(CONTRACT_SDK_BUILD_COMMAND)
         run_checked(sdk_install_command, cwd=contract_context, timeout=300)
         run_checked(sdk_build_command, cwd=contract_context, timeout=300)
         contract_archive = [
@@ -2283,6 +2639,9 @@ def artifact_sizes(
                     )
 
         gzip_pipeline(docker_save, oci_archive)
+        oci_image_bytes = saved_oci_layer_bytes(
+            oci_archive, context["source"]["oci_image_id"], context["source"]
+        )
         gzip_pipeline(contract_archive, contract_pack, source_cwd=contract_context)
         retained_artifacts = {
             "oci_image_compressed": publish_content_addressed_artifact(
@@ -2303,7 +2662,7 @@ def artifact_sizes(
         "native_fastid_binary_bytes": args.native_binary.stat().st_size,
         "oci_fastid_binary_bytes": int(binary_values[0]),
         "oci_fasti_cli_binary_bytes": int(binary_values[1]),
-        "oci_image_bytes": int(run_checked(image_size_command)),
+        "oci_image_bytes": oci_image_bytes,
         "native_runtime_installed_bytes": None,
         "native_archive_compressed_bytes": None,
         **compressed_sizes,
@@ -2313,7 +2672,6 @@ def artifact_sizes(
     commands = [
         command_text(["stat", "-c", "%s", str(args.native_binary)]),
         command_text(binary_size_command),
-        command_text(image_size_command),
         f"{command_text(docker_save)} | gzip -n -9",
         contract_context_provenance["archive_command"],
         f"(cd verifier-owned-git-archive && {command_text(sdk_install_command)})",
@@ -2357,7 +2715,7 @@ def artifact_budget_verdicts(sizes: dict[str, Any]) -> list[dict[str, Any]]:
         measured(
             "oci_image_unpacked",
             sizes["oci_image_bytes"],
-            "Docker image inspection reports the unpacked layer size for the immutable governed image ID.",
+            "Sum of the verified Docker-save image layers after decompression for the immutable governed image ID.",
         ),
         measured(
             "contract_pack_compressed",
@@ -2502,7 +2860,7 @@ def capture_bound(
     memory_budgets = budgets_document["memory_bytes"]
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    sizes, size_commands, retained_artifacts = artifact_sizes(args)
+    sizes, size_commands, retained_artifacts = artifact_sizes(args, context)
     scenarios = [capture_scenario(scenario_id, args) for scenario_id in SCENARIO_IDS]
     post_governor = parse_cpu_governors()
     if post_governor != context["runner"]["cpu_governor"]:
@@ -2611,6 +2969,79 @@ def self_test() -> None:
     print("PASS: B1 benchmark harness validator self-test")
 
 
+def capture_artifact_budgets(args: argparse.Namespace) -> None:
+    if platform.system() != "Linux":
+        raise CaptureError("B1 artifact budget capture is Linux-only")
+    for command in ["docker", "git", "gzip", "node", "pnpm", "tar"]:
+        require_command(command)
+    if args.output.exists() or args.output.is_symlink():
+        raise CaptureError(f"refusing to overwrite existing evidence: {args.output}")
+    if not args.native_binary.is_file() or args.native_binary.is_symlink():
+        raise CaptureError(f"native release binary is not a regular file: {args.native_binary}")
+
+    commit, tree, contract_ref = ensure_clean_tree()
+    docker_locality = verify_local_docker()
+    if run_checked(["docker", "info", "--format", "{{.CgroupVersion}}"]) != "2":
+        raise CaptureError("Docker must use cgroup v2 for B1 artifact capture")
+    architecture, _ = host_architecture()
+
+    context: dict[str, Any] = {
+        "docker_locality": docker_locality,
+        "source": {
+            "git_commit": commit,
+            "git_tree": tree,
+            "contract_ref": contract_ref,
+            "build_recipe_sha256": sha256_file(GOVERNED_DOCKERFILE),
+            "native_fastid_sha256": sha256_file(args.native_binary),
+        },
+    }
+    governed_build_image(args, context)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    sizes, commands, retained_artifacts = artifact_sizes(args, context)
+    verdicts = artifact_budget_verdicts(sizes)
+    failures = [verdict["budget"] for verdict in verdicts if verdict["status"] == "fail"]
+    if failures:
+        raise CaptureError(f"artifact budgets failed: {', '.join(failures)}")
+    verify_capture_inputs_unchanged(args, context)
+
+    evidence = {
+        "schema_version": "fasti.b1.artifact-budgets.v1",
+        "kind": "fasti.b1.artifact-budgets",
+        "status": "pass",
+        "source": {
+            "git_commit": commit,
+            "git_tree": tree,
+            "contract_ref": contract_ref,
+            "build_recipe_sha256": context["source"]["build_recipe_sha256"],
+            "build_context_archive_sha256": context["source"][
+                "build_context_archive_sha256"
+            ],
+            "dirty": False,
+        },
+        "runner": {"architecture": architecture},
+        "policy": {
+            "budgets_sha256": sha256_file(BUDGETS_PATH),
+            "harness_sha256": sha256_file(Path(__file__)),
+        },
+        "oci_image_id": context["source"]["oci_image_id"],
+        "artifact_sizes": sizes,
+        "artifact_budget_verdicts": verdicts,
+        "retained_artifacts": retained_artifacts,
+        "commands": commands,
+    }
+    descriptor = os.open(
+        args.output,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        json.dump(evidence, output, indent=2, sort_keys=True)
+        output.write("\n")
+        output.flush()
+        os.fsync(output.fileno())
+    print(f"PASS: B1 artifact budget evidence written to {args.output}")
+
+
 def add_runner_arguments(command_parser: argparse.ArgumentParser, *, with_output: bool) -> None:
     command_parser.add_argument(
         "--image",
@@ -2670,6 +3101,15 @@ def parser() -> argparse.ArgumentParser:
     subcommands = root.add_subparsers(dest="command", required=True)
     subcommands.add_parser("self-test", help="run portable schema and negative-sentinel tests")
 
+    artifact_parser = subcommands.add_parser(
+        "artifact-capture",
+        help="build exact-source OCI and contract artifacts and capture their governed sizes",
+    )
+    artifact_parser.add_argument("--image", required=True)
+    artifact_parser.add_argument("--native-binary", type=Path, required=True)
+    artifact_parser.add_argument("--output", type=Path, required=True)
+    artifact_parser.add_argument("--build-timeout-seconds", type=float, default=1800.0)
+
     preflight_parser = subcommands.add_parser(
         "preflight",
         help="emit a non-mutating JSON prerequisite result for a physical B1 runner",
@@ -2685,6 +3125,12 @@ def parser() -> argparse.ArgumentParser:
 
 
 def validate_arguments(args: argparse.Namespace) -> None:
+    if args.command == "artifact-capture":
+        args.output = args.output.resolve()
+        args.native_binary = args.native_binary.resolve()
+        if not args.image.strip() or args.build_timeout_seconds <= 0:
+            raise CaptureError("artifact capture image and build timeout must be valid")
+        return
     if args.command not in {"capture", "preflight"}:
         return
     args.runner_id = reject_placeholder("runner ID", args.runner_id)
@@ -2777,6 +3223,8 @@ def main() -> None:
         validate_arguments(args)
         if args.command == "self-test":
             self_test()
+        elif args.command == "artifact-capture":
+            capture_artifact_budgets(args)
         elif args.command == "preflight":
             preflight_json(args)
         else:

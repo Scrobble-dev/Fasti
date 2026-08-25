@@ -40,7 +40,7 @@ Public binary, package, image, attestation, and GitHub Release publication remai
 
 ## Performance and accessibility
 
-Measured targets are 64 MiB idle, 96 MiB normal, 160 MiB heavy, and a 192 MiB absolute process-tree ceiling. Raspberry Pi 5 is the champion profile; a J4125-class x86 machine is the second mandatory profile. Claims require artifact-bound receipts from the named profile.
+Measured targets are 64 MiB idle, 96 MiB normal, 160 MiB heavy, and a 192 MiB absolute process-tree ceiling. B1 requires exact-artifact receipts that declare the same CI workflow run attempt for one exact `dev` push on x86_64 and aarch64. Each architecture must complete the governed 600-second warm-up and 900-second route-less idle measurement with the kernel applying a 192 MiB, one-vCPU, zero-swap envelope. Named physical devices are optional comparison profiles unless a later packaging claim explicitly requires one.
 
 Every user-facing flow must follow Gestalt grouping, Nielsen usability heuristics, 44 px minimum targets, visible focus, reduced motion, stable list position, persistent critical state, and resumable review. ADHD/AuDHD needs are acceptance criteria, not a later polish pass. The interface should make the user capable and confident through clear actions, immediate truthful feedback, and recoverable mistakes; it must not explain away unclear interaction design.
 
