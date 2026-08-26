@@ -94,7 +94,6 @@ export const cssVariables = `
    * Without dark values here, those components stayed light-on-light in
    * dark mode. */
   --fasti-surface-archive: ${colors.surface.night};
-  --fasti-surface-paper: color-mix(in srgb, ${colors.surface.night} 88%, ${colors.surface.paper});
   --fasti-text-primary: ${colors.surface.paper};
   --fasti-text-muted: color-mix(in srgb, ${colors.surface.paper} 72%, ${colors.surface.night});
   --fasti-brand-mark: color-mix(in srgb, ${colors.brand.mark} 65%, white);
