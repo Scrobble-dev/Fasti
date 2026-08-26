@@ -1,33 +1,41 @@
 <script lang="ts">
-  import { IconDeviceTv, IconPlug, IconRadio, IconInfoCircle } from "@tabler/icons-svelte";
+  import { IconDeviceTv, IconInfoCircle, IconPlug, IconRadio } from "@tabler/icons-svelte";
+  import ApiClientsPanel from "./api-clients-panel.svelte";
+  import type { WorkbenchHost } from "./types.js";
+
+  interface Props {
+    host?: WorkbenchHost;
+  }
+
+  let { host }: Props = $props();
 
   const connectors = [
     {
       id: "nuvio",
       name: "NuvioTV",
-      desc: "Planned integration lane for observation submission and later state synchronization.",
-      status: "Not available yet",
+      desc: "Fasti now has authenticated durable occurrence ingress and scoped client credentials. Current upstream Nuvio still needs a Fasti tracking provider before it can submit those observations directly.",
+      status: "Client integration required",
       icon: IconDeviceTv,
     },
     {
       id: "plex",
       name: "Plex & Tautulli",
-      desc: "Planned source-conformance target. No production webhook adapter is active.",
-      status: "Not available yet",
+      desc: "No production webhook adapter is mounted. Fasti does not publish a Plex webhook URL in this build.",
+      status: "Not available",
       icon: IconPlug,
     },
     {
       id: "jellyfin",
       name: "Jellyfin & Emby",
-      desc: "Planned source-conformance target. No production webhook adapter is active.",
-      status: "Not available yet",
+      desc: "No production webhook adapter is mounted. Fasti does not publish a Jellyfin or Emby webhook URL in this build.",
+      status: "Not available",
       icon: IconPlug,
     },
     {
       id: "mpris",
-      name: "Desktop MPRIS / D-Bus Observer",
-      desc: "Reserved local observation source. It is not active in this workbench build.",
-      status: "Not available yet",
+      name: "Desktop MPRIS observer",
+      desc: "The shared observation contract can support local observers, but no production MPRIS adapter is active in this build.",
+      status: "Not available",
       icon: IconRadio,
     },
   ];
@@ -35,29 +43,30 @@
 
 <div class="connections-container">
   <header class="view-header">
-    <div>
-      <h1 class="view-title">Connections</h1>
-      <p class="view-subtitle">
-        Fasti will show a connection here only after its capability and host adapter are active.
-      </p>
-    </div>
+    <h1 class="view-title">Connections</h1>
+    <p class="view-subtitle">
+      See what Fasti can accept now, create scoped external-client credentials, and distinguish
+      active capability from later integration work.
+    </p>
   </header>
 
   <section class="availability-card" aria-labelledby="connections-availability-title">
     <IconInfoCircle size={28} stroke={1.75} aria-hidden="true" />
     <div>
-      <h2 id="connections-availability-title">No connection adapters are active</h2>
+      <h2 id="connections-availability-title">Durable occurrence ingress is active locally</h2>
       <p>
-        This prototype does not advertise discovery, pairing, webhook, or Nuvio endpoints that
-        the backend cannot serve. Local discovery and source integrations remain later delivery
-        work. Existing local Chronicle state is not affected.
+        Fasti now accepts authenticated consumption occurrences through the local API and returns
+        durable idempotency receipts. This is not the same as native Nuvio support. Partial
+        progress, pairing, discovery, two-way state synchronization, and source-specific webhooks
+        remain unavailable until their own contracts and adapters are active.
       </p>
     </div>
   </section>
 
-  <section class="connectors-section" aria-labelledby="planned-connections-title">
-    <h2 class="section-title" id="planned-connections-title">Planned integrations</h2>
+  <ApiClientsPanel {host} />
 
+  <section class="connectors-section" aria-labelledby="integration-status-title">
+    <h2 class="section-title" id="integration-status-title">Integration status</h2>
     <div class="connectors-grid">
       {#each connectors as conn (conn.id)}
         <article class="connector-card">
@@ -77,9 +86,9 @@
 
 <style>
   .connections-container {
-    max-width: 960px;
+    max-width: 1040px;
     margin: 0 auto;
-    padding: 32px 24px;
+    padding: 32px 24px 64px;
     display: flex;
     flex-direction: column;
     gap: 32px;
@@ -111,6 +120,12 @@
   .conn-name,
   .availability-card h2 {
     margin-top: 0;
+  }
+
+  .view-subtitle {
+    margin-bottom: 0;
+    max-width: 70ch;
+    line-height: 1.5;
   }
 
   .availability-card {
@@ -189,5 +204,15 @@
 
   .conn-desc {
     font-size: 0.88rem;
+  }
+
+  @media (max-width: 47.99rem) {
+    .connections-container {
+      padding: 24px 16px 48px;
+    }
+
+    .view-title {
+      font-size: 2rem;
+    }
   }
 </style>
