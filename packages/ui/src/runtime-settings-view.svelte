@@ -69,11 +69,11 @@
     providerNotice = undefined;
     try {
       providers = await host.saveProviderCredential(provider, credential);
-      editing = { ...editing, [provider]: "" };
       providerNotice = "Credential saved in the platform credential store.";
     } catch (error) {
       providerProblem = hostProblemText(error, "Fasti rejected the provider credential.");
     } finally {
+      editing = { ...editing, [provider]: "" };
       busyProvider = undefined;
     }
   }
@@ -111,7 +111,7 @@
       <button type="button" class:active={active === "system"} onclick={() => (active = "system")}>Capability status</button>
     </nav>
 
-    <main>
+    <div class="settings-panel">
       {#if active === "network"}
         <NetworkSettings
           configuration={network}
@@ -225,7 +225,7 @@
           </dl>
         </section>
       {/if}
-    </main>
+    </div>
   </div>
 </div>
 
