@@ -128,8 +128,8 @@ pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
         .route("/api/v1/node/initialization", post(initialize_node))
         .route("/api/v1/client-enrollments", post(enroll_first_client))
         .layer(DefaultBodyLimit::max(MAX_BOOTSTRAP_JSON_BODY_BYTES));
-    let observation = crate::observation::router()
-        .layer(DefaultBodyLimit::max(MAX_OBSERVATION_JSON_BODY_BYTES));
+    let observation =
+        crate::observation::router().layer(DefaultBodyLimit::max(MAX_OBSERVATION_JSON_BODY_BYTES));
 
     bootstrap.merge(observation).with_state(state)
 }

@@ -158,7 +158,10 @@ mod tests {
             "ProblemDetails",
             "ViolationDto",
         ] {
-            assert!(schemas.contains_key(schema), "missing shared schema {schema}");
+            assert!(
+                schemas.contains_key(schema),
+                "missing shared schema {schema}"
+            );
         }
     }
 
@@ -179,9 +182,7 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    async fn enroll_admin(
-        app: &Router,
-    ) -> fasti_contracts::ClientEnrollmentResponse {
+    async fn enroll_admin(app: &Router) -> fasti_contracts::ClientEnrollmentResponse {
         let initialized = app
             .clone()
             .oneshot(
@@ -395,10 +396,7 @@ mod tests {
 
         let mut changed = request;
         changed["title"] = serde_json::json!("Changed evidence for the same source event");
-        let conflict = app
-            .oneshot(send(changed))
-            .await
-            .expect("router response");
+        let conflict = app.oneshot(send(changed)).await.expect("router response");
         assert_eq!(conflict.status(), StatusCode::CONFLICT);
         let problem: ProblemDetails = serde_json::from_slice(
             &to_bytes(conflict.into_body(), 16 * 1024)

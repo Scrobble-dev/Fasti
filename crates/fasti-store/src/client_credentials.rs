@@ -4,9 +4,9 @@ use crate::kernel::{
 };
 use chrono::{DateTime, Utc};
 use fasti_application::{
-    ClientCredentialAdministrationPort, ClientCredentialSummary, CreateScopedClientCredentialCommand,
-    CreateScopedClientCredentialOutcome, FastiProblem, ListClientCredentialsQuery, ProblemCode,
-    RevokeClientCredentialCommand, ScopeKey,
+    ClientCredentialAdministrationPort, ClientCredentialSummary,
+    CreateScopedClientCredentialCommand, CreateScopedClientCredentialOutcome, FastiProblem,
+    ListClientCredentialsQuery, ProblemCode, RevokeClientCredentialCommand, ScopeKey,
 };
 use fasti_domain::{ClientId, CredentialId, ProfileGrantId};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
@@ -97,7 +97,10 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
             .iter()
             .any(|scope| !issuer_scopes.contains(scope_storage_key(*scope)))
         {
-            return Err(Box::new(FastiProblem::forbidden(capability, correlation_id)));
+            return Err(Box::new(FastiProblem::forbidden(
+                capability,
+                correlation_id,
+            )));
         }
 
         map_sql(
@@ -234,7 +237,8 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
         };
 
         let mut summaries = Vec::with_capacity(rows.len());
-        for (client_id, credential_id, profile_id, status, created_at, revoked_at, grant_id) in rows {
+        for (client_id, credential_id, profile_id, status, created_at, revoked_at, grant_id) in rows
+        {
             let scopes = {
                 let mut statement = map_sql(
                     transaction.prepare(
@@ -288,7 +292,10 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
         let capability = fasti_application::CapabilityKey::RevokeCredential;
         let correlation_id = command.correlation_id();
         if command.credential_id() == command.access().credential_id() {
-            return Err(Box::new(FastiProblem::forbidden(capability, correlation_id)));
+            return Err(Box::new(FastiProblem::forbidden(
+                capability,
+                correlation_id,
+            )));
         }
         let revoked_at = timestamp(now());
         let mut connection = self.lock_connection(capability, correlation_id)?;
@@ -333,7 +340,10 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
             correlation_id,
         )?;
         if credential_changed > 1 {
-            return Err(Box::new(FastiProblem::integrity_failed(capability, correlation_id)));
+            return Err(Box::new(FastiProblem::integrity_failed(
+                capability,
+                correlation_id,
+            )));
         }
         map_sql(
             transaction.execute(

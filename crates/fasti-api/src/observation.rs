@@ -14,7 +14,7 @@ use fasti_application::{
 };
 use fasti_contracts::{ProblemDetails, SubmitObservationRequest, SubmitObservationResponse};
 use fasti_domain::{
-    ClaimedTrust, ExternalIdentifierClaim, Grain, ObservedAt, OccurredAt, ObservationResolution,
+    ClaimedTrust, ExternalIdentifierClaim, Grain, ObservationResolution, ObservedAt, OccurredAt,
     RequestCorrelationId,
 };
 use std::sync::Arc;
@@ -64,7 +64,11 @@ fn validate_request(
             "at most 16 identifier clues",
         ));
     }
-    if request.title.as_ref().is_some_and(|title| title.len() > 512) {
+    if request
+        .title
+        .as_ref()
+        .is_some_and(|title| title.len() > 512)
+    {
         return Err(invalid_observation(
             correlation_id,
             "/title",
@@ -219,19 +223,16 @@ pub(crate) async fn submit_observation(
                 "one registered Fasti grain",
             )
         })?;
-        let clue = ExternalIdentifierClaim::try_new(
-            &identifier.namespace,
-            grain,
-            &identifier.value,
-        )
-        .map_err(|_| {
-            invalid_observation(
-                correlation_id,
-                &format!("/identifiers/{index}"),
-                "external identifier does not satisfy the domain contract",
-                "a registered namespace, grain, and bounded identifier value",
-            )
-        })?;
+        let clue =
+            ExternalIdentifierClaim::try_new(&identifier.namespace, grain, &identifier.value)
+                .map_err(|_| {
+                    invalid_observation(
+                        correlation_id,
+                        &format!("/identifiers/{index}"),
+                        "external identifier does not satisfy the domain contract",
+                        "a registered namespace, grain, and bounded identifier value",
+                    )
+                })?;
         clues.push(clue);
     }
 
@@ -261,34 +262,38 @@ pub(crate) async fn submit_observation(
     let source = request.source;
     let source_event_id = request.source_event_id;
     let kernel = state.kernel;
-    let outcome = run_kernel(CapabilityKey::AcceptObservation, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
-            CapabilityKey::AcceptObservation,
-            secret,
-        ))?;
-        let operation_id = derive_deterministic_operation_id(&format!(
-            "observation:{}:{source}:{source_event_id}",
-            access.client_id()
-        ));
-        let mut upload = kernel.begin_evidence_upload(EvidenceUploadRequest::new(
-            correlation_id,
-            access,
-            Some(evidence_bytes.len() as u64),
-        ))?;
-        upload.write_chunk(&evidence_bytes)?;
-        let evidence = upload.finish()?;
-        let command = AcceptObservationCommand::new(
-            correlation_id,
-            access,
-            operation_id,
-            occurred_at,
-            observed_at,
-            evidence,
-        )
-        .with_identity_clues(clues, target_grain);
-        kernel.authorize_and_accept(command)
-    })
+    let outcome = run_kernel(
+        CapabilityKey::AcceptObservation,
+        correlation_id,
+        move || {
+            let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
+                correlation_id,
+                CapabilityKey::AcceptObservation,
+                secret,
+            ))?;
+            let operation_id = derive_deterministic_operation_id(&format!(
+                "observation:{}:{source}:{source_event_id}",
+                access.client_id()
+            ));
+            let mut upload = kernel.begin_evidence_upload(EvidenceUploadRequest::new(
+                correlation_id,
+                access,
+                Some(evidence_bytes.len() as u64),
+            ))?;
+            upload.write_chunk(&evidence_bytes)?;
+            let evidence = upload.finish()?;
+            let command = AcceptObservationCommand::new(
+                correlation_id,
+                access,
+                operation_id,
+                occurred_at,
+                observed_at,
+                evidence,
+            )
+            .with_identity_clues(clues, target_grain);
+            kernel.authorize_and_accept(command)
+        },
+    )
     .await?;
 
     let receipt = outcome.receipt();

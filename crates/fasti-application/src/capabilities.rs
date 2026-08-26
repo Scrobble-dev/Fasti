@@ -101,14 +101,117 @@ macro_rules! define_capabilities {
 }
 
 define_capabilities!(
-    (SystemHealth, B1, B0, Finalized, Implemented, Unauthenticated, [], [], []),
-    (DiscoverCapabilities, B1, B1, Finalized, FixtureOnly, Scoped, [CapabilityRead], [Forbidden], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
-    (InitializeNode, B1, B2, Finalized, Implemented, BootstrapOnly, [], [Forbidden, MalformedJson, PayloadTooLarge, UnsupportedMediaType, ValidationFailed, AlreadyInitialized, IntegrityFailed, StorageUnavailable], []),
-    (EnrollFirstClient, B1, B2, Finalized, Implemented, Scoped, [ClientEnroll], [Forbidden, MalformedJson, PayloadTooLarge, UnsupportedMediaType, ValidationFailed, BootstrapClosed, IntegrityFailed, StorageUnavailable], []),
-    (SelectProfile, B1, B2, Finalized, FixtureOnly, Scoped, [ProfileSelect], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
-    (RotateCredential, B1, B2, Finalized, FixtureOnly, Scoped, [CredentialManage], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
-    (RevokeCredential, B1, B2, Finalized, FixtureOnly, Scoped, [CredentialManage], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
-    (ConfigureListener, B1, B2, Finalized, FixtureOnly, Scoped, [ListenerConfigure], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, IntegrityFailed, StorageUnavailable, UnsupportedListener]),
+    (
+        SystemHealth,
+        B1,
+        B0,
+        Finalized,
+        Implemented,
+        Unauthenticated,
+        [],
+        [],
+        []
+    ),
+    (
+        DiscoverCapabilities,
+        B1,
+        B1,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [CapabilityRead],
+        [Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
+        InitializeNode,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        BootstrapOnly,
+        [],
+        [
+            Forbidden,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
+            ValidationFailed,
+            AlreadyInitialized,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        EnrollFirstClient,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ClientEnroll],
+        [
+            Forbidden,
+            MalformedJson,
+            PayloadTooLarge,
+            UnsupportedMediaType,
+            ValidationFailed,
+            BootstrapClosed,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        SelectProfile,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [ProfileSelect],
+        [CapabilityUnavailable, Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
+        RotateCredential,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [CredentialManage],
+        [CapabilityUnavailable, Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
+        RevokeCredential,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [CredentialManage],
+        [CapabilityUnavailable, Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
+        ConfigureListener,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [ListenerConfigure],
+        [CapabilityUnavailable, Forbidden],
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            StorageUnavailable,
+            UnsupportedListener
+        ]
+    ),
     (
         AcceptObservation,
         B1,
@@ -117,22 +220,232 @@ define_capabilities!(
         Implemented,
         Scoped,
         [ObservationAccept],
-        [AuthenticationFailed, CapacityExceeded, Forbidden, IdempotencyConflict, IntegrityFailed, InvalidObservation, MalformedJson, PayloadTooLarge, StorageUnavailable, UnsupportedMediaType, ValidationFailed],
+        [
+            AuthenticationFailed,
+            CapacityExceeded,
+            Forbidden,
+            IdempotencyConflict,
+            IntegrityFailed,
+            InvalidObservation,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
         [EvidenceNotFound]
     ),
-    (ReplayReceipt, B1, B2, Finalized, FixtureOnly, Scoped, [ReceiptRead], [Forbidden, ReceiptNotFound], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
-    (StreamReceipts, B1, B2, Finalized, FixtureOnly, Scoped, [ReceiptRead], [Forbidden, ReceiptNotFound], [AuthenticationFailed, CursorExpired, IntegrityFailed, StorageUnavailable]),
-    (CreateRecord, B2, B2, Reserved, LaterBody, Scoped, [IdentityWrite], [CapabilityUnavailable, InvalidIdentifier, ValidationFailed], [AuthenticationFailed, Forbidden, IntegrityFailed, StorageUnavailable]),
-    (AttachIdentifier, B2, B2, Reserved, LaterBody, Scoped, [IdentityWrite], [CapabilityUnavailable, InvalidIdentifier, ValidationFailed], [AuthenticationFailed, Forbidden, IdentityConflict, IntegrityFailed, RecordNotFound, StorageUnavailable]),
-    (InspectReview, B2, B2, Reserved, LaterBody, Scoped, [ReviewRead], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
-    (DeferReview, B2, B2, Reserved, LaterBody, Scoped, [ReviewWrite], [CapabilityUnavailable, Forbidden, ValidationFailed], [AuthenticationFailed, IntegrityFailed, ReviewNotFound, StorageUnavailable]),
-    (ResumeReview, B2, B2, Reserved, LaterBody, Scoped, [ReviewWrite], [CapabilityUnavailable, Forbidden, ValidationFailed], [AuthenticationFailed, IntegrityFailed, ReviewNotFound, StorageUnavailable]),
-    (ResolveReview, B2, B2, Reserved, LaterBody, Scoped, [ReviewWrite], [CapabilityUnavailable, Forbidden, ValidationFailed], [AuthenticationFailed, IdentityConflict, IntegrityFailed, InvalidIdentifier, RecordNotFound, ReviewNotFound, StorageUnavailable]),
-    (AppendCorrection, B3, B3, Reserved, LaterBody, Scoped, [CorrectionWrite], [CapabilityUnavailable, Forbidden, ValidationFailed], [AuthenticationFailed, IntegrityFailed, RecordNotFound, StorageUnavailable]),
-    (InspectCorrectionChain, B3, B3, Reserved, LaterBody, Scoped, [CorrectionRead], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, ValidationFailed, IntegrityFailed, StorageUnavailable]),
-    (ExportWorkspace, B3, B3, Reserved, Guarded, Scoped, [WorkspaceExport], [CapabilityUnavailable, Forbidden], [AuthenticationFailed, CapacityExceeded, DataRootLocked, ExportCanceled, IntegrityFailed, StoppedNodeExportRequired, StorageUnavailable, UnsupportedPlatform]),
-    (RestoreWorkspace, B3, B3, Reserved, Guarded, LocalOperator, [], [CapabilityUnavailable, Forbidden, ValidationFailed], [BootstrapClosed, CapacityExceeded, DataRootLocked, IntegrityFailed, OperationCanceled, RecoveryBootstrapPending, StorageUnavailable, UnsupportedPlatform]),
-    (VerifyWorkspace, B3, B3, Reserved, Guarded, Scoped, [WorkspaceVerify], [CapabilityUnavailable, Forbidden, ValidationFailed], [AuthenticationFailed, DataRootLocked, IntegrityFailed, StorageUnavailable]),
+    (
+        ReplayReceipt,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [ReceiptRead],
+        [Forbidden, ReceiptNotFound],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
+        StreamReceipts,
+        B1,
+        B2,
+        Finalized,
+        FixtureOnly,
+        Scoped,
+        [ReceiptRead],
+        [Forbidden, ReceiptNotFound],
+        [
+            AuthenticationFailed,
+            CursorExpired,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
+    ),
+    (
+        CreateRecord,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [IdentityWrite],
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
+    ),
+    (
+        AttachIdentifier,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [IdentityWrite],
+        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IdentityConflict,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable
+        ]
+    ),
+    (
+        InspectReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewRead],
+        [CapabilityUnavailable, Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
+        DeferReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
+    ),
+    (
+        ResumeReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
+    ),
+    (
+        ResolveReview,
+        B2,
+        B2,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [ReviewWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [
+            AuthenticationFailed,
+            IdentityConflict,
+            IntegrityFailed,
+            InvalidIdentifier,
+            RecordNotFound,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
+    ),
+    (
+        AppendCorrection,
+        B3,
+        B3,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [CorrectionWrite],
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable
+        ]
+    ),
+    (
+        InspectCorrectionChain,
+        B3,
+        B3,
+        Reserved,
+        LaterBody,
+        Scoped,
+        [CorrectionRead],
+        [CapabilityUnavailable, Forbidden],
+        [
+            AuthenticationFailed,
+            ValidationFailed,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
+    ),
+    (
+        ExportWorkspace,
+        B3,
+        B3,
+        Reserved,
+        Guarded,
+        Scoped,
+        [WorkspaceExport],
+        [CapabilityUnavailable, Forbidden],
+        [
+            AuthenticationFailed,
+            CapacityExceeded,
+            DataRootLocked,
+            ExportCanceled,
+            IntegrityFailed,
+            StoppedNodeExportRequired,
+            StorageUnavailable,
+            UnsupportedPlatform
+        ]
+    ),
+    (
+        RestoreWorkspace,
+        B3,
+        B3,
+        Reserved,
+        Guarded,
+        LocalOperator,
+        [],
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [
+            BootstrapClosed,
+            CapacityExceeded,
+            DataRootLocked,
+            IntegrityFailed,
+            OperationCanceled,
+            RecoveryBootstrapPending,
+            StorageUnavailable,
+            UnsupportedPlatform
+        ]
+    ),
+    (
+        VerifyWorkspace,
+        B3,
+        B3,
+        Reserved,
+        Guarded,
+        Scoped,
+        [WorkspaceVerify],
+        [CapabilityUnavailable, Forbidden, ValidationFailed],
+        [
+            AuthenticationFailed,
+            DataRootLocked,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
+    ),
 );
 
 #[cfg(test)]
