@@ -374,6 +374,10 @@ _open() {
   fi
   if command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$target" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "$target" >/dev/null 2>&1 &
+  elif command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command Start-Process "'$target'" >/dev/null 2>&1 &
   else
     echo "$target"
   fi
@@ -400,8 +404,13 @@ _require_container_image() {
 }
 
 _port_in_use() {
-  command -v ss >/dev/null 2>&1 || return 1
-  [[ -n "$(ss -H -ltn "sport = :$1" 2>/dev/null)" ]]
+  # Return 2 (probe unavailable) when ss is missing or fails, distinct from
+  # 1 (port free) -- callers must treat "couldn't check" as "don't proceed",
+  # not silently equivalent to "the port is free".
+  command -v ss >/dev/null 2>&1 || return 2
+  local listeners
+  listeners="$(ss -H -ltn "sport = :$1" 2>/dev/null)" || return 2
+  [[ -n "$listeners" ]]
 }
 
 _container_port() {
@@ -431,7 +440,12 @@ _start_container() {
     echo "Container mode supports FASTI_LISTEN=127.0.0.1:FASTI_PORT only; the container still listens on 0.0.0.0:8420 internally" >&2
     return 1
   fi
-  if _port_in_use "$FASTI_PORT"; then
+  local container_port_status=0
+  _port_in_use "$FASTI_PORT" || container_port_status=$?
+  if ((container_port_status == 2)); then
+    echo "Cannot verify port $FASTI_PORT availability (ss probe unavailable)" >&2
+    return 1
+  elif ((container_port_status == 0)); then
     if [[ "$FASTI_PORT_FALLBACK" == fail ]]; then
       echo "FASTI_PORT $FASTI_PORT is already in use" >&2
       return 1
@@ -519,15 +533,21 @@ _start_native() {
   fi
 
   if _has_web; then
-    if ! command -v ss >/dev/null 2>&1; then
-      echo "Cannot verify port $WEB_PORT availability (ss command not found); not starting the web workbench." >&2
-    elif _port_in_use "$WEB_PORT"; then
+    local port_status=0
+    _port_in_use "$WEB_PORT" || port_status=$?
+    if ((port_status == 2)); then
+      echo "Cannot verify port $WEB_PORT availability (ss probe unavailable); not starting the web workbench." >&2
+    elif ((port_status == 0)); then
       echo "Port $WEB_PORT is already in use; not starting the web workbench." >&2
     else
       echo "=== 2. Building and starting the web workbench ==="
       # apps/web imports @fasti/tokens and @fasti/sdk as built workspace
-      # packages, not raw TS sources -- build them first.
-      pnpm run build >"$LOGDIR/web-build.log" 2>&1
+      # packages, not raw TS sources -- build them first. Filtered to just
+      # web's dependency chain, not the whole repo, for a faster dev loop.
+      if ! pnpm --filter @fasti/tokens --filter @fasti/sdk --filter @fasti/ui --filter @fasti/web run build >"$LOGDIR/web-build.log" 2>&1; then
+        echo "Web workbench build failed; see $LOGDIR/web-build.log" >&2
+        return 1
+      fi
       set -m
       FASTI_QA_PROXY_TARGET="$FASTI_API_URL" pnpm --filter @fasti/web run dev >"$LOGDIR/web.log" 2>&1 &
       local web_pid=$!
@@ -544,6 +564,11 @@ _start_native() {
 }
 
 _self_test() {
+  # Nested self-invocations ("$0" --status) must not inherit this shell's
+  # already-resolved FASTI_API_URL/FASTI_PUBLIC_URL -- each assertion sets
+  # exactly the variables it means to test and expects the rest to fall
+  # back to fresh defaults, not whatever the caller's environment exported.
+  unset FASTI_API_URL FASTI_PUBLIC_URL
   local old_rundir="$RUNDIR"
   local ceiling_mib=""
   local exec_comm=""
