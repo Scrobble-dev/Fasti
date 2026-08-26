@@ -254,6 +254,37 @@ export interface WorkbenchHost {
   ): Promise<ProviderSearchCandidate[]>;
   clearSearchCache?(): void;
   getSearchCacheSize?(): number;
+  listReviews?(): Promise<ReviewItem[]>;
+  resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
+}
+
+export interface ReviewItem {
+  readonly review_item_id: string;
+  readonly observation_id: string;
+  readonly current_interpretation_id: string;
+  readonly status: "open" | "deferred" | "resolved";
+  readonly candidate_record_ids: string[];
+}
+
+export type ReviewResolutionTargetInput =
+  { kind: "existing"; value: string } | { kind: "new"; value: string };
+
+export interface ExternalIdentifierClaimInput {
+  readonly namespace: string;
+  readonly grain: string;
+  readonly value: string;
+}
+
+export interface ResolveReviewInput {
+  readonly review_item_id: string;
+  readonly target: ReviewResolutionTargetInput;
+  readonly identifiers: ExternalIdentifierClaimInput[];
+}
+
+export interface ResolveReviewOutcome {
+  readonly review_item_id: string;
+  readonly record_id: string;
+  readonly interpretation_id: string;
 }
 
 export interface OidcConfiguration {

@@ -437,8 +437,8 @@
     <div>
       <h1 class="view-title">Settings & Studio</h1>
       <p class="view-subtitle">
-        Configure metadata API keys, appearance themes, media server connectors,
-        and security.
+        Configure available metadata providers, network access, appearance, and
+        navigation. Unavailable sections say so.
       </p>
     </div>
   </header>
@@ -1492,8 +1492,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Personal Access Tokens (PAT)</h2>
           <p class="pane-desc">
-            Generate cryptographically verified Bearer tokens for scripts and
-            devices.
+            Token creation and revocation are not available in this build. The
+            disabled controls show the planned scope model.
           </p>
 
           <!-- New Token Form -->

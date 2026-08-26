@@ -1,12 +1,19 @@
 # Fasti External Harness Context Save
 
-**Status:** Dated Handoff Snapshot
-**Date:** 2026-08-25  
-**Audience:** Antigravity, Claude, Codex, or any autonomous coding harness picking up Fasti in a new conversation  
-**Repository:** `Scrobble-dev/Fasti`  
-**Integration Branch:** `dev`  
-**Active B4 PR:** #44 (`codex/b4-durable-bootstrap`)  
-**Canonical Evergreen Reference:** [`FASTI_MASTER_INTEGRATOR_HANDOFF.md`](FASTI_MASTER_INTEGRATOR_HANDOFF.md)
+> Status correction, verified 2026-08-25: this dated context save originally overstated B6 and B7. Current source contains application-level payload converters and in-memory conformance models. Production `fastid` has no Plex or Jellyfin webhook routes, MPRIS D-Bus observer, mDNS discovery, Nuvio pairing endpoint, Nuvio transport, or callers for these converters. Use the master handoff, capability ledger, current source, and live checks for current status.
+
+**Date:** 2026-08-25T08:10:00Z  
+**Branch:** `dev`  
+**Milestone Disposition:**
+- B0 (Ledger & Truth): Complete
+- B1 (Hardware Envelopes & Verifiable Receipts): Complete (PR #36 merged into `dev` at `6e18c18a`)
+- B2 (Namespace Governance): Branch `codex/b2-namespace-definition` verified against `dev`
+- B3 (Portability Archive v1 & Restore): Complete (PR #35 merged into `dev` at `fd6bdd60`)
+- B4 (UI / Fasti Workbench): merged into `dev` via PR #58 and PR #59 on 2026-08-26; truthful empty-state baseline, no mock data
+- B5 (Metadata Resolution & Claims): Single-pass $O(1)$ space optimization implemented in PR #39
+- B6 (Multi-Client Conformance & Ingest): source-neutral archetype fixtures and Plex, Jellyfin/Emby, and Linux MPRIS payload converters exist; production transports are absent
+- B7 (Nuvio Deep Integration): application models cover observation, replay, state-delta, and catalog behavior; production pairing, persistence, transport, and Nuvio client work are absent
+- B8 (Packaging & Platform Readiness): Clean compilation and zero-network reproducible contract verification
 
 This file is a historical snapshot. Do not use its PR, branch, or next-step statements as current instructions. Verify live source, pull requests, and exact-head evidence first.
 
@@ -14,54 +21,24 @@ This file is a historical snapshot. Do not use its PR, branch, or next-step stat
 
 ## 1. Executive Summary & Status
 
-Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in PR #44. The implementation candidate provides:
+- `crates/fasti-application/src/nuvio.rs`: `NuvioPlaybackSession`, `NuvioOutbox`, `NuvioWatchedState`, `NuvioChangeDelta`, `NuvioStateSyncEngine`, `NuvioCatalogDescriptor`, `NuvioCatalogItem`, `NuvioCatalogProjectionStore`.
+- `crates/fasti-application/src/ingest.rs`: `PlexWebhookPayload`, `JellyfinWebhookPayload`, `MprisMediaEvent`.
+- `crates/fasti-application/tests/b7_nuvio_observations.rs`: 14 feature-gated conformance tests.
+- `crates/fasti-application/tests/b6_ingest_webhooks.rs`: 16 feature-gated converter and conformance tests.
 
-1. **Full Fasti Workbench Application** in `@fasti/ui` (Svelte 5 runes) and `apps/web` (Vite container).
-2. **Multi-Domain Tracking Interfaces**: Chronicle timeline, Library catalogue (_Movies, TV, Anime, Books, Games_), Media Details with claims provenance, Review Inbox (Reconciliation), Up Next & Calendar schedule, Connections availability, and Settings & Studio. Controls without host commands remain disabled.
-3. **Desktop Host & Container Runtime**: Tauri v2 shell with OS Keyring integration in `apps/desktop/src-tauri` and rootless OCI container (`localhost/fasti:test`) running at **1.35 MiB RSS**.
-4. **Verification Gates**: use `PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr` and `cargo xtask contract verify --locked` at the current head. A dated result does not establish merge readiness for a later head.
+Run these suites explicitly:
+
+```bash
+cargo test --locked -p fasti-application --features conformance-fixture --test b6_ingest_webhooks
+cargo test --locked -p fasti-application --features conformance-fixture --test b7_nuvio_observations
+```
+- `docs/architecture/nuvio-integration.md`: Architectural specification and invariant documentation.
 
 ---
 
-## 2. Pull Request & Branch Topology (2026-08-25)
+## 2. Pull Request & Branch Topology (2026-08-26)
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                              GitHub Remote                             │
-│                           Scrobble-dev/Fasti                           │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-       ┌────────────────────────────┼────────────────────────────┐
-       ▼                            ▼                            ▼
-┌──────────────┐             ┌──────────────┐             ┌──────────────┐
-│  Branch: dev │             │ PR #20: dev  │             │ PR #44: B4   │
-│  (Integration│             │      to      │             │  Workbench   │
-│   B5-B7 merged│            │   release    │             │  Bootstrap   │
-└──────┬───────┘             └──────────────┘             └──────┬───────┘
-       │                                                         │
-       ├────────────────────────────┐                            │
-       ▼                            ▼                            │
-┌──────────────┐             ┌──────────────┐                    │
-│ Branch: B2   │             │ PR #35: B3   │                    │
-│  Namespace   │             │  Portability │                    │
-│  Definition  │             │   (Merged)   │                    │
-└──────────────┘             └──────────────┘                    │
-                                                                 │
-                                                                 ▼
-                                                  ┌──────────────────────────────┐
-                                                  │ @fasti/ui & apps/web & dev.sh│
-                                                  │ Svelte 5 + Tauri v2 + Podman │
-                                                  └──────────────────────────────┘
-```
-
-### Active Branches & Worktrees:
-
-1. **`dev`**:
-   - Integration branch containing B0, B1, B3, B5, B6, and B7 work.
-2. **`codex/b4-durable-bootstrap` (PR #44)**:
-   - Contains the full B4 implementation, Svelte 5 `@fasti/ui` suite, `apps/web`, `apps/desktop`, `scripts/dev.sh`, and OCI containerfile.
-3. **`codex/b2-namespace-definition` (`.codex/worktrees/b2-namespace-definition`)**:
-   - Contains B2 identity namespace registry and governance; ready to open once B4 lands.
+`dev` is the integration branch (B0, B1, B3, B4, B5, B6, B7 application-level work). `release` only advances via a deliberate promotion PR (last one: #20) and lags `dev` significantly — always diff against `origin/dev` for current status, not `release`.
 
 ---
 
@@ -73,10 +50,10 @@ Fasti Milestone **B4 (Durable Bootstrap & Fasti Workbench)** is under review in 
 | **B1**         | Software contracts, OpenAPI 3.1, AsyncAPI 3.1, JSON-LD, SDK   | **IN PROGRESS** | Contract receipt only; aggregate exact-head evidence was not recorded |
 | **B2**         | Namespace definition registration & identity governance       | **READY**       | Branch `codex/b2-namespace-definition`                                |
 | **B3**         | Portability workspace manifest & JCS verification             | **MERGED**      | PR #35 in `dev`                                                       |
-| **B4**         | Durable bootstrap, Fasti Workbench UI, Tauri v2, Podman       | **IN REVIEW**   | PR #44 (`codex/b4-durable-bootstrap`)                                 |
+| **B4**         | Durable bootstrap, Fasti Workbench UI (empty-state), network settings | **MERGED** | PR #58, PR #59 in `dev`                                        |
 | **B5**         | Metadata resolution and claims                                | **MERGED**      | PR #39 in `dev`                                                       |
-| **B6**         | Ingestion webhooks & desktop observer (Plex, Jellyfin, MPRIS) | **MERGED**      | `crates/fasti-application/src/ingest.rs`                              |
-| **B7**         | NuvioTV sync engine, cursor outbox, and catalog projections   | **MERGED**      | `crates/fasti-application/src/nuvio.rs`                               |
+| **B6**         | Ingestion webhooks & desktop observer (Plex, Jellyfin, MPRIS) | **APPLICATION-LEVEL ONLY** | `crates/fasti-application/src/ingest.rs`; no production transports |
+| **B7**         | NuvioTV sync engine, cursor outbox, and catalog projections   | **APPLICATION-LEVEL ONLY** | `crates/fasti-application/src/nuvio.rs`; no production pairing/transport |
 | **B8**         | Release candidate stabilization & public gateway              | **PLANNED**     | Release gate scripts ready                                            |
 | **Goldilocks** | Custom fields, WebAuthn, PAT tokens, Floppy/Yamtrack import   | **BLUEPRINT**   | `fasti_batteries_included_goldilocks_plan.md`                         |
 
@@ -131,8 +108,8 @@ pnpm --filter @fasti/ui typecheck && pnpm --filter @fasti/web typecheck
   - [`packages/ui/src/media-detail-view.svelte`](../../packages/ui/src/media-detail-view.svelte) — Media details, identity claims, and episode checklists.
   - [`packages/ui/src/reconciliation-view.svelte`](../../packages/ui/src/reconciliation-view.svelte) — Review Inbox and candidate diffs.
   - [`packages/ui/src/settings-view.svelte`](../../packages/ui/src/settings-view.svelte) — Settings and capability availability.
-- **Merged integration capabilities**:
-  - [`crates/fasti-application/src/ingest.rs`](../../crates/fasti-application/src/ingest.rs) — Plex, Jellyfin/Emby, and MPRIS observation adapters.
+- **Application-level capabilities (not yet production-wired)**:
+  - [`crates/fasti-application/src/ingest.rs`](../../crates/fasti-application/src/ingest.rs) — Plex, Jellyfin/Emby, and MPRIS observation converters.
   - [`crates/fasti-application/src/nuvio.rs`](../../crates/fasti-application/src/nuvio.rs) — Nuvio observation ingress, outbox, watched-state sync, and catalog projections.
-  - [`crates/fasti-application/tests/b6_ingest_webhooks.rs`](../../crates/fasti-application/tests/b6_ingest_webhooks.rs) and [`b7_nuvio_observations.rs`](../../crates/fasti-application/tests/b7_nuvio_observations.rs) — Integration evidence.
+  - [`crates/fasti-application/tests/b6_ingest_webhooks.rs`](../../crates/fasti-application/tests/b6_ingest_webhooks.rs) and [`b7_nuvio_observations.rs`](../../crates/fasti-application/tests/b7_nuvio_observations.rs) — Conformance evidence.
   - [`docs/architecture/nuvio-integration.md`](../architecture/nuvio-integration.md) — B7 architecture and invariants.

@@ -34,6 +34,7 @@ backups/
 .env
 .env.local
 .env.*.local
+.dev-logs/
 
 # OS & Editor artifacts
 .DS_Store

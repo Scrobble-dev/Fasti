@@ -1,13 +1,14 @@
-//! Neutral player webhook and desktop scrobbler ingestion adapters.
+//! Neutral payload converters for player webhooks and desktop observations.
 //!
 //! # Product Boundary
 //!
 //! **Fasti records. Players play.**
 //!
-//! Fasti accepts media observations from any player or scrobbling companion
-//! (Plex, Jellyfin, Emby, MPRIS Linux/macOS/Windows desktop players).
-//! These adapters map vendor-specific payloads into canonical [`AcceptObservationCommand`]
-//! instances with deterministically derived operation IDs.
+//! These types map Plex, Jellyfin/Emby, and Linux MPRIS-shaped input into
+//! canonical [`AcceptObservationCommand`] values with deterministic operation
+//! IDs. This module does not expose webhook routes, listen to D-Bus, discover
+//! services, or dispatch commands to a production store. A transport adapter
+//! must supply authenticated access and a stable observation time.
 
 use crate::{
     derive_deterministic_evidence_digest as derive_ingest_evidence_digest,
@@ -23,7 +24,7 @@ use serde::{Deserialize, Serialize};
 /// oversized or hostile payload cannot force unbounded claim-construction work.
 const MAX_INGEST_GUIDS: usize = 16;
 
-/// Assembles the canonical command shared by every ingest adapter, once the
+/// Assembles the canonical command shared by every payload converter, once the
 /// caller has built the source-specific lexeme and identity claims.
 fn build_ingest_command(
     access: RequestAccessContext,
@@ -285,7 +286,7 @@ impl JellyfinWebhookPayload {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Desktop MPRIS & Scrob Companion Adapter
+// 3. Linux MPRIS event converter
 // ---------------------------------------------------------------------------
 
 /// Normalized representation of an MPRIS Linux/Desktop media player event.

@@ -109,6 +109,16 @@ publication. Settings does not present an unconsumed listener control.
 Desktop builds still require an explicit, non-empty `FASTI_DATA_ROOT`. Android
 uses an explicit `FASTI_DATA_ROOT` when the launch environment supplies one;
 otherwise it uses the app's sandbox data directory. The explicit override wins.
+Before SQLite opens, Android retains the physical data-root directory and takes
+the same exclusive `fasti.lock` used by the daemon. The Android lock uses
+`openat` with no symbolic-link following so it works on kernels that do not
+provide Linux B3's stronger `openat2` restore primitives. Android does not
+activate B3 restore or startup recovery. Those paths remain Linux-only until
+they have separate platform evidence. Fixed kernel directories and evidence
+prefixes are opened relative to retained directory descriptors without
+following symbolic links. This Android path is implemented in source. It has
+not passed an Android NDK build or device test in this worktree, so Android
+package support is not yet verified.
 
 ## Provider network policy
 
@@ -130,6 +140,21 @@ authorized and sends it as the sensitive `X-Goog-Api-Key` header. Discover
 returns at most ten neutral book candidates and does not create or modify a
 local media record. The browser does not receive credentials or execute
 provider requests.
+
+An app-managed provider credential is scoped to the identity of the opened
+physical Fasti data root. Fasti derives that identity from the retained root
+descriptor's device and inode plus an owner-only random nonce persisted in
+`fasti.lock`, not from the configured path. The nonce is written and synced
+before SQLite opens. Renaming or reopening a root keeps the credential account.
+Replacing that path with a different root uses a different account, including
+if the filesystem later reuses an inode.
+All profiles on that local node share it. Another data root under the same
+operating-system account uses a different credential-store account, and Fasti
+does not read, replace, delete, or use the other root's entry. Environment
+credentials remain process-managed. Fasti does not import or delete an older
+unscoped credential because that could move a secret across node boundaries.
+Profile-private provider credentials remain a later capability that requires a
+real authenticated profile context.
 
 ## Contract disposition
 

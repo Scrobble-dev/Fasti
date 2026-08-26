@@ -1,10 +1,14 @@
-# B7: Nuvio Integration Architecture
+# B7: Nuvio Integration Design
+
+## Current status
+
+This document describes the target design and the application-level conformance model. Production pairing, Nuvio client code, durable client storage, network transport, daemon ingest routes, and shared catalog publication do not exist. The checked-in `NuvioOutbox` is process-local and non-durable.
 
 ## 1. Constitutional Boundary
 
 **Fasti records. Players play.**
 
-Fasti does not decode, transcode, manage streams, or function as a media player. Nuvio is an external player and media environment that integrates with Fasti strictly through public, authenticated application capabilities.
+Fasti does not decode, transcode, manage streams, or function as a media player. A future Nuvio integration must use public, authenticated application capabilities.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -13,7 +17,7 @@ Fasti does not decode, transcode, manage streams, or function as a media player.
 │  │ Playback Engine │  │ Local Session│  │   Outbox   │  │
 │  └────────┬────────┘  └──────┬───────┘  └─────┬──────┘  │
 └───────────┼──────────────────┼────────────────┼─────────┘
-            │                  │                │ (Durable queue)
+            │                  │                │ (Process-local, non-durable)
             │ (Playback        ▼                │
             │  Unblocked) ┌─────────────────────┴─────────┐
             └────────────►│ Canonical Observation Accept  │
@@ -33,7 +37,7 @@ Fasti does not decode, transcode, manage streams, or function as a media player.
    Playback within Nuvio must never depend on Fasti availability or network connectivity. If the Fasti daemon is unreachable, crashing, or returning errors, Nuvio continues playback seamlessly without UI interruption or lag, buffering observations into its client-side outbox.
 
 2. **No Direct Storage or Schema Coupling:**
-   Nuvio does not access Fasti SQLite files directly or share internal SQLite handles. All interaction occurs through canonical application ports and HTTP/SSE/gRPC capability contracts.
+   A production adapter must not access Fasti SQLite files directly or share internal SQLite handles. It must use canonical application ports and governed transport contracts.
 
 3. **Deterministic Operation Derivation & Replay Safety:**
    Every observation maps to a deterministic operation ID:
@@ -49,30 +53,18 @@ Fasti does not decode, transcode, manage streams, or function as a media player.
 
 ## 3. Programme Lanes
 
-The Nuvio integration is partitioned into three strictly sequenced lanes:
+The target Nuvio integration is partitioned into three strictly sequenced lanes. Current code models parts of each lane for conformance only:
 
-- **B7a — Observation Ingress & Pairing (Implemented):**
-  - Device pairing and client enrollment with workspace/profile attribution.
-  - Periodic progress heartbeats and completion events.
-  - Durable client-side outbox with FIFO buffering and transient-failure
-    requeue on reconnect (no backoff scheduling yet -- `drain()` is one
-    attempt per call, left to the caller to space out).
-  - Transparent error visibility with RFC 9457 structured problems.
-- **B7b — Two-Way Watched State Synchronization (Implemented):**
-  - Watched-state snapshots and ordered change feeds via `NuvioStateSyncEngine`.
-  - Cursor-based delta synchronization and self-origin loop prevention.
-  - Reconciliation workbench diagnostics remain unimplemented.
-- **B7c — Shared Catalogs & Media Metadata (Implemented):**
-  - Collection projections via `NuvioCatalogProjectionStore`.
-  - Stremio/Nuvio catalog publication and provider resolution remain
-    unimplemented; only the local projection/filter surface exists.
+- **B7a — Observation ingress and pairing:** application models cover progress, completion, bounded FIFO retry, and typed problems. Pairing, persistence, and transport are absent.
+- **B7b — Two-way watched-state synchronization:** `NuvioStateSyncEngine` models ordered deltas and self-origin suppression. Change-feed transport and reconciliation UI are absent.
+- **B7c — Shared catalogs and media metadata:** `NuvioCatalogProjectionStore` models local projection and filtering. Publication and provider resolution are absent.
 
 ---
 
-## 4. B7a Operational Flow
+## 4. B7a Conformance Flow
 
 ### Heartbeat Progression
-During playback, Nuvio dispatches an observation command every 5–10 minutes:
+The conformance model can build a periodic observation command:
 ```rust
 let mut session = NuvioPlaybackSession::new("session-42", Grain::Film, "Title", clues, 7200);
 let cmd = session.tick_heartbeat(access, 600, observed_at);
@@ -80,4 +72,4 @@ outbox.dispatch_or_buffer(&port, cmd);
 ```
 
 ### Outbox Buffering & Drain
-When offline, all generated commands are queued in FIFO order in `NuvioOutbox`. Upon link re-establishment, `outbox.drain(&port)` drains all entries against the active daemon. Fasti commits fresh entries and deduplicates replayed entries idempotently.
+The process-local `NuvioOutbox` queues generated commands in FIFO order. `outbox.drain(&port)` exercises a caller-supplied application port. It does not contact a daemon or survive a process restart.

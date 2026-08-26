@@ -1,9 +1,8 @@
 use crate::crypto::{encode_hex, sha256_reader};
 use crate::kernel::{
-    authorize_connection, authorize_transaction, fsync_directory, harden_private_regular_file,
-    map_sql, now, prepare_private_directory, problem, reject_unsafe_existing_file, timestamp,
-    SqliteKernel, MAX_CONCURRENT_UPLOADS, MAX_EVIDENCE_BYTES, MAX_PREPARED_EVIDENCE_BYTES,
-    MAX_TEMP_EVIDENCE_BYTES,
+    authorize_connection, authorize_transaction, harden_private_regular_file, map_sql, now,
+    problem, timestamp, SqliteKernel, MAX_CONCURRENT_UPLOADS, MAX_EVIDENCE_BYTES,
+    MAX_PREPARED_EVIDENCE_BYTES, MAX_TEMP_EVIDENCE_BYTES,
 };
 use fasti_application::{
     ApplicationResult, CapabilityKey, EvidenceUploadPort, EvidenceUploadRequest,
@@ -241,47 +240,17 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
         }
 
         let relative_path = relative_evidence_path(&digest_hex);
-        let parent =
-            self.kernel
-                .inner
-                .current_root
-                .join(relative_path.parent().ok_or_else(|| {
-                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-                })?);
-        let parent_created = match fs::symlink_metadata(&parent) {
-            Ok(_) => false,
-            Err(error) if error.kind() == ErrorKind::NotFound => true,
-            Err(_) => {
-                return Err(Box::new(FastiProblem::storage_unavailable(
-                    capability,
-                    correlation_id,
-                )))
-            }
-        };
-        prepare_private_directory(&parent).map_err(|_| {
-            Box::new(FastiProblem::storage_unavailable(
-                capability,
-                correlation_id,
-            ))
-        })?;
-        if parent_created {
-            fsync_directory(&self.kernel.inner.payload_root).map_err(|_| {
+        let (prefix_directory, destination) = self
+            .kernel
+            .prepare_evidence_destination(&digest_hex)
+            .map_err(|_| {
                 Box::new(FastiProblem::storage_unavailable(
                     capability,
                     correlation_id,
                 ))
             })?;
-        }
-        let destination = self.kernel.inner.current_root.join(&relative_path);
         match fs::hard_link(&self.temp_path, &destination) {
             Ok(()) => {
-                if harden_private_regular_file(&destination).is_err() {
-                    let _ = fs::remove_file(&destination);
-                    return Err(Box::new(FastiProblem::storage_unavailable(
-                        capability,
-                        correlation_id,
-                    )));
-                }
                 fs::remove_file(&self.temp_path).map_err(|_| {
                     Box::new(FastiProblem::storage_unavailable(
                         capability,
@@ -290,12 +259,12 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
                 })?;
             }
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                reject_unsafe_existing_file(&destination).map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-                })?;
-                let existing = File::open(&destination).map_err(|_| {
-                    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
-                })?;
+                let existing = self
+                    .kernel
+                    .open_evidence_file_at(&prefix_directory, &digest_hex)
+                    .map_err(|_| {
+                        Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+                    })?;
                 let (existing_digest, existing_size) = sha256_reader(existing).map_err(|_| {
                     Box::new(FastiProblem::integrity_failed(capability, correlation_id))
                 })?;
@@ -319,7 +288,7 @@ impl EvidenceUploadSession for SqliteEvidenceUpload {
                 )))
             }
         }
-        fsync_directory(&parent).map_err(|_| {
+        prefix_directory.sync_all().map_err(|_| {
             Box::new(FastiProblem::storage_unavailable(
                 capability,
                 correlation_id,
