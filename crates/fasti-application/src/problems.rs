@@ -457,9 +457,15 @@ impl ProblemCode {
     }
 
     pub const fn contract_state(self) -> ContractState {
-        match self.introduced_in() {
-            CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
-            CapabilityBody::B2 | CapabilityBody::B3 => ContractState::Reserved,
+        match self {
+            Self::AlreadyInitialized
+            | Self::BootstrapClosed
+            | Self::IntegrityFailed
+            | Self::StorageUnavailable => ContractState::Finalized,
+            _ => match self.introduced_in() {
+                CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
+                CapabilityBody::B2 | CapabilityBody::B3 => ContractState::Reserved,
+            },
         }
     }
 }
@@ -915,18 +921,24 @@ mod tests {
     }
 
     #[test]
-    fn later_problem_contracts_remain_reserved_until_their_body_activates() {
+    fn only_activated_problem_contracts_are_finalized() {
         for code in [
             ProblemCode::AlreadyInitialized,
-            ProblemCode::AuthenticationFailed,
             ProblemCode::BootstrapClosed,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StorageUnavailable,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::B2);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+        }
+
+        for code in [
+            ProblemCode::AuthenticationFailed,
             ProblemCode::CursorExpired,
             ProblemCode::EvidenceNotFound,
             ProblemCode::IdentityConflict,
-            ProblemCode::IntegrityFailed,
             ProblemCode::RecordNotFound,
             ProblemCode::ReviewNotFound,
-            ProblemCode::StorageUnavailable,
             ProblemCode::UnsupportedListener,
         ] {
             assert_eq!(code.introduced_in(), CapabilityBody::B2);

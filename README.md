@@ -19,7 +19,7 @@
 
 <br/>
 
-[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b3-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b4-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 <br/>
 
@@ -39,27 +39,28 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, product web application, desktop application, import adapter, replication service, or supported installation exists yet. A pre-production browser harness renders only the implemented health capability for interface QA. It is not packaged, deployed, or evidence that B4 has begun. B0 and the B1 software gates have reviewed evidence. B2 local-kernel and B3 correction/portability implementations are staged behind internal application ports for review. They are not mounted by the production daemon or CLI, their public surfaces remain reserved, and no B2 or B3 milestone or release claim is made. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
+This repository is an engineering baseline, not a supported public release. No published container, package, product web application, desktop application, import adapter, replication service, or supported installation exists yet. The production daemon can construct the SQLite kernel for one-time node initialization and first-client enrollment when an operator supplies an explicit data root and binds to loopback. A pre-production browser harness renders only the implemented health capability for interface QA. Unpackaged desktop review code remains behind trusted-host setup. Neither interface is deployed or evidence that B4 has begun. Other B2 local-kernel and B3 correction/portability paths remain staged behind internal application ports for review. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
 
 The production daemon deliberately exposes only behavior it can prove:
 
-| Surface                                 | Current state                                                                                                                                            |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document                                                                                 |
-| B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability  |
-| B2 local kernel                         | Implemented behind application ports and SQLite/filesystem adapters for review; not constructed by `fastid`, not a public route, and not a release claim |
-| B3 correction and portability           | Implemented behind application ports and Linux SQLite/filesystem adapters for review; not mounted by `fastid` or `fasti` and not a release claim         |
-| `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                           |
-| `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                 |
-| `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                         |
-| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                        |
-| Product web UI                          | Not implemented; B4 owns the approved Tabler-based media interface                                                                                       |
-| Desktop packaging                       | Not implemented; B8 owns packaged application work                                                                                                       |
-| Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                      |
+| Surface                                 | Current state                                                                                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health`                    | Implemented in `fastid` and described by the production OpenAPI document, which covers health and durable setup routes                                  |
+| One-time node initialization/enrollment | Durable production routes are mounted only for a loopback bind with an explicit `FASTI_DATA_ROOT`; one-time secrets remain in JSON bodies               |
+| B1 conformance HTTP and SSE             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability |
+| B2 local kernel                         | Constructed by `fastid` only for durable local setup; observation, identity, evidence, receipt, and review operations remain internal                   |
+| B3 correction and portability           | Implemented behind application ports and Linux SQLite/filesystem adapters for review; not mounted by `fastid` or `fasti` and not a release claim        |
+| `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                          |
+| `fasti capability list/show`            | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                |
+| `fasti export`, `restore`, and `verify` | Reserved for B3; exit nonzero and change no data                                                                                                        |
+| Browser QA harness                      | Local-only health-contract surface for responsive, theme, keyboard, and accessibility evidence; not a product UI or B4 activation                       |
+| Product web UI                          | Not implemented; B4 owns the approved Tabler-based media interface                                                                                      |
+| Desktop interface                       | Trusted-host review candidate only; unavailable commands remain disabled and B8 still owns supported packaging and release evidence                     |
+| Public images and binaries              | Disabled until the B8 readiness gate and an explicit release action                                                                                     |
 
 The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
 
-The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, identity records, observations, review state, and durable receipts behind application ports. These paths are exercised by the Rust suites but remain unavailable through the production composition root. Finalized B1 problems remain the public contract; B2-only authentication, bootstrap, integrity, storage, cursor, evidence, identity, and review failures stay staged until their owning public surfaces are activated.
+The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, identity records, observations, review state, and durable receipts behind application ports. Only node initialization and first-client enrollment are available through the production composition root. The other paths are exercised by the Rust suites but remain unavailable through production HTTP. Their problems stay staged until the owning public surfaces are activated.
 
 ## Constitution
 
@@ -74,21 +75,22 @@ The controlling engineering rules are in [the Fasti constitution](docs/constitut
 
 See the [glossary](docs/glossary.md), [capability ledger](docs/capability-ledger.md), and [Definition of Done](docs/definition-of-done.md) for the shared vocabulary and gates.
 
-## Current B0-B3 review architecture
+## Current B0-B4 review architecture
 
 The active workspace has an inward-facing ownership spine and executable B1 contract surfaces:
 
 ```text
-apps/fastid          production, health-only daemon composition root
+apps/fastid          production health plus explicit loopback durable-setup composition root
 apps/web             pre-production health and interface-quality harness; not packaged or deployed
+apps/desktop         trusted-host desktop review candidate; not packaged or released
 crates/fasti-domain  typed IDs, time values, and domain invariants
 crates/fasti-application
                      use cases, authorization, B1 fixture behavior, B2 ports, and typed problems
 crates/fasti-contracts
                      shared public DTOs and generated capability identifiers
-crates/fasti-api     production Utoipa health API plus a separately gated loopback fixture
+crates/fasti-api     production Utoipa health/setup API plus a separately gated loopback fixture
 crates/fasti-cli     local capability discovery and explicit B3 nonzero guards
-crates/fasti-store   B2 kernel plus staged B3 correction, export, verify, restore, and recovery adapters; not production-mounted
+crates/fasti-store   B2 kernel mounted for setup; other B2 and B3 adapters remain staged
 
 contracts            authoritative registry, authored semantics, examples, and generated artifacts
 packages/sdk         generated typed TypeScript HTTP/SSE client
@@ -98,7 +100,7 @@ packages/ui          presentation-only health status component; no domain or ret
 xtask                deterministic generation and fail-closed verification
 ```
 
-Player, replication, connector, provider-keyed projection, desktop, and placeholder catalogue packages are not active workspace boundaries. The browser harness is evidence tooling over the generated `system.health` SDK binding; it does not activate a product presentation boundary or later capability. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
+Player, replication, connector, and provider-keyed projection packages are not active workspace boundaries. The browser harness is evidence tooling over the generated `system.health` SDK binding; it does not activate a product presentation boundary or later capability. The B4 presentation and desktop packages are review candidates, not supported runtime capabilities. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. B2 extends the existing domain and application boundaries instead of creating provider-specific paths or a second rule set.
 
 Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. An occupied loopback port can recover to an OS-assigned port; public and wildcard listeners fail closed. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately. See [network configuration](docs/network-configuration.md) for custom domains, `.internal`, system CA trust, public URLs, loopback aliases, Docker, Podman, and collision behavior.
 
@@ -106,7 +108,7 @@ Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an e
 
 B1 has a machine-readable capability registry as the authoritative public ledger. Deterministic generation projects that meaning into:
 
-- a production OpenAPI 3.1 document generated from the one mounted health handler;
+- a production OpenAPI 3.1 document covering health and durable setup routes;
 - a separate OpenAPI 3.1 document for real, feature-gated conformance handlers and shared public DTOs;
 - AsyncAPI 3.x transport binding for the `receipt.stream` SSE channel;
 - JSON Schema 2020-12 for public payloads;
@@ -147,7 +149,15 @@ curl --fail --silent http://127.0.0.1:8420/api/v1/health
 
 The exact response is `{"status":"healthy","version":"0.1.0"}`.
 
-That proves only the health-only production composition root. Stop it with `Ctrl-C`. It does not start the B1 conformance fixture or imply persistence, observation acceptance, installation, or release readiness.
+Without `FASTI_DATA_ROOT`, that proves only the health-only production composition root. To activate durable one-time setup, bind to loopback and supply a private data directory:
+
+```bash
+FASTI_LISTEN=127.0.0.1:8420 \
+FASTI_DATA_ROOT=/path/to/private/fasti-data \
+cargo run --locked -p fastid
+```
+
+The production OpenAPI document defines the initialization and enrollment requests. The TypeScript SDK exposes them as `initializeDurableNode` and `enrollDurableFirstClient`. Keep the returned proof and credential out of logs, URLs, shell history, and browser storage. A non-loopback bind remains health-only even when a data root is present. Stop the daemon with `Ctrl-C`. This does not activate observation acceptance, identity review, portability, installation, or release readiness.
 
 The scoped launcher provides the same health-only native path and an optional Podman path:
 
@@ -159,7 +169,7 @@ FASTI_PORT=19420 ./scripts/dev.sh --docker
 ./scripts/dev.sh --stop
 ```
 
-`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. `FASTI_PUBLIC_URL` records a separate reverse-proxy origin and can omit the port when HTTPS uses port 443. `FASTI_PORT_FALLBACK=auto|fail` controls safe loopback collision recovery. Container mode uses the documented `fasti:b0` image, a 192 MiB memory ceiling, and no additional swap; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
+`FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and health-probe URL. `FASTI_PUBLIC_URL` records a separate reverse-proxy origin and can omit the port when HTTPS uses port 443. Port collisions fail closed by default; set `FASTI_PORT_FALLBACK=auto` to allow safe loopback recovery. Native mode requires a user cgroup v2 scope. Native and container modes read the 192 MiB ceiling from the governed performance budget and disable swap. The canonical benchmark remains the owner of the separate 64 MiB idle measurement. Container mode uses the documented `fasti:b0` image; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
 
 With `fastid` still running on its default port, the local browser QA harness uses that same health contract:
 
@@ -242,7 +252,8 @@ The product interface arrives after the headless contract and local kernel. The 
 - **B1: Executable contract spine** — software surfaces are executable and drift-proof; closure still requires a current aggregate manifest with QA, Tauri, and same-attempt x86_64/aarch64 envelope receipts.
 - **B2: Local kernel** — implementation is present behind internal ports for review; public activation, full milestone evidence, and constrained-hardware qualification remain open.
 - **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
-- **B4 and later** — implement the approved media UI, provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
+- **B4: Product experience** — durable local setup is mounted as a prerequisite; authenticated review APIs and the approved media interface remain open.
+- **B5 and later** — implement provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
 
 Nuvio adaptation does not begin before the B7 provider gate, applicable B8 evidence, and maintainer agreement. See [ROADMAP.md](ROADMAP.md) for the dependency order.
 
@@ -253,11 +264,13 @@ Fasti is an independent, community-driven project under AGPL-3.0-or-later and DC
 ### 🤝 Maintainers & Contributors Wanted
 
 We are intentionally expanding the maintainer team to improve the project's bus factor and code-review coverage:
-* **Co-Maintainers & Reviewers**: We welcome maintainers familiar with async Rust (`axum`, `rusqlite`), Domain-Driven Design, OpenAPI 3.1 / AsyncAPI 3.x schema validation, and Svelte / Tauri presentation.
-* **Good First Issues**: Check out our curated list of [Good First Issues](https://github.com/Scrobble-dev/Fasti/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for well-scoped onboarding tasks with step-by-step instructions and test commands.
-* **Hardware Receipts**: Help us test and benchmark Milestone B1 memory envelopes (<= 64 MiB idle) on diverse physical hardware (Raspberry Pi 5, Intel J4125, Apple Silicon, TV boxes per [#49](https://github.com/Scrobble-dev/Fasti/issues/49) and [#50](https://github.com/Scrobble-dev/Fasti/issues/50)).
+
+- **Co-Maintainers & Reviewers**: We welcome maintainers familiar with async Rust (`axum`, `rusqlite`), Domain-Driven Design, OpenAPI 3.1 / AsyncAPI 3.x schema validation, and Svelte / Tauri presentation.
+- **Good First Issues**: Check out our curated list of [Good First Issues](https://github.com/Scrobble-dev/Fasti/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for well-scoped onboarding tasks with step-by-step instructions and test commands.
+- **Hardware Receipts**: Help us test and benchmark Milestone B1 memory envelopes (<= 64 MiB idle) on diverse physical hardware (Raspberry Pi 5, Intel J4125, Apple Silicon, TV boxes per [#49](https://github.com/Scrobble-dev/Fasti/issues/49) and [#50](https://github.com/Scrobble-dev/Fasti/issues/50)).
 
 To contribute:
+
 1. Browse open [Issues](https://github.com/Scrobble-dev/Fasti/issues) or start a [GitHub Discussion](https://github.com/Scrobble-dev/Fasti/discussions) to align on scope.
 2. Follow [CONTRIBUTING.md](CONTRIBUTING.md) and sign your commits with the [Developer Certificate of Origin](https://developercertificate.org/) (`git commit -s`).
 3. **All active development and pull requests must target the `dev` branch.**

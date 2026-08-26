@@ -1,5 +1,5 @@
-import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { cssVariables } from "@fasti/tokens";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
 import { themeBootstrapScript } from "./src/theme.js";
 

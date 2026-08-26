@@ -64,6 +64,51 @@ test("health omits credentials and returns the exact public contract", async () 
   );
 });
 
+test("durable bootstrap SDK keeps one-time secrets in JSON bodies", async () => {
+  const proof = "a".repeat(64);
+  const credential = "b".repeat(64);
+  const requests = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async (url, init) => {
+      requests.push({
+        url: String(url),
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: JSON.parse(init?.body),
+      });
+      if (String(url).endsWith("/api/v1/node/initialization")) {
+        return new Response(JSON.stringify({ initialization_proof: proof }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ credential_scheme: "Bearer", credential }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const initialized = await client.initializeDurableNode();
+  assert.equal(initialized.initialization_proof, proof);
+  const enrolled = await client.enrollDurableFirstClient({
+    initialization_proof: initialized.initialization_proof,
+  });
+  assert.equal(enrolled.credential, credential);
+
+  assert.deepEqual(requests, [
+    {
+      url: "http://127.0.0.1:8420/api/v1/node/initialization",
+      authorization: null,
+      body: {},
+    },
+    {
+      url: "http://127.0.0.1:8420/api/v1/client-enrollments",
+      authorization: null,
+      body: { initialization_proof: proof },
+    },
+  ]);
+});
+
 test("default fetch keeps the platform receiver", async () => {
   const originalFetch = globalThis.fetch;
   let receiver;
@@ -433,8 +478,10 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "configureListener",
           "constructor",
           "discoverCapabilities",
+          "enrollDurableFirstClient",
           "enrollFirstClient",
           "health",
+          "initializeDurableNode",
           "initializeNode",
           "receiptEvents",
           "replayReceipt",
@@ -603,7 +650,7 @@ test("generated public metadata preserves complete registry and surface disposit
   assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 22);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    7,
+    8,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",

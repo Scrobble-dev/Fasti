@@ -1,14 +1,17 @@
 import {
   B1_CONFORMANCE_OPERATIONS,
+  LOCAL_BOOTSTRAP_OPERATIONS,
   FastiContractParseError,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
   parseCapabilityDiscoveryResponse,
+  parseClientEnrollmentResponse,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
+  parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
   parseReceiptCommittedEvent,
   parseReplayReceiptResponse,
@@ -17,11 +20,13 @@ import {
   type AcceptObservationResponse,
   type CapabilityDiscoveryResponse,
   type CapabilityId,
+  type ClientEnrollmentResponse,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
+  type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
   type ReceiptCommittedEnvelope,
@@ -212,6 +217,52 @@ export class FastiClient {
       retryMode: "safe",
       responseParser: parseHealthResponse,
       responseLabel: "Health response",
+      options,
+    });
+  }
+
+  initializeDurableNode(
+    request: InitializeNodeRequest = {},
+    options: CallOptions = {},
+  ): Promise<NodeInitializationResponse> {
+    const operation = LOCAL_BOOTSTRAP_OPERATIONS.initializeDurableNode;
+    const body = parseOutgoing(
+      parseInitializeNodeRequest,
+      request,
+      "Durable initialize-node request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseNodeInitializationResponse,
+      responseLabel: "Durable initialize-node response",
+      options,
+    });
+  }
+
+  enrollDurableFirstClient(
+    request: EnrollFirstClientRequest,
+    options: CallOptions = {},
+  ): Promise<ClientEnrollmentResponse> {
+    const operation = LOCAL_BOOTSTRAP_OPERATIONS.enrollDurableFirstClient;
+    const body = parseOutgoing(
+      parseEnrollFirstClientRequest,
+      request,
+      "Durable first-client enrollment request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseClientEnrollmentResponse,
+      responseLabel: "Durable first-client enrollment response",
       options,
     });
   }

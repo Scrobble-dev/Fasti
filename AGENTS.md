@@ -5,7 +5,7 @@
 Before planning or implementation, read these in order:
 
 1. [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
-2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md)
+2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md)
 3. [`README.md`](README.md)
 4. [`docs/constitution.md`](docs/constitution.md)
 5. [`docs/definition-of-done.md`](docs/definition-of-done.md)
@@ -63,6 +63,7 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
+- Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
 
@@ -188,4 +189,3 @@ Document:
 - **Zero Runtime Telemetry**: The daemon and client libraries must never include phone-home code, tracking SDKs, or external analytics.
 - **YouTrack Workflow**: Fasti uses YouTrack (`fasti.youtrack.cloud`) for sprint execution, milestone tracking (B0–B8), and hardware receipts. Prefix commit messages and PR titles with YouTrack IDs (`FASTI-###`).
 - **No-Publish Guardrail**: Workflows in `.github/workflows/` must have strictly read-only permissions before Milestone B8 release readiness.
-

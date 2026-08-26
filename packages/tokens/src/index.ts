@@ -10,6 +10,7 @@ export const colors = {
   },
   brand: {
     mark: "#8B2E2A", // Fasti Oxblood
+    gold: "#D4AF37", // Horological Gold
   },
   action: {
     primary: "#1E4FA3", // Chronicle Blue
@@ -55,6 +56,7 @@ export const cssVariables = `
   --fasti-text-primary: ${colors.text.primary};
   --fasti-text-muted: ${colors.text.muted};
   --fasti-brand-mark: ${colors.brand.mark};
+  --fasti-brand-gold: ${colors.brand.gold};
   --fasti-action-primary: ${colors.action.primary};
   --fasti-state-verified: ${colors.state.verified};
   --fasti-state-attention: ${colors.state.attention};

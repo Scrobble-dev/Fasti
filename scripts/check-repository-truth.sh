@@ -2,7 +2,6 @@
 set -euo pipefail
 
 retired_paths=(
-  "apps/desktop"
   "crates/fasti-player"
   "crates/fasti-sync"
   "crates/fasti-connectors"
