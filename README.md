@@ -13,6 +13,7 @@
 
 <br/>
 
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/e754179ea7984bc791ccf4aafe875a25)](https://app.codacy.com/gh/Scrobble-dev/Fasti?utm_source=github.com&utm_medium=referral&utm_content=Scrobble-dev/Fasti&utm_campaign=Badge_Grade)
 [![CI](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml/badge.svg)](https://github.com/Scrobble-dev/Fasti/actions/workflows/ci.yml)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/14234/badge)](https://www.bestpractices.dev/projects/14234)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
