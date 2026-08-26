@@ -120,8 +120,15 @@ setting.
 
 Android sandbox selection, data-root locking, and descriptor-rooted kernel
 directories are implemented in source but are not Android build- or
-device-verified. Do not claim Android package support until the NDK build and
-device evidence pass. B3 restore and startup recovery remain Linux-only.
+device-verified. The Gradle project scaffold
+(`apps/desktop/src-tauri/gen/android/`) and the `io.crates.keyring.Keyring`
+JNI bridge that Android's keyring store calls into are checked in, but
+`cargo tauri android build` has never been run against them — this host has
+no Android SDK, NDK, or JDK. Building for Android requires Java, the Android
+SDK/NDK, and `@tauri-apps/cli` (`npx @tauri-apps/cli@2.11.4 android build`
+from `apps/desktop/src-tauri`, after `pnpm --filter @fasti/web build`). Do not
+claim Android package support until the NDK build and device evidence pass.
+B3 restore and startup recovery remain Linux-only.
 
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
