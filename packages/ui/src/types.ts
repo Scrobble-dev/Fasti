@@ -252,8 +252,7 @@ export interface ReviewItem {
 }
 
 export type ReviewResolutionTargetInput =
-  | { kind: "existing"; value: string }
-  | { kind: "new"; value: string };
+  { kind: "existing"; value: string } | { kind: "new"; value: string };
 
 export interface ExternalIdentifierClaimInput {
   readonly namespace: string;

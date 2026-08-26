@@ -4,12 +4,12 @@ use crate::setup::{DesktopProblem, KEYRING_SERVICE};
 use fasti_application::{
     authorize_outbound, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
 };
+use fasti_store::DataRootIdentity;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::time::Duration;
 use zeroize::Zeroize;
-use fasti_store::DataRootIdentity;
 
 const GOOGLE_BOOKS_PROVIDER: &str = "google-books";
 const GOOGLE_BOOKS_LABEL: &str = "Google Books";
@@ -244,7 +244,9 @@ pub(crate) async fn search(
     parse_candidates(&body)
 }
 
-fn google_books_status(identity: DataRootIdentity) -> Result<ProviderCredentialStatus, DesktopProblem> {
+fn google_books_status(
+    identity: DataRootIdentity,
+) -> Result<ProviderCredentialStatus, DesktopProblem> {
     if environment_is_configured()? {
         return Ok(status(true, CredentialSource::Environment, false));
     }

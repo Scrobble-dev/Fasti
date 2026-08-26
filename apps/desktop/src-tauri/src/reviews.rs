@@ -1,7 +1,5 @@
 use crate::setup::{authenticate, DesktopProblem, SetupSecretStore};
-use fasti_application::{
-    ReviewPort, ReviewQuery, ReviewResolutionTarget, ResolveReviewCommand,
-};
+use fasti_application::{ResolveReviewCommand, ReviewPort, ReviewQuery, ReviewResolutionTarget};
 use fasti_domain::{ExternalIdentifierClaim, Grain, RecordId, RequestCorrelationId, ReviewItemId};
 use fasti_store::SqliteKernel;
 use serde::{Deserialize, Serialize};
@@ -96,9 +94,9 @@ pub(crate) fn resolve_review(
 
     let target = match input.target {
         ReviewResolutionTargetInput::Existing(raw) => {
-            let record_id: RecordId = raw
-                .parse()
-                .map_err(|_| DesktopProblem::configuration("The candidate record ID is malformed."))?;
+            let record_id: RecordId = raw.parse().map_err(|_| {
+                DesktopProblem::configuration("The candidate record ID is malformed.")
+            })?;
             ReviewResolutionTarget::Existing(record_id)
         }
         ReviewResolutionTargetInput::New(raw) => {
@@ -113,10 +111,9 @@ pub(crate) fn resolve_review(
         .identifiers
         .into_iter()
         .map(|claim| {
-            let grain: Grain = claim
-                .grain
-                .parse()
-                .map_err(|_| DesktopProblem::configuration("An identifier's media grain is not recognized."))?;
+            let grain: Grain = claim.grain.parse().map_err(|_| {
+                DesktopProblem::configuration("An identifier's media grain is not recognized.")
+            })?;
             ExternalIdentifierClaim::try_new(claim.namespace, grain, claim.value)
                 .map_err(|_| DesktopProblem::configuration("An identifier claim is invalid."))
         })
