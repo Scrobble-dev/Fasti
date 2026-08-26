@@ -2,12 +2,17 @@
 # Fasti Local Development Launcher
 #
 # Usage:
-#   ./scripts/dev.sh             # Start the native daemon
+#   ./scripts/dev.sh             # Start the native daemon (+ web, if present)
 #   ./scripts/dev.sh --podman    # Start Fasti in a scoped Podman container
 #   ./scripts/dev.sh --docker    # Start Fasti in a scoped Docker container
 #   ./scripts/dev.sh --status    # Check this worktree's daemon and API health
 #   ./scripts/dev.sh --stop      # Stop this worktree's daemon or container
+#   ./scripts/dev.sh --open      # Open the web UI, or the API health check
 #   ./scripts/dev.sh --self-test # Verify scoped process cleanup
+#
+# apps/web (the Svelte health/interface-quality harness) only exists on
+# worktrees checked out at a branch that carries it -- not every worktree
+# has it, so this is detected at runtime rather than assumed.
 #
 set -euo pipefail
 
@@ -17,6 +22,9 @@ DATADIR="$PROJECT_ROOT/.dev-data"
 RUNDIR="$PROJECT_ROOT/.dev-run"
 FASTI_PORT="${FASTI_PORT:-8420}"
 FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:$FASTI_PORT}"
+# apps/web's vite.config.ts hardcodes this port with strictPort -- not
+# configurable here without also changing that file.
+WEB_PORT=5173
 FASTI_IMAGE="${FASTI_IMAGE:-fasti:b0}"
 FASTI_PORT_FALLBACK="${FASTI_PORT_FALLBACK:-fail}"
 FASTI_CONTAINER_RUNTIME="${FASTI_CONTAINER_RUNTIME:-podman}"
@@ -267,9 +275,23 @@ _stop_pidfile() {
   rm -f "$RUNDIR/$name.pid"
 }
 
+_has_web() {
+  [[ -f "$PROJECT_ROOT/apps/web/package.json" ]]
+}
+
 _stop_processes() {
   _stop_pidfile daemon
+  _stop_pidfile web
   rm -f "$BOUND_ADDR_FILE"
+}
+
+# Re-reads FASTI_API_URL from the bound-address file if the daemon picked a
+# fallback port and the caller didn't pin FASTI_API_URL/FASTI_PUBLIC_URL
+# explicitly. Shared by _status and _open so both report the port actually
+# in use, not just the preferred one.
+_resolve_actual_api_url() {
+  ((!FASTI_API_URL_EXPLICIT)) && [[ -s "$BOUND_ADDR_FILE" ]] || return 0
+  FASTI_API_URL="$(_api_url_for_addr "$(<"$BOUND_ADDR_FILE")")"
 }
 
 _cleanup() {
@@ -309,17 +331,23 @@ _status() {
   container_runtime="$(_container_runtime_for_scope 2>/dev/null || true)"
   if [[ -z "$daemon_pid" && -z "$container_runtime" ]]; then
     rm -f "$BOUND_ADDR_FILE"
-  elif ((!FASTI_API_URL_EXPLICIT)) && [[ -s "$BOUND_ADDR_FILE" ]]; then
-    FASTI_API_URL="$(_api_url_for_addr "$(<"$BOUND_ADDR_FILE")")"
+  else
+    _resolve_actual_api_url
   fi
   echo "=== Fasti Dev Status ($DEV_SCOPE) ==="
   _status_line "Daemon (fastid)" daemon
+  if _has_web; then
+    _status_line "Web (Vite)" web
+  fi
   if [[ -n "$container_runtime" ]]; then
     printf '  %-19s RUNNING (%s)\n' "Container:" "$container_runtime"
   else
     printf '  %-19s NOT RUNNING\n' "Container:"
   fi
   echo ""
+  if _tracked_pid web >/dev/null 2>&1; then
+    echo "  Web URL: http://127.0.0.1:$WEB_PORT"
+  fi
   echo "  API URL: $FASTI_API_URL"
   if [[ -n "$FASTI_PUBLIC_URL" ]]; then
     echo "  Public URL: $FASTI_PUBLIC_URL"
@@ -331,6 +359,27 @@ _status() {
     echo "  API Probe: HEALTHY ($health)"
   else
     echo "  API Probe: NOT REACHABLE"
+  fi
+}
+
+_open() {
+  _resolve_actual_api_url
+  local target="$FASTI_API_URL/api/v1/health"
+  if _tracked_pid web >/dev/null 2>&1; then
+    target="http://127.0.0.1:$WEB_PORT"
+  elif _has_web; then
+    echo "web isn't running in this worktree yet -- run ./scripts/dev.sh first. Opening the API health check instead." >&2
+  else
+    echo "apps/web isn't in this worktree. Opening the API health check instead." >&2
+  fi
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$target" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "$target" >/dev/null 2>&1 &
+  elif command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -Command Start-Process "'$target'" >/dev/null 2>&1 &
+  else
+    echo "$target"
   fi
 }
 
@@ -355,8 +404,13 @@ _require_container_image() {
 }
 
 _port_in_use() {
-  command -v ss >/dev/null 2>&1 || return 1
-  [[ -n "$(ss -H -ltn "sport = :$1" 2>/dev/null)" ]]
+  # Return 2 (probe unavailable) when ss is missing or fails, distinct from
+  # 1 (port free) -- callers must treat "couldn't check" as "don't proceed",
+  # not silently equivalent to "the port is free".
+  command -v ss >/dev/null 2>&1 || return 2
+  local listeners
+  listeners="$(ss -H -ltn "sport = :$1" 2>/dev/null)" || return 2
+  [[ -n "$listeners" ]]
 }
 
 _container_port() {
@@ -386,7 +440,12 @@ _start_container() {
     echo "Container mode supports FASTI_LISTEN=127.0.0.1:FASTI_PORT only; the container still listens on 0.0.0.0:8420 internally" >&2
     return 1
   fi
-  if _port_in_use "$FASTI_PORT"; then
+  local container_port_status=0
+  _port_in_use "$FASTI_PORT" || container_port_status=$?
+  if ((container_port_status == 2)); then
+    echo "Cannot verify port $FASTI_PORT availability (ss probe unavailable)" >&2
+    return 1
+  elif ((container_port_status == 0)); then
     if [[ "$FASTI_PORT_FALLBACK" == fail ]]; then
       echo "FASTI_PORT $FASTI_PORT is already in use" >&2
       return 1
@@ -473,11 +532,43 @@ _start_native() {
     return 1
   fi
 
+  if _has_web; then
+    local port_status=0
+    _port_in_use "$WEB_PORT" || port_status=$?
+    if ((port_status == 2)); then
+      echo "Cannot verify port $WEB_PORT availability (ss probe unavailable); not starting the web workbench." >&2
+    elif ((port_status == 0)); then
+      echo "Port $WEB_PORT is already in use; not starting the web workbench." >&2
+    else
+      echo "=== 2. Building and starting the web workbench ==="
+      # apps/web imports @fasti/tokens and @fasti/sdk as built workspace
+      # packages, not raw TS sources -- build them first. Filtered to just
+      # web's dependency chain, not the whole repo, for a faster dev loop.
+      if ! pnpm --filter @fasti/tokens --filter @fasti/sdk --filter @fasti/ui --filter @fasti/web run build >"$LOGDIR/web-build.log" 2>&1; then
+        echo "Web workbench build failed; see $LOGDIR/web-build.log" >&2
+        return 1
+      fi
+      set -m
+      FASTI_QA_PROXY_TARGET="$FASTI_API_URL" pnpm --filter @fasti/web run dev >"$LOGDIR/web.log" 2>&1 &
+      local web_pid=$!
+      set +m
+      _write_pidfile web "$web_pid"
+      echo "Web workbench starting: http://127.0.0.1:$WEB_PORT (see .dev-logs/web.log)"
+    fi
+  else
+    echo "apps/web is not present in this worktree; skipping web workbench."
+  fi
+
   echo "Press Ctrl+C or run ./scripts/dev.sh --stop to shut down."
   wait "$daemon_pid"
 }
 
 _self_test() {
+  # Nested self-invocations ("$0" --status) must not inherit this shell's
+  # already-resolved FASTI_API_URL/FASTI_PUBLIC_URL -- each assertion sets
+  # exactly the variables it means to test and expects the rest to fall
+  # back to fresh defaults, not whatever the caller's environment exported.
+  unset FASTI_API_URL FASTI_PUBLIC_URL
   local old_rundir="$RUNDIR"
   local ceiling_mib=""
   local exec_comm=""
@@ -538,12 +629,12 @@ _self_test() {
   printf '%s|invalid start time\n' "$$" > "$RUNDIR/stale.pid"
   _stop_pidfile stale
   [[ ! -e "$RUNDIR/stale.pid" ]]
-  if FASTI_PORT=0 "$0" --status >/dev/null 2>&1; then
+  if FASTI_PORT=0 bash "$0" --status >/dev/null 2>&1; then
     echo "self-test accepted invalid FASTI_PORT" >&2
     return 1
   fi
   local status_output
-  status_output="$(FASTI_LISTEN=127.0.0.1:18420 "$0" --status)"
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 bash "$0" --status)"
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
   if FASTI_LISTEN=0.0.0.0:18420 _listener_fell_back 0.0.0.0:18420; then
     echo "self-test treated the requested wildcard listener as a fallback" >&2
@@ -553,7 +644,7 @@ _self_test() {
     echo "self-test missed a changed listener" >&2
     return 1
   fi
-  status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 bash "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
   if FASTI_LISTEN='[0:0:0:0:0:0:0:1]:18420' _listener_fell_back '[::1]:18420'; then
     echo "self-test treated equivalent IPv6 listener text as a fallback" >&2
@@ -563,19 +654,19 @@ _self_test() {
     echo "self-test missed an IPv6 listener fallback" >&2
     return 1
   fi
-  if FASTI_API_URL='http://userinfo-marker@127.0.0.1:18421?query-marker' "$0" --status >/dev/null 2>&1; then
+  if FASTI_API_URL='http://userinfo-marker@127.0.0.1:18421?query-marker' bash "$0" --status >/dev/null 2>&1; then
     echo "self-test accepted credentials or a query in FASTI_API_URL" >&2
     return 1
   fi
-  if FASTI_API_URL=http://127.0.0.1:70000 "$0" --status >/dev/null 2>&1; then
+  if FASTI_API_URL=http://127.0.0.1:70000 bash "$0" --status >/dev/null 2>&1; then
     echo "self-test accepted an out-of-range FASTI_API_URL port" >&2
     return 1
   fi
-  if FASTI_API_URL=http://127.0.0.1:not-a-port "$0" --status >/dev/null 2>&1; then
+  if FASTI_API_URL=http://127.0.0.1:not-a-port bash "$0" --status >/dev/null 2>&1; then
     echo "self-test accepted a nonnumeric FASTI_API_URL port" >&2
     return 1
   fi
-  status_output="$(FASTI_API_URL=http://127.0.0.1:18421/ "$0" --status)"
+  status_output="$(FASTI_API_URL=http://127.0.0.1:18421/ bash "$0" --status)"
   [[ "$status_output" == *"http://127.0.0.1:18421"* ]]
   if FASTI_CONTAINER_RUNTIME=podman FASTI_LISTEN=0.0.0.0:18420 FASTI_PORT=18420 _start_container >/dev/null 2>&1; then
     echo "self-test accepted an unsupported container listener" >&2
@@ -621,6 +712,7 @@ _self_test() {
 case "${1:-}" in
   --stop) _stop ;;
   --status) _status ;;
+  --open) _open ;;
   --podman) FASTI_CONTAINER_RUNTIME=podman; _start_container ;;
   --docker) FASTI_CONTAINER_RUNTIME=docker; _start_container ;;
   --container) _start_container ;;

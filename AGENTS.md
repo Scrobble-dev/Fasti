@@ -7,12 +7,13 @@ Before planning or implementation, read these in order:
 1. [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
 2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md)
 3. [`README.md`](README.md)
-4. [`docs/constitution.md`](docs/constitution.md)
-5. [`docs/definition-of-done.md`](docs/definition-of-done.md)
-6. [`ROADMAP.md`](ROADMAP.md)
-7. [`docs/capability-ledger.md`](docs/capability-ledger.md)
-8. [`contracts/README.md`](contracts/README.md)
-9. [`SECURITY.md`](SECURITY.md)
+4. [`docs/dev-loop.md`](docs/dev-loop.md)
+5. [`docs/constitution.md`](docs/constitution.md)
+6. [`docs/definition-of-done.md`](docs/definition-of-done.md)
+7. [`ROADMAP.md`](ROADMAP.md)
+8. [`docs/capability-ledger.md`](docs/capability-ledger.md)
+9. [`contracts/README.md`](contracts/README.md)
+10. [`SECURITY.md`](SECURITY.md)
 
 The master handoff defines the durable product boundary, source-of-truth order, architecture and security invariants, programme model, required evidence, and the first 48-hour onboarding sequence.
 
