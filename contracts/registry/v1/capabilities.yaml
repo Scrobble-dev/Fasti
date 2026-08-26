@@ -439,18 +439,21 @@ capabilities:
       {
         introduced_in: b1,
         contract_state: finalized,
-        runtime_availability: fixture_only,
+        runtime_availability: implemented,
       }
     surface_profile: b1_observation_accept
     scopes: [observation_accept]
     problems:
       [
+        authentication_failed,
         capacity_exceeded,
         forbidden,
         idempotency_conflict,
+        integrity_failed,
         invalid_observation,
         malformed_json,
         payload_too_large,
+        storage_unavailable,
         unsupported_media_type,
         validation_failed,
       ]
