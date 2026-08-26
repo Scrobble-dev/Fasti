@@ -81,7 +81,9 @@ export interface ConnectionEndpoint {
  * @param value - The base URL string to normalize.
  * @param source - The source of the connection value.
  * @returns A frozen ConnectionEndpoint object.
- * @throws {TypeError} If non-loopback HTTP connection is attempted.
+ * @throws {TypeError} If the URL scheme is not http or https, contains credentials,
+ *   includes a query string or fragment, has an application path, has an invalid port
+ *   (must be from 1 to 65535), or if a non-loopback HTTP connection is attempted.
  */
 export function connectionEndpoint(
   value: string,
