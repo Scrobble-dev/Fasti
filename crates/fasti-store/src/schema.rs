@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 5;
+pub(crate) const SCHEMA_VERSION: i64 = 6;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -27,6 +27,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 4 {
         migrate_v5(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 5 {
+        migrate_v6(connection)?;
     }
     Ok(())
 }
@@ -541,6 +546,68 @@ fn migrate_v5(connection: &Connection) -> Result<()> {
     )
 }
 
+fn migrate_v6(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        -- Every claim a provider ever supplied for one Record field, kept as
+        -- history rather than overwritten in place: metadata.rs's resolver
+        -- picks the winning tier from the full set, and a stale or expired
+        -- claim is evidence the resolver itself weighs, not a row to discard.
+        CREATE TABLE metadata_field_claims (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            field_key TEXT NOT NULL,
+            source TEXT NOT NULL,
+            value TEXT NOT NULL,
+            locale TEXT,
+            fetched_at TEXT NOT NULL,
+            expires_at TEXT,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (record_id, field_key, source, fetched_at)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_field_claims_record_field_idx
+            ON metadata_field_claims(workspace_id, record_id, field_key);
+
+        -- A user-owned value for one field. Single row per (record, field):
+        -- an override is not versioned history, it is the current profile
+        -- decision, and a later override simply replaces it.
+        CREATE TABLE metadata_field_overrides (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            field_key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (record_id, field_key)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX metadata_field_overrides_record_field_idx
+            ON metadata_field_overrides(workspace_id, record_id, field_key);
+        "#,
+    );
+    for source in [
+        RevisionSource {
+            table: "metadata_field_claims",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+        RevisionSource {
+            table: "metadata_field_overrides",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    ] {
+        append_revision_triggers(&mut sql, &source);
+    }
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 6;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -687,7 +754,10 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count revision triggers");
-        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3 + 3) as i64);
+        // +3 for namespace_definitions (migrate_v4) and +6 for the two
+        // metadata field tables (migrate_v6), none of which are in the
+        // original REVISION_SOURCES list built for the v3 schema snapshot.
+        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3 + 3 + 6) as i64);
     }
 
     #[test]
@@ -926,7 +996,20 @@ mod tests {
             .expect("query upgraded node-state columns")
             .collect::<Result<_, _>>()
             .expect("collect upgraded node-state columns");
-        assert_eq!(tables_after, tables_before);
+        // Beyond v4, this connection also picks up migrate_v5's node_state
+        // column and migrate_v6's two new metadata field tables -- both
+        // additive, so every v4 table and column is still present unchanged.
+        let expected_tables_after: Vec<String> = tables_before
+            .iter()
+            .cloned()
+            .chain([
+                "metadata_field_claims".to_owned(),
+                "metadata_field_overrides".to_owned(),
+            ])
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        assert_eq!(tables_after, expected_tables_after);
         assert_eq!(
             columns_after,
             columns_before

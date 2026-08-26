@@ -308,11 +308,11 @@ export interface CapabilityDescriptorDto {
   readonly bounded_context: string;
   readonly contract_body: "b1" | "b2" | "b3";
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
   readonly problems: ReadonlyArray<"already_initialized" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3";
-  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
   readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
@@ -554,6 +554,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "credential.rotate",
           "identity.identifier.attach",
           "identity.record.create",
+          "identity.record.list",
           "identity.review.defer",
           "identity.review.inspect",
           "identity.review.resolve",
@@ -617,6 +618,7 @@ const B1_CONFORMANCE_SCHEMAS = {
             "correction_read",
             "correction_write",
             "credential_manage",
+            "identity_read",
             "identity_write",
             "listener_configure",
             "observation_accept",
@@ -674,8 +676,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 22,
-        "minItems": 22,
+        "maxItems": 23,
+        "minItems": 23,
         "type": "array",
         "uniqueItems": true
       },
@@ -1547,6 +1549,7 @@ export type CapabilityId =
   | "credential.rotate"
   | "identity.identifier.attach"
   | "identity.record.create"
+  | "identity.record.list"
   | "identity.review.defer"
   | "identity.review.inspect"
   | "identity.review.resolve"
@@ -1768,6 +1771,28 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "runtime_body": "b2",
       "scopes": [
         "identity_write"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "identity.records",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.record.list",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_read"
       ],
       "surface_profile": "later_b2",
       "uat": []
@@ -3041,6 +3066,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "identity.record.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
       "capability_id": "identity.review.defer",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
@@ -3867,7 +3928,7 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
 const PROBLEM_CODES = ["already_initialized", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore

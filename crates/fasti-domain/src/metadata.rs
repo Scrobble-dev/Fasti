@@ -20,6 +20,11 @@ pub const MAX_FIELD_KEY_BYTES: usize = 64;
 pub const MAX_FIELD_VALUE_BYTES: usize = 4096;
 pub const MAX_LOCALE_BYTES: usize = 16;
 
+/// Canonical field key for a Record's display title.
+pub const TITLE_FIELD_KEY: &str = "core.title";
+/// Canonical field key for a Record's poster/artwork URL.
+pub const POSTER_FIELD_KEY: &str = "core.poster_url";
+
 /// A dotted field identity such as `core.title` or `book.authors`.
 ///
 /// Not an enum: record types and providers both add fields, and the domain
@@ -138,6 +143,10 @@ impl FieldClaim {
 
     pub const fn fetched_at(&self) -> DateTime<Utc> {
         self.fetched_at
+    }
+
+    pub const fn expires_at(&self) -> Option<DateTime<Utc>> {
+        self.expires_at
     }
 
     /// A claim with no declared expiry never goes stale on its own; absence

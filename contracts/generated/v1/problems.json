@@ -417,6 +417,42 @@
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "identity.record.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
       "capability_id": "identity.review.defer",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",

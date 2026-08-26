@@ -115,7 +115,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 22);
+  assert.equal(registry.capabilities.length, 23);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());

@@ -7,6 +7,7 @@ mod endpoint;
 mod network_config;
 mod outbound_http;
 mod providers;
+mod records;
 mod reviews;
 mod secure_storage;
 mod setup;
@@ -195,6 +196,18 @@ async fn search_provider(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
+fn list_records(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<records::RecordSummary>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::list_records(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
 fn list_reviews(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Vec<reviews::ReviewItem>, DesktopProblem> {
@@ -300,6 +313,7 @@ pub fn run() {
             save_provider_credential,
             delete_provider_credential,
             search_provider,
+            list_records,
             list_reviews,
             resolve_review
         ])

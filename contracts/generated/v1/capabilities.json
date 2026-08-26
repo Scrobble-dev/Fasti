@@ -171,6 +171,28 @@
     },
     {
       "authorization": "scoped",
+      "bounded_context": "identity.records",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "identity.record.list",
+      "lifecycle": {
+        "contract_state": "reserved",
+        "introduced_in": "b1",
+        "runtime_availability": "fixture_only"
+      },
+      "problems": [
+        "capability_unavailable",
+        "forbidden"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_read"
+      ],
+      "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
       "bounded_context": "identity.review",
       "contract_body": "b2",
       "examples": [],

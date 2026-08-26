@@ -114,6 +114,7 @@
               "credential.rotate",
               "identity.identifier.attach",
               "identity.record.create",
+              "identity.record.list",
               "identity.review.defer",
               "identity.review.inspect",
               "identity.review.resolve",
@@ -177,6 +178,7 @@
                 "correction_read",
                 "correction_write",
                 "credential_manage",
+                "identity_read",
                 "identity_write",
                 "listener_configure",
                 "observation_accept",
@@ -234,8 +236,8 @@
             "items": {
               "$ref": "#/components/schemas/CapabilityDescriptorDto"
             },
-            "maxItems": 22,
-            "minItems": 22,
+            "maxItems": 23,
+            "minItems": 23,
             "type": "array",
             "uniqueItems": true
           },
@@ -1062,6 +1064,28 @@
                           "runtime_body": "b2",
                           "scopes": [
                             "identity_write"
+                          ],
+                          "surface_profile": "later_b2",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "scoped",
+                          "bounded_context": "identity.records",
+                          "contract_body": "b2",
+                          "examples": [],
+                          "id": "identity.record.list",
+                          "lifecycle": {
+                            "contract_state": "reserved",
+                            "introduced_in": "b1",
+                            "runtime_availability": "fixture_only"
+                          },
+                          "problems": [
+                            "capability_unavailable",
+                            "forbidden"
+                          ],
+                          "runtime_body": "b2",
+                          "scopes": [
+                            "identity_read"
                           ],
                           "surface_profile": "later_b2",
                           "uat": []

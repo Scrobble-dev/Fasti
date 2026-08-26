@@ -297,6 +297,17 @@ define_capabilities!(
         ]
     ),
     (
+        ListRecords,
+        B2,
+        B2,
+        Reserved,
+        FixtureOnly,
+        Scoped,
+        [IdentityRead],
+        [CapabilityUnavailable, Forbidden],
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+    ),
+    (
         InspectReview,
         B2,
         B2,

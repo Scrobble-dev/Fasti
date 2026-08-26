@@ -579,6 +579,24 @@ capabilities:
     examples: []
     uat: []
 
+  - application_key: list_records
+    id: identity.record.list
+    bounded_context: identity.records
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b1,
+        contract_state: reserved,
+        runtime_availability: fixture_only,
+      }
+    surface_profile: later_b2
+    scopes: [identity_read]
+    problems: [capability_unavailable, forbidden]
+    examples: []
+    uat: []
+
   - application_key: inspect_review
     id: identity.review.inspect
     bounded_context: identity.review

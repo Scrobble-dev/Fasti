@@ -8,6 +8,7 @@ mod crypto;
 mod evidence;
 mod identity;
 mod kernel;
+mod metadata;
 mod observation;
 mod online_archive;
 mod portability;
