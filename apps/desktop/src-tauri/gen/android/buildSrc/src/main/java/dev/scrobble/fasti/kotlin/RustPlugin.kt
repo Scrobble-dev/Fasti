@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.ApplicationExtension
+import org.gradle.api.GradleException
 import org.gradle.api.DefaultTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -17,13 +18,20 @@ open class RustPlugin : Plugin<Project> {
     override fun apply(project: Project) = with(project) {
         config = extensions.create("rust", Config::class.java)
 
-        val defaultAbiList = listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64");
+        val defaultAbiList = listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         val abiList = (findProperty("abiList") as? String)?.split(',') ?: defaultAbiList
 
-        val defaultArchList = listOf("arm64", "arm", "x86", "x86_64");
+        val defaultArchList = listOf("arm64", "arm", "x86", "x86_64")
         val archList = (findProperty("archList") as? String)?.split(',') ?: defaultArchList
 
-        val targetsList = (findProperty("targetList") as? String)?.split(',') ?: listOf("aarch64", "armv7", "i686", "x86_64")
+        val targetsList = (findProperty("targetList") as? String)?.split(',')
+            ?: listOf("aarch64", "armv7", "i686", "x86_64")
+
+        if (archList.size != abiList.size || archList.size != targetsList.size) {
+            throw GradleException(
+                "archList, abiList, and targetList must contain the same number of entries"
+            )
+        }
 
         extensions.configure<ApplicationExtension> {
             @Suppress("UnstableApiUsage")
@@ -35,11 +43,11 @@ open class RustPlugin : Plugin<Project> {
                         abiFilters += abiList
                     }
                 }
-                defaultArchList.forEachIndexed { index, arch ->
+                archList.forEachIndexed { index, arch ->
                     create(arch) {
                         dimension = "abi"
                         ndk {
-                            abiFilters.add(defaultAbiList[index])
+                            abiFilters.add(abiList[index])
                         }
                     }
                 }
@@ -59,9 +67,8 @@ open class RustPlugin : Plugin<Project> {
 
                 tasks["mergeUniversal${profileCapitalized}JniLibFolders"].dependsOn(buildTask)
 
-                for (targetPair in targetsList.withIndex()) {
-                    val targetName = targetPair.value
-                    val targetArch = archList[targetPair.index]
+                targetsList.forEachIndexed { index, targetName ->
+                    val targetArch = archList[index]
                     val targetArchCapitalized = targetArch.replaceFirstChar { it.uppercase() }
                     val targetBuildTask = project.tasks.maybeCreate(
                         "rustBuild$targetArchCapitalized$profileCapitalized",
