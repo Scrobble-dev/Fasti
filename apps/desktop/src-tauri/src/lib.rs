@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(feature = "desktop-runtime"), allow(dead_code))]
 
+mod api_clients;
 mod endpoint;
 mod network_config;
 mod outbound_http;
@@ -49,10 +50,10 @@ impl DesktopState {
         if let Some(kernel) = current.as_ref() {
             return Ok(Arc::clone(kernel));
         }
-        let kernel =
-            Arc::new(SqliteKernel::open(&self.data_root).map_err(|_| {
-                DesktopProblem::storage("Fasti could not open its local data root.")
-            })?);
+        let kernel = Arc::new(
+            SqliteKernel::open(&self.data_root)
+                .map_err(|_| DesktopProblem::storage("Fasti could not open its local data root."))?,
+        );
         *current = Some(Arc::clone(&kernel));
         Ok(kernel)
     }
@@ -79,6 +80,46 @@ fn complete_setup(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, 
     setup::complete_setup(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn list_api_clients(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<api_clients::ApiClientSummary>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    api_clients::list(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn create_api_client(
+    state: tauri::State<'_, DesktopState>,
+    input: api_clients::CreateApiClientInput,
+) -> Result<api_clients::CreatedApiClient, DesktopProblem> {
+    let kernel = state.kernel()?;
+    api_clients::create(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn revoke_api_client(
+    state: tauri::State<'_, DesktopState>,
+    input: api_clients::RevokeApiClientInput,
+) -> Result<Vec<api_clients::ApiClientSummary>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    api_clients::revoke(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
     )
 }
 
@@ -249,6 +290,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             setup_status,
             complete_setup,
+            list_api_clients,
+            create_api_client,
+            revoke_api_client,
             load_network_configuration,
             save_network_configuration,
             test_endpoint_connection,
