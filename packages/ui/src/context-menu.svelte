@@ -38,9 +38,41 @@
     return y;
   });
 
+  function actionButtons(): HTMLButtonElement[] {
+    if (!menuRef) return [];
+    return Array.from(menuRef.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'));
+  }
+
+  function focusItem(index: number): void {
+    const buttons = actionButtons();
+    if (buttons.length === 0) return;
+    const target = (index + buttons.length) % buttons.length;
+    buttons[target].focus();
+  }
+
   function handleKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
+      e.preventDefault();
       onClose();
+      return;
+    }
+
+    const buttons = actionButtons();
+    if (buttons.length === 0) return;
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      focusItem(current + 1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      focusItem(current - 1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      focusItem(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      focusItem(buttons.length - 1);
     }
   }
 
@@ -53,6 +85,7 @@
   onMount(() => {
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("mousedown", handleWindowClick);
+    focusItem(0);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleWindowClick);
@@ -90,9 +123,7 @@
       >
         {#if item.icon}
           {@const Icon = item.icon}
-          <span
-            class="dropdown-item-icon text-muted d-inline-flex align-items-center"
-          >
+          <span class="dropdown-item-icon text-muted d-inline-flex align-items-center" aria-hidden="true">
             <Icon size={16} />
           </span>
         {/if}
@@ -113,11 +144,18 @@
 
   .dropdown-item {
     color: var(--fasti-text-primary) !important;
+    min-height: 44px;
   }
 
-  .dropdown-item:hover {
+  .dropdown-item:hover,
+  .dropdown-item:focus-visible {
     background: var(--fasti-surface-archive) !important;
     color: var(--fasti-action-primary) !important;
+  }
+
+  .dropdown-item:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: -3px;
   }
 
   .dropdown-divider {
