@@ -981,6 +981,10 @@ impl ExportScratch {
     fn remove_stream_file(&self, correlation_id: RequestCorrelationId) -> ApplicationResult<()> {
         Err(unsupported_platform_problem(correlation_id))
     }
+
+    fn cleanup(&mut self, correlation_id: RequestCorrelationId) -> ApplicationResult<()> {
+        Err(unsupported_platform_problem(correlation_id))
+    }
 }
 
 #[cfg(target_os = "linux")]

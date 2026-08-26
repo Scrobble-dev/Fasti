@@ -768,7 +768,8 @@ impl WorkspaceArchiveDestination for FilesystemArchiveDestination {
         return Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "archive destination is unsupported on this platform",
-        ));
+        )
+        .into());
         #[cfg(target_os = "linux")]
         {
             use std::os::fd::AsRawFd as _;
