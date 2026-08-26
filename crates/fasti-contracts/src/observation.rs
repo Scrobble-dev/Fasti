@@ -16,24 +16,22 @@ pub struct ObservationIdentifierInput {
     pub value: String,
 }
 
-/// Durable provider-neutral ingress envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ObservationIngressKind {
+    ConsumptionOccurrence,
+}
+
+/// Durable provider-neutral occurrence ingress envelope.
 ///
 /// `source_event_id` is source-owned and must remain stable when the same
-/// delivery is retried. `operation_id` is the Fasti idempotency key. The full
-/// request is stored as immutable evidence before observation acceptance.
+/// delivery is retried. Fasti derives the operation ID from the authenticated
+/// client, source, and event identity. The complete normalized request is
+/// stored as immutable evidence before observation acceptance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SubmitObservationRequest {
-    #[schemars(
-        length(equal = 35),
-        regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$")
-    )]
-    #[schema(
-        min_length = 35,
-        max_length = 35,
-        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"
-    )]
-    pub operation_id: String,
+    pub kind: ObservationIngressKind,
     #[schemars(length(min = 1, max = 64))]
     #[schema(min_length = 1, max_length = 64)]
     pub source: String,
