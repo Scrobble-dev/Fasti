@@ -15,10 +15,12 @@ fn explicit_null_openapi() -> utoipa::openapi::schema::Object {
         .build()
 }
 
+mod bootstrap;
 mod conformance;
 mod generated_capability_ids;
 mod portability;
 
+pub use bootstrap::*;
 pub use conformance::*;
 pub use generated_capability_ids::public_capability_id;
 pub use portability::*;

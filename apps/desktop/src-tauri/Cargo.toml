@@ -1,0 +1,52 @@
+[package]
+name = "fasti-desktop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "fasti_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "fasti-desktop"
+path = "src/main.rs"
+required-features = ["desktop-runtime"]
+
+[features]
+default = ["desktop-runtime"]
+desktop-runtime = ["dep:tauri", "dep:tauri-build", "tauri/wry"]
+
+[dependencies]
+fasti-application = { path = "../../../crates/fasti-application" }
+fasti-contracts = { path = "../../../crates/fasti-contracts" }
+fasti-domain = { path = "../../../crates/fasti-domain" }
+fasti-store = { path = "../../../crates/fasti-store" }
+getrandom = "0.3.4"
+futures-util = "0.3.32"
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10.9"
+tauri = { version = "=2.11.5", default-features = false, optional = true }
+tokio = { version = "1.53", features = ["macros", "rt"] }
+zeroize = "1.8"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = "=4.1.6"
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "=1.0.0"
+keyring-core = "=1.0.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", optional = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+# Keep desktop platform dependencies out of the headless core workspace.
+[workspace]

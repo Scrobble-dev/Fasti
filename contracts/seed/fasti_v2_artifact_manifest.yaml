@@ -1,0 +1,34 @@
+generated_on: '2026-08-21'
+status: validated_planning_artifact_pack
+report:
+  path: fasti_fresh_blind_master_plan_v2_2026-08-21.md
+  words: 25774
+  major_sections: 55
+  blind_panels: 4
+  synthetic_persona_lenses: 50
+structured_artifacts:
+  identity_persistence_entities: 26
+  capabilities: 66
+  roadmap_milestones: 7
+  uat_cases: 126
+validation:
+  yaml_parse: passed
+  duplicate_capability_ids: 0
+  duplicate_uat_ids: 0
+  report_title_count: 1
+files:
+- path: fasti_fresh_blind_master_plan_v2_2026-08-21.md
+  bytes: 183949
+  sha256: ea6f88e229978d54a7f32890b95c61225d9e34f5aaab4b5f650f88878bb490df
+- path: fasti_identity_contract_seed_v1.yaml
+  bytes: 15780
+  sha256: 4624259f4bde55009ccf6e172032c173663b123998aa8f4ccc5a2f475eb45a50
+- path: fasti_capabilities_ledger_seed_v2.yaml
+  bytes: 37976
+  sha256: 90bb9527e18fb9f2f252b01d0cdc6b36a5b8a87af2bff198935d460ebb904910
+- path: fasti_roadmap_seed_v2.yaml
+  bytes: 10164
+  sha256: 7dd08b77c6c3124ca14ec687afe66a021f7c7fa6a9c48f475a9f8733461614c9
+- path: fasti_identity_uat_matrix_v1.csv
+  bytes: 27076
+  sha256: 3435b6d60abf7d9701ecbf64c94718a2ee5277fa3556d87232e89a7a608ba83b

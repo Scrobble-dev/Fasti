@@ -50,6 +50,246 @@ export interface ReceiptCommittedEnvelope {
   readonly data: ReceiptCommittedEvent;
 }
 
+export interface ClientEnrollmentResponse {
+  readonly credential: string;
+  readonly credential_scheme: CredentialSchemeDto;
+}
+
+export interface NodeInitializationResponse {
+  readonly initialization_proof: string;
+}
+
+// prettier-ignore
+export const LOCAL_BOOTSTRAP_OPERATIONS = {
+  initializeDurableNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", authorization: "bootstrap_only", requiredScopes: [], problemCodes: ["already_initialized","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["node.initialize.validation_failed"], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "NodeInitializationResponse" },
+  enrollDurableFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", authorization: "scoped", requiredScopes: ["client_enroll"], problemCodes: ["bootstrap_closed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["client.enroll.forbidden"], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "ClientEnrollmentResponse" },
+} as const;
+
+// prettier-ignore
+const PRODUCTION_BOOTSTRAP_SCHEMAS = {
+  "ClientEnrollmentResponse": {
+    "additionalProperties": false,
+    "description": "One-time credential returned by durable first-client enrollment.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
+    "properties": {
+      "credential": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "credential_scheme": {
+        "$ref": "#/components/schemas/CredentialSchemeDto"
+      }
+    },
+    "required": [
+      "credential_scheme",
+      "credential"
+    ],
+    "type": "object"
+  },
+  "CredentialSchemeDto": {
+    "enum": [
+      "Bearer"
+    ],
+    "type": "string"
+  },
+  "EnrollFirstClientRequest": {
+    "additionalProperties": false,
+    "description": "Bootstrap proof is body-only. It must never be placed in a URL or log.",
+    "properties": {
+      "initialization_proof": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "HealthResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "version": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "status",
+      "version"
+    ],
+    "type": "object"
+  },
+  "InitializeNodeRequest": {
+    "additionalProperties": false,
+    "type": "object"
+  },
+  "NodeInitializationResponse": {
+    "additionalProperties": false,
+    "description": "One-time proof returned by durable node initialization.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
+    "properties": {
+      "initialization_proof": {
+        "format": "opaque-secret",
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "ProblemActionDto": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "label": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "label"
+    ],
+    "type": "object"
+  },
+  "ProblemDetails": {
+    "additionalProperties": false,
+    "description": "RFC 9457 representation of the one application problem model.",
+    "properties": {
+      "actual": {
+        "type": "null"
+      },
+      "capability_id": {
+        "type": "string"
+      },
+      "code": {
+        "type": "string"
+      },
+      "correlation_id": {
+        "pattern": "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "next_actions": {
+        "items": {
+          "$ref": "#/components/schemas/ProblemActionDto"
+        },
+        "maxItems": 1,
+        "minItems": 1,
+        "type": "array"
+      },
+      "param": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "retryability": {
+        "type": "string"
+      },
+      "safe_state": {
+        "type": "string"
+      },
+      "status": {
+        "format": "uint16",
+        "maximum": 65535,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "type": "string"
+      },
+      "type": {
+        "type": "string"
+      },
+      "violations": {
+        "items": {
+          "$ref": "#/components/schemas/ViolationDto"
+        },
+        "maxItems": 32,
+        "type": "array"
+      }
+    },
+    "required": [
+      "type",
+      "title",
+      "status",
+      "detail",
+      "code",
+      "capability_id",
+      "safe_state",
+      "retryability",
+      "next_actions",
+      "correlation_id",
+      "actual",
+      "violations"
+    ],
+    "type": "object"
+  },
+  "ViolationDto": {
+    "additionalProperties": false,
+    "properties": {
+      "actual": {
+        "type": "null"
+      },
+      "code": {
+        "type": "string"
+      },
+      "expected": {
+        "type": "string"
+      },
+      "pointer": {
+        "type": "string"
+      },
+      "reason": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "pointer",
+      "reason",
+      "expected",
+      "actual"
+    ],
+    "type": "object"
+  }
+} as const;
+
+// prettier-ignore
+export function parseNodeInitializationResponse(value: unknown): NodeInitializationResponse {
+  return parseProductionBootstrapDto("NodeInitializationResponse", value);
+}
+
+// prettier-ignore
+export function parseClientEnrollmentResponse(value: unknown): ClientEnrollmentResponse {
+  return parseProductionBootstrapDto("ClientEnrollmentResponse", value);
+}
+
+// prettier-ignore
+function parseProductionBootstrapDto<T>(schemaName: string, value: unknown): T {
+  const schema = (PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>)[schemaName];
+  if (schema === undefined) {
+    throw new FastiContractParseError(`Unknown production bootstrap schema ${schemaName}`);
+  }
+  validateOpenApiValue(value, schema, schemaName, PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>);
+  return value as T;
+}
+
 export interface AcceptObservationRequest {
   readonly evidence: EvidenceReferenceDto;
   readonly observed_at: ObservedTimeDto;
@@ -70,10 +310,10 @@ export interface CapabilityDescriptorDto {
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
   readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "unsupported_media_type" | "validation_failed">;
+  readonly problems: ReadonlyArray<"already_initialized" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -339,15 +579,19 @@ const B1_CONFORMANCE_SCHEMAS = {
       "problems": {
         "items": {
           "enum": [
+            "already_initialized",
+            "bootstrap_closed",
             "capability_unavailable",
             "capacity_exceeded",
             "forbidden",
             "idempotency_conflict",
+            "integrity_failed",
             "invalid_identifier",
             "invalid_observation",
             "malformed_json",
             "payload_too_large",
             "receipt_not_found",
+            "storage_unavailable",
             "unsupported_media_type",
             "validation_failed"
           ],
@@ -390,6 +634,7 @@ const B1_CONFORMANCE_SCHEMAS = {
       },
       "surface_profile": {
         "enum": [
+          "b1_durable_bootstrap",
           "b1_http_fixture",
           "b1_observation_accept",
           "b1_receipt_replay",
@@ -468,10 +713,11 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 7,
-        "minProperties": 7,
+        "maxProperties": 8,
+        "minProperties": 8,
         "propertyNames": {
           "enum": [
+            "b1_durable_bootstrap",
             "b1_http_fixture",
             "b1_observation_accept",
             "b1_receipt_replay",
@@ -1112,12 +1358,12 @@ function parseConformanceDto<T>(schemaName: string, value: unknown): T {
   if (schema === undefined) {
     throw new FastiContractParseError(`Unknown conformance schema ${schemaName}`);
   }
-  validateOpenApiValue(value, schema, schemaName);
+  validateOpenApiValue(value, schema, schemaName, B1_CONFORMANCE_SCHEMAS as Record<string, unknown>);
   return value as T;
 }
 
 // prettier-ignore
-function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string): void {
+function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string, schemas: Record<string, unknown>): void {
   const schema = schemaValue as Record<string, unknown>;
   if (typeof schema.$ref === "string") {
     const prefix = "#/components/schemas/";
@@ -1125,18 +1371,18 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       throw new FastiContractParseError(`${path} has an unsupported schema reference`);
     }
     const name = schema.$ref.slice(prefix.length);
-    const target = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[name];
+    const target = schemas[name];
     if (target === undefined) {
       throw new FastiContractParseError(`${path} references an unknown schema`);
     }
-    validateOpenApiValue(value, target, path);
+    validateOpenApiValue(value, target, path, schemas);
     return;
   }
   if (Array.isArray(schema.oneOf)) {
     let matches = 0;
     for (const candidate of schema.oneOf) {
       try {
-        validateOpenApiValue(value, candidate, path);
+        validateOpenApiValue(value, candidate, path, schemas);
         matches += 1;
       } catch (error) {
         if (!(error instanceof FastiContractParseError)) throw error;
@@ -1195,7 +1441,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
       throw new FastiContractParseError(`${path} exceeds its bounded items`);
     }
-    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
+    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`, schemas));
     return;
   }
   if (schemaTypes.includes("object")) {
@@ -1215,14 +1461,14 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       : {};
     for (const key of keys) {
       if (isPlainObject(schema.propertyNames)) {
-        validateOpenApiValue(key, schema.propertyNames, `${path} property name`);
+        validateOpenApiValue(key, schema.propertyNames, `${path} property name`, schemas);
       }
       if (!Object.hasOwn(properties, key)) {
         if (schema.additionalProperties === false) {
           throw new FastiContractParseError(`${path} contains unknown field ${key}`);
         }
         if (isPlainObject(schema.additionalProperties)) {
-          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`);
+          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`, schemas);
         }
       }
     }
@@ -1234,7 +1480,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     for (const [field, fieldSchema] of Object.entries(properties)) {
       if (Object.hasOwn(object, field)) {
-        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`);
+        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`, schemas);
       }
     }
     return;
@@ -1338,15 +1584,19 @@ export type RuntimeAvailability =
 
 // prettier-ignore
 export type ProblemCode =
+  | "already_initialized"
+  | "bootstrap_closed"
   | "capability_unavailable"
   | "capacity_exceeded"
   | "forbidden"
   | "idempotency_conflict"
+  | "integrity_failed"
   | "invalid_identifier"
   | "invalid_observation"
   | "malformed_json"
   | "payload_too_large"
   | "receipt_not_found"
+  | "storage_unavailable"
   | "unsupported_media_type"
   | "validation_failed";
 
@@ -1364,12 +1614,15 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "bootstrap_closed",
         "forbidden",
+        "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
@@ -1377,7 +1630,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "scopes": [
         "client_enroll"
       ],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_durable_bootstrap",
       "uat": []
     },
     {
@@ -1645,18 +1898,21 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "already_initialized",
         "forbidden",
+        "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_durable_bootstrap",
       "uat": []
     },
     {
@@ -1935,6 +2191,58 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
   "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
   "contract_version": "1.0.0",
   "surface_profiles": {
+    "b1_durable_bootstrap": {
+      "cli": {
+        "reason": "One-time secret delivery uses the loopback API and generated SDK.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Node bootstrap is operational state rather than linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Bootstrap is a finite local operation and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "The local host shell owns one-time secret setup and storage.",
+        "state": "not_applicable"
+      }
+    },
     "b1_http_fixture": {
       "cli": {
         "binding": "cli:capability-discovery",
@@ -2320,6 +2628,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
   "problems": [
     {
       "capability_id": "client.enroll",
+      "code": "bootstrap_closed",
+      "detail": "the one-time enrollment proof is invalid, expired, or already consumed",
+      "next_actions": [
+        {
+          "id": "inspect_node_status",
+          "label": "Inspect the local node status before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Bootstrap closed",
+      "type": "https://fasti.scrobble.dev/v1/problems/bootstrap-closed"
+    },
+    {
+      "capability_id": "client.enroll",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -2335,6 +2661,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "client.enroll",
@@ -2371,6 +2715,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "client.enroll",
@@ -2914,6 +3276,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "node.initialize",
+      "code": "already_initialized",
+      "detail": "the local node has already completed its one-time initialization",
+      "next_actions": [
+        {
+          "id": "use_existing_node",
+          "label": "Use the existing node and enrolled client"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Node already initialized",
+      "type": "https://fasti.scrobble.dev/v1/problems/already-initialized"
+    },
+    {
+      "capability_id": "node.initialize",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -2929,6 +3309,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "node.initialize",
@@ -2965,6 +3363,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "node.initialize",
@@ -3453,7 +3869,7 @@ const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
 const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

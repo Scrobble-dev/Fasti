@@ -47,13 +47,26 @@ textarea {
   transform: translateY(0);
 }
 
-:where(a, button, [tabindex]):focus-visible {
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: 3px solid var(--fasti-focus);
   outline-offset: 2px;
 }
 
 @media (forced-colors: active) {
-  :where(a, button, [tabindex]):focus-visible {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline-color: Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
   }
 }

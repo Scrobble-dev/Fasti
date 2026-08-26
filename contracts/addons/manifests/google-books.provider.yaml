@@ -63,7 +63,7 @@ normalization:
     provider_id: $.id
     title: $.volumeInfo.title
     kind: book
-    description: $.volumeInfo.authors
+    authors: $.volumeInfo.authors
   local_record_write: none
 
 limits:
@@ -82,6 +82,15 @@ limits:
     - reserved
 
 errors:
+  "400":
+    code: provider.credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "401":
+    code: provider.credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
+  "403":
+    code: provider.credential_invalid
+    user_action: Replace or remove the provider key. Fasti local data is unchanged.
   "429":
     code: provider.rate_limited
     user_action: Wait, then retry. Fasti local data is unchanged.
