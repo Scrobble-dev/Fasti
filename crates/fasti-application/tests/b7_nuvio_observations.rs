@@ -140,7 +140,7 @@ fn nuvio_completion_observation_emits_watched_event() {
 }
 
 #[test]
-fn process_local_outbox_buffers_failed_dispatch_and_drains() {
+fn process_local_outbox_drains_enqueued_commands() {
     let fixture = B1ConformanceFixture::new();
     let enrollment = enroll(&fixture);
     let access = *enrollment.access();

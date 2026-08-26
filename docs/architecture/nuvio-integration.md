@@ -17,7 +17,7 @@ Fasti does not decode, transcode, manage streams, or function as a media player.
 │  │ Playback Engine │  │ Local Session│  │   Outbox   │  │
 │  └────────┬────────┘  └──────┬───────┘  └─────┬──────┘  │
 └───────────┼──────────────────┼────────────────┼─────────┘
-            │                  │                │ (Durable queue)
+            │                  │                │ (Process-local, non-durable)
             │ (Playback        ▼                │
             │  Unblocked) ┌─────────────────────┴─────────┐
             └────────────►│ Canonical Observation Accept  │

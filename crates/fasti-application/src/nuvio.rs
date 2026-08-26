@@ -12,8 +12,9 @@
 //!
 //! # Invariants
 //!
-//! 1. **Playback Independence:** A future Nuvio integration must never make
-//!    playback depend on Fasti availability. The process-local queue here
+//! 1. **Observation Buffering Independence:** A future Nuvio observation
+//!    integration must not make Fasti availability a prerequisite for
+//!    generating or buffering observations. The process-local queue here
 //!    proves ordering and retry behavior only; it is not durable.
 //! 2. **Idempotency & Replay:** Every observation uses a deterministically
 //!    derived operation ID (`nuvio:session:<session_id>:beat:<seq>` or
