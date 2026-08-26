@@ -536,6 +536,7 @@ fn replace_file(source: &Path, destination: &Path) -> std::io::Result<()> {
         .chain(Some(0))
         .collect::<Vec<_>>();
     // SAFETY: both buffers are live, NUL-terminated Windows paths.
+    #[rustfmt::skip]
     if unsafe { // nosemgrep: rust.lang.security.unsafe-usage.unsafe-usage
         MoveFileExW(
             source.as_ptr(),

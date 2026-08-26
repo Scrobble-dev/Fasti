@@ -32,6 +32,11 @@ pub(crate) struct DesktopProblem {
 }
 
 impl DesktopProblem {
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
+
     pub(crate) fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
@@ -68,6 +73,15 @@ impl DesktopProblem {
         }
     }
 
+    pub(crate) fn invalid_input(detail: impl Into<String>) -> Self {
+        Self {
+            code: "invalid_input",
+            title: "Invalid input",
+            detail: detail.into(),
+            next_action: "Correct the input and retry.",
+        }
+    }
+
     pub(crate) fn connection(detail: impl Into<String>) -> Self {
         Self {
             code: "connection_failed",
@@ -96,7 +110,16 @@ impl DesktopProblem {
         }
     }
 
-    fn application(problem: &FastiProblem) -> Self {
+    pub(crate) fn not_authenticated() -> Self {
+        Self {
+            code: "not_authenticated",
+            title: "Setup is not complete",
+            detail: "This capability needs a saved administrator credential.".to_owned(),
+            next_action: "Complete setup, then retry.",
+        }
+    }
+
+    pub(crate) fn application(problem: &FastiProblem) -> Self {
         let contract = problem.code().contract();
         Self {
             code: problem.code().as_str(),
@@ -210,7 +233,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     }
 }
 
-fn authenticate(
+pub(crate) fn authenticate(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
 ) -> Result<Option<RequestAccessContext>, DesktopProblem> {
@@ -287,13 +310,14 @@ pub(crate) fn complete_setup(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_support {
+    use super::{DesktopProblem, SecretMaterial, SetupSecret, SetupSecretStore};
+    use fasti_store::SqliteKernel;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
     #[derive(Default)]
-    struct MemoryStore(Mutex<BTreeMap<SetupSecret, [u8; 32]>>);
+    pub(crate) struct MemoryStore(Mutex<BTreeMap<SetupSecret, [u8; 32]>>);
 
     impl SetupSecretStore for MemoryStore {
         fn load(&self, secret: SetupSecret) -> Result<Option<SecretMaterial>, DesktopProblem> {
@@ -320,11 +344,17 @@ mod tests {
         }
     }
 
-    fn new_kernel() -> (tempfile::TempDir, SqliteKernel) {
+    pub(crate) fn new_kernel() -> (tempfile::TempDir, SqliteKernel) {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
         (root, kernel)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_support::{new_kernel, MemoryStore};
 
     #[test]
     fn setup_initializes_and_enrolls_cleanly() {

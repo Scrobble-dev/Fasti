@@ -6,6 +6,7 @@ mod endpoint;
 mod network_config;
 mod outbound_http;
 mod providers;
+mod reviews;
 mod secure_storage;
 mod setup;
 
@@ -151,6 +152,32 @@ async fn search_provider(
     .await
 }
 
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn list_reviews(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<reviews::ReviewItem>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    reviews::list_reviews(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn resolve_review(
+    state: tauri::State<'_, DesktopState>,
+    input: reviews::ResolveReviewInput,
+) -> Result<reviews::ResolveReviewOutcome, DesktopProblem> {
+    let kernel = state.kernel()?;
+    reviews::resolve_review(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
+}
+
 fn explicit_data_root(value: Option<OsString>) -> io::Result<PathBuf> {
     value
         .filter(|value| !value.is_empty())
@@ -207,10 +234,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             secure_storage::initialize().map_err(|()| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "Fasti could not initialize the platform credential store",
-                )
+                io::Error::other("Fasti could not initialize the platform credential store")
             })?;
             let config_root = app.path().app_config_dir()?;
             let data_root = data_root(app)?;
@@ -231,7 +255,9 @@ pub fn run() {
             provider_credential_status,
             save_provider_credential,
             delete_provider_credential,
-            search_provider
+            search_provider,
+            list_reviews,
+            resolve_review
         ])
         .run(tauri::generate_context!())
         .expect("Fasti desktop shell failed");
