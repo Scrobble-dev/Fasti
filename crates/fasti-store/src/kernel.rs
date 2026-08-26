@@ -213,14 +213,35 @@ impl SqliteKernel {
         }
 
         let database_path = current_root.join("fasti.sqlite3");
-        reject_unsafe_existing_file(&database_path)?;
-        let flags = OpenFlags::default();
+        // Open the final path component atomically relative to the held
+        // current-directory descriptor (NOFOLLOW + BENEATH + NO_SYMLINKS) on
+        // Linux/Android, so a same-user process cannot replace fasti.sqlite3
+        // with a symlink between a path-based check and SQLite's own open.
+        // SQLITE_OPEN_NOFOLLOW is intentionally not set on those platforms:
+        // bundled SQLite >= 3.39.3 canonicalizes the whole path before
+        // opening, which rejects the /proc/self/fd/<fd> descriptor path this
+        // guard hands it. The openat2 resolve flags already give the
+        // NOFOLLOW guarantee for the real filesystem entry.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let database_file = open_kernel_database_file(&current_directory, "fasti.sqlite3")?;
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let connection = {
+            set_owner_only_open_file_permissions(&database_file)?;
+            Connection::open_with_flags(descriptor_path(&database_file), OpenFlags::default())?
+        };
+        // database_file stays alive until here so /proc/self/fd/<fd> stays
+        // resolvable for the open() call above; SQLite holds its own fd
+        // after that, so database_file can now be dropped normally.
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        drop(database_file);
+
         #[cfg(not(any(target_os = "linux", target_os = "android")))]
-        let flags = flags | OpenFlags::SQLITE_OPEN_NOFOLLOW;
-        // The retained current-directory descriptor prevents intermediate path
-        // redirection on Linux and Android. The final database entry is checked
-        // before SQLite opens it; this is not an atomic final-component guard.
+        reject_unsafe_existing_file(&database_path)?;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let flags = OpenFlags::default() | OpenFlags::SQLITE_OPEN_NOFOLLOW;
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         let connection = Connection::open_with_flags(&database_path, flags)?;
+
         harden_private_regular_file(&database_path)?;
         connection.busy_timeout(DEFAULT_BUSY_TIMEOUT)?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
@@ -568,6 +589,40 @@ fn finish_regular_file(file: File, name: &str) -> Result<File, StoreOpenError> {
     } else {
         Err(unsafe_path(Path::new(name), "expected a regular file"))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn open_kernel_database_file(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat2(
+        parent,
+        name,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    finish_regular_file(File::from(fd), name)
+}
+
+#[cfg(target_os = "android")]
+fn open_kernel_database_file(parent: &File, name: &str) -> Result<File, StoreOpenError> {
+    let fd = rustix::fs::openat(
+        parent,
+        name,
+        rustix::fs::OFlags::RDWR
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .map_err(|error| StoreOpenError::Io(std::io::Error::from_raw_os_error(error.raw_os_error())))?;
+    finish_regular_file(File::from(fd), name)
 }
 
 #[cfg(target_os = "linux")]
@@ -1071,6 +1126,34 @@ mod tests {
         assert!(SqliteKernel::open(&root).is_err());
         assert!(!outside.join("sha256").exists());
         assert!(!outside.join("fasti.sqlite3").exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn database_open_rejects_a_symlinked_final_component() {
+        // Regression: kernel.rs open_locked previously checked
+        // fasti.sqlite3 via a path-based reject_unsafe_existing_file, then
+        // opened it via a second, separate path lookup -- a same-user
+        // process could replace the file with a symlink between the two.
+        // The fix opens the final component atomically (openat2 with
+        // NOFOLLOW|NO_SYMLINKS|BENEATH) relative to a held directory
+        // descriptor. This test pre-plants the hostile symlink before any
+        // open happens, so it fails closed whether the guard is atomic or
+        // just an early check -- it exists to catch a future refactor that
+        // drops back to a plain path-based Connection::open_with_flags.
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path().join("fasti-data");
+        let outside = temporary.path().join("outside.sqlite3");
+        fs::create_dir_all(root.join("current")).expect("current directory");
+        fs::write(&outside, b"not a fasti database").expect("outside file");
+        std::os::unix::fs::symlink(&outside, root.join("current/fasti.sqlite3"))
+            .expect("hostile database symlink");
+
+        assert!(SqliteKernel::open(&root).is_err());
+        assert_eq!(
+            fs::read(&outside).expect("outside bytes"),
+            b"not a fasti database"
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
