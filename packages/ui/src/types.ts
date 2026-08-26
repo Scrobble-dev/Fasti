@@ -14,11 +14,11 @@ export type WatchStatus =
   "watching" | "completed" | "plan_to_watch" | "on_hold" | "dropped";
 
 export interface ExternalId {
-  namespace: string;
-  value: string;
-  status: "matched" | "needs_review" | "local_only" | "retired";
-  source: string;
-  url?: string;
+  readonly namespace: string;
+  readonly value: string;
+  readonly status: "matched" | "needs_review" | "local_only" | "retired";
+  readonly source: string;
+  readonly url?: string;
 }
 
 export interface CastMember {
@@ -39,58 +39,61 @@ export interface EpisodeItem {
   readonly id: string;
   readonly number: number;
   readonly seasonNumber: number;
-  title: string;
-  overview?: string;
-  airDate?: string;
-  durationSeconds?: number;
-  watched: boolean;
-  watchedAt?: string;
-  userRating?: number;
+  readonly title: string;
+  readonly overview?: string;
+  readonly airDate?: string;
+  readonly durationSeconds?: number;
+  readonly watched: boolean;
+  readonly watchedAt?: string;
+  readonly userRating?: number;
 }
 
 export interface SeasonItem {
   readonly seasonNumber: number;
-  title: string;
-  posterUrl?: string;
-  episodeCount: number;
-  episodes: EpisodeItem[];
+  readonly title: string;
+  readonly posterUrl?: string;
+  readonly episodeCount: number;
+  readonly episodes: EpisodeItem[];
 }
 
 export interface MediaRecord {
   readonly id: string;
-  title: string;
-  originalTitle?: string;
-  mediaKind: MediaKind;
-  customTypeName?: string;
-  releaseYear?: number;
-  airDates?: string;
-  format?: string;
-  statusText?: string;
-  country?: string;
-  languages?: string[];
-  runtimeMinutes?: number;
-  overview?: string;
-  posterUrl?: string;
-  backdropUrl?: string;
-  status: WatchStatus;
-  userRating?: number;
-  communityRating?: { score: number; votes: number; source: string };
-  progressSeconds?: number;
-  totalDurationSeconds?: number;
-  progressEpisodes?: number;
-  totalEpisodes?: number;
-  externalIds: ExternalId[];
-  displaySource: string;
-  userNotes?: string;
-  tags: string[];
-  genres: string[];
-  studios: string[];
-  lastActivityAt?: string;
-  seasons?: SeasonItem[];
-  cast?: CastMember[];
-  crew?: CrewMember[];
-  customFields?: Record<string, unknown>;
-  collectionName?: string;
+  readonly title: string;
+  readonly originalTitle?: string;
+  readonly mediaKind: MediaKind;
+  readonly customTypeName?: string;
+  readonly releaseYear?: number;
+  readonly airDates?: string;
+  readonly format?: string;
+  readonly statusText?: string;
+  readonly country?: string;
+  readonly languages?: string[];
+  readonly runtimeMinutes?: number;
+  readonly overview?: string;
+  readonly posterUrl?: string;
+  readonly backdropUrl?: string;
+  readonly status: WatchStatus;
+  readonly userRating?: number;
+  readonly communityRating?: {
+    readonly score: number;
+    readonly votes: number;
+    readonly source: string;
+  };
+  readonly progressSeconds?: number;
+  readonly totalDurationSeconds?: number;
+  readonly progressEpisodes?: number;
+  readonly totalEpisodes?: number;
+  readonly externalIds: ExternalId[];
+  readonly displaySource: string;
+  readonly userNotes?: string;
+  readonly tags: string[];
+  readonly genres: string[];
+  readonly studios: string[];
+  readonly lastActivityAt?: string;
+  readonly seasons?: SeasonItem[];
+  readonly cast?: CastMember[];
+  readonly crew?: CrewMember[];
+  readonly collectionName?: string;
 }
 
 export interface ChronicleOccurrence {
@@ -142,7 +145,7 @@ export interface CustomFieldDefinition {
   readonly isFilterable: boolean;
 }
 
-/** Legacy prototype shape. Do not use for credential persistence. */
+/** Legacy type retained for compatibility with prototype-only components. */
 export interface ScopedApiToken {
   readonly id: string;
   readonly name: string;
@@ -164,11 +167,12 @@ export interface ApiClientCredentialSummary {
 }
 
 export interface CreatedApiClientCredential extends ApiClientCredentialSummary {
-  /** Returned only once by the trusted host. Never persist this value. */
+  /** Returned once by the trusted host. The workbench must never persist this value. */
   readonly credential: string;
 }
 
-export type ManagedSettingSource = "default" | "saved" | "build" | "environment";
+export type ManagedSettingSource =
+  "default" | "saved" | "build" | "environment";
 
 export interface ManagedSetting<T> {
   readonly value: T;
@@ -220,14 +224,6 @@ export interface EndpointConnectionStatus {
   readonly version: string;
 }
 
-export interface ProviderApiKeyConfig {
-  readonly provider: string;
-  readonly label: string;
-  readonly apiKey?: string;
-  readonly isConfigured: boolean;
-  readonly docsUrl?: string;
-}
-
 export interface ProviderCredentialStatus {
   readonly provider: string;
   readonly label: string;
@@ -252,12 +248,20 @@ export interface ProviderSearchCandidate {
 
 export interface WorkbenchHost {
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
-  saveNetworkConfiguration(input: SaveNetworkConfigurationRequest): Promise<NetworkConfiguration>;
+  saveNetworkConfiguration(
+    input: SaveNetworkConfigurationRequest,
+  ): Promise<NetworkConfiguration>;
   testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
-  saveProviderCredential(provider: string, credential: string): Promise<ProviderCredentialStatus[]>;
+  saveProviderCredential(
+    provider: string,
+    credential: string,
+  ): Promise<ProviderCredentialStatus[]>;
   deleteProviderCredential(provider: string): Promise<ProviderCredentialStatus[]>;
-  searchProvider(provider: string, query: string): Promise<ProviderSearchCandidate[]>;
+  searchProvider(
+    provider: string,
+    query: string,
+  ): Promise<ProviderSearchCandidate[]>;
   listApiClients?(): Promise<ApiClientCredentialSummary[]>;
   createApiClient?(scopes: string[]): Promise<CreatedApiClientCredential>;
   revokeApiClient?(credentialId: string): Promise<ApiClientCredentialSummary[]>;
@@ -369,49 +373,9 @@ export interface ContextMenuItemConfig {
   order: number;
 }
 
-export interface CustomMetadataField {
-  id: string;
-  name: string;
-  key: string;
-  type: "text" | "number" | "date" | "boolean" | "select";
-  targetKinds: (MediaKind | "all")[];
-  options?: string[];
-  description?: string;
-}
-
-export interface CustomMediaType {
-  id: string;
-  name: string;
-  singular: string;
-  plural: string;
-  icon?: string;
-  trackProgress: "episodes" | "pages" | "percent" | "duration" | "binary";
-}
-
 export interface WorkbenchPreferences {
   sidebarCollapsed: boolean;
   sidebarHidden: boolean;
-  titleLanguagePreference?: "english" | "romaji" | "native";
-  showOriginalTitleSubtitle?: boolean;
-  cacheMetadataLocally?: boolean;
-  providerRegion?: string;
-  metadataLanguage?: string;
-  tvProvider?: "tmdb" | "tvdb";
-  animeProvider?: "mal" | "anilist" | "kitsu";
-  animeLibrary?: "separate" | "unified";
-  hideCompleted?: "disabled" | "home" | "all";
-  hideZeroRatings?: boolean;
-  homeButtons?: "none" | "quick_track" | "context_only";
-  gameLogging?: "repeats" | "sessions";
-  progressFormat?: "pages_chapters" | "percent" | "episodes_minutes";
-  sessionDuration?: "2_weeks" | "30_days" | "never";
-  rpdbApiKey?: string;
-  rpdbEnabled?: boolean;
-  tvdbApiKey?: string;
-  tvdbUserPin?: string;
-  collectionsManifestUrl?: string;
-  customFields?: CustomMetadataField[];
-  customMediaTypes?: CustomMediaType[];
   navItems: NavItemConfig[];
   contextMenuItems: ContextMenuItemConfig[];
 }
