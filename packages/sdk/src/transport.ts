@@ -741,8 +741,9 @@ function parseOutgoing<T>(
 }
 
 /**
- * Throws an error when a problem-only binding returns success.
- * @throws {FastiProtocolError} Always throws.
+ * Rejects successful responses for bindings that define only problem responses.
+ *
+ * @throws FastiProtocolError Always throws a protocol error.
  */
 function unexpectedProblemOnlySuccess(_value: unknown): never {
   throw new FastiProtocolError(
@@ -752,9 +753,10 @@ function unexpectedProblemOnlySuccess(_value: unknown): never {
 
 /**
  * Normalizes and validates a base URL for Fasti client connections.
- * @param value - The URL string to normalize.
- * @returns A normalized URL object.
- * @throws {TypeError} If the URL is invalid or contains forbidden components.
+ *
+ * @param value - The URL string to validate.
+ * @returns A validated HTTP or HTTPS origin URL.
+ * @throws {TypeError} If the URL is invalid or contains credentials, a path, query, fragment, or invalid port.
  */
 export function normalizeBaseUrl(value: string): URL {
   const url = new URL(value);
@@ -779,18 +781,20 @@ export function normalizeBaseUrl(value: string): URL {
 }
 
 /**
- * Determines if a hostname is a loopback address.
+ * Determines whether a hostname identifies a loopback address.
+ *
  * @param hostname - The hostname to check.
- * @returns True if the hostname is localhost, 127.0.0.1, or [::1].
+ * @returns `true` for `localhost`, `127.0.0.1`, or `[::1]`, `false` otherwise.
  */
 function isLoopbackHostname(hostname: string): boolean {
   return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
 }
 
 /**
- * Returns loopback URL aliases for a given URL.
- * @param url - The URL to generate aliases for.
- * @returns An array of equivalent loopback URLs, or empty array if not loopback.
+ * Generates equivalent loopback origins for a URL.
+ *
+ * @param url - The URL whose loopback hostname and port determine the aliases.
+ * @returns Loopback origin aliases, or an empty array if the hostname is not loopback.
  */
 function loopbackAliases(url: URL): readonly string[] {
   if (!isLoopbackHostname(url.hostname)) return Object.freeze([]);

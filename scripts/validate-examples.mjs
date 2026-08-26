@@ -359,10 +359,10 @@ const validateLinkedDataReceipt = async (
 };
 
 /**
- * Validates contract examples against OpenAPI, JSON Schema, and JSON-LD specifications.
- * @param {string} [root=repositoryRoot] - The repository root directory path.
- * @returns {Promise<Object>} Validation results including example counts.
- * @throws {AssertionError} If any example validation fails.
+ * Validates contract examples against generated registries and API specifications.
+ * @param {string} [root=repositoryRoot] - The repository root directory.
+ * @return {Promise<Object>} Counts of validated examples, linked-data receipts, and problem examples.
+ * @throws {AssertionError} If a contract example or cross-specification reference is invalid.
  */
 export async function validateExamples(root = repositoryRoot) {
   const [

@@ -23,9 +23,9 @@ const definitionLink = /^\[(?!\^)[^\]]+\]:\s+(\S+)/gm;
 const failures = [];
 
 /**
- * Validates that a link target from a Markdown file exists and is accessible.
- * @param {string} file - The source Markdown file containing the link.
- * @param {string} rawTarget - The raw link target from the Markdown syntax.
+ * Validates a Markdown link target and records failures for non-portable or missing local targets.
+ * @param {string} file - The Markdown file containing the link.
+ * @param {string} rawTarget - The link target as written in the Markdown syntax.
  */
 function checkTarget(file, rawTarget) {
   let target = rawTarget.trim().replace(/^<|>$/g, "");

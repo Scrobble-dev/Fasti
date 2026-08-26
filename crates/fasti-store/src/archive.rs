@@ -748,6 +748,26 @@ impl WorkspaceArchiveDestination for FilesystemArchiveDestination {
         }
     }
 
+    /// Flushes, verifies, and atomically publishes the staged archive.
+    ///
+    /// The archive is published only when its SHA-256 digest matches `archive_digest`.
+    /// A directory synchronization failure is reported as indeterminate durability after
+    /// publication.
+    ///
+    /// # Arguments
+    ///
+    /// * `archive_digest` — Expected SHA-256 digest of the complete archive.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// destination.complete(&archive_digest, &manifest_digest)?;
+    /// # Ok::<(), WorkspaceArchiveCompletionError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing, syncing, digest verification, or publication fails.
     fn complete(
         mut self: Box<Self>,
         archive_digest: &Sha256Digest,

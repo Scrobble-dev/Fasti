@@ -102,11 +102,10 @@ function setDifference(left, right) {
 }
 
 /**
- * Asserts that two sets contain exactly the same elements.
- * @param {Iterable} actualValues - The actual values.
- * @param {Iterable} expectedValues - The expected values.
- * @param {string} label - A label for error reporting.
- * @throws {AssertionError} If the sets differ or contain duplicates.
+ * Verifies that two iterables contain the same unique identifiers.
+ * @param {Iterable} actualValues - The actual identifiers.
+ * @param {Iterable} expectedValues - The expected identifiers.
+ * @param {string} label - A label used in assertion messages.
  */
 function assertSameSet(actualValues, expectedValues, label) {
   const actualList = [...actualValues];
@@ -183,10 +182,10 @@ function markdownTargets(body) {
 }
 
 /**
- * Asserts that a link target exists locally or is a valid external/fragment link.
- * @param {string} sourcePath - The source file containing the link.
+ * Validates a Markdown link target against the repository.
+ * @param {string} sourcePath - The file containing the link.
  * @param {string} target - The link target to validate.
- * @throws {AssertionError} If a local target does not exist or is outside the repository.
+ * @throws {AssertionError} If the target is empty, points outside the repository, or refers to a missing local path.
  */
 async function assertLocalTargetExists(sourcePath, target) {
   if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) {
@@ -228,10 +227,9 @@ function assertStringList(value, label) {
 }
 
 /**
- * Validates the OKF (Open Knowledge Framework) bundle structure and content.
- * @param {Object} registry - The capability registry document.
- * @returns {Promise<Object>} Validation results including concept count.
- * @throws {AssertionError} If OKF validation fails.
+ * Validates the OKF bundle structure, metadata, links, and catalogue contents.
+ * @param {Object} registry - The capability registry used to verify catalogue values.
+ * @returns {Promise<{conceptCount: number}>} The number of validated concept files.
  */
 async function validateOkf(registry) {
   const files = await markdownFiles(okfRoot);
@@ -495,10 +493,9 @@ function parseCsv(source) {
 }
 
 /**
- * Validates the UAT (User Acceptance Test) matrix and ownership mappings.
- * @param {Object} registry - The capability registry document.
- * @returns {Promise<Object>} Validation results including case counts by status.
- * @throws {AssertionError} If UAT validation fails.
+ * Validates the product UAT matrix and its ownership mappings.
+ * @param {Object} registry - The capability registry containing UAT trace identifiers.
+ * @return {Promise<Object>} Counts of total, executable B1, contract B1, and deferred cases.
  */
 async function validateUat(registry) {
   const rows = parseCsv(await readFile(uatCsvPath, "utf8"));
@@ -608,9 +605,8 @@ async function validateUat(registry) {
 }
 
 /**
- * Validates the identity domain UAT matrix structure and content.
- * @returns {Promise<Object>} Validation results including case counts and phase distribution.
- * @throws {AssertionError} If identity UAT validation fails.
+ * Validates the identity-domain UAT matrix.
+ * @return {{caseCount: number, criticalCount: number, phaseCount: number}} Counts of cases, critical-risk cases, and represented phases.
  */
 async function validateIdentityUat() {
   const rows = parseCsv(await readFile(identityUatCsvPath, "utf8"));

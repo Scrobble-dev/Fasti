@@ -25,10 +25,10 @@ const entrypointWorkspaces = new Set([
 const failures = [];
 
 /**
- * Checks if a path is confined within a root directory (not escaping via .. or absolute paths).
+ * Determines whether a path identifies a descendant within a root directory.
  * @param {string} root - The root directory path.
  * @param {string} path - The path to check.
- * @returns {boolean} True if the path is confined within the root.
+ * @return {boolean} `true` if the path is within the root and differs from the root itself, `false` otherwise.
  */
 function isConfinedPath(root, path) {
   const fromRoot = relative(root, path);
@@ -53,10 +53,10 @@ function packageEntryPath(packageRoot, entry) {
 }
 
 /**
- * Checks if a package entry path exists and is physically confined within the package.
+ * Verifies that a package entry exists within the package directory.
  * @param {string} packageRoot - The package root directory.
- * @param {string} entry - The entry path from package.json.
- * @returns {boolean} True if the entry exists and is confined.
+ * @param {string} entry - The entry path from package metadata.
+ * @returns {boolean} `true` if the entry exists and is physically confined, `false` otherwise.
  */
 function packageEntryExists(packageRoot, entry) {
   const entryPath = packageEntryPath(packageRoot, entry);

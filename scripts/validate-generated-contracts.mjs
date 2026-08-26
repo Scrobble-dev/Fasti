@@ -37,10 +37,10 @@ const visitReferences = (value, visit) => {
 };
 
 /**
- * Validates generated OpenAPI and JSON Schema contracts against capability registry.
- * @param {string} [root=repositoryRoot] - The repository root directory path.
- * @returns {Promise<Object>} Validation results including capability and path counts.
- * @throws {AssertionError} If any generated contract validation fails.
+ * Validates generated OpenAPI, JSON Schema, capability registry, and problem catalog contracts.
+ * @param {string} [root=repositoryRoot] - The repository root directory containing the generated contracts.
+ * @returns {Object} Validation counts for capabilities, OpenAPI paths, problems, and schemas.
+ * @throws {AssertionError} If a generated contract fails validation.
  */
 export async function validateGeneratedContracts(root = repositoryRoot) {
   const [

@@ -82,6 +82,19 @@ enum ContractCommand {
     },
 }
 
+/// Parses command-line arguments, dispatches the selected workspace operation, and reports its result.
+///
+/// # Examples
+///
+/// ```
+/// # fn main() -> std::io::Result<()> {
+/// let status = std::process::Command::new("cargo")
+///     .args(["xtask", "--help"])
+///     .status()?;
+/// assert!(status.success());
+/// # Ok(())
+/// # }
+/// ```
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let root = workspace_root()?;
@@ -124,11 +137,24 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Runs the canonical B1 pull-request gate including contract verification and portable tests.
+/// Runs the canonical B1 pull-request gate, including contract verification and portable tests.
+///
+/// # Arguments
+///
+/// * `root` - Path to the workspace root.
 ///
 /// # Errors
 ///
 /// Returns an error if contract verification or portable B1 tests fail.
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// run_pr(std::path::Path::new("."))?;
+/// # Ok(())
+/// # }
+/// ```
 fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     verify_contracts(root, true)?;
     orchestration::run_portable_b1(root)?;
@@ -136,11 +162,18 @@ fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Runs the pull-request gate plus all applicable deep checks for the current B1 body.
+/// Runs the pull-request gate and all deep checks applicable to the current B1 body.
 ///
 /// # Errors
 ///
-/// Returns an error if the PR gate or any deep checks fail.
+/// Returns an error if the pull-request gate or any deep check fails.
+///
+/// # Examples
+///
+/// ```no_run
+/// run_deep(std::path::Path::new("."))?;
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
     run_pr(root)?;
     orchestration::run_deep_b1(root)?;
@@ -149,6 +182,11 @@ fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
 }
 
 /// Runs the selected milestone gate and creates its evidence manifest when applicable.
+///
+/// # Arguments
+///
+/// * `manifest` - Optional output path for the evidence manifest. Defaults to the
+///   milestone-specific path under `target/fasti-evidence`.
 ///
 /// # Examples
 ///
@@ -163,11 +201,9 @@ fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error when the selected milestone is unavailable, prerequisites
-/// are missing or invalid, or gate verification fails.
-///
-/// `manifest` specifies the output path for the milestone evidence manifest.
-/// When omitted, the default path under `target/fasti-evidence` is used.
+/// Returns an error if the milestone is unavailable, a prerequisite is missing
+/// or invalid, or gate verification fails. B8b additionally requires a passing
+/// B8a manifest.
 fn run_milestone(
     root: &std::path::Path,
     body: BodyArg,
@@ -215,16 +251,26 @@ fn run_milestone(
     }
 }
 
-/// Verifies B1 software contracts including registry, generation, and examples.
+/// Validates B1 software contracts and writes a verification receipt when all checks succeed.
+///
+/// This verifies the capability registry, deterministic generated artifacts, checked-in artifacts,
+/// registry examples, and the remaining contract checks. Any existing receipt is removed when
+/// verification fails.
 ///
 /// # Arguments
 ///
-/// * `root` - The workspace root path.
-/// * `locked` - Whether to require locked dependency graphs.
+/// * `root` - Path to the workspace root.
+/// * `locked` - Whether dependency verification must use locked dependency graphs.
 ///
-/// # Errors
+/// # Examples
 ///
-/// Returns an error if any verification step fails. Invalid receipts are removed.
+/// ```no_run
+/// # fn main() -> anyhow::Result<()> {
+/// let root = workspace_root()?;
+/// verify_contracts(&root, true)?;
+/// # Ok(())
+/// # }
+/// ```
 fn verify_contracts(root: &std::path::Path, locked: bool) -> anyhow::Result<()> {
     verify::clear_receipt(root)?;
 
@@ -298,11 +344,19 @@ fn verify_contracts(root: &std::path::Path, locked: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
-/// Determines the workspace root directory from the xtask crate location.
+/// Locates the workspace root directory containing the `xtask` crate.
 ///
 /// # Errors
 ///
-/// Returns an error if xtask is not directly under the workspace root.
+/// Returns an error when the `xtask` crate manifest directory has no parent.
+///
+/// # Examples
+///
+/// ```
+/// let root = workspace_root()?;
+/// assert!(root.is_dir());
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn workspace_root() -> anyhow::Result<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest

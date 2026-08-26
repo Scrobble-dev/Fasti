@@ -41,10 +41,10 @@ const assertInternalReferencesOnly = (value, path = "$") => {
 };
 
 /**
- * Validates authored AsyncAPI, portability JSON Schema, and JSON-LD contracts.
- * @param {string} [root=repositoryRoot] - The repository root directory path.
- * @returns {Promise<Object>} Validation results including AsyncAPI version and document counts.
- * @throws {AssertionError} If any contract validation fails.
+ * Validates authored AsyncAPI, portability, and JSON-LD contracts for a repository.
+ * @param {string} [root=repositoryRoot] - Repository root directory containing the contract files.
+ * @returns {Promise<Object>} Validation results with the AsyncAPI version, expanded document count, and portability format.
+ * @throws {AssertionError} If contract validation or consistency checks fail.
  */
 export async function validateAuthoredContracts(root = repositoryRoot) {
   const asyncApiPath = resolve(root, "contracts/asyncapi/v1/transport.yaml");
