@@ -17,7 +17,7 @@ android {
     compileSdk = 36
     namespace = "dev.scrobble.fasti"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "true"
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "dev.scrobble.fasti"
         minSdk = 24
         targetSdk = 36
@@ -30,13 +30,15 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+            packaging {
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
                 jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
             }
         }
         getByName("release") {
+            manifestPlaceholders["usesCleartextTraffic"] = "false"
             isMinifyEnabled = true
             proguardFiles(
                 fileTree(".") { include("**/*.pro") },
