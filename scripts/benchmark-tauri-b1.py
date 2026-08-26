@@ -53,10 +53,12 @@ class CaptureError(RuntimeError):
 
 
 def command_text(parts: list[str | Path]) -> str:
+    """Convert command parts to a shell-quoted string representation."""
     return shlex.join(str(part) for part in parts)
 
 
 def run_checked(parts: list[str | Path], *, timeout: float = 1200) -> str:
+    """Run a command and return stdout, raising CaptureError on failure."""
     result = subprocess.run(
         [str(part) for part in parts],
         cwd=ROOT,
@@ -72,11 +74,13 @@ def run_checked(parts: list[str | Path], *, timeout: float = 1200) -> str:
 
 
 def require_command(name: str) -> None:
+    """Verify that a required command exists in PATH, raising CaptureError if not."""
     if shutil.which(name) is None:
         raise CaptureError(f"required command is unavailable: {name}")
 
 
 def sha256_file(path: Path) -> str:
+    """Calculate the SHA-256 hash of a file."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -187,6 +191,7 @@ def retain_artifact(binary_bytes: bytes) -> tuple[Path, bool]:
 
 
 def remove_new_artifact(path: Path, created: bool) -> None:
+    """Remove a newly created artifact file if it was created."""
     if not created:
         return
     try:
@@ -197,6 +202,7 @@ def remove_new_artifact(path: Path, created: bool) -> None:
 
 
 def validate_runner_id(value: str) -> str:
+    """Validate and normalize runner ID, rejecting placeholders."""
     normalized = value.strip().casefold()
     if normalized in PLACEHOLDERS or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{2,63}", normalized):
         raise CaptureError(
@@ -206,6 +212,7 @@ def validate_runner_id(value: str) -> str:
 
 
 def clean_source_identity() -> dict[str, str]:
+    """Verify clean Git tree and return commit and tree object IDs."""
     if run_checked(["git", "status", "--porcelain=v1", "--untracked-files=all"]):
         raise CaptureError("Tauri evidence requires a clean source tree")
     return {
@@ -225,6 +232,7 @@ def validate_fixture_policy(
     main_source: str | None = None,
     require_tracked: bool = False,
 ) -> dict[str, Any]:
+    """Validate fixture configuration against policy restrictions."""
     run_checked(["node", str(VALIDATOR.relative_to(ROOT)), "--policy"], timeout=30)
     policy = json.loads(FIXTURE_POLICY.read_text(encoding="utf-8"))
     for relative, expected_digest in policy["tracked_inputs"].items():
@@ -295,6 +303,7 @@ def validate_fixture_policy(
 
 
 def fixture_scope(*, require_tracked: bool = False) -> dict[str, Any]:
+    """Load and validate fixture configuration files."""
     return validate_fixture_policy(
         json.loads(TAURI_CONFIG.read_text(encoding="utf-8")),
         tomllib.loads(MANIFEST.read_text(encoding="utf-8")),
@@ -304,6 +313,7 @@ def fixture_scope(*, require_tracked: bool = False) -> dict[str, Any]:
 
 
 def performance_environment_module() -> Any:
+    """Dynamically import the performance harness module."""
     spec = importlib.util.spec_from_file_location(
         "fasti_b1_performance_environment", PERFORMANCE_HARNESS
     )
@@ -404,6 +414,7 @@ def validate_display_evidence(
     wayland: bool,
     x11: bool,
 ) -> dict[str, Any]:
+    """Validate display environment evidence for physical display requirement."""
     if not re.fullmatch(r"[A-Za-z0-9._-]+", session_id):
         raise CaptureError("qualifying Tauri capture requires a safe XDG_SESSION_ID")
     if session_type not in {"wayland", "x11"}:
@@ -447,6 +458,7 @@ def validate_display_evidence(
 
 
 def display_session() -> dict[str, Any]:
+    """Collect and validate local display session evidence."""
     if platform.system() != "Linux":
         raise CaptureError(
             "qualifying Tauri capture requires a governed Linux desktop cgroup-v2 "
@@ -494,6 +506,7 @@ def display_session() -> dict[str, Any]:
 
 
 def runner_fingerprint(runner_id: str, display_evidence: dict[str, Any]) -> dict[str, Any]:
+    """Derive a stable runner fingerprint from runner ID and display evidence."""
     release = Path("/etc/os-release")
     if not release.is_file():
         raise CaptureError("Linux runner lacks /etc/os-release")
@@ -543,6 +556,7 @@ def runner_fingerprint(runner_id: str, display_evidence: dict[str, Any]) -> dict
 
 
 def validate_control_group(control_group: str, unit: str) -> Path:
+    """Validate and resolve the cgroup path for a systemd scope unit."""
     if not control_group.startswith("/") or ".." in Path(control_group).parts:
         raise CaptureError(f"systemd returned an unsafe cgroup path: {control_group!r}")
     if Path(control_group).name != unit:
@@ -557,6 +571,7 @@ def validate_control_group(control_group: str, unit: str) -> Path:
 
 
 def resolve_scope_cgroup(unit: str) -> Path:
+    """Resolve cgroup path for a systemd scope unit."""
     control_group = run_checked(
         ["systemctl", "--user", "show", unit, "--property=ControlGroup", "--value"],
         timeout=10,
@@ -571,6 +586,7 @@ def resolve_scope_cgroup(unit: str) -> Path:
 
 
 def cgroup_usage(path: Path) -> tuple[int, int, int]:
+    """Read memory usage metrics from a cgroup-v2 path."""
     try:
         current = int((path / "memory.current").read_text(encoding="ascii").strip())
         peak = int((path / "memory.peak").read_text(encoding="ascii").strip())
@@ -592,6 +608,7 @@ def cgroup_usage(path: Path) -> tuple[int, int, int]:
 def stop_scope(
     unit: str, process: subprocess.Popen[bytes], cgroup_path: Path | None
 ) -> None:
+    """Stop a systemd scope unit and its processes."""
     subprocess.run(
         ["systemctl", "--user", "kill", "--signal=TERM", "--kill-whom=all", unit],
         cwd=ROOT,
@@ -642,6 +659,7 @@ def capture_once(
     steady_window_seconds: float,
     sample_interval_ms: int,
 ) -> dict[str, Any]:
+    """Execute a single Tauri capture run and return measurements."""
     with tempfile.TemporaryDirectory(prefix="fasti-tauri-b1-") as temporary:
         ready_path = Path(temporary) / "ready"
         environment = os.environ.copy()
@@ -731,6 +749,7 @@ def capture_once(
 
 
 def metric_summary(values: list[int | float]) -> dict[str, int | float]:
+    """Compute summary statistics for captured metric values."""
     return {
         "minimum": min(values),
         "median": statistics.median(values),
@@ -739,6 +758,7 @@ def metric_summary(values: list[int | float]) -> dict[str, int | float]:
 
 
 def capture(args: argparse.Namespace) -> int:
+    """Run the complete Tauri benchmark capture workflow."""
     runner_id = validate_runner_id(args.runner_id)
     display_evidence = display_session()
     for command in [
@@ -900,6 +920,7 @@ def capture(args: argparse.Namespace) -> int:
 
 
 def self_test() -> None:
+    """Run the Tauri benchmark self-test validation."""
     require_command("node")
     run_checked(["node", str(VALIDATOR.relative_to(ROOT)), "--self-test"])
     fixture_scope()
@@ -935,6 +956,7 @@ def self_test() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the Tauri benchmark harness."""
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("self-test", help="run portable harness sentinels")
@@ -952,6 +974,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Main entry point for the Tauri benchmark harness."""
     args = parse_args()
     try:
         if args.command == "self-test":

@@ -7,12 +7,13 @@ Before planning or implementation, read these in order:
 1. [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
 2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md)
 3. [`README.md`](README.md)
-4. [`docs/constitution.md`](docs/constitution.md)
-5. [`docs/definition-of-done.md`](docs/definition-of-done.md)
-6. [`ROADMAP.md`](ROADMAP.md)
-7. [`docs/capability-ledger.md`](docs/capability-ledger.md)
-8. [`contracts/README.md`](contracts/README.md)
-9. [`SECURITY.md`](SECURITY.md)
+4. [`docs/dev-loop.md`](docs/dev-loop.md)
+5. [`docs/constitution.md`](docs/constitution.md)
+6. [`docs/definition-of-done.md`](docs/definition-of-done.md)
+7. [`ROADMAP.md`](ROADMAP.md)
+8. [`docs/capability-ledger.md`](docs/capability-ledger.md)
+9. [`contracts/README.md`](contracts/README.md)
+10. [`SECURITY.md`](SECURITY.md)
 
 The master handoff defines the durable product boundary, source-of-truth order, architecture and security invariants, programme model, required evidence, and the first 48-hour onboarding sequence.
 
@@ -67,6 +68,8 @@ Generated files are outputs, not sources of truth.
 - Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
+- Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
+- Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
@@ -114,6 +117,11 @@ Listener, public URL, loopback alias, container port, and certificate-trust
 ownership is documented in [`docs/network-configuration.md`](docs/network-configuration.md).
 Do not merge the bind address, client URL, and public reverse-proxy URL into one
 setting.
+
+Android sandbox selection, data-root locking, and descriptor-rooted kernel
+directories are implemented in source but are not Android build- or
+device-verified. Do not claim Android package support until the NDK build and
+device evidence pass. B3 restore and startup recovery remain Linux-only.
 
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 

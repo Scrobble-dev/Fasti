@@ -3,7 +3,7 @@
     CustomFieldDefinition,
     CustomMetadataField,
     ScopedApiToken,
-    ProviderApiKeyConfig,
+    ProviderCredentialStatus,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
@@ -13,7 +13,8 @@
     MediaRecord,
     ChronicleOccurrence,
   } from "./types.js";
-  import { DEFAULT_WORKBENCH_PREFERENCES } from "./mock-data.js";
+  import { createDefaultWorkbenchPreferences } from "./defaults.js";
+  import { hostProblemText } from "./host-problem.js";
   import {
     IconKey,
     IconPalette,
@@ -48,7 +49,9 @@
   interface Props {
     customFields: CustomFieldDefinition[];
     tokens: ScopedApiToken[];
-    providerKeys: ProviderApiKeyConfig[];
+    providerKeys?: ProviderCredentialStatus[];
+    providerLoading?: boolean;
+    providerLoadProblem?: string;
     oidcConfig: OidcConfiguration;
     appriseConfig: AppriseNotificationConfig;
     themeSettings: ThemeSettings;
@@ -57,7 +60,9 @@
     onUpdateWorkbenchPreferences?: (
       prefs: Partial<WorkbenchPreferences>,
     ) => void;
-    onSaveProviderKey?: (provider: string, key: string) => void;
+    onSaveProviderKey?: (provider: string, key: string) => Promise<void>;
+    onDeleteProviderKey?: (provider: string) => Promise<void>;
+    onRetryProviderState?: () => void;
     onCreateToken?: (name: string, scopes: string[]) => void;
     onDeleteToken?: (id: string) => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
@@ -73,14 +78,18 @@
   let {
     customFields,
     tokens,
-    providerKeys,
+    providerKeys = [],
+    providerLoading = false,
+    providerLoadProblem,
     oidcConfig,
     appriseConfig,
     themeSettings,
-    workbenchPreferences = DEFAULT_WORKBENCH_PREFERENCES,
+    workbenchPreferences = createDefaultWorkbenchPreferences(),
     onUpdateTheme,
     onUpdateWorkbenchPreferences,
     onSaveProviderKey,
+    onDeleteProviderKey,
+    onRetryProviderState,
     onCreateToken,
     onDeleteToken,
     onSaveOidc,
@@ -138,15 +147,9 @@
 
   // Local state for keys
   let editingKeyMap: Record<string, string> = $state({});
-  let savedStatusMap: Record<string, boolean> = $state({});
-
-  function handleSaveKey(provider: string, val: string): void {
-    onSaveProviderKey?.(provider, val);
-    savedStatusMap[provider] = true;
-    setTimeout(() => {
-      savedStatusMap[provider] = false;
-    }, 2500);
-  }
+  let providerBusy = $state<string | undefined>();
+  let providerNotice = $state("");
+  let providerProblem = $state("");
 
   function handleCreateTokenSubmit(e: Event): void {
     e.preventDefault();
@@ -428,7 +431,52 @@
   }
 
   function handleResetNavPreferences(): void {
-    onUpdateWorkbenchPreferences?.(DEFAULT_WORKBENCH_PREFERENCES);
+    onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
+  }
+
+  async function saveProviderKey(provider: string): Promise<void> {
+    const credential = editingKeyMap[provider]?.trim() ?? "";
+    if (!credential || !onSaveProviderKey || providerBusy) return;
+    providerBusy = provider;
+    providerNotice = "";
+    providerProblem = "";
+    try {
+      await onSaveProviderKey(provider, credential);
+      editingKeyMap[provider] = "";
+      providerNotice = "Credential saved in the platform credential store.";
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "The trusted desktop host rejected this credential request.",
+      );
+    } finally {
+      providerBusy = undefined;
+    }
+  }
+
+  async function deleteProviderKey(provider: string): Promise<void> {
+    if (!onDeleteProviderKey || providerBusy) return;
+    providerBusy = provider;
+    providerNotice = "";
+    providerProblem = "";
+    try {
+      await onDeleteProviderKey(provider);
+      editingKeyMap[provider] = "";
+      providerNotice = "Credential removed from the platform credential store.";
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "The trusted desktop host rejected this credential request.",
+      );
+    } finally {
+      providerBusy = undefined;
+    }
+  }
+
+  function confirmProviderDelete(provider: string): void {
+    if (window.confirm("Remove this provider key from the credential store?")) {
+      void deleteProviderKey(provider);
+    }
   }
 </script>
 
@@ -437,8 +485,8 @@
     <div>
       <h1 class="view-title">Settings & Studio</h1>
       <p class="view-subtitle">
-        Configure metadata API keys, appearance themes, media server connectors,
-        and security.
+        Configure available metadata providers, network access, appearance, and
+        navigation. Unavailable sections say so.
       </p>
     </div>
   </header>
@@ -1290,24 +1338,17 @@
                       >
                         Supports v3 API Key & v4 Bearer Token (`eyJ...`)
                       </div>
-                    {:else if prov.provider === "rpdb"}
-                      <div
-                        class="badge bg-warning-lt font-monospace mb-1"
-                        style="font-size: 0.7rem;"
-                      >
-                        Rating Poster Database (IMDb / RT / Metacritic badges)
-                      </div>
-                    {:else if prov.provider === "kaptains-collections"}
+                    {:else if prov.provider === "podcast-index"}
                       <div
                         class="badge bg-info-lt font-monospace mb-1"
                         style="font-size: 0.7rem;"
                       >
-                        Community Playlists & YAML/JSON Collections Manifests
+                        Enter as "key:secret"
                       </div>
                     {/if}
                     <div>
                       <a
-                        href={prov.docsUrl}
+                        href={prov.docs_url}
                         target="_blank"
                         rel="noopener"
                         class="docs-link"
@@ -1318,47 +1359,89 @@
                   </div>
                   <span
                     class="prov-status-chip"
-                    class:configured={prov.isConfigured}
+                    class:configured={prov.configured}
                   >
-                    {prov.isConfigured ? "Active & Verified" : "Not Configured"}
+                    {prov.configured ? "Configured" : "Not configured"}
                   </span>
                 </div>
 
-                <div class="key-input-row">
+                <p class="wb-help">
+                  {#if prov.source === "environment"}
+                    Source: environment. This value is read-only and applies to
+                    this app process.
+                  {:else if prov.source === "credential_store"}
+                    Source: platform credential store. This value is shared by
+                    all profiles on this Fasti node.
+                  {:else}
+                    No key is saved for this Fasti node.
+                  {/if}
+                </p>
+                <form
+                  class="key-input-row"
+                  onsubmit={(event) => {
+                    event.preventDefault();
+                    void saveProviderKey(prov.provider);
+                  }}
+                >
                   <input
                     type="password"
-                    placeholder={prov.provider === "tmdb"
-                      ? "Paste TMDB v3 API Key or v4 Read Access Token..."
-                      : prov.provider === "rpdb"
-                        ? "Enter RPDB Tier Key (e.g. t0-..., t1-...)..."
-                        : prov.provider === "kaptains-collections"
-                          ? "Enter Collections Manifest URL (https://...)..."
-                          : "Enter API Key / Access Token..."}
-                    value={editingKeyMap[prov.provider] ?? prov.apiKey}
+                    placeholder={prov.writable
+                      ? prov.provider === "tmdb"
+                        ? "Paste TMDB v3 API Key or v4 Read Access Token..."
+                        : prov.provider === "podcast-index"
+                          ? "Enter API key:secret..."
+                          : "Enter API Key / Access Token..."
+                      : "Managed by the environment"}
+                    value={editingKeyMap[prov.provider] ?? ""}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
                     aria-label="API Key for {prov.label}"
+                    autocomplete="off"
+                    spellcheck="false"
+                    disabled={!prov.writable || providerBusy === prov.provider}
                   />
                   <button
-                    type="button"
+                    type="submit"
                     class="save-key-btn"
-                    class:saved={savedStatusMap[prov.provider]}
-                    onclick={() => {
-                      const val = editingKeyMap[prov.provider] ?? prov.apiKey;
-                      handleSaveKey(prov.provider, val);
-                    }}
+                    disabled={!prov.writable ||
+                      !editingKeyMap[prov.provider]?.trim() ||
+                      !!providerBusy}
                   >
-                    {#if savedStatusMap[prov.provider]}
-                      <IconCheck size={14} /> Saved!
-                    {:else}
-                      Save Key
-                    {/if}
+                    {providerBusy === prov.provider ? "Saving..." : "Save Key"}
                   </button>
-                </div>
+                  {#if prov.writable && prov.configured}
+                    <button
+                      type="button"
+                      class="remove-key-btn"
+                      disabled={!!providerBusy}
+                      onclick={() => confirmProviderDelete(prov.provider)}
+                    >
+                      Remove key
+                    </button>
+                  {/if}
+                </form>
               </div>
             {/each}
           </div>
+          {#if providerLoadProblem}
+            <p class="wb-problem" role="alert">
+              {providerLoadProblem}
+              {#if onRetryProviderState}
+                <button type="button" onclick={() => onRetryProviderState?.()}>
+                  Retry
+                </button>
+              {/if}
+            </p>
+          {:else if providerLoading}
+            <p class="wb-help">Loading provider credential status...</p>
+          {/if}
+          {#if providerNotice}
+            <p class="wb-notice" role="status">{providerNotice}</p>
+          {/if}
+          {#if providerProblem}
+            <p class="wb-problem" role="alert">{providerProblem}</p>
+          {/if}
         </section>
 
         <!-- 3. Nuvio & Media Server Connectors -->
@@ -1492,8 +1575,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Personal Access Tokens (PAT)</h2>
           <p class="pane-desc">
-            Generate cryptographically verified Bearer tokens for scripts and
-            devices.
+            Token creation and revocation are not available in this build. The
+            disabled controls show the planned scope model.
           </p>
 
           <!-- New Token Form -->
@@ -1755,8 +1838,10 @@
         <section class="section-pane">
           <h2 class="pane-title">Lossless Importers & Migrations</h2>
           <p class="pane-desc">
-            Migrate your entire scrobble and media history with zero data loss,
-            or export your full chronicle.
+            Export your full chronicle at any time. Third-party importers do
+            generic JSON/CSV parsing only -- they are not format-validated
+            against each platform's real export schema yet, so double-check
+            imported records before trusting them.
           </p>
 
           {#if importStatusMessage}
@@ -1792,7 +1877,7 @@
 
           <h3 class="h4 mb-3">Third-Party Platform Importers</h3>
           <div class="importers-grid">
-            {#each [{ name: "Floppy / Yamtrack", desc: "Import full history, custom fields, and tags from Floppy SQLite/JSON.", ext: ".json" }, { name: "SIMKL Archive", desc: "Import TV, Anime, and Movie tracking records from SIMKL CSV/JSON.", ext: ".csv, .json" }, { name: "Trakt.tv Export", desc: "Import Trakt scrobbles, ratings, and watchlists.", ext: ".csv" }, { name: "MyAnimeList / AniList", desc: "Import anime and manga lists via XML / JSON format.", ext: ".json" }] as imp}
+            {#each [{ name: "Floppy / Yamtrack", desc: "Generic JSON import. Field mapping is not yet validated against Floppy's real export schema -- review imported records before trusting them.", ext: ".json" }, { name: "SIMKL Archive", desc: "Generic CSV/JSON import. Field mapping is not yet validated against SIMKL's real export schema.", ext: ".csv, .json" }, { name: "Trakt.tv Export", desc: "Generic CSV import. Ratings and watchlists are not parsed yet -- only title/kind columns.", ext: ".csv" }, { name: "MyAnimeList / AniList", desc: "Generic JSON import. XML export is not supported yet.", ext: ".json" }] as imp}
               <div class="importer-card">
                 <h3 class="imp-title">{imp.name}</h3>
                 <p class="imp-desc">{imp.desc}</p>
@@ -2082,9 +2167,24 @@
     transition: all 120ms ease;
   }
 
-  .save-key-btn.saved {
-    background: var(--fasti-state-verified) !important;
-    color: #ffffff !important;
+  .save-key-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .remove-key-btn {
+    padding: 8px 18px;
+    background: transparent;
+    color: var(--fasti-state-attention, var(--tblr-danger, #d63939));
+    font-weight: 600;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .remove-key-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .connector-instruction-card {
@@ -2157,6 +2257,20 @@
     font-size: 0.78rem;
     color: var(--fasti-text-muted);
     margin: 6px 0 0;
+  }
+
+  .wb-notice,
+  .wb-problem {
+    font-size: 0.85rem;
+    margin: 12px 0 0;
+  }
+
+  .wb-notice {
+    color: var(--fasti-state-verified, var(--tblr-success, #2fb344));
+  }
+
+  .wb-problem {
+    color: var(--fasti-state-attention, var(--tblr-danger, #d63939));
   }
 
   .token-form-card {

@@ -4,6 +4,7 @@ use crate::setup::{DesktopProblem, KEYRING_SERVICE};
 use fasti_application::{
     authorize_outbound, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
 };
+use fasti_store::DataRootIdentity;
 use reqwest::header::{HeaderValue, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -49,7 +50,7 @@ pub(crate) struct ProviderCredentialStatus {
     docs_url: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SaveProviderCredentialInput {
     provider: String,
@@ -102,12 +103,15 @@ struct GoogleVolumeInfo {
     authors: Vec<String>,
 }
 
-pub(crate) fn credential_statuses() -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    Ok(vec![google_books_status()?])
+pub(crate) fn credential_statuses(
+    identity: DataRootIdentity,
+) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
+    Ok(vec![google_books_status(identity)?])
 }
 
 pub(crate) fn save_credential(
     mut input: SaveProviderCredentialInput,
+    identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
     let result = (|| {
         require_google_books(&input.provider)?;
@@ -117,7 +121,7 @@ pub(crate) fn save_credential(
             ));
         }
         validate_credential(&input.credential)?;
-        let entry = provider_entry()?;
+        let entry = provider_entry(identity)?;
         entry.set_secret(input.credential.as_bytes()).map_err(|_| {
             DesktopProblem::secure_storage(
                 "Fasti could not save the Google Books credential securely.",
@@ -139,11 +143,12 @@ pub(crate) fn save_credential(
     })();
     input.credential.zeroize();
     result?;
-    credential_statuses()
+    credential_statuses(identity)
 }
 
 pub(crate) fn delete_credential(
     input: DeleteProviderCredentialInput,
+    identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
     require_google_books(&input.provider)?;
     if environment_is_configured()? {
@@ -151,8 +156,8 @@ pub(crate) fn delete_credential(
             "The Google Books credential is managed by GOOGLE_BOOKS_API_KEY.",
         ));
     }
-    match provider_entry()?.delete_credential() {
-        Ok(()) | Err(KeyringError::NoEntry) => credential_statuses(),
+    match provider_entry(identity)?.delete_credential() {
+        Ok(()) | Err(KeyringError::NoEntry) => credential_statuses(identity),
         Err(_) => Err(DesktopProblem::secure_storage(
             "Fasti could not remove the Google Books credential.",
         )),
@@ -162,6 +167,7 @@ pub(crate) fn delete_credential(
 pub(crate) async fn search(
     input: ProviderSearchInput,
     policy: &OutboundAccessPolicy,
+    identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
     require_google_books(&input.provider)?;
     validate_query(&input.query)?;
@@ -188,7 +194,7 @@ pub(crate) async fn search(
 
     // Credential access follows DNS resolution, declaration checks, policy checks,
     // and construction of a proxy-free, redirect-free client.
-    let credential = load_credential()?;
+    let credential = load_credential(identity)?;
     let mut url = reqwest::Url::parse(GOOGLE_BOOKS_URL)
         .map_err(|_| DesktopProblem::provider("The Google Books endpoint is invalid."))?;
     url.query_pairs_mut()
@@ -238,11 +244,13 @@ pub(crate) async fn search(
     parse_candidates(&body)
 }
 
-fn google_books_status() -> Result<ProviderCredentialStatus, DesktopProblem> {
+fn google_books_status(
+    identity: DataRootIdentity,
+) -> Result<ProviderCredentialStatus, DesktopProblem> {
     if environment_is_configured()? {
         return Ok(status(true, CredentialSource::Environment, false));
     }
-    let configured = match provider_entry()?.get_secret() {
+    let configured = match provider_entry(identity)?.get_secret() {
         Ok(mut secret) => {
             let valid = validate_credential_bytes(&secret).is_ok();
             secret.zeroize();
@@ -281,8 +289,9 @@ const fn status(
     }
 }
 
-fn provider_entry() -> Result<Entry, DesktopProblem> {
-    Entry::new(KEYRING_SERVICE, GOOGLE_BOOKS_ACCOUNT).map_err(|_| {
+fn provider_entry(identity: DataRootIdentity) -> Result<Entry, DesktopProblem> {
+    let account = crate::secure_storage::scoped_account(GOOGLE_BOOKS_ACCOUNT, identity);
+    Entry::new(KEYRING_SERVICE, &account).map_err(|_| {
         DesktopProblem::secure_storage("Fasti could not open the system credential store.")
     })
 }
@@ -313,11 +322,11 @@ fn environment_is_configured() -> Result<bool, DesktopProblem> {
     }
 }
 
-fn load_credential() -> Result<Option<String>, DesktopProblem> {
+fn load_credential(identity: DataRootIdentity) -> Result<Option<String>, DesktopProblem> {
     if let Some(value) = environment_credential()? {
         return Ok(Some(value));
     }
-    match provider_entry()?.get_secret() {
+    match provider_entry(identity)?.get_secret() {
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(mut value) => {
                 if let Err(problem) = validate_credential(&value) {
@@ -515,5 +524,27 @@ mod tests {
         let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
 
         assert!(authenticated_request(&client, url, None).is_err());
+    }
+
+    #[test]
+    fn credential_is_sent_only_in_a_sensitive_header() {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("test client");
+        let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
+        let request = authenticated_request(&client, url, Some("test-key".into()))
+            .expect("authenticated request")
+            .build()
+            .expect("built request");
+        let header = request
+            .headers()
+            .get("X-Goog-Api-Key")
+            .expect("credential header");
+
+        assert_eq!(header, "test-key");
+        assert!(header.is_sensitive());
+        assert!(!request.url().as_str().contains("test-key"));
     }
 }

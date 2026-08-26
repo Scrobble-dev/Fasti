@@ -3,11 +3,8 @@ use fasti_application::{
     FastiProblem, InitializeNodeCommand, ProblemCode, RequestAccessContext, SecretMaterial,
 };
 use fasti_domain::RequestCorrelationId;
-use fasti_store::SqliteKernel;
+use fasti_store::{DataRootIdentity, SqliteKernel};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use std::fmt::Write as _;
-use std::path::Path;
 
 pub(crate) const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
@@ -35,6 +32,11 @@ pub(crate) struct DesktopProblem {
 }
 
 impl DesktopProblem {
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
+
     pub(crate) fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
@@ -71,6 +73,15 @@ impl DesktopProblem {
         }
     }
 
+    pub(crate) fn invalid_input(detail: impl Into<String>) -> Self {
+        Self {
+            code: "invalid_input",
+            title: "Invalid input",
+            detail: detail.into(),
+            next_action: "Correct the input and retry.",
+        }
+    }
+
     pub(crate) fn connection(detail: impl Into<String>) -> Self {
         Self {
             code: "connection_failed",
@@ -99,7 +110,16 @@ impl DesktopProblem {
         }
     }
 
-    fn application(problem: &FastiProblem) -> Self {
+    pub(crate) fn not_authenticated() -> Self {
+        Self {
+            code: "not_authenticated",
+            title: "Setup is not complete",
+            detail: "This capability needs a saved administrator credential.".to_owned(),
+            next_action: "Complete setup, then retry.",
+        }
+    }
+
+    pub(crate) fn application(problem: &FastiProblem) -> Self {
         let contract = problem.code().contract();
         Self {
             code: problem.code().as_str(),
@@ -150,13 +170,10 @@ pub(crate) struct KeyringSetupSecretStore {
 }
 
 impl KeyringSetupSecretStore {
-    pub(crate) fn new(data_root: &Path) -> Self {
-        let digest = Sha256::digest(data_root.as_os_str().as_encoded_bytes());
-        let mut account_scope = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            write!(account_scope, "{byte:02x}").expect("writing to a String cannot fail");
+    pub(crate) fn new(identity: DataRootIdentity) -> Self {
+        Self {
+            account_scope: crate::secure_storage::account_scope(identity),
         }
-        Self { account_scope }
     }
 
     fn account(&self, secret: SetupSecret) -> String {
@@ -216,7 +233,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     }
 }
 
-fn authenticate(
+pub(crate) fn authenticate(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
 ) -> Result<Option<RequestAccessContext>, DesktopProblem> {
@@ -293,13 +310,14 @@ pub(crate) fn complete_setup(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) mod test_support {
+    use super::{DesktopProblem, SecretMaterial, SetupSecret, SetupSecretStore};
+    use fasti_store::SqliteKernel;
     use std::collections::BTreeMap;
     use std::sync::Mutex;
 
     #[derive(Default)]
-    struct MemoryStore(Mutex<BTreeMap<SetupSecret, [u8; 32]>>);
+    pub(crate) struct MemoryStore(Mutex<BTreeMap<SetupSecret, [u8; 32]>>);
 
     impl SetupSecretStore for MemoryStore {
         fn load(&self, secret: SetupSecret) -> Result<Option<SecretMaterial>, DesktopProblem> {
@@ -326,11 +344,17 @@ mod tests {
         }
     }
 
-    fn new_kernel() -> (tempfile::TempDir, SqliteKernel) {
+    pub(crate) fn new_kernel() -> (tempfile::TempDir, SqliteKernel) {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
         (root, kernel)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_support::{new_kernel, MemoryStore};
 
     #[test]
     fn setup_initializes_and_enrolls_cleanly() {
@@ -375,10 +399,18 @@ mod tests {
 
     #[test]
     fn keyring_accounts_are_scoped_to_the_data_root() {
-        let root_a = tempfile::tempdir().expect("first data root");
-        let root_b = tempfile::tempdir().expect("second data root");
-        let store_a = KeyringSetupSecretStore::new(root_a.path());
-        let store_b = KeyringSetupSecretStore::new(root_b.path());
+        let (_root_a, kernel_a) = new_kernel();
+        let (_root_b, kernel_b) = new_kernel();
+        let store_a = KeyringSetupSecretStore::new(kernel_a.data_root_identity());
+        let store_b = KeyringSetupSecretStore::new(kernel_b.data_root_identity());
+
+        assert_eq!(
+            store_a.account(SetupSecret::Credential),
+            format!(
+                "local-admin-credential-v1-{}",
+                crate::secure_storage::account_scope(kernel_a.data_root_identity())
+            )
+        );
 
         assert_ne!(
             store_a.account(SetupSecret::Credential),

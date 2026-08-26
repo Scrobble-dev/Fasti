@@ -6,6 +6,7 @@ mod endpoint;
 mod network_config;
 mod outbound_http;
 mod providers;
+mod reviews;
 mod secure_storage;
 mod setup;
 
@@ -61,7 +62,10 @@ impl DesktopState {
 #[tauri::command(async)]
 fn setup_status(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, DesktopProblem> {
     let kernel = state.kernel()?;
-    setup::inspect_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
+    setup::inspect_setup(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -72,7 +76,10 @@ fn complete_setup(state: tauri::State<'_, DesktopState>) -> Result<SetupStatus, 
         .lock()
         .map_err(|_| DesktopProblem::storage("The setup lock is unavailable."))?;
     let kernel = state.kernel()?;
-    setup::complete_setup(&kernel, &KeyringSetupSecretStore::new(kernel.data_root()))
+    setup::complete_setup(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -102,24 +109,31 @@ async fn test_endpoint_connection(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
-fn provider_credential_status() -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    providers::credential_statuses()
+fn provider_credential_status(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    providers::credential_statuses(kernel.data_root_identity())
 }
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
 fn save_provider_credential(
+    state: tauri::State<'_, DesktopState>,
     input: SaveProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    providers::save_credential(input)
+    let kernel = state.kernel()?;
+    providers::save_credential(input, kernel.data_root_identity())
 }
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
 fn delete_provider_credential(
+    state: tauri::State<'_, DesktopState>,
     input: DeleteProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    providers::delete_credential(input)
+    let kernel = state.kernel()?;
+    providers::delete_credential(input, kernel.data_root_identity())
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -128,8 +142,40 @@ async fn search_provider(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSearchInput,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    let kernel = state.kernel()?;
     let configuration = state.network.load()?;
-    providers::search(input, configuration.outbound_policy()).await
+    providers::search(
+        input,
+        configuration.outbound_policy(),
+        kernel.data_root_identity(),
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn list_reviews(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<reviews::ReviewItem>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    reviews::list_reviews(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn resolve_review(
+    state: tauri::State<'_, DesktopState>,
+    input: reviews::ResolveReviewInput,
+) -> Result<reviews::ResolveReviewOutcome, DesktopProblem> {
+    let kernel = state.kernel()?;
+    reviews::resolve_review(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
 }
 
 fn explicit_data_root(value: Option<OsString>) -> io::Result<PathBuf> {
@@ -188,10 +234,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             secure_storage::initialize().map_err(|()| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    "Fasti could not initialize the platform credential store",
-                )
+                io::Error::other("Fasti could not initialize the platform credential store")
             })?;
             let config_root = app.path().app_config_dir()?;
             let data_root = data_root(app)?;
@@ -212,7 +255,9 @@ pub fn run() {
             provider_credential_status,
             save_provider_credential,
             delete_provider_credential,
-            search_provider
+            search_provider,
+            list_reviews,
+            resolve_review
         ])
         .run(tauri::generate_context!())
         .expect("Fasti desktop shell failed");

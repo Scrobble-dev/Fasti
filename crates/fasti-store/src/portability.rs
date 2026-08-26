@@ -1,8 +1,6 @@
 use crate::crypto::{encode_hex, sha256_reader};
 use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evidence_path};
-use crate::kernel::{
-    authorize_transaction, map_sql, reject_unsafe_existing_file, SqliteKernel, StoreOpenError,
-};
+use crate::kernel::{authorize_transaction, map_sql, SqliteKernel, StoreOpenError};
 use crate::schema::workspace_revision;
 use fasti_application::{
     ApplicationResult, CapabilityKey, ExportWorkspaceQuery, FastiProblem, PortabilityLimits,
@@ -18,7 +16,6 @@ use rusqlite::types::{Value, ValueRef};
 use rusqlite::{params, Connection, Transaction, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-use std::fs::File;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
@@ -482,10 +479,8 @@ fn verify_evidence_file(
     if path_to_storage_value(&expected_relative) != stored_path {
         return integrity_failure(capability, correlation_id);
     }
-    let path = kernel.inner.current_root.join(&expected_relative);
-    reject_unsafe_existing_file(&path)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let file = File::open(&path)
+    let file = kernel
+        .open_evidence_file(digest_hex)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let (actual_digest, actual_size) = sha256_reader(file)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;

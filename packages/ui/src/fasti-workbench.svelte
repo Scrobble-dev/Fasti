@@ -5,7 +5,7 @@
     MediaRecord,
     WatchStatus,
     ChronicleOccurrence,
-    ProviderApiKeyConfig,
+    ProviderCredentialStatus,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
@@ -14,6 +14,7 @@
     ReconciliationCase,
     ScopedApiToken,
   } from "./types.js";
+  import { hostProblemText } from "./host-problem.js";
   import {
     SAMPLE_RECORDS,
     SAMPLE_CHRONICLE,
@@ -21,7 +22,6 @@
     SAMPLE_DISCOVER_TRENDING,
     SAMPLE_CUSTOM_FIELDS,
     SAMPLE_TOKENS,
-    SAMPLE_PROVIDER_KEYS,
     SAMPLE_OIDC_CONFIG,
     SAMPLE_APPRISE_CONFIG,
     DEFAULT_THEME_SETTINGS,
@@ -106,9 +106,9 @@
   let tokens = $state<ScopedApiToken[]>(
     loadInitialState("fasti-tokens", SAMPLE_TOKENS),
   );
-  let providerKeys = $state<ProviderApiKeyConfig[]>(
-    loadInitialState("fasti-provider-keys", SAMPLE_PROVIDER_KEYS),
-  );
+  let providerKeys = $state<ProviderCredentialStatus[]>([]);
+  let providerLoading = $state(false);
+  let providerLoadProblem = $state<string | undefined>();
   let oidcConfig = $state<OidcConfiguration>(
     loadInitialState("fasti-oidc", SAMPLE_OIDC_CONFIG),
   );
@@ -146,11 +146,6 @@
   $effect(() => {
     try {
       localStorage.setItem("fasti-tokens", JSON.stringify(tokens));
-    } catch {}
-  });
-  $effect(() => {
-    try {
-      localStorage.setItem("fasti-provider-keys", JSON.stringify(providerKeys));
     } catch {}
   });
   $effect(() => {
@@ -511,9 +506,26 @@
     }
   }
 
+  async function loadProviderKeys(): Promise<void> {
+    if (!host?.providerCredentialStatus) return;
+    providerLoading = true;
+    providerLoadProblem = undefined;
+    try {
+      providerKeys = await host.providerCredentialStatus();
+    } catch (error) {
+      providerLoadProblem = hostProblemText(
+        error,
+        "The trusted host rejected the provider credential status request.",
+      );
+    } finally {
+      providerLoading = false;
+    }
+  }
+
   onMount(() => {
     syncFromUrl();
     checkNodeHealth();
+    void loadProviderKeys();
     window.addEventListener("popstate", syncFromUrl);
     return () => {
       window.removeEventListener("popstate", syncFromUrl);
@@ -649,15 +661,25 @@
     themeSettings = { ...themeSettings, ...updates };
   }
 
-  function handleSaveProviderKey(provider: string, key: string): void {
-    providerKeys = providerKeys.map((p) =>
-      p.provider === provider
-        ? { ...p, apiKey: key, isConfigured: key.trim().length > 0 }
-        : p,
-    );
-    if (host?.saveProviderCredential) {
-      void host.saveProviderCredential(provider, key);
+  async function handleSaveProviderKey(
+    provider: string,
+    key: string,
+  ): Promise<void> {
+    if (!host?.saveProviderCredential) {
+      throw new Error(
+        "This host cannot save provider credentials outside the trusted desktop shell.",
+      );
     }
+    providerKeys = await host.saveProviderCredential(provider, key);
+  }
+
+  async function handleDeleteProviderKey(provider: string): Promise<void> {
+    if (!host?.deleteProviderCredential) {
+      throw new Error(
+        "This host cannot remove provider credentials outside the trusted desktop shell.",
+      );
+    }
+    providerKeys = await host.deleteProviderCredential(provider);
   }
 
   function handleCreateToken(name: string, scopes: string[]): void {
@@ -1128,6 +1150,8 @@
           customFields={SAMPLE_CUSTOM_FIELDS}
           {tokens}
           {providerKeys}
+          {providerLoading}
+          {providerLoadProblem}
           {oidcConfig}
           {appriseConfig}
           {themeSettings}
@@ -1136,6 +1160,8 @@
           onUpdateWorkbenchPreferences={(prefs) =>
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
           onSaveProviderKey={handleSaveProviderKey}
+          onDeleteProviderKey={handleDeleteProviderKey}
+          onRetryProviderState={loadProviderKeys}
           onCreateToken={handleCreateToken}
           onDeleteToken={handleDeleteToken}
           onSaveOidc={handleSaveOidc}

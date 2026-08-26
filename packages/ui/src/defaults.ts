@@ -1,6 +1,8 @@
 export * from "./mock-data.js";
 
-export function createDefaultWorkbenchPreferences() {
+import type { WorkbenchPreferences } from "./types.js";
+
+export function createDefaultWorkbenchPreferences(): WorkbenchPreferences {
   return {
     sidebarCollapsed: false,
     sidebarHidden: false,
