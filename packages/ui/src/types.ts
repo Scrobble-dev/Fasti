@@ -274,16 +274,9 @@ export interface ResolvedFieldView {
 export interface ClaimedTimeView {
   readonly original: string;
   readonly precision:
-    | "date"
-    | "second"
-    | "millisecond"
-    | "microsecond"
-    | "nanosecond";
+    "date" | "second" | "millisecond" | "microsecond" | "nanosecond";
   readonly trust:
-    | "source_claim"
-    | "device_observed"
-    | "user_entered"
-    | "inferred";
+    "source_claim" | "device_observed" | "user_entered" | "inferred";
 }
 
 export interface RecordActivityView {

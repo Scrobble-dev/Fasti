@@ -143,7 +143,10 @@
                 class="action-btn not-same"
                 disabled={!onResolveNew}
                 onclick={() =>
-                  onResolveNew?.(item.review_item_id, grainFor(item.review_item_id))}
+                  onResolveNew?.(
+                    item.review_item_id,
+                    grainFor(item.review_item_id),
+                  )}
                 title={!onResolveNew
                   ? "Resolving is unavailable until a resolve command is implemented"
                   : undefined}

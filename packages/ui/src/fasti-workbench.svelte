@@ -19,7 +19,10 @@
   import MediaDetailView from "./media-detail-view.svelte";
   import NavSidebar from "./nav-sidebar.svelte";
   import TablerThemeDrawer from "./tabler-theme-drawer.svelte";
-  import { createDefaultWorkbenchPreferences, DEFAULT_THEME_SETTINGS } from "./defaults.js";
+  import {
+    createDefaultWorkbenchPreferences,
+    DEFAULT_THEME_SETTINGS,
+  } from "./defaults.js";
   import { hostProblemText } from "./host-problem.js";
   import { projectRecordSummary } from "./record-projection.js";
   import type {
@@ -90,7 +93,8 @@
     if (path === "/connections") return "connections";
     if (path === "/settings") return "settings";
     if (path === "/discover") return "discover";
-    if (path === "/reconciliation" || path === "/reviews") return "reconciliation";
+    if (path === "/reconciliation" || path === "/reviews")
+      return "reconciliation";
     if (path === "/library") return "library";
     if (path === "/calendar") return "calendar";
     if (path.startsWith("/records")) {
@@ -126,7 +130,10 @@
 
   $effect(() => {
     try {
-      localStorage.setItem("fasti-theme-settings", JSON.stringify(themeSettings));
+      localStorage.setItem(
+        "fasti-theme-settings",
+        JSON.stringify(themeSettings),
+      );
     } catch {}
     if (typeof document === "undefined") return;
     const root = document.documentElement;
@@ -135,13 +142,22 @@
     root.dataset.bsTheme = themeSettings.mode === "light" ? "light" : "dark";
     root.style.colorScheme = themeSettings.mode === "light" ? "light" : "dark";
     if (themeSettings.accentColor) {
-      root.style.setProperty("--fasti-action-primary", themeSettings.accentColor);
+      root.style.setProperty(
+        "--fasti-action-primary",
+        themeSettings.accentColor,
+      );
       root.style.setProperty("--tblr-primary", themeSettings.accentColor);
     }
     if (themeSettings.fontFamily === "serif") {
-      root.style.setProperty("--fasti-font-display", "'Newsreader', Georgia, serif");
+      root.style.setProperty(
+        "--fasti-font-display",
+        "'Newsreader', Georgia, serif",
+      );
     } else if (themeSettings.fontFamily === "monospace") {
-      root.style.setProperty("--fasti-font-display", "'IBM Plex Mono', monospace");
+      root.style.setProperty(
+        "--fasti-font-display",
+        "'IBM Plex Mono', monospace",
+      );
     } else {
       root.style.removeProperty("--fasti-font-display");
     }
@@ -327,7 +343,7 @@
 
 <div class="workbench-shell">
   <NavSidebar
-    activeSection={activeSection}
+    {activeSection}
     navItems={workbenchPreferences.navItems}
     {openReviewCount}
     collapsed={workbenchPreferences.sidebarCollapsed || isNarrowViewport}
@@ -472,8 +488,10 @@
         {:else}
           <div class="state-message">
             <p>No record selected.</p>
-            <button type="button" class="link-btn" onclick={() => select("library")}
-              >Choose one from Library</button
+            <button
+              type="button"
+              class="link-btn"
+              onclick={() => select("library")}>Choose one from Library</button
             >
           </div>
         {/if}
@@ -484,8 +502,8 @@
             <h1>Current Fasti capability</h1>
             <p>
               This surface reports only behavior that the active host and local
-              API can perform. It does not load sample media or substitute browser
-              storage for the Chronicle.
+              API can perform. It does not load sample media or substitute
+              browser storage for the Chronicle.
             </p>
           </header>
 
@@ -495,8 +513,8 @@
               <div>
                 <h2>Durable occurrence ingress</h2>
                 <p>
-                  <strong>Active on the local API.</strong> Scoped bearer clients
-                  can submit complete consumption occurrences to
+                  <strong>Active on the local API.</strong> Scoped bearer
+                  clients can submit complete consumption occurrences to
                   <code>POST /api/v1/observations</code>. Fasti stores evidence,
                   applies idempotency, and returns a durable receipt.
                 </p>
@@ -508,10 +526,10 @@
               <div>
                 <h2>Media library presentation</h2>
                 <p>
-                  <strong>Record listing is active.</strong> Chronicle listing,
-                  metadata editing, collections, ratings, imports, and progress
-                  still need their own application and public contracts before
-                  this workbench can present them as working product state.
+                  <strong>Record listing is active.</strong> Chronicle listing, metadata
+                  editing, collections, ratings, imports, and progress still need
+                  their own application and public contracts before this workbench
+                  can present them as working product state.
                 </p>
                 <button
                   type="button"
@@ -576,9 +594,9 @@
             <h2 id="next-step-title">Next implementation gate</h2>
             <p>
               Activate Chronicle query/mutation contracts and bind metadata
-              editing, collections, ratings, and progress to the media UI.
-              Until that gate passes, Fasti keeps the richer prototype out of
-              the runtime path instead of presenting fake success.
+              editing, collections, ratings, and progress to the media UI. Until
+              that gate passes, Fasti keeps the richer prototype out of the
+              runtime path instead of presenting fake success.
             </p>
           </section>
         </div>

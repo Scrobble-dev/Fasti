@@ -1,4 +1,9 @@
-import type { MediaKind, MediaRecord, RecordSummary, WatchStatus } from "./types.js";
+import type {
+  MediaKind,
+  MediaRecord,
+  RecordSummary,
+  WatchStatus,
+} from "./types.js";
 
 /**
  * Coarse `Grain` (identity granularity) -> `MediaKind` (display category)
@@ -46,7 +51,9 @@ function mediaKindForGrain(grain: string): MediaKind {
  * once occurrence-derived watch status exists.
  */
 export function projectRecordSummary(summary: RecordSummary): MediaRecord {
-  const status: WatchStatus = summary.latest_activity ? "watching" : "plan_to_watch";
+  const status: WatchStatus = summary.latest_activity
+    ? "watching"
+    : "plan_to_watch";
   const titleValue =
     summary.title.tier !== "empty" && summary.title.value
       ? summary.title.value
