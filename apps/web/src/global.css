@@ -23,6 +23,20 @@ input,
 select,
 textarea {
   font: inherit;
+  color: inherit;
+}
+
+select option {
+  background-color: var(--fasti-surface-paper, #ffffff) !important;
+  color: var(--fasti-text-primary, #181716) !important;
+}
+
+.dropdown-menu,
+.form-select,
+.form-control {
+  background-color: var(--fasti-surface-paper, #ffffff) !important;
+  color: var(--fasti-text-primary, #181716) !important;
+  border-color: var(--fasti-border, rgba(0, 0, 0, 0.2)) !important;
 }
 
 ::selection {

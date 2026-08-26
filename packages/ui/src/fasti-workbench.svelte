@@ -1,25 +1,32 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import type {
     ActiveNavSection,
-    MediaKind,
     MediaRecord,
     WatchStatus,
     ChronicleOccurrence,
-    ReconciliationCase,
-    ProviderCredentialStatus,
-    NetworkConfiguration,
-    SaveNetworkConfigurationRequest,
-    WorkbenchHost,
+    ProviderApiKeyConfig,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
     WorkbenchPreferences,
+    WorkbenchHost,
+    ReconciliationCase,
+    ScopedApiToken,
   } from "./types.js";
   import {
+    SAMPLE_RECORDS,
+    SAMPLE_CHRONICLE,
+    SAMPLE_RECONCILIATION,
+    SAMPLE_DISCOVER_TRENDING,
+    SAMPLE_CUSTOM_FIELDS,
+    SAMPLE_TOKENS,
+    SAMPLE_PROVIDER_KEYS,
+    SAMPLE_OIDC_CONFIG,
+    SAMPLE_APPRISE_CONFIG,
     DEFAULT_THEME_SETTINGS,
-    createDefaultWorkbenchPreferences,
-  } from "./defaults.js";
+    DEFAULT_WORKBENCH_PREFERENCES,
+  } from "./mock-data.js";
   import NavSidebar from "./nav-sidebar.svelte";
   import HomeView from "./home-view.svelte";
   import ChronicleView from "./chronicle-view.svelte";
@@ -33,56 +40,199 @@
   import TablerThemeDrawer from "./tabler-theme-drawer.svelte";
   import {
     IconSearch,
+    IconLayoutGrid,
+    IconList,
+    IconFilter,
     IconMoon,
     IconSun,
     IconCircleCheck,
     IconLayoutSidebar,
     IconAlertCircle,
     IconLoader2,
+    IconChevronRight,
   } from "@tabler/icons-svelte";
 
   interface Props {
-    host: WorkbenchHost;
+    host?: WorkbenchHost;
   }
 
   let { host }: Props = $props();
 
-  let activeSection: ActiveNavSection = $state("home");
-  let records = $state<MediaRecord[]>([]);
-  let chronicle = $state<ChronicleOccurrence[]>([]);
-  let reconciliationCases = $state<ReconciliationCase[]>([]);
-  let tokens = $state([]);
-  let providerKeys = $state<ProviderCredentialStatus[] | undefined>();
-  let networkConfiguration = $state<NetworkConfiguration | undefined>();
-  let providerLoading = $state(false);
-  let networkLoading = $state(false);
-  let providerProblem = $state("");
-  let networkProblem = $state("");
-  let healthCheckRunning = false;
-  let settingsTarget = $state<"providers" | "advanced" | undefined>();
-  let oidcConfig = $state<OidcConfiguration>({
-    enabled: false,
-    issuerUrl: "",
-    clientId: "",
-    clientSecret: "",
-    redirectUri: "",
-    autoProvisionUsers: false,
-  });
-  let appriseConfig = $state<AppriseNotificationConfig>({
-    enabled: false,
-    urls: [],
-    notifyOnReviewRequired: false,
-    notifyOnSyncError: false,
-    notifyOnMilestone: false,
-  });
-  let themeSettings = $state<ThemeSettings>(DEFAULT_THEME_SETTINGS);
-  let workbenchPreferences = $state<WorkbenchPreferences>(
-    createDefaultWorkbenchPreferences(),
+  function computeInitialSection(): ActiveNavSection {
+    if (typeof window === "undefined") return "home";
+    const pathname = window.location.pathname;
+    if (pathname.startsWith("/records/")) return "detail";
+    if (pathname === "/discover") return "discover";
+    if (pathname === "/media/shows") return "tv_shows";
+    if (pathname === "/media/movies") return "movies";
+    if (pathname === "/media/anime") return "anime";
+    if (pathname === "/media/manga") return "manga";
+    if (pathname === "/media/games") return "games";
+    if (pathname === "/media/books") return "books";
+    if (pathname === "/media/comics") return "comics";
+    if (pathname === "/media/podcasts") return "podcasts";
+    if (pathname === "/media/music") return "music";
+    if (pathname === "/calendar") return "calendar";
+    if (pathname === "/collection") return "collection";
+    if (pathname === "/history" || pathname === "/chronicle")
+      return "chronicle";
+    if (pathname === "/review-inbox" || pathname === "/reconciliation")
+      return "reconciliation";
+    if (pathname === "/connections" || pathname === "/sources")
+      return "connections";
+    if (pathname === "/settings") return "settings";
+    return "home";
+  }
+
+  function loadInitialState<T>(key: string, fallback: T): T {
+    if (typeof window === "undefined") return fallback;
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return fallback;
+  }
+
+  let activeSection: ActiveNavSection = $state(computeInitialSection());
+  let records = $state<MediaRecord[]>(
+    loadInitialState("fasti-records", SAMPLE_RECORDS),
   );
+  let chronicle = $state<ChronicleOccurrence[]>(
+    loadInitialState("fasti-chronicle", SAMPLE_CHRONICLE),
+  );
+  let reconciliationCases = $state<ReconciliationCase[]>(
+    loadInitialState("fasti-reconciliation", SAMPLE_RECONCILIATION),
+  );
+  let tokens = $state<ScopedApiToken[]>(
+    loadInitialState("fasti-tokens", SAMPLE_TOKENS),
+  );
+  let providerKeys = $state<ProviderApiKeyConfig[]>(
+    loadInitialState("fasti-provider-keys", SAMPLE_PROVIDER_KEYS),
+  );
+  let oidcConfig = $state<OidcConfiguration>(
+    loadInitialState("fasti-oidc", SAMPLE_OIDC_CONFIG),
+  );
+  let appriseConfig = $state<AppriseNotificationConfig>(
+    loadInitialState("fasti-apprise", SAMPLE_APPRISE_CONFIG),
+  );
+  let themeSettings = $state<ThemeSettings>(
+    loadInitialState("fasti-theme-settings", DEFAULT_THEME_SETTINGS),
+  );
+  let workbenchPreferences = $state<WorkbenchPreferences>(
+    loadInitialState(
+      "fasti-workbench-preferences",
+      DEFAULT_WORKBENCH_PREFERENCES,
+    ),
+  );
+
+  $effect(() => {
+    try {
+      localStorage.setItem("fasti-records", JSON.stringify(records));
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem("fasti-chronicle", JSON.stringify(chronicle));
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem(
+        "fasti-reconciliation",
+        JSON.stringify(reconciliationCases),
+      );
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem("fasti-tokens", JSON.stringify(tokens));
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem("fasti-provider-keys", JSON.stringify(providerKeys));
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem("fasti-oidc", JSON.stringify(oidcConfig));
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem("fasti-apprise", JSON.stringify(appriseConfig));
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem(
+        "fasti-theme-settings",
+        JSON.stringify(themeSettings),
+      );
+      if (typeof document !== "undefined") {
+        const root = document.documentElement;
+        root.dataset.bsTheme =
+          themeSettings.mode === "light" ? "light" : "dark";
+        root.style.colorScheme =
+          themeSettings.mode === "light" ? "light" : "dark";
+
+        if (themeSettings.mode === "night") {
+          root.style.setProperty("--fasti-surface-archive", "#0b0b0c");
+          root.style.setProperty("--fasti-surface-paper", "#141416");
+          root.style.setProperty("--fasti-text-primary", "#ffffff");
+          root.style.setProperty("--fasti-text-muted", "#71717a");
+        } else if (themeSettings.mode === "dark") {
+          root.style.setProperty("--fasti-surface-archive", "#182433");
+          root.style.setProperty("--fasti-surface-paper", "#1f2d3d");
+          root.style.setProperty("--fasti-text-primary", "#f8fafc");
+          root.style.setProperty("--fasti-text-muted", "#94a3b8");
+        } else {
+          root.style.setProperty("--fasti-surface-archive", "#F2EFE6");
+          root.style.setProperty("--fasti-surface-paper", "#FFFDF8");
+          root.style.setProperty("--fasti-text-primary", "#181716");
+          root.style.setProperty("--fasti-text-muted", "#625E56");
+        }
+
+        if (themeSettings.accentColor) {
+          root.style.setProperty(
+            "--fasti-action-primary",
+            themeSettings.accentColor,
+          );
+          root.style.setProperty("--tblr-primary", themeSettings.accentColor);
+        }
+
+        if (themeSettings.fontFamily === "serif") {
+          root.style.setProperty(
+            "--fasti-font-display",
+            "'Newsreader', Georgia, serif",
+          );
+        } else if (themeSettings.fontFamily === "monospace") {
+          root.style.setProperty(
+            "--fasti-font-display",
+            "'IBM Plex Mono', monospace",
+          );
+        } else {
+          root.style.setProperty(
+            "--fasti-font-display",
+            "'Atkinson Hyperlegible', sans-serif",
+          );
+        }
+      }
+    } catch {}
+  });
+  $effect(() => {
+    try {
+      localStorage.setItem(
+        "fasti-workbench-preferences",
+        JSON.stringify(workbenchPreferences),
+      );
+    } catch {}
+  });
   let selectedRecordId = $state<string | null>(null);
   let themeDrawerOpen = $state(false);
   let searchQuery = $state("");
   let mediaScope = $state("all");
+  let viewMode: "grid" | "list" = $state("grid");
   let nodeHealthy = $state<boolean | null>(null);
 
   const selectedRecord = $derived(
@@ -91,14 +241,25 @@
   const watchingRecords = $derived(
     records.filter((r) => r.status === "watching"),
   );
-  const availableCollections = $derived(
-    [
-      ...new Set(records.flatMap((record) => record.collectionName ?? [])),
-    ].sort(),
-  );
   const openReviewCount = $derived(
     reconciliationCases.filter((c) => c.status === "open").length,
   );
+
+  const globalSearchResults = $derived.by(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return records
+      .filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.originalTitle?.toLowerCase().includes(q) ||
+          r.genres?.some((g) => g.toLowerCase().includes(q)) ||
+          r.tags?.some((t) => t.toLowerCase().includes(q)) ||
+          r.cast?.some((c) => c.name.toLowerCase().includes(q)) ||
+          r.crew?.some((cr) => cr.name.toLowerCase().includes(q)),
+      )
+      .slice(0, 8);
+  });
 
   // Filtered records based on active section
   const filteredSectionRecords = $derived.by(() => {
@@ -123,18 +284,6 @@
       list = records.filter((r) => r.mediaKind === "music");
     } else if (activeSection === "collection") {
       list = records.filter((r) => !!r.collectionName);
-    }
-
-    if (mediaScope !== "all") {
-      const scopeKinds: Record<string, MediaKind> = {
-        shows: "show",
-        movies: "movie",
-        anime: "anime",
-        games: "game",
-        books: "book",
-      };
-      const kind = scopeKinds[mediaScope];
-      list = kind ? list.filter((record) => record.mediaKind === kind) : [];
     }
 
     if (searchQuery.trim().length > 0) {
@@ -185,8 +334,6 @@
         return "/calendar";
       case "collection":
         return "/collection";
-      case "library":
-        return "/library";
       case "custom":
         return "/custom";
       case "history":
@@ -232,9 +379,6 @@
     } else if (pathname === "/media/shows") {
       activeSection = "tv_shows";
       selectedRecordId = null;
-    } else if (pathname === "/media/seasons") {
-      activeSection = "tv_seasons";
-      selectedRecordId = null;
     } else if (pathname === "/media/movies") {
       activeSection = "movies";
       selectedRecordId = null;
@@ -246,9 +390,6 @@
       selectedRecordId = null;
     } else if (pathname === "/media/games") {
       activeSection = "games";
-      selectedRecordId = null;
-    } else if (pathname === "/media/board-games") {
-      activeSection = "board_games";
       selectedRecordId = null;
     } else if (pathname === "/media/books") {
       activeSection = "books";
@@ -267,12 +408,6 @@
       selectedRecordId = null;
     } else if (pathname === "/collection") {
       activeSection = "collection";
-      selectedRecordId = null;
-    } else if (pathname === "/library") {
-      activeSection = "library";
-      selectedRecordId = null;
-    } else if (pathname === "/custom") {
-      activeSection = "custom";
       selectedRecordId = null;
     } else if (pathname === "/history" || pathname === "/chronicle") {
       activeSection = "history";
@@ -298,7 +433,6 @@
     } else {
       activeSection = "home";
       selectedRecordId = null;
-      if (pathname !== "/") window.history.replaceState({}, "", "/");
     }
   }
 
@@ -321,12 +455,6 @@
     }
   }
 
-  function handleViewAllSection(
-    section: "in_progress" | "history" | "up_next",
-  ): void {
-    handleSelectSection(section === "history" ? "history" : "library");
-  }
-
   function handleBackToLibrary(): void {
     activeSection = "home";
     selectedRecordId = null;
@@ -346,9 +474,7 @@
       isDark ? "dark" : "light",
     );
     document.documentElement.setAttribute("data-fasti-mode", mode);
-    document.body.classList.add("layout-fluid");
-    document.body.classList.remove("theme-light", "theme-dark", "theme-night");
-    document.body.classList.add(`theme-${mode}`);
+    document.body.className = `theme-${mode} layout-fluid`;
 
     const accent = themeSettings.accentColor || "#066fd1";
     document.documentElement.style.setProperty("--tblr-primary", accent);
@@ -376,107 +502,21 @@
   });
 
   async function checkNodeHealth(): Promise<void> {
-    if (!networkConfiguration || healthCheckRunning) return;
-    healthCheckRunning = true;
+    if (typeof fetch === "undefined") return;
     try {
-      await host.testEndpointConnection(
-        networkConfiguration.connection.service_url.value,
-      );
-      nodeHealthy = true;
+      const res = await fetch("/api/v1/health");
+      nodeHealthy = res.ok;
     } catch {
       nodeHealthy = false;
-    } finally {
-      healthCheckRunning = false;
     }
-  }
-
-  async function loadHostState(): Promise<void> {
-    networkLoading = true;
-    providerLoading = true;
-    networkProblem = "";
-    providerProblem = "";
-    const [configuration, credentials] = await Promise.allSettled([
-      host.loadNetworkConfiguration(),
-      host.providerCredentialStatus(),
-    ]);
-    if (configuration.status === "fulfilled") {
-      networkConfiguration = configuration.value;
-    } else {
-      networkProblem = "The trusted host could not load network settings.";
-    }
-    if (credentials.status === "fulfilled") {
-      providerKeys = credentials.value;
-    } else {
-      providerProblem = "The trusted host could not load provider status.";
-    }
-    networkLoading = false;
-    providerLoading = false;
-    await checkNodeHealth();
-  }
-
-  async function retryHostState(
-    kind: "network" | "provider",
-    successTarget: string,
-  ): Promise<void> {
-    await loadHostState();
-    await tick();
-    const failed = kind === "network" ? networkProblem : providerProblem;
-    document.getElementById(failed ? `${kind}-retry` : successTarget)?.focus();
-  }
-
-  async function saveNetworkConfiguration(
-    input: SaveNetworkConfigurationRequest,
-  ): Promise<NetworkConfiguration> {
-    const response = await host.saveNetworkConfiguration(input);
-    networkConfiguration = response;
-    await checkNodeHealth();
-    return response;
-  }
-
-  async function saveProviderKey(
-    provider: string,
-    credential: string,
-  ): Promise<void> {
-    providerKeys = await host.saveProviderCredential(provider, credential);
-  }
-
-  async function deleteProviderKey(provider: string): Promise<void> {
-    providerKeys = await host.deleteProviderCredential(provider);
-  }
-
-  async function openProviderSettings(): Promise<void> {
-    settingsTarget = "providers";
-    handleSelectSection("settings");
-    await tick();
-    document.getElementById("provider-settings-title")?.focus();
-    settingsTarget = undefined;
   }
 
   onMount(() => {
     syncFromUrl();
-    const narrowViewport = window.matchMedia("(max-width: 47.99rem)");
-    if (narrowViewport.matches) {
-      workbenchPreferences = {
-        ...workbenchPreferences,
-        sidebarHidden: true,
-      };
-    }
-    const handleViewportChange = (event: MediaQueryListEvent): void => {
-      workbenchPreferences = {
-        ...workbenchPreferences,
-        sidebarHidden: event.matches,
-      };
-    };
-    narrowViewport.addEventListener("change", handleViewportChange);
-    void loadHostState();
-    const healthInterval = window.setInterval(() => {
-      void checkNodeHealth();
-    }, 30_000);
+    checkNodeHealth();
     window.addEventListener("popstate", syncFromUrl);
     return () => {
-      window.clearInterval(healthInterval);
       window.removeEventListener("popstate", syncFromUrl);
-      narrowViewport.removeEventListener("change", handleViewportChange);
     };
   });
 
@@ -608,6 +648,171 @@
   function handleUpdateTheme(updates: Partial<ThemeSettings>): void {
     themeSettings = { ...themeSettings, ...updates };
   }
+
+  function handleSaveProviderKey(provider: string, key: string): void {
+    providerKeys = providerKeys.map((p) =>
+      p.provider === provider
+        ? { ...p, apiKey: key, isConfigured: key.trim().length > 0 }
+        : p,
+    );
+    if (host?.saveProviderCredential) {
+      void host.saveProviderCredential(provider, key);
+    }
+  }
+
+  function handleCreateToken(name: string, scopes: string[]): void {
+    const newToken = {
+      id: `tok_${Date.now()}`,
+      name,
+      tokenPrefix: `fst_pat_${Math.random().toString(36).substring(2, 8)}...`,
+      scopes,
+      createdAt: new Date().toISOString(),
+    };
+    tokens = [newToken, ...tokens];
+  }
+
+  function handleDeleteToken(id: string): void {
+    tokens = tokens.filter((t) => t.id !== id);
+  }
+
+  function handleSaveOidc(config: OidcConfiguration): void {
+    oidcConfig = { ...config };
+  }
+
+  function handleSaveApprise(config: AppriseNotificationConfig): void {
+    appriseConfig = { ...config };
+  }
+
+  function handleAcceptCase(caseId: string): void {
+    reconciliationCases = reconciliationCases.filter((c) => c.id !== caseId);
+  }
+
+  function handleRejectCase(caseId: string): void {
+    reconciliationCases = reconciliationCases.filter((c) => c.id !== caseId);
+  }
+
+  function handleDeferCase(caseId: string): void {
+    reconciliationCases = reconciliationCases.map((c) =>
+      c.id === caseId ? { ...c, status: "deferred" } : c,
+    );
+  }
+
+  function handleAddRecord(rec: MediaRecord, andOcc = false): void {
+    const existing = records.find((r) => r.id === rec.id);
+    if (!existing) {
+      records = [rec, ...records];
+    } else {
+      records = records.map((r) => (r.id === rec.id ? rec : r));
+    }
+    if (andOcc) {
+      const newOcc: ChronicleOccurrence = {
+        id: `occ_${Date.now()}`,
+        recordId: rec.id,
+        title: rec.title,
+        mediaKind: rec.mediaKind,
+        posterUrl: rec.posterUrl,
+        timestamp: new Date().toISOString(),
+        progressPercentage: 100,
+        durationMinutes: rec.runtimeMinutes ?? 30,
+        deviceName: "Web Browser",
+        clientName: "Fasti Web",
+        isRewatch: false,
+        userRating: rec.userRating,
+      };
+      chronicle = [newOcc, ...chronicle];
+    }
+  }
+
+  function handleImportData(
+    importedRecords: MediaRecord[],
+    importedOccurrences: ChronicleOccurrence[],
+  ): void {
+    if (importedRecords.length > 0) {
+      const existingIds = new Set(records.map((r) => r.id));
+      const newRecords = importedRecords.filter((r) => !existingIds.has(r.id));
+      records = [...records, ...newRecords];
+    }
+    if (importedOccurrences.length > 0) {
+      const existingOccIds = new Set(chronicle.map((o) => o.id));
+      const newOcc = importedOccurrences.filter(
+        (o) => !existingOccIds.has(o.id),
+      );
+      chronicle = [...newOcc, ...chronicle];
+    }
+  }
+
+  function handleExportChronicle(): void {
+    const backup = {
+      version: "1.0",
+      exportedAt: new Date().toISOString(),
+      records,
+      chronicle,
+      reconciliationCases,
+      tokens,
+      oidcConfig,
+      appriseConfig,
+      themeSettings,
+      workbenchPreferences,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fasti-chronicle-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportCsv(): void {
+    const headers =
+      "id,recordId,title,mediaKind,timestamp,durationMinutes,deviceName,clientName,userRating\n";
+    const rows = chronicle
+      .map(
+        (o) =>
+          `"${o.id}","${o.recordId}","${o.title.replace(/"/g, '""')}","${o.mediaKind}","${o.timestamp}",${o.durationMinutes},"${o.deviceName}","${o.clientName}",${o.userRating ?? ""}`,
+      )
+      .join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fasti-scrobble-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  function formatSectionTitle(sec: ActiveNavSection): string {
+    const titles: Record<string, string> = {
+      home: "Chronicle Dashboard",
+      discover: "Discover & Explore",
+      tv_shows: "TV Shows",
+      tv_seasons: "TV Seasons",
+      movies: "Movies",
+      anime: "Anime",
+      manga: "Manga",
+      games: "Games",
+      books: "Books",
+      comics: "Comics",
+      board_games: "Board Games",
+      music: "Music",
+      podcasts: "Podcasts",
+      calendar: "Calendar & Schedule",
+      collection: "Collections",
+      custom: "Custom Collections",
+      chronicle: "Living Chronicle",
+      history: "Living Chronicle",
+      lists: "Custom Lists",
+      statistics: "Statistics & Insights",
+      tags: "Tags & Genres",
+      reconciliation: "Reconciliation Inbox",
+      connections: "Media Server Connections",
+      sources: "Media Server Connections",
+      settings: "Settings & Studio",
+      detail: "Media Details",
+    };
+    return titles[sec] || "Fasti Chronicle";
+  }
 </script>
 
 <div
@@ -618,7 +823,7 @@
     navItems={workbenchPreferences.navItems}
     {openReviewCount}
     collapsed={workbenchPreferences.sidebarCollapsed}
-    hidden={workbenchPreferences.sidebarHidden}
+    hidden={false}
     onToggleCollapse={() =>
       (workbenchPreferences = {
         ...workbenchPreferences,
@@ -627,56 +832,145 @@
     onToggleHide={() =>
       (workbenchPreferences = {
         ...workbenchPreferences,
-        sidebarHidden: !workbenchPreferences.sidebarHidden,
+        sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
       })}
     onSelectSection={handleSelectSection}
   />
 
   <div class="workbench-main-shell">
-    <!-- Top Bar Header (Search, Scope, View Mode, Filters, Theme Drawer Toggle) -->
-    <header class="top-nav-bar">
-      <div
-        class="d-flex align-items-center gap-2 flex-grow-1"
-        style="max-width: 480px;"
-      >
-        {#if workbenchPreferences.sidebarHidden}
-          <button
-            type="button"
-            class="btn btn-icon btn-outline-secondary btn-sm"
-            onclick={() =>
-              (workbenchPreferences = {
-                ...workbenchPreferences,
-                sidebarHidden: false,
-              })}
-            title="Show sidebar menu"
-            aria-label="Show sidebar menu"
-          >
-            <IconLayoutSidebar size={18} />
-          </button>
-        {/if}
+    <!-- Top Bar Header: Left (Sidebar toggle + Title), Center (Search), Right (Controls) -->
+    <header
+      class="top-nav-bar"
+      role="toolbar"
+      aria-label="Global workbench toolbar"
+    >
+      <!-- Left: Sidebar Toggle + Active Section Breadcrumb -->
+      <div class="top-nav-left d-flex align-items-center gap-3">
+        <button
+          type="button"
+          class="btn btn-icon btn-outline-secondary btn-sm sidebar-toggle-btn"
+          onclick={() =>
+            (workbenchPreferences = {
+              ...workbenchPreferences,
+              sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
+            })}
+          title={workbenchPreferences.sidebarCollapsed
+            ? "Expand sidebar"
+            : "Collapse sidebar"}
+          aria-label={workbenchPreferences.sidebarCollapsed
+            ? "Expand sidebar"
+            : "Collapse sidebar"}
+        >
+          <IconLayoutSidebar size={18} />
+        </button>
 
-        <div class="search-field-wrapper">
-          <IconSearch size={18} class="search-icon" />
-          <input
-            type="search"
-            class="global-search-input"
-            placeholder={records.length === 0
-              ? "No media records to search"
-              : "Search your media..."}
-            bind:value={searchQuery}
-            aria-label="Search media collection"
-            disabled={records.length === 0}
-          />
+        <div class="section-title-wrap d-flex align-items-center gap-2">
+          <span class="active-section-label font-display fw-bold text-truncate">
+            {formatSectionTitle(activeSection)}
+          </span>
         </div>
       </div>
 
-      <div class="top-actions-right">
+      <!-- Center: Global Search Input -->
+      <div
+        class="top-nav-center flex-grow-1 px-3 d-flex justify-content-center position-relative"
+      >
+        <div
+          class="search-field-wrapper position-relative"
+          style="width: 100%; max-width: 480px;"
+        >
+          <IconSearch size={18} class="search-icon" />
+          <input
+            type="search"
+            class="global-search-input form-control form-control-sm"
+            placeholder="Search titles, creators, tags..."
+            bind:value={searchQuery}
+            aria-label="Search media collection"
+          />
+
+          {#if searchQuery.trim().length > 0}
+            <div
+              class="dropdown-menu show shadow-lg border p-2 position-absolute w-100 mt-1"
+              style="top: 100%; left: 0; z-index: 1050; max-height: 380px; overflow-y: auto; background: var(--fasti-surface-paper); color: var(--fasti-text-primary); border-color: color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);"
+            >
+              <div
+                class="px-2 py-1 small text-muted font-monospace text-uppercase"
+                style="font-size: 0.68rem;"
+              >
+                Library Matches ({globalSearchResults.length})
+              </div>
+
+              {#if globalSearchResults.length === 0}
+                <div class="px-3 py-2 text-muted small">
+                  No direct matches in library for "{searchQuery}"
+                </div>
+              {:else}
+                {#each globalSearchResults as res (res.id)}
+                  <button
+                    type="button"
+                    class="dropdown-item d-flex align-items-center gap-2 py-2 px-2 rounded"
+                    onclick={() => {
+                      handleSelectRecord(res.id);
+                      searchQuery = "";
+                    }}
+                  >
+                    {#if res.posterUrl}
+                      <img
+                        src={res.posterUrl}
+                        alt=""
+                        referrerpolicy="no-referrer"
+                        style="width: 32px; height: 48px; object-fit: cover; border-radius: 3px;"
+                      />
+                    {:else}
+                      <div
+                        class="bg-secondary-lt text-muted d-flex align-items-center justify-content-center"
+                        style="width: 32px; height: 48px; border-radius: 3px; font-size: 0.65rem;"
+                      >
+                        {res.mediaKind}
+                      </div>
+                    {/if}
+                    <div class="flex-grow-1 text-truncate text-start">
+                      <div class="fw-bold text-truncate">{res.title}</div>
+                      <div
+                        class="small text-muted font-monospace"
+                        style="font-size: 0.72rem;"
+                      >
+                        {res.mediaKind.toUpperCase()} • {res.releaseYear ??
+                          "Unknown"} • {res.status.replace("_", " ")}
+                      </div>
+                    </div>
+                    {#if res.userRating}
+                      <span class="badge bg-warning text-dark font-monospace"
+                        >★ {res.userRating}</span
+                      >
+                    {/if}
+                  </button>
+                {/each}
+              {/if}
+
+              <div class="dropdown-divider my-1"></div>
+              <button
+                type="button"
+                class="dropdown-item d-flex align-items-center justify-content-between py-2 px-2 text-primary fw-bold small"
+                onclick={() => {
+                  activeSection = "discover";
+                }}
+              >
+                <span>Search online in Discover for "{searchQuery}"</span>
+                <IconChevronRight size={14} />
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Right: Scope, View mode, Theme drawer, Health status -->
+      <div class="top-nav-right d-flex align-items-center gap-2">
         <!-- Media Scope Select -->
         <select
-          class="scope-select"
+          class="scope-select form-select form-select-sm"
           bind:value={mediaScope}
           aria-label="Filter media scope"
-          disabled={records.length === 0}
         >
           <option value="all">All media</option>
           <option value="shows">TV Shows</option>
@@ -686,18 +980,50 @@
           <option value="books">Books</option>
         </select>
 
+        <!-- Grid / List Toggle -->
+        <div
+          class="btn-group btn-group-sm"
+          role="radiogroup"
+          aria-label="View layout mode"
+        >
+          <button
+            type="button"
+            class="btn btn-outline-secondary btn-icon"
+            class:active={viewMode === "grid"}
+            onclick={() => (viewMode = "grid")}
+            role="radio"
+            aria-checked={viewMode === "grid"}
+            title="Grid view"
+            aria-label="Grid view"
+          >
+            <IconLayoutGrid size={16} />
+          </button>
+          <button
+            type="button"
+            class="btn btn-outline-secondary btn-icon"
+            class:active={viewMode === "list"}
+            onclick={() => (viewMode = "list")}
+            role="radio"
+            aria-checked={viewMode === "list"}
+            title="List view"
+            aria-label="List view"
+          >
+            <IconList size={16} />
+          </button>
+        </div>
+
         <!-- Theme Settings Drawer Trigger -->
         <button
           type="button"
-          class="tool-btn icon-only"
+          class="btn btn-icon btn-outline-secondary btn-sm"
           onclick={() => (themeDrawerOpen = true)}
-          title="Open theme customizer"
-          aria-label="Open theme customizer"
+          title="Open Theme Studio"
+          aria-label="Open Theme Studio"
         >
           {#if themeSettings.mode === "light"}
-            <IconSun size={18} />
+            <IconSun size={17} />
           {:else}
-            <IconMoon size={18} />
+            <IconMoon size={17} />
           {/if}
         </button>
 
@@ -742,42 +1068,33 @@
     </header>
 
     <!-- Main Viewport Canvas -->
-    <main class="viewport-canvas" id="main-content" tabindex="-1">
+    <main class="viewport-canvas" id="main-content">
       {#if activeSection === "home"}
-        {#if records.length === 0}
-          <section class="empty-workbench" aria-labelledby="empty-title">
-            <h1 id="empty-title">No media records</h1>
-            <p>
-              This review build has no active media ingest capability. It does
-              not load sample records.
-            </p>
-          </section>
-        {:else}
-          <HomeView
-            {records}
-            {availableCollections}
-            contextMenuConfigs={workbenchPreferences.contextMenuItems}
-            onSelectRecord={handleSelectRecord}
-            onUpdateStatus={handleUpdateStatus}
-            onUpdateProgress={handleUpdateProgress}
-            onSaveReview={handleSaveReview}
-            onSaveCollection={handleSaveCollection}
-            onViewAllSection={handleViewAllSection}
-          />
-        {/if}
+        <HomeView
+          {records}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSelectRecord={handleSelectRecord}
+          onUpdateStatus={handleUpdateStatus}
+          onUpdateProgress={handleUpdateProgress}
+          onSaveReview={handleSaveReview}
+          onSaveCollection={handleSaveCollection}
+          onViewAllSection={(sec) => handleSelectSection(sec as any)}
+        />
       {:else if activeSection === "discover"}
         <DiscoverView
-          providerCredentials={providerKeys}
-          loading={providerLoading}
-          hostProblem={providerProblem}
-          onSearch={(provider, query) => host.searchProvider(provider, query)}
-          onOpenSettings={openProviderSettings}
-          onRetry={() => void retryHostState("provider", "discover-title")}
+          trendingRecords={SAMPLE_DISCOVER_TRENDING}
+          libraryRecords={records}
+          {host}
+          onSelectRecord={handleSelectRecord}
+          onUpdateStatus={handleUpdateStatus}
+          onUpdateProgress={handleUpdateProgress}
+          onSaveReview={handleSaveReview}
+          onSaveCollection={handleSaveCollection}
+          onAddRecord={handleAddRecord}
         />
       {:else if activeSection === "detail" && selectedRecord}
         <MediaDetailView
           record={selectedRecord}
-          {availableCollections}
           occurrences={chronicle}
           onBack={handleBackToLibrary}
           onUpdateStatus={handleUpdateStatus}
@@ -798,20 +1115,19 @@
       {:else if activeSection === "calendar"}
         <CalendarView {watchingRecords} onSelectRecord={handleSelectRecord} />
       {:else if activeSection === "reconciliation"}
-        <ReconciliationView cases={reconciliationCases} />
+        <ReconciliationView
+          cases={reconciliationCases}
+          onAcceptCase={handleAcceptCase}
+          onRejectCase={handleRejectCase}
+          onDeferCase={handleDeferCase}
+        />
       {:else if activeSection === "connections" || activeSection === "sources"}
         <ConnectionsView />
       {:else if activeSection === "settings"}
         <SettingsView
-          customFields={[]}
+          customFields={SAMPLE_CUSTOM_FIELDS}
           {tokens}
           {providerKeys}
-          {networkConfiguration}
-          {providerLoading}
-          {networkLoading}
-          providerLoadProblem={providerProblem}
-          networkLoadProblem={networkProblem}
-          initialSection={settingsTarget}
           {oidcConfig}
           {appriseConfig}
           {themeSettings}
@@ -819,20 +1135,19 @@
           onUpdateTheme={handleUpdateTheme}
           onUpdateWorkbenchPreferences={(prefs) =>
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
-          onSaveProviderKey={saveProviderKey}
-          onDeleteProviderKey={deleteProviderKey}
-          onSaveNetworkConfiguration={saveNetworkConfiguration}
-          onTestEndpoint={(endpoint) => host.testEndpointConnection(endpoint)}
-          onRetryProviderState={() =>
-            void retryHostState("provider", "provider-settings-title")}
-          onRetryNetworkState={() =>
-            void retryHostState("network", "advanced-settings-title")}
+          onSaveProviderKey={handleSaveProviderKey}
+          onCreateToken={handleCreateToken}
+          onDeleteToken={handleDeleteToken}
+          onSaveOidc={handleSaveOidc}
+          onSaveApprise={handleSaveApprise}
+          onImportData={handleImportData}
+          onExportChronicle={handleExportChronicle}
+          onExportCsv={handleExportCsv}
         />
       {:else}
         <!-- Media Category Grid (Shows, Movies, Anime, Manga, Games, Books, etc.) -->
         <LibraryView
           records={filteredSectionRecords}
-          {availableCollections}
           contextMenuConfigs={workbenchPreferences.contextMenuItems}
           onSelectRecord={handleSelectRecord}
           onUpdateStatus={handleUpdateStatus}
@@ -855,36 +1170,6 @@
 </div>
 
 <style>
-  .theme-dark {
-    --fasti-surface-archive: #0f172a;
-    --fasti-surface-paper: #1e293b;
-    --fasti-surface-night: #090d16;
-    --fasti-text-primary: #f8fafc;
-    --fasti-text-muted: #94a3b8;
-    --fasti-brand-mark: #d34b45;
-    --fasti-brand-gold: #f1d06e;
-    --fasti-state-verified: #4ade80;
-    --fasti-state-attention: #fbbf24;
-    --tblr-body-bg: #0f172a;
-    --tblr-card-bg: #1e293b;
-    --tblr-body-color: #f8fafc;
-  }
-
-  .theme-night {
-    --fasti-surface-archive: #000000;
-    --fasti-surface-paper: #09090b;
-    --fasti-surface-night: #000000;
-    --fasti-text-primary: #ffffff;
-    --fasti-text-muted: #a1a1aa;
-    --fasti-brand-mark: #ef4444;
-    --fasti-brand-gold: #eab308;
-    --fasti-state-verified: #22c55e;
-    --fasti-state-attention: #eab308;
-    --tblr-body-bg: #000000;
-    --tblr-card-bg: #09090b;
-    --tblr-body-color: #ffffff;
-  }
-
   .fasti-workbench-layout {
     display: flex !important;
     flex-direction: row !important;
@@ -896,42 +1181,47 @@
   }
 
   .workbench-main-shell {
-    flex: 1;
+    flex: 1 1 0%;
     min-width: 0;
     display: flex;
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
-  }
-
-  .density-compact {
-    font-size: 14px;
-  }
-
-  .density-normal {
-    font-size: 16px;
-  }
-
-  .density-spacious {
-    font-size: 18px;
+    position: relative;
   }
 
   .top-nav-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 24px;
+    padding: 10px 20px;
     background: var(--fasti-surface-paper);
     border-bottom: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
     gap: 16px;
     z-index: 10;
+    min-height: 56px;
+    box-sizing: border-box;
+  }
+
+  .top-nav-left {
+    flex-shrink: 0;
+    min-width: 200px;
+  }
+
+  .active-section-label {
+    font-size: 1.15rem;
+    color: var(--fasti-text-primary);
+  }
+
+  .top-nav-center {
+    flex: 1;
+    max-width: 520px;
   }
 
   .search-field-wrapper {
     position: relative;
-    flex: 1;
-    max-width: 440px;
+    width: 100%;
     display: flex;
     align-items: center;
   }
@@ -945,8 +1235,7 @@
 
   .global-search-input {
     width: 100%;
-    min-height: 44px;
-    padding: 8px 12px 8px 38px;
+    padding: 7px 12px 7px 36px;
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -963,15 +1252,13 @@
     outline-offset: 1px;
   }
 
-  .top-actions-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  .top-nav-right {
+    flex-shrink: 0;
   }
 
   .scope-select {
-    min-height: 44px;
-    padding: 8px 12px;
+    min-height: 36px;
+    padding: 6px 12px;
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -981,38 +1268,9 @@
     font-weight: 500;
   }
 
-  .tool-btn {
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--fasti-surface-archive);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: var(--tblr-border-radius, 4px);
-    color: var(--fasti-text-primary);
-    font-size: 0.84rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 120ms ease;
-  }
-
-  .tool-btn:hover {
-    background: color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
-  }
-
-  .tool-btn.icon-only {
-    min-width: 44px;
-    min-height: 44px;
-    padding: 7px;
-    display: grid;
-    place-items: center;
-  }
-
   .status-indicator {
-    min-width: 44px;
-    min-height: 44px;
+    min-width: 36px;
+    min-height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1032,54 +1290,12 @@
     animation: spin 1.2s linear infinite;
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    :global(.spin) {
-      animation: none;
-    }
-  }
-
   .viewport-canvas {
-    flex: 1;
+    flex: 1 1 0%;
+    min-width: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     background-color: var(--fasti-surface-archive);
     box-sizing: border-box;
-  }
-
-  .empty-workbench {
-    max-width: 42rem;
-    margin: 4rem auto;
-    padding: 2rem;
-    border: 1px solid var(--fasti-border-subtle);
-    border-radius: var(--fasti-radius-lg);
-    background: var(--fasti-surface-paper);
-  }
-
-  .empty-workbench h1 {
-    margin-top: 0;
-  }
-
-  @media (max-width: 47.99rem) {
-    .top-nav-bar {
-      padding: 8px;
-      gap: 8px;
-    }
-
-    .top-nav-bar > div:first-child,
-    .search-field-wrapper {
-      min-width: 0;
-    }
-
-    .top-actions-right {
-      gap: 4px;
-    }
-
-    .scope-select {
-      max-width: 7rem;
-    }
-
-    .empty-workbench {
-      margin: 1.5rem 1rem;
-      padding: 1.5rem;
-    }
   }
 </style>

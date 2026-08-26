@@ -15,18 +15,17 @@
     IconBook,
     IconDeviceGamepad2,
     IconMicrophone,
-    IconShieldCheck,
     IconChevronRight,
-    IconAdjustments,
     IconEye,
     IconBookmark,
     IconFolderPlus,
     IconStar,
+    IconPlayerPlay,
+    IconAdjustments,
   } from "@tabler/icons-svelte";
 
   interface Props {
     records: MediaRecord[];
-    availableCollections: string[];
     onSelectRecord: (recordId: string) => void;
     onUpdateStatus: (recordId: string, status: WatchStatus) => void;
     onUpdateProgress: (
@@ -38,12 +37,11 @@
     onSaveReview: (recordId: string, rating: number, notes: string) => void;
     onSaveCollection: (recordId: string, collections: string[]) => void;
     contextMenuConfigs?: ContextMenuItemConfig[];
-    onViewAllSection?: (section: "in_progress" | "history" | "up_next") => void;
+    onViewAllSection?: (section: string) => void;
   }
 
   let {
     records,
-    availableCollections,
     onSelectRecord,
     onUpdateStatus,
     onUpdateProgress,
@@ -84,11 +82,14 @@
     records
       .filter(
         (r) =>
-          r.status === "plan_to_watch" ||
-          (r.status === "watching" &&
-            (r.progressEpisodes ?? 0) < (r.totalEpisodes ?? 1)),
+          r.status === "watching" &&
+          (r.progressEpisodes ?? 0) < (r.totalEpisodes ?? 1),
       )
       .slice(0, 6),
+  );
+
+  const watchlistRecords = $derived(
+    records.filter((r) => r.status === "plan_to_watch").slice(0, 6),
   );
 
   function getKindIcon(kind: string) {
@@ -129,11 +130,12 @@
 
   function handleToggleWatchlist(rec: MediaRecord) {
     const newStatus: WatchStatus =
-      rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
+      rec.status === "plan_to_watch" ? "dropped" : "plan_to_watch";
     onUpdateStatus(rec.id, newStatus);
   }
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent) {
+    e.preventDefault();
     contextMenuRecord = rec;
     contextMenuPos = { x: e.clientX, y: e.clientY };
     contextMenuVisible = true;
@@ -142,74 +144,76 @@
   const contextMenuItems = $derived.by<ContextMenuItem[]>(() => {
     if (!contextMenuRecord) return [];
     const r = contextMenuRecord;
-    const allItems: Record<string, ContextMenuItem> = {
-      view: {
+    return [
+      {
+        id: "h_act",
+        label: "",
+        header: "Playback & Actions",
+        action: () => {},
+      },
+      {
         id: "view",
-        label: "View details",
-        icon: IconEye,
+        label: "View Media Details",
+        icon: IconPlayerPlay,
         action: () => onSelectRecord(r.id),
       },
-      watched: {
+      {
         id: "watched",
-        label: r.status === "completed" ? "Mark unplayed" : "Mark as seen",
+        label:
+          r.status === "completed"
+            ? "Mark as In Progress"
+            : "Mark as Completed",
         icon: IconEye,
         action: () => handleToggleWatched(r),
       },
-      progress: {
+      {
         id: "progress",
-        label: "Update progress & episodes",
+        label: "Update Progress & Episodes",
         icon: IconAdjustments,
         action: () => (activeProgressRecord = r),
       },
-      watchlist: {
+      { id: "d1", label: "", divider: true, action: () => {} },
+      { id: "h_lib", label: "", header: "Library & Lists", action: () => {} },
+      {
         id: "watchlist",
         label:
           r.status === "plan_to_watch"
-            ? "Remove from watchlist"
-            : "Add to watchlist",
+            ? "Remove from Watchlist"
+            : "Add to Watchlist",
         icon: IconBookmark,
         action: () => handleToggleWatchlist(r),
       },
-      collection: {
+      {
         id: "collection",
-        label: "Add to collection...",
+        label: "Add to Collection...",
         icon: IconFolderPlus,
         action: () => (activeCollectionRecord = r),
       },
-      review: {
+      {
         id: "review",
-        label: "Rate & personal review...",
+        label: "Rate & Personal Review...",
         icon: IconStar,
         action: () => (activeRatingRecord = r),
       },
-      edit_tags: {
-        id: "edit_tags",
-        label: "Inspect tags & genres",
-        icon: IconFolderPlus,
+      { id: "d2", label: "", divider: true, action: () => {} },
+      {
+        id: "h_id",
+        label: "",
+        header: "Identity & Metadata",
+        action: () => {},
+      },
+      {
+        id: "inspect_claims",
+        label: "Inspect External Claim IDs",
+        icon: IconPlayerPlay,
         action: () => onSelectRecord(r.id),
       },
-      manage_ids: {
-        id: "manage_ids",
-        label: "Inspect external claims & IDs",
-        icon: IconShieldCheck,
-        action: () => onSelectRecord(r.id),
+      {
+        id: "copy_id",
+        label: `Copy ID (${r.id})`,
+        action: () => navigator.clipboard.writeText(r.id),
       },
-      reconcile: {
-        id: "reconcile",
-        label: "Review identity evidence",
-        icon: IconShieldCheck,
-        action: () => onSelectRecord(r.id),
-      },
-    };
-
-    if (contextMenuConfigs && contextMenuConfigs.length > 0) {
-      return [...contextMenuConfigs]
-        .filter((cfg) => cfg.visible && allItems[cfg.id])
-        .sort((a, b) => a.order - b.order)
-        .map((cfg) => allItems[cfg.id]);
-    }
-
-    return Object.values(allItems);
+    ];
   });
 </script>
 
@@ -235,18 +239,24 @@
       {#each inProgressRecords as rec (rec.id)}
         {@const KindIcon = getKindIcon(rec.mediaKind)}
         {@const pct = calculateProgress(rec)}
-        <div class="poster-card" role="group" aria-label="{rec.title} card">
-          <button
-            type="button"
-            class="artwork-wrapper"
-            onclick={() => onSelectRecord(rec.id)}
-          >
+        <div
+          class="poster-card"
+          tabindex="0"
+          role="button"
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
+          }}
+          onclick={() => onSelectRecord(rec.id)}
+          oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+        >
+          <div class="artwork-wrapper">
             {#if rec.posterUrl}
               <img
                 src={rec.posterUrl}
                 alt={rec.title}
                 class="poster-img"
                 loading="lazy"
+                referrerpolicy="no-referrer"
               />
             {:else}
               <div class="typographic-fallback">
@@ -264,7 +274,7 @@
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
               </div>
             {/if}
-          </button>
+          </div>
 
           <div class="card-info">
             <h3 class="media-title" title={rec.title}>{rec.title}</h3>
@@ -321,18 +331,24 @@
       {#each recentlyRecorded as rec (rec.id)}
         {@const KindIcon = getKindIcon(rec.mediaKind)}
         {@const pct = calculateProgress(rec)}
-        <div class="poster-card" role="group" aria-label="{rec.title} card">
-          <button
-            type="button"
-            class="artwork-wrapper"
-            onclick={() => onSelectRecord(rec.id)}
-          >
+        <div
+          class="poster-card"
+          tabindex="0"
+          role="button"
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
+          }}
+          onclick={() => onSelectRecord(rec.id)}
+          oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+        >
+          <div class="artwork-wrapper">
             {#if rec.posterUrl}
               <img
                 src={rec.posterUrl}
                 alt={rec.title}
                 class="poster-img"
                 loading="lazy"
+                referrerpolicy="no-referrer"
               />
             {:else}
               <div class="typographic-fallback">
@@ -350,7 +366,7 @@
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
               </div>
             {/if}
-          </button>
+          </div>
 
           <div class="card-info">
             <h3 class="media-title" title={rec.title}>{rec.title}</h3>
@@ -406,18 +422,24 @@
       {#each upNextRecords as rec (rec.id)}
         {@const KindIcon = getKindIcon(rec.mediaKind)}
         {@const pct = calculateProgress(rec)}
-        <div class="poster-card" role="group" aria-label="{rec.title} card">
-          <button
-            type="button"
-            class="artwork-wrapper"
-            onclick={() => onSelectRecord(rec.id)}
-          >
+        <div
+          class="poster-card"
+          tabindex="0"
+          role="button"
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
+          }}
+          onclick={() => onSelectRecord(rec.id)}
+          oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+        >
+          <div class="artwork-wrapper">
             {#if rec.posterUrl}
               <img
                 src={rec.posterUrl}
                 alt={rec.title}
                 class="poster-img"
                 loading="lazy"
+                referrerpolicy="no-referrer"
               />
             {:else}
               <div class="typographic-fallback">
@@ -435,7 +457,7 @@
                 <div class="progress-bar-fill" style="width: {pct}%"></div>
               </div>
             {/if}
-          </button>
+          </div>
 
           <div class="card-info">
             <h3 class="media-title" title={rec.title}>{rec.title}</h3>
@@ -470,6 +492,89 @@
     </div>
   </section>
 
+  <!-- Section 4: Watchlist / Plan to Watch -->
+  {#if watchlistRecords.length > 0}
+    <section class="shelf-section">
+      <div class="shelf-header">
+        <div class="shelf-title-row">
+          <h2 class="shelf-title">Watchlist & Backlog</h2>
+          <span class="count-pill">{watchlistRecords.length}</span>
+        </div>
+        <button
+          type="button"
+          class="view-all-btn"
+          onclick={() => onViewAllSection?.("library")}
+        >
+          <span>View full library</span>
+          <IconChevronRight size={16} />
+        </button>
+      </div>
+
+      <div class="cards-grid">
+        {#each watchlistRecords as rec (rec.id)}
+          {@const KindIcon = getKindIcon(rec.mediaKind)}
+          <div
+            class="poster-card"
+            tabindex="0"
+            role="button"
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") onSelectRecord(rec.id);
+            }}
+            onclick={() => onSelectRecord(rec.id)}
+            oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
+          >
+            <div class="artwork-wrapper">
+              {#if rec.posterUrl}
+                <img
+                  src={rec.posterUrl}
+                  alt={rec.title}
+                  class="poster-img"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                />
+              {:else}
+                <div class="typographic-fallback">
+                  <span class="fallback-title">{rec.title}</span>
+                  <span class="fallback-kind">{rec.mediaKind}</span>
+                </div>
+              {/if}
+
+              <div class="top-badge top-left-badge" title={rec.mediaKind}>
+                <KindIcon size={14} />
+              </div>
+            </div>
+
+            <div class="card-info">
+              <h3 class="media-title" title={rec.title}>{rec.title}</h3>
+              <div class="meta-row">
+                <span class="meta-kind">{rec.mediaKind.toUpperCase()}</span>
+                {#if rec.releaseYear}
+                  <span class="meta-dot">•</span>
+                  <span>{rec.releaseYear}</span>
+                {/if}
+              </div>
+            </div>
+
+            <div
+              class="card-footer"
+              role="presentation"
+              onclick={(e) => e.stopPropagation()}
+            >
+              <FastActionBar
+                record={rec}
+                onToggleWatched={handleToggleWatched}
+                onToggleWatchlist={handleToggleWatchlist}
+                onOpenCollection={(r) => (activeCollectionRecord = r)}
+                onOpenReview={(r) => (activeRatingRecord = r)}
+                onOpenContextMenu={handleOpenContextMenu}
+              />
+            </div>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
   <!-- Modals & Context Menu -->
   {#if activeProgressRecord}
     <ProgressModal
@@ -496,7 +601,6 @@
   {#if activeCollectionRecord}
     <CollectionModal
       record={activeCollectionRecord}
-      collections={availableCollections}
       onClose={() => (activeCollectionRecord = null)}
       onSaveCollection={(recId, collections) => {
         onSaveCollection(recId, collections);
@@ -517,17 +621,17 @@
 
 <style>
   .home-container {
-    padding: 24px 32px 64px;
+    padding: 16px 20px 36px;
     display: flex;
     flex-direction: column;
-    gap: 36px;
+    gap: 20px;
     box-sizing: border-box;
   }
 
   .shelf-section {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
   }
 
   .shelf-header {
@@ -539,20 +643,20 @@
   .shelf-title-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
   .shelf-title {
-    font-size: 1.25rem;
+    font-size: 1.15rem;
     font-weight: 700;
     margin: 0;
     color: var(--fasti-text-primary);
   }
 
   .count-pill {
-    font-size: 0.8rem;
+    font-size: 0.76rem;
     font-weight: 600;
-    padding: 2px 8px;
+    padding: 1px 7px;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-muted);
     border: 1px solid
@@ -567,10 +671,10 @@
     background: transparent;
     border: none;
     color: var(--fasti-text-muted);
-    font-size: 0.86rem;
+    font-size: 0.82rem;
     font-weight: 600;
     cursor: pointer;
-    padding: 4px 8px;
+    padding: 3px 6px;
     border-radius: 4px;
     transition: all 120ms ease;
   }
@@ -581,8 +685,8 @@
 
   .cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 18px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
   }
 
   .poster-card {
@@ -610,10 +714,6 @@
     aspect-ratio: 2 / 3;
     background: var(--fasti-surface-night, #0f172a);
     overflow: hidden;
-    padding: 0;
-    border: 0;
-    color: inherit;
-    cursor: pointer;
   }
 
   .poster-img {
@@ -684,15 +784,15 @@
   }
 
   .card-info {
-    padding: 10px 12px;
+    padding: 6px 10px;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
     flex: 1;
   }
 
   .media-title {
-    font-size: 0.9rem;
+    font-size: 0.88rem;
     font-weight: 600;
     margin: 0;
     color: var(--fasti-text-primary);
@@ -702,7 +802,7 @@
   }
 
   .meta-row {
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--fasti-text-muted);
     display: flex;
     align-items: center;
@@ -716,14 +816,14 @@
 
   .pct-text {
     font-family: var(--fasti-font-mono);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-weight: 700;
     color: var(--fasti-action-primary);
-    margin-top: 2px;
+    margin-top: 1px;
   }
 
   .card-footer {
-    padding: 8px 10px;
+    padding: 4px 6px;
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
     background: var(--fasti-surface-archive);

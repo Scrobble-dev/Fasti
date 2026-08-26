@@ -11,6 +11,7 @@
     IconList,
     IconStarFilled,
     IconCheck,
+    IconPlayerPlay,
     IconBookmark,
     IconEye,
     IconEyeCheck,
@@ -28,7 +29,6 @@
 
   interface Props {
     records: MediaRecord[];
-    availableCollections: string[];
     onSelectRecord: (recordId: string) => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
@@ -45,7 +45,6 @@
 
   let {
     records,
-    availableCollections,
     onSelectRecord,
     onUpdateStatus,
     onUpdateRating,
@@ -134,7 +133,7 @@
       view: {
         id: "view",
         label: "View Details...",
-        icon: IconEye,
+        icon: IconPlayerPlay,
         action: () => onSelectRecord(rec.id),
       },
       progress: {
@@ -236,62 +235,48 @@
     </div>
   </header>
 
-  {#if records.length > 0}
-    <!-- Filter & Search Toolbar -->
-    <div class="toolbar">
-      <div class="search-wrap">
-        <IconSearch size={16} stroke={2} class="search-icon" />
-        <input
-          type="search"
-          placeholder="Filter by title, tag, or creator..."
-          bind:value={searchQuery}
-          class="search-input"
-          aria-label="Filter library records"
-        />
-      </div>
-
-      <div
-        class="filter-pills"
-        role="radiogroup"
-        aria-label="Media kind filter"
-      >
-        {#each kinds as k}
-          <button
-            type="button"
-            role="radio"
-            aria-checked={selectedKind === k.id}
-            class="filter-pill"
-            class:active={selectedKind === k.id}
-            onclick={() => (selectedKind = k.id)}
-          >
-            {k.label}
-          </button>
-        {/each}
-      </div>
-
-      <div class="filter-pills" role="radiogroup" aria-label="Status filter">
-        {#each statuses as s}
-          <button
-            type="button"
-            role="radio"
-            aria-checked={selectedStatus === s.id}
-            class="filter-pill status"
-            class:active={selectedStatus === s.id}
-            onclick={() => (selectedStatus = s.id)}
-          >
-            {s.label}
-          </button>
-        {/each}
-      </div>
+  <!-- Filter & Search Toolbar -->
+  <div class="toolbar">
+    <div class="search-wrap">
+      <IconSearch size={16} stroke={2} class="search-icon" />
+      <input
+        type="search"
+        placeholder="Filter by title, tag, or creator..."
+        bind:value={searchQuery}
+        class="search-input"
+        aria-label="Filter library records"
+      />
     </div>
-  {/if}
+
+    <div class="filter-pills" role="radiogroup" aria-label="Media kind filter">
+      {#each kinds as k}
+        <button
+          type="button"
+          class="filter-pill"
+          class:active={selectedKind === k.id}
+          onclick={() => (selectedKind = k.id)}
+        >
+          {k.label}
+        </button>
+      {/each}
+    </div>
+
+    <div class="filter-pills" role="radiogroup" aria-label="Status filter">
+      {#each statuses as s}
+        <button
+          type="button"
+          class="filter-pill status"
+          class:active={selectedStatus === s.id}
+          onclick={() => (selectedStatus = s.id)}
+        >
+          {s.label}
+        </button>
+      {/each}
+    </div>
+  </div>
 
   <!-- Records Grid / List -->
-  {#if records.length === 0}
-    <div class="empty-results">
-      <p>No media records are available in this view.</p>
-    </div>
-  {:else if filteredRecords.length === 0}
+  {#if filteredRecords.length === 0}
     <div class="empty-results">
       <p>No media records match the selected filters.</p>
       <button
@@ -327,6 +312,7 @@
                   alt=""
                   class="poster-image"
                   loading="lazy"
+                  referrerpolicy="no-referrer"
                 />
               {:else}
                 <div class="fallback-poster">{rec.mediaKind}</div>
@@ -341,7 +327,7 @@
                 </div>
               {/if}
 
-              {#if rec.progressEpisodes !== undefined && rec.totalEpisodes !== undefined}
+              {#if rec.progressEpisodes && rec.totalEpisodes}
                 <div class="episode-pill">
                   {rec.progressEpisodes}/{rec.totalEpisodes} eps
                 </div>
@@ -372,7 +358,7 @@
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
               <span class="status-indicator {rec.status}"
-                >{rec.status.replaceAll("_", " ")}</span
+                >{rec.status.replace("_", " ")}</span
               >
             </div>
           </div>
@@ -397,17 +383,12 @@
           {#each filteredRecords as rec (rec.id)}
             <tr
               class="table-row"
+              onclick={() => onSelectRecord(rec.id)}
               oncontextmenu={(e) => handleOpenContextMenu(rec, e)}
             >
               <td>
                 <div class="row-title-box">
-                  <button
-                    type="button"
-                    class="title-link"
-                    onclick={() => onSelectRecord(rec.id)}
-                  >
-                    <strong>{rec.title}</strong>
-                  </button>
+                  <strong>{rec.title}</strong>
                   {#if rec.releaseYear}
                     <span class="row-year">({rec.releaseYear})</span>
                   {/if}
@@ -419,7 +400,7 @@
               >
               <td
                 ><span class="status-pill {rec.status}"
-                  >{rec.status.replaceAll("_", " ")}</span
+                  >{rec.status.replace("_", " ")}</span
                 ></td
               >
               <td>
@@ -430,7 +411,7 @@
                 {/if}
               </td>
               <td>
-                {#if rec.progressEpisodes !== undefined && rec.totalEpisodes !== undefined}
+                {#if rec.progressEpisodes && rec.totalEpisodes}
                   <span class="mono-prog"
                     >{rec.progressEpisodes}/{rec.totalEpisodes} eps</span
                   >
@@ -507,7 +488,6 @@
 {#if showCollectionModal && activeModalRecord}
   <CollectionModal
     record={activeModalRecord}
-    collections={availableCollections}
     onClose={() => {
       showCollectionModal = false;
       activeModalRecord = null;
@@ -828,6 +808,7 @@
   }
 
   .table-row {
+    cursor: pointer;
     transition: background 80ms ease;
   }
 

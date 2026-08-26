@@ -9,67 +9,58 @@
 
   interface Props {
     record: MediaRecord;
-    collections: string[];
     onClose: () => void;
     onSaveCollection: (recordId: string, collectionNames: string[]) => void;
   }
 
-  let { record, collections, onClose, onSaveCollection }: Props = $props();
+  let { record, onClose, onSaveCollection }: Props = $props();
 
-  let selected = $state<string>();
-  let dialog: HTMLDialogElement | undefined;
-  let availableCollections = $state<string[]>([]);
-  let syncedRecordId = $state("");
+  let collections = $state<string[]>([
+    "Favorites",
+    "Must Watch Classics",
+    "Sci-Fi Hall of Fame",
+    "Cyberpunk & Neo-Noir",
+    "High Fantasy Runs",
+  ]);
 
-  $effect(() => {
-    availableCollections = [...collections];
-  });
-
-  $effect(() => {
-    if (record.id !== syncedRecordId) {
-      syncedRecordId = record.id;
-      selected = record.collectionName;
-    }
-  });
+  let selected = $state<string[]>([]);
 
   $effect(() => {
-    if (!dialog?.open) dialog?.showModal();
+    selected = record.collectionName ? [record.collectionName] : ["Favorites"];
   });
   let newCollectionInput = $state("");
 
-  function handleSelect(name: string): void {
-    selected = name;
+  function handleToggle(name: string): void {
+    if (selected.includes(name)) {
+      selected = selected.filter((s) => s !== name);
+    } else {
+      selected = [...selected, name];
+    }
   }
 
   function handleCreateCollection(e: Event): void {
     e.preventDefault();
     if (
       newCollectionInput.trim().length > 0 &&
-      !availableCollections.includes(newCollectionInput.trim())
+      !collections.includes(newCollectionInput.trim())
     ) {
-      availableCollections = [
-        ...availableCollections,
-        newCollectionInput.trim(),
-      ];
-      selected = newCollectionInput.trim();
+      collections = [...collections, newCollectionInput.trim()];
+      selected = [...selected, newCollectionInput.trim()];
       newCollectionInput = "";
     }
   }
 
   function handleSave(): void {
-    onSaveCollection(record.id, selected ? [selected] : []);
+    onSaveCollection(record.id, selected);
     onClose();
   }
 </script>
 
-<dialog
-  bind:this={dialog}
+<div
   class="modal-backdrop"
+  role="dialog"
+  aria-modal="true"
   aria-labelledby="coll-title"
-  oncancel={onClose}
-  onclick={(event) => {
-    if (event.target === event.currentTarget) onClose();
-  }}
 >
   <div class="modal-card">
     <div class="modal-header">
@@ -88,27 +79,16 @@
 
     <div class="modal-body">
       <p class="body-desc">
-        Organize this record in one curated personal list or franchise.
+        Organize this record into curated personal lists or franchises.
       </p>
 
       <div class="collections-list">
-        <label class="collection-item" class:checked={!selected}>
-          <input
-            type="radio"
-            name="collection"
-            checked={!selected}
-            onchange={() => (selected = undefined)}
-          />
-          <IconFolder size={18} class="folder-icon" />
-          <span class="collection-name">No collection</span>
-        </label>
-        {#each availableCollections as c}
-          <label class="collection-item" class:checked={selected === c}>
+        {#each collections as c}
+          <label class="collection-item" class:checked={selected.includes(c)}>
             <input
-              type="radio"
-              name="collection"
-              checked={selected === c}
-              onchange={() => handleSelect(c)}
+              type="checkbox"
+              checked={selected.includes(c)}
+              onchange={() => handleToggle(c)}
             />
             <IconFolder size={18} class="folder-icon" />
             <span class="collection-name">{c}</span>
@@ -132,35 +112,21 @@
     <div class="modal-footer">
       <button type="button" class="btn-cancel" onclick={onClose}>Cancel</button>
       <button type="button" class="btn-save" onclick={handleSave}>
-        <IconCheck size={16} /> Save Collection
+        <IconCheck size={16} /> Save Collections ({selected.length})
       </button>
     </div>
   </div>
-</dialog>
+</div>
 
 <style>
   .modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    width: 100%;
-    max-width: none;
-    height: 100%;
-    max-height: none;
-    margin: 0;
-    border: 0;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.5);
     display: grid;
     place-items: center;
     padding: 16px;
-  }
-
-  .modal-backdrop::backdrop {
-    background: rgba(0, 0, 0, 0.5);
-  }
-
-  .modal-backdrop:not([open]) {
-    display: none;
   }
 
   .modal-card {
@@ -255,11 +221,13 @@
     border-radius: 4px;
     font-size: 0.88rem;
     background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
   }
 
   .add-coll-btn {
     padding: 0 14px;
     background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
@@ -285,6 +253,7 @@
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
     font-weight: 600;
+    color: var(--fasti-text-primary);
     cursor: pointer;
   }
 

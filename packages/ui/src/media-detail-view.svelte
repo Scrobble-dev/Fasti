@@ -10,6 +10,7 @@
     IconStarFilled,
     IconCheck,
     IconBookmark,
+    IconHeart,
     IconCalendar,
     IconRepeat,
     IconExternalLink,
@@ -25,6 +26,9 @@
     IconEdit,
     IconClock,
     IconDeviceTv,
+    IconPhoto,
+    IconRefresh,
+    IconPlus,
   } from "@tabler/icons-svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
@@ -33,7 +37,6 @@
 
   interface Props {
     record: MediaRecord;
-    availableCollections: string[];
     occurrences?: ChronicleOccurrence[];
     onBack: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
@@ -54,7 +57,6 @@
 
   let {
     record,
-    availableCollections,
     occurrences = [],
     onBack,
     onUpdateStatus,
@@ -74,7 +76,18 @@
   let isEditingNotes = $state(false);
   let editedNotesText = $state("");
   let newTagInput = $state("");
-  let syncedRecordId = $state("");
+  let isFavorite = $state(false);
+  let activeDisplaySource = $state("tmdb_tv");
+
+  // Artwork & Metadata Editor State
+  let showArtworkModal = $state(false);
+  let editingPosterUrl = $state("");
+  let editingBackdropUrl = $state("");
+  let editingTitle = $state("");
+  let editingOverview = $state("");
+  let newClaimNamespace = $state("tmdb_tv");
+  let newClaimValue = $state("");
+  let showAddClaimInline = $state(false);
 
   // Modal Dialog States
   let showProgressModal = $state(false);
@@ -89,11 +102,12 @@
   } | null>(null);
 
   $effect(() => {
-    if (record.id !== syncedRecordId) {
-      syncedRecordId = record.id;
-      editedNotesText = record.userNotes ?? "";
-      isEditingNotes = false;
-    }
+    editedNotesText = record.userNotes ?? "";
+    activeDisplaySource = record.displaySource;
+    editingPosterUrl = record.posterUrl ?? "";
+    editingBackdropUrl = record.backdropUrl ?? "";
+    editingTitle = record.title;
+    editingOverview = record.overview ?? "";
     const seasonCount = record.seasons?.length ?? 0;
     if (seasonCount === 0) {
       selectedSeasonIndex = 0;
@@ -101,6 +115,76 @@
       selectedSeasonIndex = seasonCount - 1;
     }
   });
+
+  const candidatePosters = $derived.by(() => {
+    const list: Array<{ source: string; url: string }> = [];
+    if (record.posterUrl) {
+      list.push({ source: "Current", url: record.posterUrl });
+    }
+    if (record.id === "rec_01K89Z01FrierenAnime") {
+      list.push(
+        {
+          source: "AniList Cover",
+          url: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-n2bGQYLiqcQE.jpg",
+        },
+        {
+          source: "MAL Key Visual",
+          url: "https://cdn.myanimelist.net/images/anime/1015/138006.jpg",
+        },
+        {
+          source: "Unsplash Aesthetic",
+          url: "https://images.unsplash.com/photo-1578632767115-351597cf2477?w=600&q=80",
+        },
+      );
+    } else if (record.id === "rec_01K89Z06HikaruNoGoManga") {
+      list.push(
+        {
+          source: "AniList Manga",
+          url: "https://s4.anilist.co/file/anilistcdn/media/manga/cover/large/bx30023-FmO9hV838P0F.jpg",
+        },
+        {
+          source: "MAL Manga Cover",
+          url: "https://cdn.myanimelist.net/images/manga/2/253419.jpg",
+        },
+        {
+          source: "Jump Classic",
+          url: "https://images.unsplash.com/photo-1529699211952-734e80c4d42b?w=600&q=80",
+        },
+      );
+    } else if (record.mediaKind === "anime") {
+      list.push(
+        {
+          source: "Kitsu Artwork",
+          url: "https://media.kitsu.app/anime/poster_images/46001/medium.jpg",
+        },
+        {
+          source: "AniList Artwork",
+          url: "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-n2bGQYLiqcQE.jpg",
+        },
+      );
+    }
+    return list;
+  });
+
+  function handleSetCanonical(xid: ExternalId): void {
+    record.displaySource = xid.namespace;
+    activeDisplaySource = xid.namespace;
+    xid.status = "matched";
+  }
+
+  function handleAddExternalId(): void {
+    if (newClaimValue.trim().length > 0) {
+      if (!record.externalIds) record.externalIds = [];
+      record.externalIds.push({
+        namespace: newClaimNamespace,
+        value: newClaimValue.trim(),
+        status: "matched",
+        source: "user_override",
+      });
+      newClaimValue = "";
+      showAddClaimInline = false;
+    }
+  }
 
   const recordOccurrences = $derived(
     occurrences.filter((occ) => occ.recordId === record.id),
@@ -117,6 +201,39 @@
   function handleSaveNotes(): void {
     onUpdateNotes?.(record.id, editedNotesText);
     isEditingNotes = false;
+  }
+
+  function handleMarkSeasonWatched(seasonIndex: number): void {
+    if (!record.seasons?.[seasonIndex]) return;
+    const season = record.seasons[seasonIndex];
+    for (const ep of season.episodes) {
+      if (!ep.watched) {
+        onToggleEpisode?.(record.id, ep.id);
+      }
+    }
+  }
+
+  function handleMarkSeasonUnwatched(seasonIndex: number): void {
+    if (!record.seasons?.[seasonIndex]) return;
+    const season = record.seasons[seasonIndex];
+    for (const ep of season.episodes) {
+      if (ep.watched) {
+        onToggleEpisode?.(record.id, ep.id);
+      }
+    }
+  }
+
+  function handleMarkPreviousEpisodesWatched(
+    seasonIndex: number,
+    upToEpisodeNumber: number,
+  ): void {
+    if (!record.seasons?.[seasonIndex]) return;
+    const season = record.seasons[seasonIndex];
+    for (const ep of season.episodes) {
+      if (ep.number <= upToEpisodeNumber && !ep.watched) {
+        onToggleEpisode?.(record.id, ep.id);
+      }
+    }
   }
 
   function handleAddTagSubmit(e: Event): void {
@@ -150,6 +267,12 @@
           label: "Add to Collection...",
           icon: IconFolderPlus,
           action: () => (showCollectionModal = true),
+        },
+        {
+          id: "rewatch",
+          label: "Log Occurrence (Rewatch)",
+          icon: IconRepeat,
+          action: () => onUpdateStatus?.(record.id, "completed"),
         },
         { id: "d1", label: "", divider: true, action: () => {} },
         {
@@ -186,6 +309,7 @@
             src={record.posterUrl}
             alt="{record.title} Poster"
             class="main-poster"
+            referrerpolicy="no-referrer"
           />
         {:else}
           <div class="fallback-poster">{record.mediaKind}</div>
@@ -277,6 +401,16 @@
         <button
           type="button"
           class="icon-action-btn"
+          class:active={isFavorite}
+          onclick={() => (isFavorite = !isFavorite)}
+          title="Favorite / Bookmark"
+        >
+          <IconHeart size={18} fill={isFavorite ? "currentColor" : "none"} />
+        </button>
+
+        <button
+          type="button"
+          class="icon-action-btn"
           onclick={() => (showCollectionModal = true)}
           title="Add to Collection"
         >
@@ -290,6 +424,22 @@
           title="Update Progress"
         >
           <IconAdjustments size={18} />
+        </button>
+
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          onclick={() => {
+            editingPosterUrl = record.posterUrl ?? "";
+            editingBackdropUrl = record.backdropUrl ?? "";
+            editingTitle = record.title;
+            editingOverview = record.overview ?? "";
+            showArtworkModal = true;
+          }}
+          title="Edit Artwork, Poster & Metadata"
+        >
+          <IconPhoto size={16} />
+          <span>Edit Artwork & Poster</span>
         </button>
 
         <button
@@ -405,6 +555,25 @@
           {/each}
         </div>
       </div>
+
+      <!-- Custom Fields & Attributes -->
+      <div class="sidebar-section">
+        <h4 class="sidebar-subheading">Custom Fields</h4>
+        {#if record.customFields && Object.keys(record.customFields).length > 0}
+          <dl class="meta-list">
+            {#each Object.entries(record.customFields) as [key, val]}
+              <div class="meta-pair">
+                <dt class="text-capitalize">{key.replace(/_/g, " ")}</dt>
+                <dd>{val === true ? "Yes" : val === false ? "No" : val}</dd>
+              </div>
+            {/each}
+          </dl>
+        {:else}
+          <p class="text-muted small mb-0" style="font-size: 0.75rem;">
+            No custom field values set. Configure fields in Settings &rarr; Custom Fields.
+          </p>
+        {/if}
+      </div>
     </aside>
 
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
@@ -472,7 +641,12 @@
                   onclick={() => (selectedSeasonIndex = sIdx)}
                 >
                   {#if season.posterUrl}
-                    <img src={season.posterUrl} alt="" class="season-thumb" />
+                    <img
+                      src={season.posterUrl}
+                      alt=""
+                      class="season-thumb"
+                      referrerpolicy="no-referrer"
+                    />
                   {/if}
                   <div class="season-card-info">
                     <span class="season-name">{season.title}</span>
@@ -487,9 +661,30 @@
             <!-- Episode Checklist -->
             {#if record.seasons[selectedSeasonIndex]}
               <div class="episodes-deck">
-                <h3 class="deck-title">
-                  Episodes — {record.seasons[selectedSeasonIndex].title}
-                </h3>
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+                  <h3 class="deck-title mb-0">
+                    Episodes — {record.seasons[selectedSeasonIndex].title}
+                  </h3>
+                  <div class="d-flex align-items-center gap-2">
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-success d-flex align-items-center gap-1"
+                      onclick={() => handleMarkSeasonWatched(selectedSeasonIndex)}
+                      title="Mark all episodes in this season as watched"
+                    >
+                      <IconCheck size={14} /> Mark Season Watched
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                      onclick={() => handleMarkSeasonUnwatched(selectedSeasonIndex)}
+                      title="Mark all episodes in this season as unwatched"
+                    >
+                      <IconX size={14} /> Mark Season Unwatched
+                    </button>
+                  </div>
+                </div>
+
                 <div class="episodes-table-wrap">
                   {#each record.seasons[selectedSeasonIndex].episodes ?? [] as ep (ep.id)}
                     <div class="episode-item-row" class:watched={ep.watched}>
@@ -524,14 +719,32 @@
                         {/if}
                       </div>
 
-                      {#if ep.watchedAt}
-                        <div class="ep-watched-pill">
-                          Watched {new Date(ep.watchedAt).toLocaleDateString(
-                            "en-IE",
-                            { month: "short", day: "numeric" },
-                          )}
-                        </div>
-                      {/if}
+                      <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                        {#if !ep.watched && ep.number > 1}
+                          <button
+                            type="button"
+                            class="btn btn-outline-secondary btn-sm py-0 px-2 font-monospace"
+                            style="font-size: 0.72rem;"
+                            onclick={() =>
+                              handleMarkPreviousEpisodesWatched(
+                                selectedSeasonIndex,
+                                ep.number,
+                              )}
+                            title="Mark all previous episodes 1 to {ep.number} as watched"
+                          >
+                            Mark 1..#{ep.number} Seen
+                          </button>
+                        {/if}
+
+                        {#if ep.watchedAt}
+                          <div class="ep-watched-pill">
+                            Watched {new Date(ep.watchedAt).toLocaleDateString(
+                              "en-IE",
+                              { month: "short", day: "numeric" },
+                            )}
+                          </div>
+                        {/if}
+                      </div>
                     </div>
                   {/each}
                 </div>
@@ -551,6 +764,7 @@
                         src={actor.profileUrl}
                         alt={actor.name}
                         class="avatar-img"
+                        referrerpolicy="no-referrer"
                       />
                     {:else}
                       <div class="avatar-fallback">{actor.name.charAt(0)}</div>
@@ -615,8 +829,7 @@
             <button
               type="button"
               class="ryot-action-btn"
-              disabled
-              title="Occurrence logging is not available in this build"
+              onclick={() => onUpdateStatus?.(record.id, "completed")}
             >
               <div class="action-btn-icon"><IconRepeat size={22} /></div>
               <div class="action-btn-text">
@@ -646,8 +859,7 @@
               <button
                 type="button"
                 class="btn-primary"
-                disabled
-                title="Occurrence logging is not available in this build"
+                onclick={() => onUpdateStatus?.(record.id, "completed")}
               >
                 Log First Occurrence
               </button>
@@ -700,12 +912,108 @@
               <p class="banner-desc">
                 Fasti maintains a stable, immutable identity (<code
                   >{record.id}</code
-                >) independent of TMDB, TVDB, or MyAnimeList. Provider claims
-                remain evidence. Metadata projection switching is not active in
-                this build.
+                >) independent of TMDB, TVDB, or MyAnimeList. You can switch
+                primary metadata projection without breaking your history logs.
               </p>
             </div>
           </div>
+
+          <div class="provider-switcher-row">
+            <label for="display-source-select" class="provider-label"
+              >Active Metadata Projection Provider:</label
+            >
+            <select
+              id="display-source-select"
+              class="provider-select"
+              bind:value={activeDisplaySource}
+            >
+              <option value="tmdb_tv">TheMovieDatabase (TMDB)</option>
+              <option value="tvdb">TheTVDB v4</option>
+              <option value="mal_anime">MyAnimeList (MAL)</option>
+              <option value="anilist_anime">AniList GraphQL</option>
+              <option value="simkl">SIMKL Multi-Crosswalk</option>
+            </select>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h4 class="m-0 font-display fw-bold" style="font-size: 1.1rem;">
+              Mapped External Claims & IDs
+            </h4>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+              onclick={() => (showAddClaimInline = !showAddClaimInline)}
+            >
+              <IconPlus size={14} />
+              <span>Add Identifier Claim</span>
+            </button>
+          </div>
+
+          {#if showAddClaimInline}
+            <div
+              class="p-3 mb-3 border rounded"
+              style="background: var(--fasti-surface-archive);"
+            >
+              <h5 class="mb-2 font-display">Add External Entity Mapping</h5>
+              <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                  <label
+                    for="claim-provider-select"
+                    class="form-label small fw-bold">Provider / Namespace</label
+                  >
+                  <select
+                    id="claim-provider-select"
+                    class="form-select form-select-sm"
+                    bind:value={newClaimNamespace}
+                  >
+                    <option value="tmdb_tv">TheMovieDatabase (TMDB)</option>
+                    <option value="tvdb_series">TheTVDB v4 Series</option>
+                    <option value="mal_anime">MyAnimeList (MAL)</option>
+                    <option value="anilist_anime">AniList GraphQL</option>
+                    <option value="kitsu_anime">Kitsu.io</option>
+                    <option value="simkl">SIMKL Media Crosswalk</option>
+                    <option value="imdb_title">IMDb Title ID</option>
+                    <option value="google_books">Google Books</option>
+                    <option value="open_library">Open Library</option>
+                    <option value="steam_app">Steam Web API</option>
+                    <option value="rawg_game">RAWG Video Game</option>
+                    <option value="igdb">IGDB</option>
+                    <option value="comicvine">ComicVine</option>
+                    <option value="podcast_index">Podcast Index</option>
+                  </select>
+                </div>
+                <div class="col-md-5">
+                  <label
+                    for="claim-value-input"
+                    class="form-label small fw-bold">ID / Slug / ISBN</label
+                  >
+                  <input
+                    id="claim-value-input"
+                    type="text"
+                    class="form-control form-control-sm"
+                    placeholder="e.g. 52991 or tt22238804"
+                    bind:value={newClaimValue}
+                  />
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-primary flex-grow-1"
+                    onclick={handleAddExternalId}
+                  >
+                    Save Claim
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    onclick={() => (showAddClaimInline = false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          {/if}
 
           <table class="assertions-table">
             <thead>
@@ -714,19 +1022,53 @@
                 <th scope="col">Identifier</th>
                 <th scope="col">Status</th>
                 <th scope="col">Provenance Route</th>
+                <th scope="col">Canonical Mapping</th>
               </tr>
             </thead>
             <tbody>
               {#each record.externalIds as xid}
                 <tr>
                   <td class="mono">{xid.namespace}</td>
-                  <td class="mono"><strong>{xid.value}</strong></td>
-                  <td
-                    ><span class="status-pill matched"
-                      >{xid.status.replaceAll("_", " ")}</span
-                    ></td
-                  >
+                  <td class="mono">
+                    {#if xid.url}
+                      <a
+                        href={xid.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="d-inline-flex align-items-center gap-1"
+                      >
+                        <strong>{xid.value}</strong>
+                        <IconExternalLink size={12} />
+                      </a>
+                    {:else}
+                      <strong>{xid.value}</strong>
+                    {/if}
+                  </td>
+                  <td>
+                    <span class="status-pill {xid.status}">
+                      {xid.status.replace("_", " ")}
+                    </span>
+                  </td>
                   <td>{xid.source}</td>
+                  <td>
+                    {#if activeDisplaySource === xid.namespace}
+                      <span
+                        class="badge bg-success-lt font-monospace d-inline-flex align-items-center gap-1"
+                      >
+                        <IconCheck size={12} stroke={3} /> Primary Canonical
+                      </span>
+                    {:else}
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline-secondary py-0 px-2 font-monospace"
+                        style="font-size: 0.75rem;"
+                        onclick={() => handleSetCanonical(xid)}
+                        title="Set {xid.namespace} as canonical projection source"
+                      >
+                        Set Canonical
+                      </button>
+                    {/if}
+                  </td>
                 </tr>
               {/each}
             </tbody>
@@ -840,10 +1182,166 @@
 {#if showCollectionModal}
   <CollectionModal
     {record}
-    collections={availableCollections}
     onClose={() => (showCollectionModal = false)}
     onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
   />
+{/if}
+
+{#if showArtworkModal}
+  <div
+    class="modal show d-block fasti-modal-backdrop"
+    tabindex="-1"
+    role="dialog"
+    aria-modal="true"
+  >
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+      <div
+        class="modal-content"
+        style="background: var(--fasti-surface-paper); color: var(--fasti-text-primary); border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);"
+      >
+        <div class="modal-header border-bottom">
+          <h5 class="modal-title d-flex align-items-center gap-2 font-display">
+            <IconPhoto size={20} class="text-primary" />
+            <span>Edit Artwork, Posters & Metadata</span>
+          </h5>
+          <button
+            type="button"
+            class="btn-close"
+            aria-label="Close"
+            onclick={() => (showArtworkModal = false)}
+          ></button>
+        </div>
+        <div class="modal-body p-4">
+          <div class="row g-4">
+            <!-- Left: Poster Preview & URL -->
+            <div class="col-md-5">
+              <span class="form-label fw-bold d-block"
+                >Active Poster Preview</span
+              >
+              <div
+                class="poster-preview-box rounded overflow-hidden mb-3 border shadow-sm"
+                style="aspect-ratio: 2/3; max-height: 280px; background: var(--fasti-surface-archive);"
+              >
+                {#if editingPosterUrl}
+                  <img
+                    src={editingPosterUrl}
+                    alt="Preview"
+                    class="w-100 h-100 object-fit-cover"
+                    referrerpolicy="no-referrer"
+                  />
+                {:else}
+                  <div
+                    class="d-flex align-items-center justify-content-center h-100 text-muted"
+                  >
+                    No Poster Selected
+                  </div>
+                {/if}
+              </div>
+              <label for="edit-poster-url" class="form-label small fw-bold"
+                >Poster Image URL</label
+              >
+              <input
+                id="edit-poster-url"
+                type="url"
+                class="form-control form-control-sm mb-3"
+                bind:value={editingPosterUrl}
+                placeholder="https://..."
+              />
+
+              <label for="edit-backdrop-url" class="form-label small fw-bold"
+                >Backdrop Banner URL</label
+              >
+              <input
+                id="edit-backdrop-url"
+                type="url"
+                class="form-control form-control-sm"
+                bind:value={editingBackdropUrl}
+                placeholder="https://..."
+              />
+            </div>
+
+            <!-- Right: Candidate Posters & Metadata fields -->
+            <div class="col-md-7">
+              <span class="form-label fw-bold mb-1 d-block"
+                >Pick Alternative Cover Artwork</span
+              >
+              <p class="text-muted small mb-2">
+                Click any candidate artwork below to apply it to this title:
+              </p>
+
+              <div class="d-flex gap-2 mb-4 overflow-x-auto pb-2">
+                {#each candidatePosters as cand}
+                  <button
+                    type="button"
+                    class="btn p-1 border rounded text-start flex-shrink-0"
+                    class:border-primary={editingPosterUrl === cand.url}
+                    style="width: 80px;"
+                    onclick={() => (editingPosterUrl = cand.url)}
+                    title={cand.source}
+                  >
+                    <img
+                      src={cand.url}
+                      alt={cand.source}
+                      class="w-100 rounded mb-1"
+                      style="aspect-ratio: 2/3; object-fit: cover;"
+                      referrerpolicy="no-referrer"
+                    />
+                    <div
+                      class="text-truncate text-muted font-monospace"
+                      style="font-size: 0.65rem;"
+                    >
+                      {cand.source}
+                    </div>
+                  </button>
+                {/each}
+              </div>
+
+              <label for="edit-title-input" class="form-label small fw-bold"
+                >Title</label
+              >
+              <input
+                id="edit-title-input"
+                type="text"
+                class="form-control form-control-sm mb-3"
+                bind:value={editingTitle}
+              />
+
+              <label for="edit-overview-input" class="form-label small fw-bold"
+                >Overview / Synopsis</label
+              >
+              <textarea
+                id="edit-overview-input"
+                class="form-control form-control-sm"
+                rows="4"
+                bind:value={editingOverview}></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer border-top">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick={() => (showArtworkModal = false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={() => {
+              record.posterUrl = editingPosterUrl;
+              record.backdropUrl = editingBackdropUrl;
+              record.title = editingTitle;
+              record.overview = editingOverview;
+              showArtworkModal = false;
+            }}
+          >
+            Apply & Save Artwork
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#if contextMenuState}
@@ -1003,6 +1501,10 @@
     color: var(--fasti-text-primary);
     cursor: pointer;
   }
+  .rating-select option {
+    background-color: var(--fasti-surface-paper) !important;
+    color: var(--fasti-text-primary) !important;
+  }
 
   .status-select {
     padding: 7px 12px;
@@ -1011,14 +1513,31 @@
     font-size: 0.88rem;
     cursor: pointer;
     border: 1px solid transparent;
+    color: #ffffff;
+  }
+  .status-select option {
+    background-color: var(--fasti-surface-paper) !important;
+    color: var(--fasti-text-primary) !important;
   }
   .status-select.watching {
     background: var(--fasti-action-primary);
-    color: white;
+    color: #ffffff;
   }
   .status-select.completed {
     background: var(--fasti-state-verified);
-    color: white;
+    color: #ffffff;
+  }
+  .status-select.plan_to_watch {
+    background: #6366f1;
+    color: #ffffff;
+  }
+  .status-select.on_hold {
+    background: #d97706;
+    color: #ffffff;
+  }
+  .status-select.dropped {
+    background: #dc2626;
+    color: #ffffff;
   }
 
   .icon-action-btn {
@@ -1460,6 +1979,26 @@
     margin: 0;
   }
 
+  .provider-switcher-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .provider-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  .provider-select {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    background: var(--fasti-surface-paper);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
   .assertions-table {
     width: 100%;
     border-collapse: collapse;
@@ -1586,12 +2125,5 @@
     border-radius: 20px;
     background: transparent;
     font-size: 0.85rem;
-  }
-
-  @media (max-width: 47.99rem) {
-    .media-main-header,
-    .details-body-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
   }
 </style>

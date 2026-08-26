@@ -11,6 +11,7 @@ export { default as ReconciliationView } from "./reconciliation-view.svelte";
 export { default as CalendarView } from "./calendar-view.svelte";
 export { default as ConnectionsView } from "./connections-view.svelte";
 export { default as SettingsView } from "./settings-view.svelte";
+export { default as AuthModal } from "./auth-modal.svelte";
 export { default as FastiWorkbench } from "./fasti-workbench.svelte";
 
 export * from "./types.js";

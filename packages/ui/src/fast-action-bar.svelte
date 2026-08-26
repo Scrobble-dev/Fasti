@@ -48,7 +48,6 @@
     }}
     title={isWatched ? "Marked as completed / seen" : "Mark as seen"}
     aria-label="Toggle watched"
-    aria-pressed={isWatched}
   >
     {#if isWatched}
       <IconEyeCheck size={16} stroke={2.5} class="icon-watched" />
@@ -68,7 +67,6 @@
     }}
     title={isWatchlist ? "In your watchlist" : "Add to watchlist"}
     aria-label="Toggle watchlist"
-    aria-pressed={isWatchlist}
   >
     {#if isWatchlist}
       <IconBookmarkFilled size={16} class="icon-bookmark-active" />
@@ -81,12 +79,13 @@
   <button
     type="button"
     class="fast-btn"
-    class:active={!!record.collectionName}
     onclick={(e) => {
       e.stopPropagation();
       onOpenCollection(record);
     }}
-    title="Add to collection / lists"
+    title={record.collectionName
+      ? `In collection: ${record.collectionName}`
+      : "Add to collection / lists"}
     aria-label="Add to collection"
   >
     <IconFolder size={16} stroke={2} />
@@ -96,7 +95,6 @@
   <button
     type="button"
     class="fast-btn"
-    class:active={!!record.userRating}
     onclick={(e) => {
       e.stopPropagation();
       onOpenReview(record);
@@ -132,26 +130,25 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
-    padding: 4px;
-    gap: 4px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    backdrop-filter: blur(8px);
+    border-radius: 4px;
+    padding: 2px;
+    gap: 2px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
   }
 
   .fast-btn {
     flex: 1;
-    min-height: 36px;
-    height: 36px;
+    min-height: 28px;
+    height: 28px;
     display: grid;
     place-items: center;
     background: transparent;
     border: none;
-    border-radius: 4px;
+    border-radius: 3px;
     color: var(--fasti-text-muted);
     cursor: pointer;
     transition: all 100ms ease;
-    padding: 4px;
+    padding: 2px;
   }
 
   .fast-btn:hover {

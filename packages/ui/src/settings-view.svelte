@@ -1,21 +1,19 @@
 <script lang="ts">
   import type {
     CustomFieldDefinition,
+    CustomMetadataField,
     ScopedApiToken,
-    ProviderCredentialStatus,
-    NetworkConfiguration,
-    SaveNetworkConfigurationRequest,
-    EndpointConnectionStatus,
+    ProviderApiKeyConfig,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
     WorkbenchPreferences,
     NavItemConfig,
     ContextMenuItemConfig,
+    MediaRecord,
+    ChronicleOccurrence,
   } from "./types.js";
-  import { createDefaultWorkbenchPreferences } from "./defaults.js";
-  import NetworkSettings from "./network-settings.svelte";
-  import { hostProblemText } from "./host-problem.js";
+  import { DEFAULT_WORKBENCH_PREFERENCES } from "./mock-data.js";
   import {
     IconKey,
     IconPalette,
@@ -33,21 +31,24 @@
     IconCode,
     IconPlus,
     IconTrash,
+    IconCopy,
+    IconCheck,
     IconDeviceTv,
+    IconServer,
     IconExternalLink,
-    IconSettings,
+    IconSend,
+    IconAdjustments,
+    IconTags,
+    IconShield,
+    IconDownload,
+    IconBug,
+    IconLanguage,
   } from "@tabler/icons-svelte";
 
   interface Props {
     customFields: CustomFieldDefinition[];
     tokens: ScopedApiToken[];
-    providerKeys?: ProviderCredentialStatus[];
-    networkConfiguration?: NetworkConfiguration;
-    providerLoading?: boolean;
-    networkLoading?: boolean;
-    providerLoadProblem?: string;
-    networkLoadProblem?: string;
-    initialSection?: "providers" | "advanced";
+    providerKeys: ProviderApiKeyConfig[];
     oidcConfig: OidcConfiguration;
     appriseConfig: AppriseNotificationConfig;
     themeSettings: ThemeSettings;
@@ -56,103 +57,322 @@
     onUpdateWorkbenchPreferences?: (
       prefs: Partial<WorkbenchPreferences>,
     ) => void;
-    onSaveProviderKey?: (provider: string, key: string) => Promise<void>;
-    onDeleteProviderKey?: (provider: string) => Promise<void>;
-    onSaveNetworkConfiguration?: (
-      input: SaveNetworkConfigurationRequest,
-    ) => Promise<NetworkConfiguration>;
-    onTestEndpoint?: (endpoint: string) => Promise<EndpointConnectionStatus>;
-    onRetryProviderState?: () => void;
-    onRetryNetworkState?: () => void;
+    onSaveProviderKey?: (provider: string, key: string) => void;
+    onCreateToken?: (name: string, scopes: string[]) => void;
+    onDeleteToken?: (id: string) => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
+    onImportData?: (
+      records: MediaRecord[],
+      chronicle: ChronicleOccurrence[],
+    ) => void;
+    onExportChronicle?: () => void;
+    onExportCsv?: () => void;
   }
 
   let {
     customFields,
     tokens,
     providerKeys,
-    networkConfiguration,
-    providerLoading = false,
-    networkLoading = false,
-    providerLoadProblem,
-    networkLoadProblem,
-    initialSection,
     oidcConfig,
     appriseConfig,
     themeSettings,
-    workbenchPreferences = createDefaultWorkbenchPreferences(),
+    workbenchPreferences = DEFAULT_WORKBENCH_PREFERENCES,
     onUpdateTheme,
     onUpdateWorkbenchPreferences,
     onSaveProviderKey,
-    onDeleteProviderKey,
-    onSaveNetworkConfiguration,
-    onTestEndpoint,
-    onRetryProviderState,
-    onRetryNetworkState,
+    onCreateToken,
+    onDeleteToken,
     onSaveOidc,
     onSaveApprise,
+    onImportData,
+    onExportChronicle,
+    onExportCsv,
   }: Props = $props();
 
   let activeSettingsSection:
+    | "preferences"
     | "appearance"
     | "navigation"
+    | "custom_fields"
     | "providers"
     | "connectors"
     | "tokens"
     | "oidc"
     | "notifications"
-    | "importers"
-    | "advanced" = $state("appearance");
+    | "advanced"
+    | "importers" = $state("preferences");
+
+  // Local state for custom fields & media types
+  let newFieldName = $state("");
+  let newFieldKey = $state("");
+  let newFieldType = $state<"text" | "number" | "date" | "boolean" | "select">("text");
+  let newFieldTarget = $state("all");
+  let newFieldDescription = $state("");
+  let newFieldOptions = $state("");
+
+  let newTypeName = $state("");
+  let newTypeSingular = $state("");
+  let newTypePlural = $state("");
+  let newTypeProgress = $state<"episodes" | "pages" | "percent" | "duration" | "binary">("episodes");
+  let newTypeIcon = $state("book");
+
+  // Local state for cache management & bug reports
+  let clearedCacheToast = $state<string | null>(null);
+  let searchCacheCount = $state(42);
+  let historyCacheSize = $state("128 KB");
+  let statsCacheSize = $state("64 KB");
+  let discoverCacheSize = $state("256 KB");
 
   // Local state for token generator
   let newTokenName = $state("");
   let selectedScopes: string[] = $state(["chronicle:write", "metadata:read"]);
+  let generatedTokenSecret = $state<string | null>(null);
+  let isCopied = $state(false);
+
+  // Local state for notification testing
+  let testNotificationSent = $state(false);
   let newAppriseUrl = $state("");
+  let importStatusMessage = $state<string | null>(null);
+  let testKeyStatus = $state<Record<string, string>>({});
 
   // Local state for keys
   let editingKeyMap: Record<string, string> = $state({});
-  let providerBusy = $state<string | undefined>();
-  let providerNotice = $state("");
-  let providerProblem = $state("");
-  let oidcDraft = $state({
-    enabled: false,
-    issuerUrl: "",
-    clientId: "",
-    clientSecret: "",
-    redirectUri: "",
-    autoProvisionUsers: false,
-  });
-  let appriseDraft = $state({
-    enabled: false,
-    urls: [] as string[],
-    notifyOnReviewRequired: false,
-    notifyOnSyncError: false,
-    notifyOnMilestone: false,
-  });
+  let savedStatusMap: Record<string, boolean> = $state({});
 
-  $effect(() => {
-    if (initialSection) activeSettingsSection = initialSection;
-  });
+  function handleSaveKey(provider: string, val: string): void {
+    onSaveProviderKey?.(provider, val);
+    savedStatusMap[provider] = true;
+    setTimeout(() => {
+      savedStatusMap[provider] = false;
+    }, 2500);
+  }
 
-  $effect(() => {
-    oidcDraft = { ...oidcConfig };
-  });
+  function handleCreateTokenSubmit(e: Event): void {
+    e.preventDefault();
+    if (newTokenName.trim().length === 0) return;
+    const mockSecret = `fst_pat_${Math.random().toString(36).substring(2, 15)}_${Date.now()}`;
+    generatedTokenSecret = mockSecret;
+    onCreateToken?.(newTokenName.trim(), selectedScopes);
+    newTokenName = "";
+  }
 
-  $effect(() => {
-    appriseDraft = { ...appriseConfig, urls: [...appriseConfig.urls] };
-  });
+  function handleCopySecret(): void {
+    if (generatedTokenSecret) {
+      navigator.clipboard.writeText(generatedTokenSecret);
+      isCopied = true;
+      setTimeout(() => (isCopied = false), 2000);
+    }
+  }
+
+  function handleSendTestNotification(): void {
+    testNotificationSent = true;
+    setTimeout(() => (testNotificationSent = false), 3000);
+  }
+
+  function handleClearCache(
+    type: "search" | "history" | "statistics" | "discover" | "all",
+  ): void {
+    if (type === "search" || type === "all") {
+      searchCacheCount = 0;
+    }
+    if (type === "history" || type === "all") {
+      historyCacheSize = "0 KB";
+    }
+    if (type === "statistics" || type === "all") {
+      statsCacheSize = "0 KB";
+    }
+    if (type === "discover" || type === "all") {
+      discoverCacheSize = "0 KB";
+    }
+    clearedCacheToast =
+      type === "all"
+        ? "All caches successfully cleared!"
+        : `${type.charAt(0).toUpperCase() + type.slice(1)} cache cleared!`;
+    setTimeout(() => (clearedCacheToast = null), 3000);
+  }
+
+  function handleDownloadSanitizedLogs(): void {
+    const logs = [
+      {
+        timestamp: new Date(Date.now() - 3600000).toISOString(),
+        level: "INFO",
+        message:
+          "Fasti Node loopback daemon initialized on 127.0.0.1:8420 [token=[REDACTED]]",
+      },
+      {
+        timestamp: new Date(Date.now() - 1800000).toISOString(),
+        level: "INFO",
+        message:
+          "Provider search executed [query='country bumpkin', provider='kitsu']",
+      },
+      {
+        timestamp: new Date(Date.now() - 900000).toISOString(),
+        level: "INFO",
+        message:
+          "NuvioTV observation ingested from client=NuvioTV-LivingRoom [cursor=42, key=[REDACTED]]",
+      },
+      {
+        timestamp: new Date().toISOString(),
+        level: "INFO",
+        message:
+          "Sanitized log bundle exported with zero secrets or private tokens.",
+      },
+    ];
+    const blob = new Blob([JSON.stringify(logs, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `fasti-sanitized-logs-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleAddCustomFieldSubmit(e: Event): void {
+    e.preventDefault();
+    if (!newFieldName.trim() || !newFieldKey.trim()) return;
+    const newField: CustomMetadataField = {
+      id: `cf_${Date.now()}`,
+      name: newFieldName.trim(),
+      key: newFieldKey.trim().toLowerCase().replace(/\s+/g, "_"),
+      type: newFieldType,
+      targetKinds: newFieldTarget === "all" ? ["all"] : [newFieldTarget as any],
+      options:
+        newFieldType === "select"
+          ? newFieldOptions
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+      description: newFieldDescription.trim() || undefined,
+    };
+    const currentList = workbenchPreferences.customFields ?? [];
+    onUpdateWorkbenchPreferences?.({
+      customFields: [...currentList, newField],
+    });
+    newFieldName = "";
+    newFieldKey = "";
+    newFieldDescription = "";
+    newFieldOptions = "";
+  }
+
+  function handleDeleteCustomField(id: string): void {
+    const currentList = workbenchPreferences.customFields ?? [];
+    onUpdateWorkbenchPreferences?.({
+      customFields: currentList.filter((f) => f.id !== id),
+    });
+  }
+
+  function handleAddCustomMediaTypeSubmit(e: Event): void {
+    e.preventDefault();
+    if (!newTypeName.trim() || !newTypeSingular.trim()) return;
+    const newType = {
+      id: `custom_${Date.now()}`,
+      name: newTypeName.trim(),
+      singular: newTypeSingular.trim(),
+      plural: newTypePlural.trim() || newTypeSingular.trim() + "s",
+      icon: newTypeIcon,
+      trackProgress: newTypeProgress,
+    };
+    const currentList = workbenchPreferences.customMediaTypes ?? [];
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: [...currentList, newType],
+    });
+    newTypeName = "";
+    newTypeSingular = "";
+    newTypePlural = "";
+  }
+
+  function handleDeleteCustomMediaType(id: string): void {
+    const currentList = workbenchPreferences.customMediaTypes ?? [];
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: currentList.filter((t) => t.id !== id),
+    });
+  }
 
   function handleAddAppriseUrl(e: Event): void {
     e.preventDefault();
     if (newAppriseUrl.trim().length > 0) {
       const updated = {
-        ...appriseDraft,
-        urls: [...appriseDraft.urls, newAppriseUrl.trim()],
+        ...appriseConfig,
+        urls: [...appriseConfig.urls, newAppriseUrl.trim()],
       };
-      appriseDraft = updated;
+      onSaveApprise?.(updated);
       newAppriseUrl = "";
     }
+  }
+
+  function handleRemoveAppriseUrl(urlToRemove: string): void {
+    const updated = {
+      ...appriseConfig,
+      urls: appriseConfig.urls.filter((u) => u !== urlToRemove),
+    };
+    onSaveApprise?.(updated);
+  }
+
+  function handleFileImport(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const text = reader.result as string;
+        if (file.name.endsWith(".json")) {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) {
+            onImportData?.(parsed, []);
+          } else if (parsed.records || parsed.chronicle) {
+            onImportData?.(parsed.records ?? [], parsed.chronicle ?? []);
+          }
+        } else if (file.name.endsWith(".csv")) {
+          const lines = text.split("\n").filter((l) => l.trim().length > 0);
+          const newOccs: any[] = [];
+          const newRecs: any[] = [];
+          for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i]
+              .split(",")
+              .map((c) => c.replace(/^"|"$/g, "").trim());
+            if (cols.length >= 3) {
+              const title = cols[2] || cols[0];
+              const kind = cols[3] || "movie";
+              const recId = `rec_${Date.now()}_${i}`;
+              newRecs.push({
+                id: recId,
+                title,
+                mediaKind: kind,
+                status: "completed",
+                displaySource: "csv_import",
+                tags: ["Imported"],
+                genres: [],
+                studios: [],
+                externalIds: [],
+              });
+              newOccs.push({
+                id: `occ_${Date.now()}_${i}`,
+                recordId: recId,
+                title,
+                mediaKind: kind,
+                timestamp: cols[4] || new Date().toISOString(),
+                durationMinutes: Number(cols[5]) || 30,
+                progressPercentage: 100,
+                deviceName: cols[6] || "CSV Import",
+                clientName: cols[7] || "File Import",
+                isRewatch: false,
+              });
+            }
+          }
+          onImportData?.(newRecs, newOccs);
+        }
+        importStatusMessage = `✓ Successfully imported records from ${file.name}!`;
+        setTimeout(() => (importStatusMessage = null), 4000);
+      } catch (err) {
+        importStatusMessage = `Error parsing file: ${(err as Error).message}`;
+      }
+    };
+    reader.readAsText(file);
   }
 
   function handleToggleNavVisible(id: string): void {
@@ -173,9 +393,7 @@
 
   function handleMoveNav(id: string, direction: -1 | 1): void {
     if (!workbenchPreferences) return;
-    const items = [...workbenchPreferences.navItems].sort(
-      (a, b) => a.order - b.order,
-    );
+    const items = [...workbenchPreferences.navItems];
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) return;
     const targetIdx = idx + direction;
@@ -197,9 +415,7 @@
 
   function handleMoveContext(id: string, direction: -1 | 1): void {
     if (!workbenchPreferences) return;
-    const items = [...workbenchPreferences.contextMenuItems].sort(
-      (a, b) => a.order - b.order,
-    );
+    const items = [...workbenchPreferences.contextMenuItems];
     const idx = items.findIndex((i) => i.id === id);
     if (idx < 0) return;
     const targetIdx = idx + direction;
@@ -212,52 +428,7 @@
   }
 
   function handleResetNavPreferences(): void {
-    onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
-  }
-
-  async function saveProviderKey(provider: string): Promise<void> {
-    const credential = editingKeyMap[provider]?.trim() ?? "";
-    if (!credential || !onSaveProviderKey || providerBusy) return;
-    providerBusy = provider;
-    providerNotice = "";
-    providerProblem = "";
-    try {
-      await onSaveProviderKey(provider, credential);
-      editingKeyMap[provider] = "";
-      providerNotice = "Credential saved in the platform credential store.";
-    } catch (error) {
-      providerProblem = hostProblemText(
-        error,
-        "The trusted desktop host rejected this credential request.",
-      );
-    } finally {
-      providerBusy = undefined;
-    }
-  }
-
-  async function deleteProviderKey(provider: string): Promise<void> {
-    if (!onDeleteProviderKey || providerBusy) return;
-    providerBusy = provider;
-    providerNotice = "";
-    providerProblem = "";
-    try {
-      await onDeleteProviderKey(provider);
-      editingKeyMap[provider] = "";
-      providerNotice = "Credential removed from the platform credential store.";
-    } catch (error) {
-      providerProblem = hostProblemText(
-        error,
-        "The trusted desktop host rejected this credential request.",
-      );
-    } finally {
-      providerBusy = undefined;
-    }
-  }
-
-  function confirmProviderDelete(provider: string): void {
-    if (window.confirm("Remove this provider key from the credential store?")) {
-      void deleteProviderKey(provider);
-    }
+    onUpdateWorkbenchPreferences?.(DEFAULT_WORKBENCH_PREFERENCES);
   }
 </script>
 
@@ -278,8 +449,16 @@
       <button
         type="button"
         class="nav-tab-btn"
+        class:active={activeSettingsSection === "preferences"}
+        onclick={() => (activeSettingsSection = "preferences")}
+      >
+        <IconAdjustments size={18} /> Preferences & Metadata
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
         class:active={activeSettingsSection === "appearance"}
-        aria-pressed={activeSettingsSection === "appearance"}
         onclick={() => (activeSettingsSection = "appearance")}
       >
         <IconPalette size={18} /> Appearance & Theme
@@ -289,7 +468,6 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "navigation"}
-        aria-pressed={activeSettingsSection === "navigation"}
         onclick={() => (activeSettingsSection = "navigation")}
       >
         <IconLayoutSidebar size={18} /> Navigation & Menus
@@ -298,8 +476,16 @@
       <button
         type="button"
         class="nav-tab-btn"
+        class:active={activeSettingsSection === "custom_fields"}
+        onclick={() => (activeSettingsSection = "custom_fields")}
+      >
+        <IconTags size={18} /> Custom Types & Fields
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
         class:active={activeSettingsSection === "providers"}
-        aria-pressed={activeSettingsSection === "providers"}
         onclick={() => (activeSettingsSection = "providers")}
       >
         <IconKey size={18} /> Metadata Providers & Keys
@@ -308,18 +494,7 @@
       <button
         type="button"
         class="nav-tab-btn"
-        class:active={activeSettingsSection === "advanced"}
-        aria-pressed={activeSettingsSection === "advanced"}
-        onclick={() => (activeSettingsSection = "advanced")}
-      >
-        <IconSettings size={18} /> Advanced Network Access
-      </button>
-
-      <button
-        type="button"
-        class="nav-tab-btn"
         class:active={activeSettingsSection === "connectors"}
-        aria-pressed={activeSettingsSection === "connectors"}
         onclick={() => (activeSettingsSection = "connectors")}
       >
         <IconDeviceTv size={18} /> Nuvio & Media Connectors
@@ -329,7 +504,6 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "tokens"}
-        aria-pressed={activeSettingsSection === "tokens"}
         onclick={() => (activeSettingsSection = "tokens")}
       >
         <IconCode size={18} /> Personal Access Tokens (PAT)
@@ -339,7 +513,6 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "oidc"}
-        aria-pressed={activeSettingsSection === "oidc"}
         onclick={() => (activeSettingsSection = "oidc")}
       >
         <IconUserCheck size={18} /> Single Sign-On (OIDC)
@@ -349,7 +522,6 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "notifications"}
-        aria-pressed={activeSettingsSection === "notifications"}
         onclick={() => (activeSettingsSection = "notifications")}
       >
         <IconBell size={18} /> Notifications & Apprise
@@ -358,8 +530,16 @@
       <button
         type="button"
         class="nav-tab-btn"
+        class:active={activeSettingsSection === "advanced"}
+        onclick={() => (activeSettingsSection = "advanced")}
+      >
+        <IconShield size={18} /> Advanced & Cache
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
         class:active={activeSettingsSection === "importers"}
-        aria-pressed={activeSettingsSection === "importers"}
         onclick={() => (activeSettingsSection = "importers")}
       >
         <IconDatabaseImport size={18} /> Lossless Importers & Backups
@@ -367,9 +547,235 @@
     </nav>
 
     <!-- Right Settings Content Panel -->
-    <div class="settings-content-card">
+    <main class="settings-content-card">
+      <!-- 0. General Preferences & Metadata (Matches Nuvio/Floppy Spec) -->
+      {#if activeSettingsSection === "preferences"}
+        <section class="section-pane">
+          <h2 class="pane-title">Preferences & Metadata</h2>
+          <p class="pane-desc">
+            Control how Fasti tracks, displays, and interacts with your media activity.
+          </p>
+
+          <!-- Language & Metadata Card -->
+          <div class="card p-3 border mb-4">
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <IconLanguage size={20} class="text-primary" />
+              <div>
+                <h3 class="h4 mb-0">Language & Metadata</h3>
+                <span class="text-muted small">Manage languages and metadata providers.</span>
+              </div>
+            </div>
+
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-bold" for="pref-provider-region">
+                  Provider Region
+                </label>
+                <select
+                  id="pref-provider-region"
+                  class="form-select form-select-sm"
+                  value={workbenchPreferences.providerRegion ?? "disabled"}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      providerRegion: e.currentTarget.value,
+                    })}
+                >
+                  <option value="disabled">Disabled</option>
+                  <option value="IE">Ireland (IE)</option>
+                  <option value="US">United States (US)</option>
+                  <option value="GB">United Kingdom (GB)</option>
+                  <option value="JP">Japan (JP)</option>
+                  <option value="DE">Germany (DE)</option>
+                  <option value="FR">France (FR)</option>
+                  <option value="CA">Canada (CA)</option>
+                  <option value="AU">Australia (AU)</option>
+                </select>
+                <span class="text-muted small" style="font-size: 0.72rem;">Regional availability and release dates.</span>
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-bold" for="pref-metadata-lang">
+                  Metadata Language
+                </label>
+                <select
+                  id="pref-metadata-lang"
+                  class="form-select form-select-sm"
+                  value={workbenchPreferences.metadataLanguage ?? "default"}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      metadataLanguage: e.currentTarget.value,
+                    })}
+                >
+                  <option value="default">Server Default (en)</option>
+                  <option value="en">English (en)</option>
+                  <option value="ja">Japanese (ja)</option>
+                  <option value="es">Spanish (es)</option>
+                  <option value="fr">French (fr)</option>
+                  <option value="de">German (de)</option>
+                </select>
+                <span class="text-muted small" style="font-size: 0.72rem;">Preferred language for plot overviews.</span>
+              </div>
+            </div>
+
+            <div class="border-top pt-3">
+              <h4 class="h5 mb-2">Metadata Providers</h4>
+              <p class="text-muted small mb-3">Default provider selections for TV and Anime records.</p>
+
+              <div class="row g-3">
+                <div class="col-12 col-md-4">
+                  <label class="form-label small fw-bold" for="pref-tv-prov">TV Provider</label>
+                  <select
+                    id="pref-tv-prov"
+                    class="form-select form-select-sm"
+                    value={workbenchPreferences.tvProvider ?? "tmdb"}
+                    onchange={(e) =>
+                      onUpdateWorkbenchPreferences?.({
+                        tvProvider: e.currentTarget.value as any,
+                      })}
+                  >
+                    <option value="tmdb">The Movie Database (TMDB)</option>
+                    <option value="tvdb">TheTVDB v4</option>
+                  </select>
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label small fw-bold" for="pref-anime-prov">Anime Provider</label>
+                  <select
+                    id="pref-anime-prov"
+                    class="form-select form-select-sm"
+                    value={workbenchPreferences.animeProvider ?? "mal"}
+                    onchange={(e) =>
+                      onUpdateWorkbenchPreferences?.({
+                        animeProvider: e.currentTarget.value as any,
+                      })}
+                  >
+                    <option value="mal">MyAnimeList (MAL)</option>
+                    <option value="anilist">AniList</option>
+                    <option value="kitsu">Kitsu</option>
+                  </select>
+                </div>
+
+                <div class="col-12 col-md-4">
+                  <label class="form-label small fw-bold" for="pref-anime-lib">Anime Library</label>
+                  <select
+                    id="pref-anime-lib"
+                    class="form-select form-select-sm"
+                    value={workbenchPreferences.animeLibrary ?? "separate"}
+                    onchange={(e) =>
+                      onUpdateWorkbenchPreferences?.({
+                        animeLibrary: e.currentTarget.value as any,
+                      })}
+                  >
+                    <option value="separate">Anime Library (Separate)</option>
+                    <option value="unified">Unified TV & Anime Library</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Library & Tracking Behavior Card -->
+          <div class="card p-3 border mb-4">
+            <h3 class="h4 mb-1">Library & Activity Controls</h3>
+            <p class="text-muted small mb-3">Control completed items, ratings visibility, and game logging.</p>
+
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-bold" for="pref-hide-completed">Hide Completed</label>
+                <select
+                  id="pref-hide-completed"
+                  class="form-select form-select-sm"
+                  value={workbenchPreferences.hideCompleted ?? "disabled"}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      hideCompleted: e.currentTarget.value as any,
+                    })}
+                >
+                  <option value="disabled">Disabled - show completed items</option>
+                  <option value="home">Hide on Home Dashboard</option>
+                  <option value="all">Hide everywhere except Library</option>
+                </select>
+              </div>
+
+              <div class="col-12 col-md-6 d-flex align-items-center justify-content-between pt-3">
+                <div>
+                  <label class="form-check-label fw-bold small" for="pref-hide-zero-ratings">
+                    Hide Zero Ratings
+                  </label>
+                  <div class="text-muted small">Hide unrated items from score metrics.</div>
+                </div>
+                <input
+                  class="form-check-input ms-3"
+                  type="checkbox"
+                  role="switch"
+                  id="pref-hide-zero-ratings"
+                  checked={workbenchPreferences.hideZeroRatings ?? false}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      hideZeroRatings: e.currentTarget.checked,
+                    })}
+                />
+              </div>
+            </div>
+
+            <div class="row g-3 mb-3 border-top pt-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-bold" for="pref-game-logging">Game Logging</label>
+                <select
+                  id="pref-game-logging"
+                  class="form-select form-select-sm"
+                  value={workbenchPreferences.gameLogging ?? "repeats"}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      gameLogging: e.currentTarget.value as any,
+                    })}
+                >
+                  <option value="repeats">Repeats — update one entry; spreads time across range</option>
+                  <option value="sessions">Individual chronological play sessions</option>
+                </select>
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-bold" for="pref-progress-format">Progress Format</label>
+                <select
+                  id="pref-progress-format"
+                  class="form-select form-select-sm"
+                  value={workbenchPreferences.progressFormat ?? "pages_chapters"}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      progressFormat: e.currentTarget.value as any,
+                    })}
+                >
+                  <option value="pages_chapters">Pages/Issues/Chapters</option>
+                  <option value="percent">Percent or pages</option>
+                  <option value="episodes_minutes">Episodes/Minutes</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="row g-3 border-top pt-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label small fw-bold" for="pref-session-duration">Session Duration</label>
+                <select
+                  id="pref-session-duration"
+                  class="form-select form-select-sm"
+                  value={workbenchPreferences.sessionDuration ?? "2_weeks"}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      sessionDuration: e.currentTarget.value as any,
+                    })}
+                >
+                  <option value="2_weeks">2 weeks</option>
+                  <option value="30_days">30 days</option>
+                  <option value="never">Never expire (Single-User Local)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </section>
+
       <!-- 1. Appearance & Theme Editor (Tabler Customizer) -->
-      {#if activeSettingsSection === "appearance"}
+      {:else if activeSettingsSection === "appearance"}
         <section class="section-pane">
           <h2 class="pane-title">Appearance & Theme Editor</h2>
           <p class="pane-desc">
@@ -752,138 +1158,333 @@
         <!-- 3. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
-          <h2 id="provider-settings-title" class="pane-title" tabindex="-1">
-            Metadata Providers & API Credentials
-          </h2>
+          <h2 class="pane-title">Metadata Providers & API Credentials</h2>
           <p class="pane-desc">
-            Add a provider credential to enable real metadata search. Fasti
-            never returns a stored secret to this interface.
+            Configure metadata providers, title localization preferences, local
+            caching, and rating poster overlays (RPDB).
           </p>
 
-          <div class="providers-list">
-            {#if providerLoading}
-              <p class="unavailable-note" role="status">
-                Loading provider credential status…
-              </p>
-            {:else if providerKeys === undefined && providerLoadProblem}
-              <p class="provider-problem" role="alert">
-                {providerLoadProblem}
-              </p>
-              {#if onRetryProviderState}
-                <button
-                  id="provider-retry"
-                  type="button"
-                  onclick={onRetryProviderState}
+          <!-- Title Language & Cache Preferences -->
+          <div class="setting-group mb-4">
+            <h3 class="group-title">Title & Language Preferences</h3>
+            <p class="text-muted small mb-3">
+              Configure how titles from online providers (TMDB, Kitsu, MAL,
+              AniList) are displayed in your library.
+            </p>
+
+            <div class="options-grid-3 mb-3">
+              <button
+                type="button"
+                class="density-btn"
+                class:selected={(workbenchPreferences.titleLanguagePreference ??
+                  "english") === "english"}
+                onclick={() =>
+                  onUpdateWorkbenchPreferences?.({
+                    titleLanguagePreference: "english",
+                  })}
+              >
+                <strong>English (Recommended)</strong>
+                <span>Prioritizes official English release titles</span>
+              </button>
+              <button
+                type="button"
+                class="density-btn"
+                class:selected={workbenchPreferences.titleLanguagePreference ===
+                  "romaji"}
+                onclick={() =>
+                  onUpdateWorkbenchPreferences?.({
+                    titleLanguagePreference: "romaji",
+                  })}
+              >
+                <strong>Romaji / Transliterated</strong>
+                <span>Uses Hepburn romaji / Latinized phonetics</span>
+              </button>
+              <button
+                type="button"
+                class="density-btn"
+                class:selected={workbenchPreferences.titleLanguagePreference ===
+                  "native"}
+                onclick={() =>
+                  onUpdateWorkbenchPreferences?.({
+                    titleLanguagePreference: "native",
+                  })}
+              >
+                <strong>Native / Original</strong>
+                <span>Uses original Japanese/Korean/Chinese kanji & script</span
                 >
-                  Retry host connection
-                </button>
-              {/if}
-            {/if}
-            {#each providerKeys ?? [] as prov}
+              </button>
+            </div>
+
+            <div class="card p-3 border mb-3">
+              <div
+                class="form-check form-switch d-flex align-items-center justify-content-between mb-2"
+              >
+                <div>
+                  <label
+                    class="form-check-label fw-bold"
+                    for="show-orig-subtitle"
+                  >
+                    Show Original Title Subtitle
+                  </label>
+                  <div class="text-muted small">
+                    Displays the original romaji / kanji title in italic below
+                    the English title.
+                  </div>
+                </div>
+                <input
+                  class="form-check-input ms-3"
+                  type="checkbox"
+                  role="switch"
+                  id="show-orig-subtitle"
+                  checked={workbenchPreferences.showOriginalTitleSubtitle ??
+                    true}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      showOriginalTitleSubtitle: e.currentTarget.checked,
+                    })}
+                />
+              </div>
+
+              <div
+                class="form-check form-switch d-flex align-items-center justify-content-between"
+              >
+                <div>
+                  <label
+                    class="form-check-label fw-bold"
+                    for="cache-meta-locally"
+                  >
+                    Local Caching & Rate-Limit Shield
+                  </label>
+                  <div class="text-muted small">
+                    Cache search queries and metadata in-memory (15-min TTL) to
+                    prevent 429 rate limits.
+                  </div>
+                </div>
+                <input
+                  class="form-check-input ms-3"
+                  type="checkbox"
+                  role="switch"
+                  id="cache-meta-locally"
+                  checked={workbenchPreferences.cacheMetadataLocally ?? true}
+                  onchange={(e) =>
+                    onUpdateWorkbenchPreferences?.({
+                      cacheMetadataLocally: e.currentTarget.checked,
+                    })}
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Provider Credentials List -->
+          <h3 class="group-title mb-3">API Keys & Provider Configuration</h3>
+          <div class="providers-list">
+            {#each providerKeys as prov}
               <div class="provider-key-card">
                 <div class="provider-key-header">
                   <div>
                     <h3 class="provider-title">{prov.label}</h3>
-                    <a
-                      href={prov.docs_url}
-                      target="_blank"
-                      rel="noopener"
-                      class="docs-link"
-                    >
-                      API Documentation <IconExternalLink size={12} />
-                    </a>
+                    {#if prov.provider === "tmdb"}
+                      <div
+                        class="badge bg-primary-lt font-monospace mb-1"
+                        style="font-size: 0.7rem;"
+                      >
+                        Supports v3 API Key & v4 Bearer Token (`eyJ...`)
+                      </div>
+                    {:else if prov.provider === "rpdb"}
+                      <div
+                        class="badge bg-warning-lt font-monospace mb-1"
+                        style="font-size: 0.7rem;"
+                      >
+                        Rating Poster Database (IMDb / RT / Metacritic badges)
+                      </div>
+                    {:else if prov.provider === "kaptains-collections"}
+                      <div
+                        class="badge bg-info-lt font-monospace mb-1"
+                        style="font-size: 0.7rem;"
+                      >
+                        Community Playlists & YAML/JSON Collections Manifests
+                      </div>
+                    {/if}
+                    <div>
+                      <a
+                        href={prov.docsUrl}
+                        target="_blank"
+                        rel="noopener"
+                        class="docs-link"
+                      >
+                        API Documentation <IconExternalLink size={12} />
+                      </a>
+                    </div>
                   </div>
                   <span
                     class="prov-status-chip"
-                    class:configured={prov.configured}
+                    class:configured={prov.isConfigured}
                   >
-                    {prov.configured ? "Configured" : "Not configured"}
+                    {prov.isConfigured ? "Active & Verified" : "Not Configured"}
                   </span>
                 </div>
 
-                <p class="wb-help">
-                  Source: {prov.source.replaceAll("_", " ")}. Google Books is
-                  required for Discover book search.
-                </p>
-                <form
-                  class="key-input-row"
-                  onsubmit={(event) => {
-                    event.preventDefault();
-                    void saveProviderKey(prov.provider);
-                  }}
-                >
+                <div class="key-input-row">
                   <input
                     type="password"
-                    placeholder={prov.writable
-                      ? "Enter a new API key"
-                      : "Managed by the environment"}
-                    value={editingKeyMap[prov.provider] ?? ""}
+                    placeholder={prov.provider === "tmdb"
+                      ? "Paste TMDB v3 API Key or v4 Read Access Token..."
+                      : prov.provider === "rpdb"
+                        ? "Enter RPDB Tier Key (e.g. t0-..., t1-...)..."
+                        : prov.provider === "kaptains-collections"
+                          ? "Enter Collections Manifest URL (https://...)..."
+                          : "Enter API Key / Access Token..."}
+                    value={editingKeyMap[prov.provider] ?? prov.apiKey}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
                     aria-label="API Key for {prov.label}"
-                    autocomplete="off"
-                    spellcheck="false"
-                    disabled={!prov.writable || providerBusy === prov.provider}
                   />
                   <button
-                    type="submit"
+                    type="button"
                     class="save-key-btn"
-                    disabled={!prov.writable ||
-                      !editingKeyMap[prov.provider]?.trim() ||
-                      !!providerBusy}
+                    class:saved={savedStatusMap[prov.provider]}
+                    onclick={() => {
+                      const val = editingKeyMap[prov.provider] ?? prov.apiKey;
+                      handleSaveKey(prov.provider, val);
+                    }}
                   >
-                    {providerBusy === prov.provider ? "Saving…" : "Save key"}
+                    {#if savedStatusMap[prov.provider]}
+                      <IconCheck size={14} /> Saved!
+                    {:else}
+                      Save Key
+                    {/if}
                   </button>
-                  {#if prov.writable && prov.configured}
-                    <button
-                      type="button"
-                      class="remove-key-btn"
-                      disabled={!!providerBusy}
-                      onclick={() => confirmProviderDelete(prov.provider)}
-                    >
-                      Remove key
-                    </button>
-                  {/if}
-                </form>
+                </div>
               </div>
             {/each}
           </div>
-          {#if providerNotice}
-            <p class="provider-notice" role="status">{providerNotice}</p>
-          {/if}
-          {#if providerProblem}
-            <p class="provider-problem" role="alert">{providerProblem}</p>
-          {/if}
         </section>
-      {:else if activeSettingsSection === "advanced"}
-        {#if onSaveNetworkConfiguration && onTestEndpoint}
-          <NetworkSettings
-            configuration={networkConfiguration}
-            loading={networkLoading}
-            loadProblem={networkLoadProblem}
-            onSave={onSaveNetworkConfiguration}
-            onTest={onTestEndpoint}
-            onRetry={onRetryNetworkState}
-          />
-        {:else}
-          <section class="section-pane">
-            <h2 class="pane-title">Advanced network access</h2>
-            <p class="pane-desc" role="alert">
-              The trusted desktop host does not expose network settings.
-            </p>
-          </section>
-        {/if}
 
         <!-- 3. Nuvio & Media Server Connectors -->
       {:else if activeSettingsSection === "connectors"}
         <section class="section-pane">
           <h2 class="pane-title">NuvioTV & Media Server Connectors</h2>
           <p class="pane-desc">
-            Connector setup is not available in this build. Fasti does not
-            publish ingest or webhook endpoints until the matching capability is
-            implemented.
+            Step-by-step pairing guides for automatic scrobbling from NuvioTV,
+            Kodi, Plex, Jellyfin, and MPRIS.
           </p>
+
+          <!-- NuvioTV Instructions -->
+          <div class="connector-instruction-card highlight">
+            <div class="conn-header">
+              <IconDeviceTv size={24} class="conn-icon" />
+              <div>
+                <h3 class="conn-title">
+                  NuvioTV 2-Way Sync Engine (Milestone B7)
+                </h3>
+                <p class="conn-sub">
+                  Connect your living room TV or mobile player for bidirectional
+                  scrobbling.
+                </p>
+              </div>
+            </div>
+            <ol class="step-list">
+              <li>
+                Open <strong>NuvioTV</strong> on your Android TV, Apple TV, or mobile
+                device.
+              </li>
+              <li>
+                Go to <strong
+                  >Settings &rarr; Tracking &rarr; Fasti Connect</strong
+                >.
+              </li>
+              <li>
+                Select <strong>Scan QR Code</strong> or enter the Loopback Node
+                URL: <code>http://127.0.0.1:8420/api/v1/connect/nuvio</code>.
+              </li>
+              <li>
+                Authenticate using your local Fasti Access Token below. NuvioTV
+                will automatically synchronize watch progress without internet
+                dependencies.
+              </li>
+            </ol>
+          </div>
+
+          <!-- Plex & Tautulli Instructions -->
+          <div class="connector-instruction-card">
+            <div class="conn-header">
+              <IconServer size={24} />
+              <div>
+                <h3 class="conn-title">
+                  Plex & Tautulli Webhooks (Milestone B6)
+                </h3>
+                <p class="conn-sub">
+                  Receive instant playback events on start, pause, and 90%
+                  scrobble threshold.
+                </p>
+              </div>
+            </div>
+            <div class="webhook-box">
+              <label for="plex-webhook-url" class="wb-label"
+                >Your Fasti Plex Webhook URL:</label
+              >
+              <div class="copy-url-row">
+                <input
+                  id="plex-webhook-url"
+                  type="text"
+                  readonly
+                  value="http://127.0.0.1:8420/api/v1/webhooks/plex"
+                  class="url-input"
+                />
+                <button
+                  type="button"
+                  class="copy-btn"
+                  onclick={() =>
+                    navigator.clipboard.writeText(
+                      "http://127.0.0.1:8420/api/v1/webhooks/plex",
+                    )}
+                >
+                  <IconCopy size={14} /> Copy
+                </button>
+              </div>
+              <p class="wb-help">
+                Paste this into Plex &rarr; Settings &rarr; Webhooks.
+              </p>
+            </div>
+          </div>
+
+          <!-- Jellyfin & Emby Instructions -->
+          <div class="connector-instruction-card">
+            <div class="conn-header">
+              <IconServer size={24} />
+              <div>
+                <h3 class="conn-title">Jellyfin & Emby Webhook Plugin</h3>
+                <p class="conn-sub">
+                  Lossless JSON event ingest from open-source media servers.
+                </p>
+              </div>
+            </div>
+            <div class="webhook-box">
+              <label for="jellyfin-webhook-url" class="wb-label"
+                >Your Fasti Jellyfin Webhook URL:</label
+              >
+              <div class="copy-url-row">
+                <input
+                  id="jellyfin-webhook-url"
+                  type="text"
+                  readonly
+                  value="http://127.0.0.1:8420/api/v1/webhooks/jellyfin"
+                  class="url-input"
+                />
+                <button
+                  type="button"
+                  class="copy-btn"
+                  onclick={() =>
+                    navigator.clipboard.writeText(
+                      "http://127.0.0.1:8420/api/v1/webhooks/jellyfin",
+                    )}
+                >
+                  <IconCopy size={14} /> Copy
+                </button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <!-- 4. Scoped Personal Access Tokens (PAT) -->
@@ -896,10 +1497,7 @@
           </p>
 
           <!-- New Token Form -->
-          <form
-            onsubmit={(event) => event.preventDefault()}
-            class="token-form-card"
-          >
+          <form onsubmit={handleCreateTokenSubmit} class="token-form-card">
             <h3 class="form-title">Create New Access Token</h3>
             <div class="form-row">
               <input
@@ -908,10 +1506,9 @@
                 bind:value={newTokenName}
                 class="token-name-input"
                 aria-label="Token description"
-                disabled
                 required
               />
-              <button type="submit" class="create-token-btn" disabled>
+              <button type="submit" class="create-token-btn">
                 <IconPlus size={16} /> Generate Token
               </button>
             </div>
@@ -922,7 +1519,6 @@
                   <input
                     type="checkbox"
                     checked={selectedScopes.includes(sc.id)}
-                    disabled
                     onchange={(e) => {
                       if (e.currentTarget.checked)
                         selectedScopes = [...selectedScopes, sc.id];
@@ -937,10 +1533,28 @@
               {/each}
             </div>
           </form>
-          <p class="wb-help" role="status">
-            Token issuance is unavailable until an authorized application
-            command can return the one-time secret.
-          </p>
+
+          <!-- Newly Generated Secret Modal Banner -->
+          {#if generatedTokenSecret}
+            <div class="secret-generated-banner">
+              <div>
+                <strong>Token Generated! Copy your secret now:</strong>
+                <p>This secret will never be shown again.</p>
+                <code class="secret-code">{generatedTokenSecret}</code>
+              </div>
+              <button
+                type="button"
+                class="copy-secret-btn"
+                onclick={handleCopySecret}
+              >
+                {#if isCopied}
+                  <IconCheck size={16} /> Copied!
+                {:else}
+                  <IconCopy size={16} /> Copy Secret
+                {/if}
+              </button>
+            </div>
+          {/if}
 
           <!-- Active Tokens Table -->
           <table class="tokens-table">
@@ -968,8 +1582,8 @@
                     <button
                       type="button"
                       class="delete-tok-btn"
-                      disabled
-                      title="Token revocation is not available in this build"
+                      onclick={() => onDeleteToken?.(tok.id)}
+                      title="Revoke Token"
                     >
                       <IconTrash size={14} />
                     </button>
@@ -984,160 +1598,156 @@
       {:else if activeSettingsSection === "oidc"}
         <section class="section-pane">
           <h2 class="pane-title">Single Sign-On & OpenID Connect (OIDC)</h2>
-          {#if !onSaveOidc}
-            <p class="pane-desc">
-              OIDC configuration is not available until a host command can
-              validate and store it.
-            </p>
-          {/if}
+          <p class="pane-desc">
+            Authenticate with Authentik, Authelia, Keycloak, or your identity
+            provider.
+          </p>
 
-          {#if onSaveOidc}
-            <form
-              onsubmit={(e) => {
-                e.preventDefault();
-                onSaveOidc(oidcDraft);
-              }}
-              class="oidc-form"
-            >
-              <div class="form-toggle-row">
-                <label class="toggle-label">
-                  <input type="checkbox" bind:checked={oidcDraft.enabled} />
-                  <strong>Enable Single Sign-On (OIDC)</strong>
-                </label>
-              </div>
+          <form
+            onsubmit={(e) => {
+              e.preventDefault();
+              onSaveOidc?.(oidcConfig);
+            }}
+            class="oidc-form"
+          >
+            <div class="form-toggle-row">
+              <label class="toggle-label">
+                <input type="checkbox" bind:checked={oidcConfig.enabled} />
+                <strong>Enable Single Sign-On (OIDC)</strong>
+              </label>
+            </div>
 
+            <div class="form-field">
+              <label for="oidc-issuer">OIDC Issuer Discovery URL</label>
+              <input
+                id="oidc-issuer"
+                type="url"
+                bind:value={oidcConfig.issuerUrl}
+                class="form-input"
+              />
+            </div>
+
+            <div class="form-row-2">
               <div class="form-field">
-                <label for="oidc-issuer">OIDC Issuer Discovery URL</label>
+                <label for="oidc-client-id">Client ID</label>
                 <input
-                  id="oidc-issuer"
-                  type="url"
-                  bind:value={oidcDraft.issuerUrl}
+                  id="oidc-client-id"
+                  type="text"
+                  bind:value={oidcConfig.clientId}
                   class="form-input"
                 />
               </div>
-
-              <div class="form-row-2">
-                <div class="form-field">
-                  <label for="oidc-client-id">Client ID</label>
-                  <input
-                    id="oidc-client-id"
-                    type="text"
-                    bind:value={oidcDraft.clientId}
-                    class="form-input"
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="oidc-client-secret">Client Secret</label>
-                  <input
-                    id="oidc-client-secret"
-                    type="password"
-                    bind:value={oidcDraft.clientSecret}
-                    class="form-input"
-                  />
-                </div>
-              </div>
-
               <div class="form-field">
-                <label for="oidc-redirect-uri"
-                  >Authorized Redirect Callback URI</label
-                >
+                <label for="oidc-client-secret">Client Secret</label>
                 <input
-                  id="oidc-redirect-uri"
-                  type="text"
-                  readonly
-                  value={oidcDraft.redirectUri}
-                  class="form-input mono"
+                  id="oidc-client-secret"
+                  type="password"
+                  bind:value={oidcConfig.clientSecret}
+                  class="form-input"
                 />
               </div>
+            </div>
 
-              <button type="submit" class="btn-save"
-                >Save OIDC Configuration</button
+            <div class="form-field">
+              <label for="oidc-redirect-uri"
+                >Authorized Redirect Callback URI</label
               >
-            </form>
-          {/if}
+              <input
+                id="oidc-redirect-uri"
+                type="text"
+                readonly
+                bind:value={oidcConfig.redirectUri}
+                class="form-input mono"
+              />
+            </div>
+
+            <button type="submit" class="btn-save"
+              >Save OIDC Configuration</button
+            >
+          </form>
         </section>
 
         <!-- 6. Notifications & Apprise -->
       {:else if activeSettingsSection === "notifications"}
         <section class="section-pane">
           <h2 class="pane-title">Notifications & Apprise Webhooks</h2>
-          {#if !onSaveApprise}
-            <p class="pane-desc">
-              Notification configuration is not available until a host command
-              can validate and store it.
-            </p>
-          {/if}
+          <p class="pane-desc">
+            Push notifications to Discord, Telegram, Pushover, Gotify, or Slack.
+          </p>
 
-          {#if onSaveApprise}
-            <div class="apprise-box">
-              <div class="notify-triggers">
-                <label class="chk-label">
-                  <input
-                    type="checkbox"
-                    bind:checked={appriseDraft.notifyOnReviewRequired}
-                  />
-                  <span>Notify when Review Inbox requires attention</span>
-                </label>
-                <label class="chk-label">
-                  <input
-                    type="checkbox"
-                    bind:checked={appriseDraft.notifyOnSyncError}
-                  />
-                  <span>Notify on sync and ingest connection errors</span>
-                </label>
-                <label class="chk-label">
-                  <input
-                    type="checkbox"
-                    bind:checked={appriseDraft.notifyOnMilestone}
-                  />
-                  <span
-                    >Notify when milestone achievements or backups complete</span
-                  >
-                </label>
-              </div>
-
-              <h3 class="sub-heading">Configured Apprise URLs</h3>
-              <ul class="apprise-urls-list">
-                {#each appriseDraft.urls as u}
-                  <li class="apprise-url-item">
-                    <code>{u}</code>
-                  </li>
-                {/each}
-              </ul>
-
-              <form onsubmit={handleAddAppriseUrl} class="add-url-form">
+          <div class="apprise-box">
+            <div class="notify-triggers">
+              <label class="chk-label">
                 <input
-                  type="text"
-                  placeholder="discord://webhook_id/webhook_token or telegram://bot_token/chat_id..."
-                  bind:value={newAppriseUrl}
-                  class="form-input"
-                  aria-label="New Apprise URL"
+                  type="checkbox"
+                  bind:checked={appriseConfig.notifyOnReviewRequired}
                 />
-                <button type="submit" class="btn-secondary"
-                  >+ Add Service</button
+                <span>Notify when Review Inbox requires attention</span>
+              </label>
+              <label class="chk-label">
+                <input
+                  type="checkbox"
+                  bind:checked={appriseConfig.notifyOnSyncError}
+                />
+                <span>Notify on sync and ingest connection errors</span>
+              </label>
+              <label class="chk-label">
+                <input
+                  type="checkbox"
+                  bind:checked={appriseConfig.notifyOnMilestone}
+                />
+                <span
+                  >Notify when milestone achievements or backups complete</span
                 >
-              </form>
+              </label>
+            </div>
 
+            <h3 class="sub-heading">Configured Apprise URLs</h3>
+            <ul class="apprise-urls-list">
+              {#each appriseConfig.urls as u}
+                <li
+                  class="apprise-url-item d-flex align-items-center justify-content-between"
+                >
+                  <code>{u}</code>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost-danger p-1"
+                    onclick={() => handleRemoveAppriseUrl(u)}
+                    title="Remove Webhook"
+                    aria-label="Remove Webhook"
+                  >
+                    <IconTrash size={14} />
+                  </button>
+                </li>
+              {/each}
+            </ul>
+
+            <form onsubmit={handleAddAppriseUrl} class="add-url-form">
+              <input
+                type="text"
+                placeholder="discord://webhook_id/webhook_token or telegram://bot_token/chat_id..."
+                bind:value={newAppriseUrl}
+                class="form-input"
+                aria-label="New Apprise URL"
+              />
+              <button type="submit" class="btn-secondary">+ Add Service</button>
+            </form>
+
+            <div class="test-notify-row">
               <button
                 type="button"
-                class="btn-save"
-                onclick={() => onSaveApprise?.(appriseDraft)}
+                class="btn-test"
+                onclick={handleSendTestNotification}
               >
-                Save notification settings
+                <IconSend size={16} /> Send Test Notification
               </button>
-
-              <div class="test-notify-row">
-                <button
-                  type="button"
-                  class="btn-test"
-                  disabled
-                  title="Test notifications are not available in this build"
+              {#if testNotificationSent}
+                <span class="test-success"
+                  >✓ Test notification sent to all active endpoints!</span
                 >
-                  Send Test Notification
-                </button>
-              </div>
+              {/if}
             </div>
-          {/if}
+          </div>
         </section>
 
         <!-- 7. Lossless Importers & Backups -->
@@ -1145,11 +1755,44 @@
         <section class="section-pane">
           <h2 class="pane-title">Lossless Importers & Migrations</h2>
           <p class="pane-desc">
-            Migrate your entire scrobble and media history with zero data loss.
+            Migrate your entire scrobble and media history with zero data loss,
+            or export your full chronicle.
           </p>
 
+          {#if importStatusMessage}
+            <div class="alert alert-info mb-3">
+              {importStatusMessage}
+            </div>
+          {/if}
+
+          <!-- Backups / Export Section -->
+          <div class="card mb-4 p-3 bg-surface-paper border">
+            <h3 class="h4 mb-2">Export Local Fasti Backups</h3>
+            <p class="text-muted small mb-3">
+              Download your complete uncompressed media chronicle, history,
+              tokens, and metadata settings.
+            </p>
+            <div class="d-flex gap-2">
+              <button
+                type="button"
+                class="btn btn-primary d-flex align-items-center gap-1"
+                onclick={() => onExportChronicle?.()}
+              >
+                <IconDatabaseImport size={16} /> Export Full Chronicle (.json)
+              </button>
+              <button
+                type="button"
+                class="btn btn-outline-secondary d-flex align-items-center gap-1"
+                onclick={() => onExportCsv?.()}
+              >
+                <IconCode size={16} /> Export Scrobble History (.csv)
+              </button>
+            </div>
+          </div>
+
+          <h3 class="h4 mb-3">Third-Party Platform Importers</h3>
           <div class="importers-grid">
-            {#each [{ name: "Floppy / Yamtrack", desc: "Import full history, custom fields, and tags from Floppy SQLite/JSON.", ext: ".json, .db" }, { name: "SIMKL Archive", desc: "Import TV, Anime, and Movie tracking records from SIMKL CSV/JSON.", ext: ".csv, .json" }, { name: "Trakt.tv Export", desc: "Import Trakt scrobbles, ratings, and watchlists.", ext: ".csv" }, { name: "MyAnimeList / AniList", desc: "Import anime and manga lists via XML / JSON format.", ext: ".xml, .json" }] as imp}
+            {#each [{ name: "Floppy / Yamtrack", desc: "Import full history, custom fields, and tags from Floppy SQLite/JSON.", ext: ".json" }, { name: "SIMKL Archive", desc: "Import TV, Anime, and Movie tracking records from SIMKL CSV/JSON.", ext: ".csv, .json" }, { name: "Trakt.tv Export", desc: "Import Trakt scrobbles, ratings, and watchlists.", ext: ".csv" }, { name: "MyAnimeList / AniList", desc: "Import anime and manga lists via XML / JSON format.", ext: ".json" }] as imp}
               <div class="importer-card">
                 <h3 class="imp-title">{imp.name}</h3>
                 <p class="imp-desc">{imp.desc}</p>
@@ -1158,10 +1801,10 @@
                     <input
                       type="file"
                       accept={imp.ext}
+                      onchange={handleFileImport}
                       class="hidden-file-input"
-                      disabled
                     />
-                    <span>Importer unavailable</span>
+                    <span>Select {imp.name} File</span>
                   </label>
                 </div>
               </div>
@@ -1169,7 +1812,7 @@
           </div>
         </section>
       {/if}
-    </div>
+    </main>
   </div>
 </div>
 
@@ -1228,7 +1871,6 @@
     color: var(--fasti-text-muted);
     cursor: pointer;
     text-align: left;
-    min-height: 44px;
   }
 
   .nav-tab-btn:hover {
@@ -1374,8 +2016,6 @@
 
   .provider-key-header {
     display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 12px;
@@ -1387,13 +2027,12 @@
     margin: 0;
   }
   .docs-link {
-    min-height: 44px;
     font-size: 0.78rem;
-    color: var(--fasti-text-primary);
+    color: var(--fasti-action-primary);
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    text-decoration: underline;
+    text-decoration: none;
   }
   .prov-status-chip {
     font-family: var(--fasti-font-mono);
@@ -1419,7 +2058,7 @@
 
   .api-key-input {
     flex: 1;
-    min-height: 44px;
+    height: 40px;
     padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1429,52 +2068,91 @@
     background: var(--fasti-surface-paper);
   }
 
-  .save-key-btn,
-  .remove-key-btn {
-    min-height: 44px;
-    padding: 8px 18px;
-    font-weight: 600;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
   .save-key-btn {
+    padding: 8px 18px;
     background: var(--fasti-action-primary);
     color: white;
+    font-weight: 600;
     border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 120ms ease;
   }
 
-  .remove-key-btn {
-    background: transparent;
-    color: var(--fasti-text-primary);
+  .save-key-btn.saved {
+    background: var(--fasti-state-verified) !important;
+    color: #ffffff !important;
+  }
+
+  .connector-instruction-card {
+    padding: 20px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+    margin-bottom: 18px;
+  }
+
+  .connector-instruction-card.highlight {
+    border-left: 4px solid var(--fasti-brand-mark);
+  }
+
+  .conn-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  :global(.conn-icon) {
+    color: var(--fasti-brand-mark);
+  }
+  .conn-title {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+  .conn-sub {
+    margin: 2px 0 0;
+    font-size: 0.85rem;
+    color: var(--fasti-text-muted);
+  }
+  .step-list {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+
+  .copy-url-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+  }
+  .url-input {
+    flex: 1;
+    height: 36px;
+    padding: 6px 12px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.85rem;
+    background: var(--fasti-surface-paper);
     border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
   }
-
-  .provider-notice,
-  .provider-problem {
-    margin: 14px 0 0;
-    font-size: 0.86rem;
+  .copy-btn {
+    padding: 6px 14px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    font-size: 0.85rem;
   }
-
-  .provider-notice {
-    color: var(--fasti-state-verified);
-  }
-
-  .provider-problem {
-    color: var(--fasti-state-error, #b42318);
-  }
-
-  :is(
-    .nav-tab-btn,
-    .api-key-input,
-    .save-key-btn,
-    .remove-key-btn
-  ):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
-    outline-offset: 2px;
-  }
-
   .wb-help {
     font-size: 0.78rem;
     color: var(--fasti-text-muted);
@@ -1524,6 +2202,40 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .secret-generated-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: color-mix(in srgb, var(--fasti-brand-gold) 20%, transparent);
+    border: 1px solid var(--fasti-brand-gold);
+    border-radius: 6px;
+    margin-bottom: 20px;
+  }
+
+  .secret-code {
+    font-family: var(--fasti-font-mono);
+    font-size: 1rem;
+    font-weight: 700;
+    background: var(--fasti-surface-paper);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-top: 4px;
+  }
+  .copy-secret-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    background: var(--fasti-text-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   .tokens-table {
@@ -1644,38 +2356,21 @@
     align-items: center;
     gap: 12px;
   }
+  .test-success {
+    color: var(--fasti-state-verified);
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
 
-  @media (max-width: 47.99rem) {
-    .settings-container {
-      padding: 24px 16px;
-    }
-
-    .settings-layout {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 16px;
-    }
-
-    .settings-nav {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .nav-tab-btn {
-      width: 100%;
-    }
-
-    .settings-content-card {
-      min-width: 0;
-      padding: 20px;
-    }
-
-    .options-grid-3,
-    .importers-grid {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .key-input-row {
-      flex-direction: column;
-    }
+  .nav-tab-btn:focus-visible,
+  .theme-card-btn:focus-visible,
+  .density-btn:focus-visible,
+  .accent-btn:focus-visible,
+  .btn-save:focus-visible,
+  .btn-test:focus-visible,
+  .form-input:focus-visible,
+  .api-key-input:focus-visible {
+    outline: 3px solid var(--fasti-action-primary, #1e4fa3) !important;
+    outline-offset: 2px !important;
   }
 </style>

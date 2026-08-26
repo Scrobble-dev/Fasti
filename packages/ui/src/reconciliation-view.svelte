@@ -89,6 +89,7 @@
                     src={item.candidatePosterUrl}
                     alt=""
                     class="candidate-thumb"
+                    referrerpolicy="no-referrer"
                   />
                 {/if}
                 <div>
@@ -131,11 +132,7 @@
             <button
               type="button"
               class="action-btn accept"
-              disabled={!onAcceptCase}
               onclick={() => onAcceptCase?.(item.id)}
-              title={!onAcceptCase
-                ? "Accept is unavailable until a reconciliation command is implemented"
-                : undefined}
             >
               <IconCheck size={16} stroke={2.5} /> Accept Identifier Only
             </button>
@@ -143,11 +140,7 @@
             <button
               type="button"
               class="action-btn not-same"
-              disabled={!onRejectCase}
               onclick={() => onRejectCase?.(item.id)}
-              title={!onRejectCase
-                ? "Reject is unavailable until a reconciliation command is implemented"
-                : undefined}
             >
               <IconX size={16} stroke={2.5} /> Not the Same (not_same_as)
             </button>
@@ -155,11 +148,7 @@
             <button
               type="button"
               class="action-btn defer"
-              disabled={!onDeferCase}
               onclick={() => onDeferCase?.(item.id)}
-              title={!onDeferCase
-                ? "Defer is unavailable until a reconciliation command is implemented"
-                : undefined}
             >
               <IconClock size={16} /> Resolve Later
             </button>

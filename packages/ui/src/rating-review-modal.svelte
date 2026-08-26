@@ -16,21 +16,12 @@
   let { record, onClose, onSaveReview }: Props = $props();
 
   let ratingVal = $state(8);
-  let dialog: HTMLDialogElement | undefined;
   let reviewText = $state("");
   let hoverRating = $state<number | null>(null);
-  let syncedRecordId = $state("");
 
   $effect(() => {
-    if (record.id !== syncedRecordId) {
-      syncedRecordId = record.id;
-      ratingVal = record.userRating ?? 8;
-      reviewText = record.userNotes ?? "";
-    }
-  });
-
-  $effect(() => {
-    if (!dialog?.open) dialog?.showModal();
+    ratingVal = record.userRating ?? 8;
+    reviewText = record.userNotes ?? "";
   });
 
   function handleSave(): void {
@@ -39,14 +30,11 @@
   }
 </script>
 
-<dialog
-  bind:this={dialog}
+<div
   class="modal-backdrop"
+  role="dialog"
+  aria-modal="true"
   aria-labelledby="review-title"
-  oncancel={onClose}
-  onclick={(event) => {
-    if (event.target === event.currentTarget) onClose();
-  }}
 >
   <div class="modal-card">
     <div class="modal-header">
@@ -77,8 +65,6 @@
           {#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as star}
             <button
               type="button"
-              role="radio"
-              aria-checked={star === ratingVal}
               class="star-btn"
               class:filled={star <= (hoverRating ?? ratingVal)}
               onmouseenter={() => (hoverRating = star)}
@@ -113,31 +99,17 @@
       </button>
     </div>
   </div>
-</dialog>
+</div>
 
 <style>
   .modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    width: 100%;
-    max-width: none;
-    height: 100%;
-    max-height: none;
-    margin: 0;
-    border: 0;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.5);
     display: grid;
     place-items: center;
     padding: 16px;
-  }
-
-  .modal-backdrop::backdrop {
-    background: rgba(0, 0, 0, 0.5);
-  }
-
-  .modal-backdrop:not([open]) {
-    display: none;
   }
 
   .modal-card {
@@ -236,6 +208,7 @@
     font-family: var(--fasti-font-body);
     font-size: 0.92rem;
     background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
     box-sizing: border-box;
   }
 
@@ -256,6 +229,7 @@
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
     font-weight: 600;
+    color: var(--fasti-text-primary);
     cursor: pointer;
   }
 

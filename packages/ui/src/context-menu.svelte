@@ -7,6 +7,7 @@
     icon?: any;
     danger?: boolean;
     divider?: boolean;
+    header?: string;
     action: () => void;
   }
 
@@ -20,57 +21,26 @@
   let { x, y, items, onClose }: Props = $props();
 
   let menuRef: HTMLDivElement | null = $state(null);
-  let position = $state({ x: 0, y: 0 });
 
-  function menuButtons(): HTMLButtonElement[] {
-    return menuRef
-      ? Array.from(
-          menuRef.querySelectorAll<HTMLButtonElement>("[role=menuitem]"),
-        )
-      : [];
-  }
+  const adjustedX = $derived.by(() => {
+    if (typeof window !== "undefined") {
+      const maxX = Math.max(10, window.innerWidth - 250);
+      return Math.max(10, Math.min(x, maxX));
+    }
+    return x;
+  });
+
+  const adjustedY = $derived.by(() => {
+    if (typeof window !== "undefined") {
+      const maxY = Math.max(10, window.innerHeight - 420);
+      return Math.max(10, Math.min(y, maxY));
+    }
+    return y;
+  });
 
   function handleKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       onClose();
-      return;
-    }
-
-    const buttons = menuButtons();
-    if (buttons.length === 0) return;
-    const current = buttons.indexOf(
-      document.activeElement as HTMLButtonElement,
-    );
-    let next = current;
-    if (e.key === "ArrowDown") next = (current + 1) % buttons.length;
-    else if (e.key === "ArrowUp")
-      next = (current - 1 + buttons.length) % buttons.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = buttons.length - 1;
-    else return;
-
-    e.preventDefault();
-    buttons[next]?.focus();
-  }
-
-  function clampToViewport(): void {
-    if (!menuRef) return;
-    const rect = menuRef.getBoundingClientRect();
-    const inset = 8;
-    position = {
-      x: Math.max(inset, Math.min(x, window.innerWidth - rect.width - inset)),
-      y: Math.max(inset, Math.min(y, window.innerHeight - rect.height - inset)),
-    };
-  }
-
-  function handleResize(): void {
-    clampToViewport();
-  }
-
-  function focusFirstItem(): void {
-    const first = menuButtons()[0];
-    if (first) {
-      first.focus();
     }
   }
 
@@ -81,24 +51,11 @@
   }
 
   onMount(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    clampToViewport();
-    focusFirstItem();
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("mousedown", handleWindowClick);
-    window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("mousedown", handleWindowClick);
-      window.removeEventListener("resize", handleResize);
-      queueMicrotask(() => {
-        if (
-          document.activeElement === document.body &&
-          previouslyFocused?.isConnected
-        ) {
-          previouslyFocused.focus();
-        }
-      });
     };
   });
 </script>
@@ -106,17 +63,24 @@
 <div
   bind:this={menuRef}
   class="dropdown-menu show shadow-lg border fasti-context-menu"
-  style="position: fixed; top: {position.y}px; left: {position.x}px; z-index: 1050; display: block;"
+  style="position: fixed; top: {adjustedY}px; left: {adjustedX}px; z-index: 1050; display: block;"
   role="menu"
   tabindex="-1"
 >
   {#each items as item}
-    {#if item.divider}
+    {#if item.header}
+      <h6
+        class="dropdown-header text-uppercase text-muted font-monospace px-3 pt-2 pb-1"
+        style="font-size: 0.65rem; letter-spacing: 0.06em;"
+      >
+        {item.header}
+      </h6>
+    {:else if item.divider}
       <div class="dropdown-divider" role="separator"></div>
     {:else}
       <button
         type="button"
-        class="dropdown-item d-flex align-items-center gap-2 py-2"
+        class="dropdown-item d-flex align-items-center gap-2 py-2 px-3"
         class:text-danger={item.danger}
         onclick={() => {
           item.action();
@@ -141,7 +105,23 @@
 <style>
   .fasti-context-menu {
     min-width: 210px;
+    background: var(--fasti-surface-paper) !important;
+    border-color: var(--fasti-border) !important;
+    color: var(--fasti-text-primary) !important;
     animation: fastiMenuFade 90ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dropdown-item {
+    color: var(--fasti-text-primary) !important;
+  }
+
+  .dropdown-item:hover {
+    background: var(--fasti-surface-archive) !important;
+    color: var(--fasti-action-primary) !important;
+  }
+
+  .dropdown-divider {
+    border-top-color: var(--fasti-border) !important;
   }
 
   @keyframes fastiMenuFade {
