@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MediaRecord, WatchStatus } from "./types.js";
+  import type { MediaRecord } from "./types.js";
   import {
     IconEye,
     IconEyeCheck,
@@ -32,12 +32,7 @@
   const isWatchlist = $derived(record.status === "plan_to_watch");
 </script>
 
-<div
-  class="fast-action-bar"
-  role="toolbar"
-  aria-label="Quick actions for {record.title}"
->
-  <!-- 1. Seen / Watched Fast Button -->
+<div class="fast-action-bar" role="toolbar" aria-label="Quick actions for {record.title}">
   <button
     type="button"
     class="fast-btn"
@@ -47,16 +42,16 @@
       onToggleWatched(record);
     }}
     title={isWatched ? "Marked as completed / seen" : "Mark as seen"}
-    aria-label="Toggle watched"
+    aria-label={isWatched ? "Remove watched state" : "Mark as watched"}
+    aria-pressed={isWatched}
   >
     {#if isWatched}
-      <IconEyeCheck size={16} stroke={2.5} class="icon-watched" />
+      <IconEyeCheck size={18} stroke={2.5} class="icon-watched" aria-hidden="true" />
     {:else}
-      <IconEye size={16} stroke={2} />
+      <IconEye size={18} stroke={2} aria-hidden="true" />
     {/if}
   </button>
 
-  <!-- 2. Watchlist / Bookmark Fast Button -->
   <button
     type="button"
     class="fast-btn"
@@ -66,16 +61,16 @@
       onToggleWatchlist(record);
     }}
     title={isWatchlist ? "In your watchlist" : "Add to watchlist"}
-    aria-label="Toggle watchlist"
+    aria-label={isWatchlist ? "Remove from watchlist" : "Add to watchlist"}
+    aria-pressed={isWatchlist}
   >
     {#if isWatchlist}
-      <IconBookmarkFilled size={16} class="icon-bookmark-active" />
+      <IconBookmarkFilled size={18} class="icon-bookmark-active" aria-hidden="true" />
     {:else}
-      <IconBookmark size={16} stroke={2} />
+      <IconBookmark size={18} stroke={2} aria-hidden="true" />
     {/if}
   </button>
 
-  <!-- 3. Add to Collection Fast Button -->
   <button
     type="button"
     class="fast-btn"
@@ -83,15 +78,12 @@
       e.stopPropagation();
       onOpenCollection(record);
     }}
-    title={record.collectionName
-      ? `In collection: ${record.collectionName}`
-      : "Add to collection / lists"}
+    title={record.collectionName ? `In collection: ${record.collectionName}` : "Add to collection / lists"}
     aria-label="Add to collection"
   >
-    <IconFolder size={16} stroke={2} />
+    <IconFolder size={18} stroke={2} aria-hidden="true" />
   </button>
 
-  <!-- 4. Review / Rating Fast Button -->
   <button
     type="button"
     class="fast-btn"
@@ -99,15 +91,12 @@
       e.stopPropagation();
       onOpenReview(record);
     }}
-    title={record.userRating
-      ? `Rated ${record.userRating}/10`
-      : "Add rating or review"}
+    title={record.userRating ? `Rated ${record.userRating}/10` : "Add rating or review"}
     aria-label="Add rating or review"
   >
-    <IconMessage size={16} stroke={2} />
+    <IconMessage size={18} stroke={2} aria-hidden="true" />
   </button>
 
-  <!-- 5. Context Menu Trigger -->
   <button
     type="button"
     class="fast-btn menu-dots"
@@ -115,10 +104,11 @@
       e.stopPropagation();
       onOpenContextMenu(record, e);
     }}
-    title="More actions..."
-    aria-label="More actions context menu"
+    title="More actions"
+    aria-label="More actions"
+    aria-haspopup="menu"
   >
-    <IconDotsVertical size={16} stroke={2} />
+    <IconDotsVertical size={18} stroke={2} aria-hidden="true" />
   </button>
 </div>
 
@@ -128,8 +118,7 @@
     align-items: center;
     justify-content: space-around;
     background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     border-radius: 4px;
     padding: 2px;
     gap: 2px;
@@ -138,8 +127,9 @@
 
   .fast-btn {
     flex: 1;
-    min-height: 28px;
-    height: 28px;
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
     display: grid;
     place-items: center;
     background: transparent;
@@ -147,22 +137,26 @@
     border-radius: 3px;
     color: var(--fasti-text-muted);
     cursor: pointer;
-    transition: all 100ms ease;
+    transition:
+      background-color 100ms ease,
+      color 100ms ease;
     padding: 2px;
   }
 
-  .fast-btn:hover {
+  .fast-btn:hover,
+  .fast-btn:focus-visible {
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
   }
 
+  .fast-btn:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
+  }
+
   .fast-btn.active {
     color: var(--fasti-action-primary);
-    background: color-mix(
-      in srgb,
-      var(--fasti-action-primary) 14%,
-      transparent
-    );
+    background: color-mix(in srgb, var(--fasti-action-primary) 14%, transparent);
   }
 
   :global(.icon-watched) {
@@ -171,5 +165,11 @@
 
   :global(.icon-bookmark-active) {
     color: var(--fasti-brand-mark);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fast-btn {
+      transition: none;
+    }
   }
 </style>
