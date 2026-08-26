@@ -1,27 +1,49 @@
 <script lang="ts">
-  import type { ReconciliationCase } from "./types.js";
+  import type { ReviewItem } from "./types.js";
   import {
-    IconGitPullRequest,
     IconCheck,
-    IconX,
     IconClock,
-    IconAlertTriangle,
     IconShieldCheck,
     IconArrowRight,
   } from "@tabler/icons-svelte";
 
+  // Known `fasti_domain::Grain` values (see `crates/fasti-domain/src/media.rs`).
+  // Used only to pick a grain when creating a new record for an item with no
+  // matching candidate — the review item itself doesn't carry its grain.
+  const GRAINS = [
+    "work",
+    "series",
+    "release",
+    "edition",
+    "season",
+    "segment",
+    "episode",
+    "film",
+    "recording",
+    "album_release",
+    "track",
+    "chapter",
+    "podcast_feed",
+    "podcast_episode",
+    "game_release",
+    "custom",
+  ] as const;
+
   interface Props {
-    cases: ReconciliationCase[];
-    onAcceptCase?: (caseId: string) => void;
-    onRejectCase?: (caseId: string) => void;
-    onDeferCase?: (caseId: string) => void;
+    items: ReviewItem[];
+    onResolveExisting?: (reviewItemId: string, recordId: string) => void;
+    onResolveNew?: (reviewItemId: string, grain: string) => void;
   }
 
-  let { cases, onAcceptCase, onRejectCase, onDeferCase }: Props = $props();
+  let { items, onResolveExisting, onResolveNew }: Props = $props();
 
-  const actionableCases = $derived(
-    cases.filter((c) => c.status !== "deferred"),
-  );
+  const openItems = $derived(items.filter((item) => item.status === "open"));
+
+  let newGrainByItem = $state<Record<string, string>>({});
+
+  function grainFor(itemId: string): string {
+    return newGrainByItem[itemId] ?? GRAINS[0];
+  }
 </script>
 
 <div class="reconciliation-container">
@@ -29,7 +51,7 @@
     <div>
       <h1 class="view-title">Review Inbox</h1>
       <p class="view-subtitle">
-        Review ambiguous matches, topology variances, and candidate crosswalks.
+        Resolve observations whose identity is still ambiguous.
       </p>
     </div>
 
@@ -41,128 +63,94 @@
     </div>
   </header>
 
-  {#if actionableCases.length === 0}
+  {#if openItems.length === 0}
     <div class="empty-inbox">
       <IconShieldCheck size={48} class="empty-icon" />
       <h2>All caught up!</h2>
-      <p>
-        No records currently require manual identity reconciliation or topology
-        review.
-      </p>
+      <p>No open reviews right now.</p>
     </div>
   {:else}
     <div class="cases-list">
-      {#each actionableCases as item (item.id)}
+      {#each openItems as item (item.review_item_id)}
         <article class="case-card">
           <div class="case-header">
-            <span class="case-badge">Topology Conflict</span>
-            <h2 class="case-subject">{item.title}</h2>
+            <span class="case-badge">Needs review</span>
+            <h2 class="case-subject">
+              Review <code>{item.review_item_id}</code>
+            </h2>
           </div>
 
-          <div class="comparison-grid">
-            <!-- Left: Fasti Local Ingest -->
-            <div class="comparison-pane local">
-              <h3 class="pane-title">Fasti Local Ingest</h3>
-              <p class="pane-desc">
-                Supplied from original import observation:
-              </p>
-              <div class="id-chips">
-                {#each item.suppliedIds as xid}
-                  <span class="id-chip">
-                    <span class="ns">{xid.namespace}:</span>
-                    <span class="val">{xid.value}</span>
-                  </span>
-                {/each}
+          <div class="case-body">
+            <dl class="fact-list">
+              <div>
+                <dt>Observation</dt>
+                <dd><code>{item.observation_id}</code></dd>
               </div>
-            </div>
-
-            <div class="vs-divider" aria-hidden="true">
-              <IconArrowRight size={20} />
-            </div>
-
-            <!-- Right: Candidate Match -->
-            <div class="comparison-pane candidate">
-              <h3 class="pane-title">Candidate Match</h3>
-              <div class="candidate-header">
-                {#if item.candidatePosterUrl}
-                  <img
-                    src={item.candidatePosterUrl}
-                    alt=""
-                    class="candidate-thumb"
-                  />
-                {/if}
-                <div>
-                  <h4 class="candidate-name">{item.candidateTitle}</h4>
-                  <span class="candidate-id-badge"
-                    >{item.candidateNamespace}: {item.candidateExternalId}</span
-                  >
-                </div>
+              <div>
+                <dt>Current interpretation</dt>
+                <dd><code>{item.current_interpretation_id}</code></dd>
               </div>
+            </dl>
 
-              <div class="reasons-list">
-                <h4 class="reasons-label">Matching Evidence:</h4>
-                <ul>
-                  {#each item.matchingReasons as reason}
-                    <li class="reason-item match">
-                      <IconCheck size={14} class="reason-icon check" />
-                      {reason}
+            {#if item.candidate_record_ids.length > 0}
+              <div class="candidates">
+                <h3 class="section-label">Candidate records</h3>
+                <ul class="candidate-list">
+                  {#each item.candidate_record_ids as recordId (recordId)}
+                    <li class="candidate-row">
+                      <code>{recordId}</code>
+                      <button
+                        type="button"
+                        class="action-btn accept"
+                        disabled={!onResolveExisting}
+                        onclick={() =>
+                          onResolveExisting?.(item.review_item_id, recordId)}
+                        title={!onResolveExisting
+                          ? "Resolving is unavailable until a resolve command is implemented"
+                          : undefined}
+                      >
+                        <IconCheck size={16} stroke={2.5} /> Accept as this record
+                        <IconArrowRight size={14} />
+                      </button>
                     </li>
                   {/each}
                 </ul>
               </div>
-
-              {#if item.conflictingFactors.length > 0}
-                <div class="conflicts-list">
-                  <h4 class="reasons-label">Variance to Note:</h4>
-                  <ul>
-                    {#each item.conflictingFactors as conflict}
-                      <li class="reason-item conflict">
-                        <IconAlertTriangle size={14} class="reason-icon warn" />
-                        {conflict}
-                      </li>
-                    {/each}
-                  </ul>
-                </div>
-              {/if}
-            </div>
+            {:else}
+              <p class="no-candidates">
+                No candidate records were found for this observation.
+              </p>
+            {/if}
           </div>
 
           <div class="case-actions">
-            <button
-              type="button"
-              class="action-btn accept"
-              disabled={!onAcceptCase}
-              onclick={() => onAcceptCase?.(item.id)}
-              title={!onAcceptCase
-                ? "Accept is unavailable until a reconciliation command is implemented"
-                : undefined}
-            >
-              <IconCheck size={16} stroke={2.5} /> Accept Identifier Only
-            </button>
-
-            <button
-              type="button"
-              class="action-btn not-same"
-              disabled={!onRejectCase}
-              onclick={() => onRejectCase?.(item.id)}
-              title={!onRejectCase
-                ? "Reject is unavailable until a reconciliation command is implemented"
-                : undefined}
-            >
-              <IconX size={16} stroke={2.5} /> Not the Same (not_same_as)
-            </button>
-
-            <button
-              type="button"
-              class="action-btn defer"
-              disabled={!onDeferCase}
-              onclick={() => onDeferCase?.(item.id)}
-              title={!onDeferCase
-                ? "Defer is unavailable until a reconciliation command is implemented"
-                : undefined}
-            >
-              <IconClock size={16} /> Resolve Later
-            </button>
+            <label class="new-record-form">
+              <span>Not one of these — create a new record with grain</span>
+              <select
+                value={grainFor(item.review_item_id)}
+                onchange={(e) =>
+                  (newGrainByItem = {
+                    ...newGrainByItem,
+                    [item.review_item_id]: e.currentTarget.value,
+                  })}
+              >
+                {#each GRAINS as grain}
+                  <option value={grain}>{grain}</option>
+                {/each}
+              </select>
+              <button
+                type="button"
+                class="action-btn not-same"
+                disabled={!onResolveNew}
+                onclick={() =>
+                  onResolveNew?.(item.review_item_id, grainFor(item.review_item_id))}
+                title={!onResolveNew
+                  ? "Resolving is unavailable until a resolve command is implemented"
+                  : undefined}
+              >
+                Create new record
+              </button>
+            </label>
           </div>
         </article>
       {/each}
@@ -184,6 +172,8 @@
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
     border-bottom: 2px solid
       color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
     padding-bottom: 16px;
@@ -289,132 +279,65 @@
 
   .case-subject {
     font-family: var(--fasti-font-display);
-    font-size: 1.3rem;
+    font-size: 1.15rem;
     font-weight: 600;
     margin: 0;
     color: var(--fasti-text-primary);
+    overflow-wrap: anywhere;
   }
 
-  .comparison-grid {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    gap: 20px;
+  .case-body {
     padding: 20px;
-    align-items: center;
   }
 
-  .comparison-pane {
-    background: var(--fasti-surface-archive);
-    border-radius: 6px;
-    padding: 16px;
-    height: 100%;
-    box-sizing: border-box;
-  }
-
-  .pane-title {
-    font-family: var(--fasti-font-display);
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin: 0 0 6px;
-    color: var(--fasti-text-primary);
-  }
-
-  .pane-desc {
+  .fact-list {
+    display: grid;
+    gap: 8px 16px;
+    margin: 0 0 16px;
     font-size: 0.85rem;
-    color: var(--fasti-text-muted);
-    margin: 0 0 12px;
   }
 
-  .id-chips {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .id-chip {
-    display: inline-flex;
-    gap: 6px;
-    padding: 6px 10px;
-    background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 4px;
-    font-family: var(--fasti-font-mono);
-    font-size: 0.82rem;
-  }
-
-  .id-chip .ns {
-    color: var(--fasti-text-muted);
-  }
-  .id-chip .val {
+  .fact-list dt {
     font-weight: 700;
-    color: var(--fasti-text-primary);
+    color: var(--fasti-text-muted);
   }
 
-  .candidate-header {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 12px;
+  .fact-list dd {
+    margin: 0;
+    overflow-wrap: anywhere;
   }
 
-  .candidate-thumb {
-    width: 48px;
-    height: 68px;
-    object-fit: cover;
-    border-radius: 4px;
-  }
-
-  .candidate-name {
-    margin: 0 0 4px;
-    font-size: 1rem;
-    font-weight: 600;
-  }
-
-  .candidate-id-badge {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.78rem;
-    color: var(--fasti-action-primary);
-  }
-
-  .reasons-list,
-  .conflicts-list {
-    margin-top: 12px;
-  }
-
-  .reasons-label {
+  .section-label {
     font-size: 0.8rem;
     font-family: var(--fasti-font-mono);
     text-transform: uppercase;
     color: var(--fasti-text-muted);
-    margin: 0 0 6px;
+    margin: 0 0 8px;
   }
 
-  .reason-item {
+  .candidate-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
-    align-items: flex-start;
-    gap: 6px;
-    font-size: 0.85rem;
-    margin-bottom: 4px;
-    line-height: 1.3;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  .reason-item.match {
-    color: var(--fasti-state-verified);
-  }
-  .reason-item.conflict {
-    color: var(--fasti-state-attention);
+  .candidate-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--fasti-surface-archive);
+    border-radius: 4px;
+    overflow-wrap: anywhere;
   }
 
-  :global(.reason-icon.check) {
-    color: var(--fasti-state-verified);
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-  :global(.reason-icon.warn) {
-    color: var(--fasti-state-attention);
-    flex-shrink: 0;
-    margin-top: 2px;
+  .no-candidates {
+    color: var(--fasti-text-muted);
+    margin: 0;
   }
 
   .case-actions {
@@ -422,15 +345,32 @@
     background: var(--fasti-surface-archive);
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .new-record-form {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: 10px;
+    font-size: 0.85rem;
+    color: var(--fasti-text-muted);
+  }
+
+  .new-record-form select {
+    min-height: 44px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
   }
 
   .action-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-height: 44px;
     padding: 9px 18px;
     border-radius: 4px;
     font-size: 0.88rem;
@@ -438,6 +378,11 @@
     cursor: pointer;
     border: none;
     transition: all 120ms ease;
+  }
+
+  .action-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
   }
 
   .action-btn.accept {
@@ -449,13 +394,5 @@
     background: transparent;
     border: 1px solid var(--fasti-brand-mark);
     color: var(--fasti-brand-mark);
-  }
-
-  .action-btn.defer {
-    background: transparent;
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 40%, transparent);
-    color: var(--fasti-text-muted);
-    margin-left: auto;
   }
 </style>

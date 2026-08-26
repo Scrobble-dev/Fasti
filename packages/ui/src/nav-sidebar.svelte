@@ -28,6 +28,9 @@
     IconChevronRight,
     IconPin,
     IconEyeOff,
+    IconPlugConnected,
+    IconLibrary,
+    IconFileText,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -75,6 +78,9 @@
     tags: IconTag,
     reconciliation: IconShieldCheck,
     sources: IconDatabase,
+    connections: IconPlugConnected,
+    library: IconLibrary,
+    detail: IconFileText,
     settings: IconSettings,
   };
 
@@ -461,6 +467,9 @@
   .navbar-vertical-collapsed .nav-link {
     justify-content: center;
     padding: 10px 0 !important;
+    width: 44px;
+    min-width: 44px !important;
+    margin-inline: auto;
   }
 
   .navbar-vertical-collapsed .nav-link-icon {
