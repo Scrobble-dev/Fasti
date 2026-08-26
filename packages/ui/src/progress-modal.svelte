@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import type { MediaRecord, WatchStatus } from "./types.js";
-  import { IconX, IconCheck, IconPlayerPlay } from "@tabler/icons-svelte";
+  import { IconX, IconCheck } from "@tabler/icons-svelte";
 
   interface Props {
     record: MediaRecord;
@@ -16,44 +15,44 @@
 
   let { record, onClose, onSaveProgress }: Props = $props();
 
-  let modalCardRef: HTMLDivElement | null = $state(null);
+  let dialog: HTMLDialogElement | undefined;
   let episodeVal = $state(0);
-  let totalEps = $derived(record.totalEpisodes ?? 1);
+  let totalEps = $derived(
+    record.totalEpisodes && record.totalEpisodes > 0 ? record.totalEpisodes : 1,
+  );
   let progressSec = $state(0);
   let totalSec = $derived(
-    record.totalDurationSeconds ??
+    (record.totalDurationSeconds && record.totalDurationSeconds > 0
+      ? record.totalDurationSeconds
+      : undefined) ??
       (record.runtimeMinutes ? record.runtimeMinutes * 60 : 3600),
   );
   let statusVal = $state<WatchStatus>("watching");
+  let syncedRecordId = $state("");
 
   $effect(() => {
-    episodeVal = record.progressEpisodes ?? 0;
-    progressSec = record.progressSeconds ?? 0;
-    statusVal = record.status;
+    if (record.id !== syncedRecordId) {
+      syncedRecordId = record.id;
+      episodeVal = record.progressEpisodes ?? 0;
+      progressSec = record.progressSeconds ?? 0;
+      statusVal = record.status;
+    }
+  });
+
+  $effect(() => {
+    if (!dialog?.open) dialog?.showModal();
   });
 
   const percentage = $derived(
-    record.mediaKind === "movie" || !record.totalEpisodes
-      ? Math.min(100, Math.round((progressSec / totalSec) * 100))
-      : Math.min(100, Math.round((episodeVal / totalEps) * 100)),
+    record.mediaKind === "show" || record.mediaKind === "anime"
+      ? Math.min(100, Math.round((episodeVal / totalEps) * 100))
+      : Math.min(100, Math.round((progressSec / totalSec) * 100)),
   );
-
-  function handleKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape") {
-      onClose();
-    }
-  }
-
-  onMount(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  });
 
   function handleSave(): void {
     const finalStatus: WatchStatus =
-      percentage >= 100
+      percentage >= 100 &&
+      (statusVal === "watching" || statusVal === "plan_to_watch")
         ? "completed"
         : statusVal === "plan_to_watch"
           ? "watching"
@@ -63,11 +62,14 @@
   }
 </script>
 
-<div
+<dialog
+  bind:this={dialog}
   class="modal-backdrop"
-  role="dialog"
-  aria-modal="true"
   aria-labelledby="prog-title"
+  oncancel={onClose}
+  onclick={(event) => {
+    if (event.target === event.currentTarget) onClose();
+  }}
 >
   <div class="modal-card">
     <div class="modal-header">
@@ -167,18 +169,32 @@
       </button>
     </div>
   </div>
-</div>
+</dialog>
 
 <style>
   .modal-backdrop {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    background: rgba(0, 0, 0, 0.5);
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    border: 0;
+    background: transparent;
     display: grid;
     place-items: center;
     padding: 16px;
     animation: fadeIn 100ms ease-out;
+  }
+
+  .modal-backdrop::backdrop {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .modal-backdrop:not([open]) {
+    display: none;
   }
 
   .modal-card {
@@ -250,7 +266,6 @@
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
     background: var(--fasti-surface-archive);
-    color: var(--fasti-text-primary);
     font-size: 1.2rem;
     font-weight: bold;
     cursor: pointer;
@@ -270,7 +285,6 @@
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
     background: var(--fasti-surface-paper);
-    color: var(--fasti-text-primary);
   }
 
   .max-btn {
@@ -281,7 +295,6 @@
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     background: var(--fasti-surface-archive);
-    color: var(--fasti-text-primary);
     font-size: 0.85rem;
     font-weight: 600;
     cursor: pointer;
@@ -330,12 +343,6 @@
     border-radius: 4px;
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
-    color: var(--fasti-text-primary);
-  }
-
-  .select-input option {
-    background-color: var(--fasti-surface-paper) !important;
-    color: var(--fasti-text-primary) !important;
   }
 
   .modal-footer {
@@ -356,7 +363,6 @@
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 4px;
     font-weight: 600;
-    color: var(--fasti-text-primary);
     cursor: pointer;
   }
 
