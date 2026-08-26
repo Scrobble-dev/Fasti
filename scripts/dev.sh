@@ -459,11 +459,11 @@ _self_test() {
   printf '%s|invalid start time\n' "$$" > "$RUNDIR/stale.pid"
   _stop_pidfile stale
   [[ ! -e "$RUNDIR/stale.pid" ]]
-  ! FASTI_PORT=0 "$0" --status >/dev/null 2>&1
+  ! FASTI_PORT=0 bash "$0" --status >/dev/null 2>&1
   local status_output
-  status_output="$(FASTI_LISTEN=127.0.0.1:18420 "$0" --status)"
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 bash "$0" --status)"
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
-  status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
+  status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 bash "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
   podman() { return 1; }
   ! _require_container_image >/dev/null 2>&1
