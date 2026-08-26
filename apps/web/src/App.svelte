@@ -59,10 +59,23 @@
     retryPolicy: { maxAttempts: 1 },
   });
 
+  const WORKBENCH_PATHS = new Set([
+    "/connections",
+    "/settings",
+    "/discover",
+    "/reconciliation",
+    "/reviews",
+    "/library",
+    "/calendar",
+  ]);
+
   function computeInitialSurface(): "status" | "workbench" {
     if (typeof window === "undefined") return "status";
     const path = window.location.pathname;
     if (path === "/status") return "status";
+    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records")) {
+      return "workbench";
+    }
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("surface") === "workbench") return "workbench";
     if (urlParams.get("surface") === "status") return "status";
@@ -179,6 +192,7 @@
           }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
+        listRecords: () => invoke("list_records"),
       };
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
     } catch (error) {

@@ -3,6 +3,7 @@ import type {
   NetworkConfiguration,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
+  RecordSummary,
   SaveNetworkConfigurationRequest,
   WorkbenchHost,
 } from "@fasti/ui";
@@ -230,6 +231,12 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
       return 0;
+    },
+
+    async listRecords(): Promise<RecordSummary[]> {
+      throw unavailable(
+        "Record listing is not active in the browser host. It requires the trusted native or server host.",
+      );
     },
   };
 }

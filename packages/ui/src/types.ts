@@ -114,22 +114,6 @@ export interface ChronicleOccurrence {
   readonly userRating?: number;
 }
 
-export interface ReconciliationCase {
-  readonly id: string;
-  readonly recordId: string;
-  readonly title: string;
-  readonly mediaKind: MediaKind;
-  readonly suppliedIds: ExternalId[];
-  readonly candidateId: string;
-  readonly candidateTitle: string;
-  readonly candidateNamespace: string;
-  readonly candidateExternalId: string;
-  readonly candidatePosterUrl?: string;
-  readonly matchingReasons: string[];
-  readonly conflictingFactors: string[];
-  readonly status: "open" | "resolved" | "deferred";
-}
-
 export interface CustomFieldDefinition {
   readonly key: string;
   readonly label: string;
@@ -266,6 +250,59 @@ export interface WorkbenchHost {
   getSearchCacheSize?(): number;
   listReviews?(): Promise<ReviewItem[]>;
   resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
+  listRecords?(): Promise<RecordSummary[]>;
+}
+
+/** Which tier of the resolution order actually supplied a field's displayed value.
+ * Mirrors `fasti_domain::FieldResolutionTier`'s serde representation. */
+export type FieldResolutionTier =
+  | "user_override"
+  | "preferred_provider_claim"
+  | "fallback_provider_claim"
+  | "last_known_good"
+  | "empty";
+
+/** Wire projection of `fasti_domain::ResolvedField` / the desktop host's `ResolvedFieldView`. */
+export interface ResolvedFieldView {
+  readonly tier: FieldResolutionTier;
+  readonly value: string | null;
+  readonly source: string | null;
+  readonly is_stale: boolean;
+}
+
+/** Mirrors `fasti_domain::ClaimedTime`'s wire shape (`ClaimedTimeWire`). */
+export interface ClaimedTimeView {
+  readonly original: string;
+  readonly precision:
+    | "date"
+    | "second"
+    | "millisecond"
+    | "microsecond"
+    | "nanosecond";
+  readonly trust:
+    | "source_claim"
+    | "device_observed"
+    | "user_entered"
+    | "inferred";
+}
+
+export interface RecordActivityView {
+  readonly occurred_at: ClaimedTimeView | null;
+  readonly interpretation_state: "unresolved" | "resolved" | "conflicted";
+}
+
+/** Wire shape of the desktop host's `list_records` command output
+ * (`apps/desktop/src-tauri/src/records.rs`'s `RecordSummary`). `grain` is
+ * identity granularity (`fasti_domain::Grain`), not the frontend's display
+ * `MediaKind` — see `projectRecordSummary` in `record-projection.ts` for the
+ * mapping. */
+export interface RecordSummary {
+  readonly record_id: string;
+  readonly grain: string;
+  readonly status: "active";
+  readonly title: ResolvedFieldView;
+  readonly poster: ResolvedFieldView;
+  readonly latest_activity: RecordActivityView | null;
 }
 
 export interface ReviewItem {
