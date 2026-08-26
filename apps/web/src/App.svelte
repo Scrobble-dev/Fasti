@@ -59,7 +59,7 @@
   });
 
   function computeInitialSurface(): "status" | "workbench" {
-    if (typeof window === "undefined") return "workbench";
+    if (typeof window === "undefined") return "status";
     const path = window.location.pathname;
     if (path === "/status") return "status";
     const urlParams = new URLSearchParams(window.location.search);
@@ -70,8 +70,7 @@
       if (saved === "workbench") return "workbench";
       if (saved === "status") return "status";
     } catch {}
-    if (window.location.port === "4173" && path === "/") return "status";
-    return "workbench";
+    return "status";
   }
 
   let status: StatusPanelState = $state({ view: "loading" });
