@@ -2,6 +2,7 @@
 
 mod access;
 pub mod archive;
+mod client_credentials;
 mod correction;
 mod crypto;
 mod evidence;
