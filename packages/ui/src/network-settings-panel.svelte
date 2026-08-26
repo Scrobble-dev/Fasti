@@ -23,6 +23,7 @@
   id="network-settings"
   class="settings-panel"
   aria-labelledby="network-settings-title"
+  tabindex="-1"
 >
   <h2 id="network-settings-title">Network settings</h2>
   <p class="settings-intro">
