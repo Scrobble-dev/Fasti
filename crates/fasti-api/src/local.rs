@@ -15,11 +15,12 @@ use fasti_contracts::{
 use fasti_domain::RequestCorrelationId;
 use std::sync::Arc;
 
-const MAX_JSON_BODY_BYTES: usize = 4 * 1024;
+const MAX_BOOTSTRAP_JSON_BODY_BYTES: usize = 4 * 1024;
+const MAX_OBSERVATION_JSON_BODY_BYTES: usize = 64 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct LocalApiState {
-    kernel: Arc<dyn LocalKernel>,
+    pub(crate) kernel: Arc<dyn LocalKernel>,
 }
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
@@ -102,7 +103,7 @@ pub(crate) async fn enroll_first_client(
     }))
 }
 
-async fn run_kernel<T>(
+pub(crate) async fn run_kernel<T>(
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
     operation: impl FnOnce() -> ApplicationResult<T> + Send + 'static,
@@ -122,9 +123,13 @@ where
 }
 
 pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
-    Router::new()
+    let state = LocalApiState { kernel };
+    let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))
         .route("/api/v1/client-enrollments", post(enroll_first_client))
-        .layer(DefaultBodyLimit::max(MAX_JSON_BODY_BYTES))
-        .with_state(LocalApiState { kernel })
+        .layer(DefaultBodyLimit::max(MAX_BOOTSTRAP_JSON_BODY_BYTES));
+    let observation = crate::observation::router()
+        .layer(DefaultBodyLimit::max(MAX_OBSERVATION_JSON_BODY_BYTES));
+
+    bootstrap.merge(observation).with_state(state)
 }
