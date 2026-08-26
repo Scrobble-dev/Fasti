@@ -22,6 +22,11 @@ const inlineLink = /!?\[[^\]]*\]\(([^)]+)\)/g;
 const definitionLink = /^\[(?!\^)[^\]]+\]:\s+(\S+)/gm;
 const failures = [];
 
+/**
+ * Validates that a link target from a Markdown file exists and is accessible.
+ * @param {string} file - The source Markdown file containing the link.
+ * @param {string} rawTarget - The raw link target from the Markdown syntax.
+ */
 function checkTarget(file, rawTarget) {
   let target = rawTarget.trim().replace(/^<|>$/g, "");
   target = target.replace(/\s+"[^"]*"$/, "");

@@ -124,6 +124,11 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Runs the canonical B1 pull-request gate including contract verification and portable tests.
+///
+/// # Errors
+///
+/// Returns an error if contract verification or portable B1 tests fail.
 fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     verify_contracts(root, true)?;
     orchestration::run_portable_b1(root)?;
@@ -131,6 +136,11 @@ fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Runs the pull-request gate plus all applicable deep checks for the current B1 body.
+///
+/// # Errors
+///
+/// Returns an error if the PR gate or any deep checks fail.
 fn run_deep(root: &std::path::Path) -> anyhow::Result<()> {
     run_pr(root)?;
     orchestration::run_deep_b1(root)?;
@@ -205,6 +215,16 @@ fn run_milestone(
     }
 }
 
+/// Verifies B1 software contracts including registry, generation, and examples.
+///
+/// # Arguments
+///
+/// * `root` - The workspace root path.
+/// * `locked` - Whether to require locked dependency graphs.
+///
+/// # Errors
+///
+/// Returns an error if any verification step fails. Invalid receipts are removed.
 fn verify_contracts(root: &std::path::Path, locked: bool) -> anyhow::Result<()> {
     verify::clear_receipt(root)?;
 
@@ -278,6 +298,11 @@ fn verify_contracts(root: &std::path::Path, locked: bool) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// Determines the workspace root directory from the xtask crate location.
+///
+/// # Errors
+///
+/// Returns an error if xtask is not directly under the workspace root.
 fn workspace_root() -> anyhow::Result<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest

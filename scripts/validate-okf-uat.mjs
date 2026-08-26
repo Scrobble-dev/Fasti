@@ -91,10 +91,23 @@ const ALLOWED_BODIES = new Set([
   "post-b8",
 ]);
 
+/**
+ * Computes the set difference (elements in left but not in right).
+ * @param {Set} left - The left set.
+ * @param {Set} right - The right set.
+ * @returns {Array} Sorted array of elements in left but not in right.
+ */
 function setDifference(left, right) {
   return [...left].filter((value) => !right.has(value)).sort();
 }
 
+/**
+ * Asserts that two sets contain exactly the same elements.
+ * @param {Iterable} actualValues - The actual values.
+ * @param {Iterable} expectedValues - The expected values.
+ * @param {string} label - A label for error reporting.
+ * @throws {AssertionError} If the sets differ or contain duplicates.
+ */
 function assertSameSet(actualValues, expectedValues, label) {
   const actualList = [...actualValues];
   const expectedList = [...expectedValues];
@@ -117,6 +130,13 @@ function assertSameSet(actualValues, expectedValues, label) {
   );
 }
 
+/**
+ * Parses YAML frontmatter from a Markdown document.
+ * @param {string} source - The Markdown source content.
+ * @param {string} label - A label for error reporting.
+ * @returns {Object} An object with frontmatter and body properties.
+ * @throws {AssertionError} If frontmatter is missing or malformed.
+ */
 function parseFrontmatter(source, label) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
   assert.ok(match, `${label} must begin with YAML frontmatter`);
@@ -130,6 +150,11 @@ function parseFrontmatter(source, label) {
   return { frontmatter, body: source.slice(match[0].length) };
 }
 
+/**
+ * Recursively finds all Markdown files in a directory tree.
+ * @param {string} root - The root directory to search.
+ * @returns {Promise<Array<string>>} Sorted array of absolute paths to Markdown files.
+ */
 async function markdownFiles(root) {
   const files = [];
   for (const entry of await readdir(root, { withFileTypes: true })) {
@@ -143,6 +168,11 @@ async function markdownFiles(root) {
   return files.sort();
 }
 
+/**
+ * Extracts all link targets from Markdown body content.
+ * @param {string} body - The Markdown body text.
+ * @returns {Array<string>} Array of link target URLs/paths.
+ */
 function markdownTargets(body) {
   const targets = [];
   const expression = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu;
@@ -152,6 +182,12 @@ function markdownTargets(body) {
   return targets;
 }
 
+/**
+ * Asserts that a link target exists locally or is a valid external/fragment link.
+ * @param {string} sourcePath - The source file containing the link.
+ * @param {string} target - The link target to validate.
+ * @throws {AssertionError} If a local target does not exist or is outside the repository.
+ */
 async function assertLocalTargetExists(sourcePath, target) {
   if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) {
     return;
@@ -176,6 +212,12 @@ async function assertLocalTargetExists(sourcePath, target) {
   );
 }
 
+/**
+ * Asserts that a value is a non-empty array of non-blank strings.
+ * @param {*} value - The value to validate.
+ * @param {string} label - A label for error reporting.
+ * @throws {AssertionError} If the value is not a valid string list.
+ */
 function assertStringList(value, label) {
   assert.ok(Array.isArray(value), `${label} must be a YAML list`);
   assert.ok(value.length > 0, `${label} must not be empty`);
@@ -185,6 +227,12 @@ function assertStringList(value, label) {
   }
 }
 
+/**
+ * Validates the OKF (Open Knowledge Framework) bundle structure and content.
+ * @param {Object} registry - The capability registry document.
+ * @returns {Promise<Object>} Validation results including concept count.
+ * @throws {AssertionError} If OKF validation fails.
+ */
 async function validateOkf(registry) {
   const files = await markdownFiles(okfRoot);
   assert.ok(files.length > 1, "OKF bundle must include concepts and an index");
@@ -401,6 +449,12 @@ async function validateOkf(registry) {
   return { conceptCount: concepts.length };
 }
 
+/**
+ * Parses CSV content into a two-dimensional array of rows and fields.
+ * @param {string} source - The CSV source string.
+ * @returns {Array<Array<string>>} Array of rows, each containing field values.
+ * @throws {AssertionError} If CSV syntax is invalid.
+ */
 function parseCsv(source) {
   const rows = [];
   let row = [];
@@ -440,6 +494,12 @@ function parseCsv(source) {
   return rows;
 }
 
+/**
+ * Validates the UAT (User Acceptance Test) matrix and ownership mappings.
+ * @param {Object} registry - The capability registry document.
+ * @returns {Promise<Object>} Validation results including case counts by status.
+ * @throws {AssertionError} If UAT validation fails.
+ */
 async function validateUat(registry) {
   const rows = parseCsv(await readFile(uatCsvPath, "utf8"));
   assert.deepEqual(rows[0], [
@@ -547,6 +607,11 @@ async function validateUat(registry) {
   };
 }
 
+/**
+ * Validates the identity domain UAT matrix structure and content.
+ * @returns {Promise<Object>} Validation results including case counts and phase distribution.
+ * @throws {AssertionError} If identity UAT validation fails.
+ */
 async function validateIdentityUat() {
   const rows = parseCsv(await readFile(identityUatCsvPath, "utf8"));
   assert.deepEqual(
