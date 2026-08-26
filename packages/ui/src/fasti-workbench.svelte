@@ -349,7 +349,7 @@
     class="workbench-main-shell"
     class:sidebar-hidden={workbenchPreferences.sidebarHidden}
   >
-    <header class="top-bar" role="toolbar" aria-label="Workbench toolbar">
+    <header class="top-bar" aria-label="Workbench toolbar">
       <div class="top-bar-left">
         {#if workbenchPreferences.sidebarHidden}
           <button
