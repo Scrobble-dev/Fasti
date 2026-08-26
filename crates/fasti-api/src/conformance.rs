@@ -343,11 +343,14 @@ async fn enroll_first_client(
     responses(
         (status = 200, description = "Capability-bound fixture receipt", body = AcceptObservationResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Credential or capability grant denied", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Operation ID reused with different request semantics", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request body exceeds the fixture bound", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Observation contract rejected", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 507, description = "Bounded fixture operation capacity reached", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

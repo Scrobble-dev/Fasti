@@ -781,17 +781,17 @@ mod tests {
     }
 
     #[test]
-    fn staged_authentication_problem_stays_out_of_the_public_registry() {
+    fn staged_cursor_problem_stays_out_of_the_public_registry() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask lives under workspace root");
         let public = normalized_public_json(root).expect("public registry");
         let rendered = serde_json::to_string(&public).expect("serialize public registry");
 
-        assert!(!rendered.contains(ProblemCode::AuthenticationFailed.as_str()));
+        assert!(!rendered.contains(ProblemCode::CursorExpired.as_str()));
         assert!(rendered.contains(ProblemCode::StorageUnavailable.as_str()));
         assert_eq!(
-            ProblemCode::AuthenticationFailed.contract_state(),
+            ProblemCode::CursorExpired.contract_state(),
             ContractState::Reserved
         );
         assert_eq!(

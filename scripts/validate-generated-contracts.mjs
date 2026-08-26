@@ -66,6 +66,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/client-enrollments",
     "/api/v1/health",
     "/api/v1/node/initialization",
+    "/api/v1/observations",
   ]);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });

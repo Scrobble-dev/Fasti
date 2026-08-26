@@ -347,15 +347,18 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
         "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
+        "integrity_failed",
         "invalid_observation",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],

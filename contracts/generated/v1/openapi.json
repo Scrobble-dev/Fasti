@@ -82,6 +82,38 @@
         ],
         "type": "object"
       },
+      "ObservationIdentifierInput": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "namespace": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "grain",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ObservationIngressKind": {
+        "enum": [
+          "consumption_occurrence"
+        ],
+        "type": "string"
+      },
       "ProblemActionDto": {
         "additionalProperties": false,
         "properties": {
@@ -171,6 +203,172 @@
           "correlation_id",
           "actual",
           "violations"
+        ],
+        "type": "object"
+      },
+      "SubmitObservationRequest": {
+        "additionalProperties": false,
+        "description": "Durable provider-neutral occurrence ingress envelope.\n\n`source_event_id` is source-owned and must remain stable when the same\ndelivery is retried. Fasti derives the operation ID from the authenticated\nclient, source, and event identity. The complete normalized request is\nstored as immutable evidence before observation acceptance.",
+        "properties": {
+          "duration_seconds": {
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationIdentifierInput"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ObservationIngressKind"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "occurred_at": {
+            "maxLength": 35,
+            "minLength": 10,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "progress_percent": {
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "source": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_event_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_grain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 512,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "source_event_id",
+          "observed_at",
+          "identifiers"
+        ],
+        "type": "object"
+      },
+      "SubmitObservationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "committed_at": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "interpretation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observation_id": {
+            "type": "string"
+          },
+          "occurrence_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "payload_digest": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string"
+          },
+          "record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "review_item_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_client_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disposition",
+          "receipt_id",
+          "operation_id",
+          "workspace_id",
+          "profile_id",
+          "source_client_id",
+          "observation_id",
+          "evidence_id",
+          "payload_digest",
+          "resolution",
+          "received_at",
+          "committed_at"
         ],
         "type": "object"
       },
@@ -564,6 +762,216 @@
           "validation_failed"
         ],
         "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/observations": {
+      "post": {
+        "operationId": "submit_observation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable observation receipt; a safe retry can return a replayed disposition"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Source event identity was reused with different evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request or evidence exceeds a bounded limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Observation does not satisfy the governed contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "observations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
         "x-fasti-runtime-availability": "implemented"
       }
     }

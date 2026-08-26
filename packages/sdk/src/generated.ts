@@ -148,6 +148,38 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ObservationIdentifierInput": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "namespace": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "value": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "ObservationIngressKind": {
+    "enum": [
+      "consumption_occurrence"
+    ],
+    "type": "string"
+  },
   "ProblemActionDto": {
     "additionalProperties": false,
     "properties": {
@@ -240,6 +272,172 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     ],
     "type": "object"
   },
+  "SubmitObservationRequest": {
+    "additionalProperties": false,
+    "description": "Durable provider-neutral occurrence ingress envelope.\n\n`source_event_id` is source-owned and must remain stable when the same\ndelivery is retried. Fasti derives the operation ID from the authenticated\nclient, source, and event identity. The complete normalized request is\nstored as immutable evidence before observation acceptance.",
+    "properties": {
+      "duration_seconds": {
+        "format": "int64",
+        "minimum": 1,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "identifiers": {
+        "items": {
+          "$ref": "#/components/schemas/ObservationIdentifierInput"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "kind": {
+        "$ref": "#/components/schemas/ObservationIngressKind"
+      },
+      "observed_at": {
+        "format": "date-time",
+        "maxLength": 35,
+        "minLength": 20,
+        "type": "string"
+      },
+      "occurred_at": {
+        "maxLength": 35,
+        "minLength": 10,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "position_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "progress_percent": {
+        "format": "double",
+        "maximum": 100,
+        "minimum": 0,
+        "type": [
+          "number",
+          "null"
+        ]
+      },
+      "source": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "source_event_id": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "target_grain": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "title": {
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "kind",
+      "source",
+      "source_event_id",
+      "observed_at",
+      "identifiers"
+    ],
+    "type": "object"
+  },
+  "SubmitObservationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "committed_at": {
+        "type": "string"
+      },
+      "disposition": {
+        "type": "string"
+      },
+      "evidence_id": {
+        "type": "string"
+      },
+      "interpretation_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "observation_id": {
+        "type": "string"
+      },
+      "occurrence_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "operation_id": {
+        "type": "string"
+      },
+      "payload_digest": {
+        "type": "string"
+      },
+      "profile_id": {
+        "type": "string"
+      },
+      "receipt_id": {
+        "type": "string"
+      },
+      "received_at": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "resolution": {
+        "type": "string"
+      },
+      "review_item_id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_client_id": {
+        "type": "string"
+      },
+      "workspace_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "disposition",
+      "receipt_id",
+      "operation_id",
+      "workspace_id",
+      "profile_id",
+      "source_client_id",
+      "observation_id",
+      "evidence_id",
+      "payload_digest",
+      "resolution",
+      "received_at",
+      "committed_at"
+    ],
+    "type": "object"
+  },
   "ViolationDto": {
     "additionalProperties": false,
     "properties": {
@@ -310,7 +508,7 @@ export interface CapabilityDescriptorDto {
   readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
   readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"already_initialized" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
+  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
   readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
@@ -435,7 +633,7 @@ export const B1_CONFORMANCE_OPERATIONS = {
   configureListener: { operationId: "configure_listener_unavailable", method: "PUT", path: "/api/v1/listener-configuration", capabilityId: "listener.configure", authorization: "scoped", requiredScopes: ["listener_configure"], problemCodes: ["capability_unavailable","forbidden"], exampleIds: ["listener.configure.capability_unavailable"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: null, responseSchema: null },
   initializeNode: { operationId: "initialize_node", method: "POST", path: "/api/v1/node/initialization", capabilityId: "node.initialize", authorization: "bootstrap_only", requiredScopes: [], problemCodes: ["forbidden","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["node.initialize.validation_failed"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "InitializeNodeRequest", responseSchema: "InitializeNodeResponse" },
   enrollFirstClient: { operationId: "enroll_first_client", method: "POST", path: "/api/v1/client-enrollments", capabilityId: "client.enroll", authorization: "scoped", requiredScopes: ["client_enroll"], problemCodes: ["forbidden","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["client.enroll.forbidden"], authenticated: false, runtimeAvailability: "fixture_only", durability: "none", retry: "never", requestSchema: "EnrollFirstClientRequest", responseSchema: "EnrollFirstClientResponse" },
-  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["capacity_exceeded","forbidden","idempotency_conflict","invalid_observation","malformed_json","payload_too_large","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
+  acceptObservation: { operationId: "accept_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "stable_body_operation_id", requestSchema: "AcceptObservationRequest", responseSchema: "AcceptObservationResponse" },
   replayReceipt: { operationId: "replay_receipt", method: "GET", path: "/api/v1/receipts/{receipt_id}", capabilityId: "receipt.replay", authorization: "scoped", requiredScopes: ["receipt_read"], problemCodes: ["forbidden","receipt_not_found"], exampleIds: ["receipt.replay.receipt_not_found"], authenticated: true, runtimeAvailability: "fixture_only", durability: "none", retry: "safe", requestSchema: null, responseSchema: "ReplayReceiptResponse" },
 } as const;
 
@@ -581,6 +779,7 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "enum": [
             "already_initialized",
+            "authentication_failed",
             "bootstrap_closed",
             "capability_unavailable",
             "capacity_exceeded",
@@ -1588,6 +1787,7 @@ export type RuntimeAvailability =
 // prettier-ignore
 export type ProblemCode =
   | "already_initialized"
+  | "authentication_failed"
   | "bootstrap_closed"
   | "capability_unavailable"
   | "capacity_exceeded"
@@ -1953,15 +2153,18 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
         "capacity_exceeded",
         "forbidden",
         "idempotency_conflict",
+        "integrity_failed",
         "invalid_observation",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
@@ -3481,6 +3684,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "observation.accept",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "capacity_exceeded",
       "detail": "bounded application capacity has been reached",
       "next_actions": [
@@ -3535,6 +3756,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "observation.accept",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "invalid_observation",
       "detail": "observation does not satisfy the governed contract",
       "next_actions": [
@@ -3586,6 +3825,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "observation.accept",
@@ -3930,7 +4187,7 @@ const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
 const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["already_initialized", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

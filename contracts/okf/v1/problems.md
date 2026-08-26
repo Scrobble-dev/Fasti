@@ -7,6 +7,7 @@ tags: [fasti, b1, contracts, problems]
 status: draft
 identifiers:
   - already_initialized
+  - authentication_failed
   - bootstrap_closed
   - capacity_exceeded
   - capability_unavailable
@@ -37,6 +38,7 @@ not claim a later-body failure path is executable.
 | Code                     | Contract meaning                                                     |
 | ------------------------ | -------------------------------------------------------------------- |
 | `already_initialized`    | One-time durable node initialization already completed.              |
+| `authentication_failed`  | The bearer credential is missing, malformed, or inactive.            |
 | `bootstrap_closed`       | The enrollment proof is invalid, expired, or already consumed.       |
 | `capacity_exceeded`      | A bounded application resource rejected work without mutation.       |
 | `capability_unavailable` | The requested capability is owned by another runtime body.           |

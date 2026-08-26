@@ -141,6 +141,7 @@
             "items": {
               "enum": [
                 "already_initialized",
+                "authentication_failed",
                 "bootstrap_closed",
                 "capability_unavailable",
                 "capacity_exceeded",
@@ -1246,15 +1247,18 @@
                           "lifecycle": {
                             "contract_state": "finalized",
                             "introduced_in": "b1",
-                            "runtime_availability": "fixture_only"
+                            "runtime_availability": "implemented"
                           },
                           "problems": [
+                            "authentication_failed",
                             "capacity_exceeded",
                             "forbidden",
                             "idempotency_conflict",
+                            "integrity_failed",
                             "invalid_observation",
                             "malformed_json",
                             "payload_too_large",
+                            "storage_unavailable",
                             "unsupported_media_type",
                             "validation_failed"
                           ],
@@ -2511,6 +2515,16 @@
             },
             "description": "Malformed JSON"
           },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
           "403": {
             "content": {
               "application/problem+json": {
@@ -2593,6 +2607,26 @@
             },
             "description": "Observation contract rejected"
           },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
           "507": {
             "content": {
               "application/problem+json": {
@@ -2644,12 +2678,15 @@
           "observation.accept.validation_failed"
         ],
         "x-fasti-problem-codes": [
+          "authentication_failed",
           "capacity_exceeded",
           "forbidden",
           "idempotency_conflict",
+          "integrity_failed",
           "invalid_observation",
           "malformed_json",
           "payload_too_large",
+          "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
         ],
