@@ -1,18 +1,21 @@
-//! B7a Nuvio client observation and pairing integration.
+//! Nuvio-shaped application models and conformance helpers.
 //!
 //! # Product Boundary
 //!
 //! **Fasti records. Players play.**
 //!
-//! Fasti does not decode, stream, transcode, or act as a player. Nuvio is an
-//! external player client that pairs with Fasti and pushes playback observations
-//! through canonical application capabilities.
+//! Fasti does not decode, stream, transcode, or act as a player. This module
+//! models commands, replay behavior, process-local queues, state deltas, and
+//! catalog projections against caller-supplied application ports. It does not
+//! implement pairing, durable client storage, network transport, or a Nuvio
+//! client integration.
 //!
 //! # Invariants
 //!
-//! 1. **Playback Independence:** Playback in Nuvio must NEVER depend on Fasti's
-//!    availability. If Fasti is offline or unreachable, playback proceeds
-//!    normally and observations are buffered in Nuvio's durable outbox.
+//! 1. **Observation Buffering Independence:** A future Nuvio observation
+//!    integration must not make Fasti availability a prerequisite for
+//!    generating or buffering observations. The process-local queue here
+//!    proves ordering and retry behavior only; it is not durable.
 //! 2. **Idempotency & Replay:** Every observation uses a deterministically
 //!    derived operation ID (`nuvio:session:<session_id>:beat:<seq>` or
 //!    `nuvio:session:<session_id>:complete`). Network retries replay the
@@ -33,7 +36,7 @@ use fasti_domain::{
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-/// Default maximum number of queued observations in a Nuvio client outbox.
+/// Default maximum number of queued observations in the process-local model.
 pub const DEFAULT_MAX_OUTBOX_ENTRIES: usize = 1000;
 
 /// Helper to format the lexeme for a periodic progress heartbeat.
@@ -217,9 +220,10 @@ pub enum NuvioDrainOutcome {
     Rejected(Box<FastiProblem>),
 }
 
-/// Client-side durable outbox for Nuvio.
+/// Process-local bounded FIFO model for Nuvio-shaped observations.
 ///
-/// Buffers observations when offline and drains them sequentially upon reconnect.
+/// Buffers commands when the supplied port rejects dispatch and drains them
+/// sequentially. The queue does not survive a process restart.
 #[derive(Debug)]
 pub struct NuvioOutbox {
     queue: VecDeque<NuvioOutboxEntry>,
@@ -232,12 +236,12 @@ impl Default for NuvioOutbox {
     }
 }
 
-/// The outcome of dispatching an observation through Nuvio's driver.
+/// The outcome of dispatching an observation through a supplied application port.
 #[derive(Debug)]
 pub enum NuvioDispatchResult {
-    /// The command was sent directly to Fasti and accepted.
+    /// The supplied port accepted the command.
     Dispatched(Box<AcceptObservationOutcome>),
-    /// Fasti was unreachable or rejected the request; the command was buffered in the outbox.
+    /// The supplied port rejected the request; the command was buffered in memory.
     Buffered,
 }
 
