@@ -117,8 +117,8 @@ define_capabilities!(
         Implemented,
         Scoped,
         [ObservationAccept],
-        [CapacityExceeded, Forbidden, IdempotencyConflict, InvalidObservation, MalformedJson, PayloadTooLarge, UnsupportedMediaType, ValidationFailed],
-        [AuthenticationFailed, EvidenceNotFound, IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, CapacityExceeded, Forbidden, IdempotencyConflict, IntegrityFailed, InvalidObservation, MalformedJson, PayloadTooLarge, StorageUnavailable, UnsupportedMediaType, ValidationFailed],
+        [EvidenceNotFound]
     ),
     (ReplayReceipt, B1, B2, Finalized, FixtureOnly, Scoped, [ReceiptRead], [Forbidden, ReceiptNotFound], [AuthenticationFailed, IntegrityFailed, StorageUnavailable]),
     (StreamReceipts, B1, B2, Finalized, FixtureOnly, Scoped, [ReceiptRead], [Forbidden, ReceiptNotFound], [AuthenticationFailed, CursorExpired, IntegrityFailed, StorageUnavailable]),
@@ -238,6 +238,20 @@ mod tests {
         assert!(enrollment
             .iter()
             .any(|code| *code == ProblemCode::BootstrapClosed));
+
+        let observation = CapabilityKey::AcceptObservation.allowed_problem_codes();
+        for code in [
+            ProblemCode::AuthenticationFailed,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StorageUnavailable,
+        ] {
+            assert!(observation.contains(&code));
+            assert!(observation.iter().any(|published| *published == code));
+        }
+        assert!(observation.contains(&ProblemCode::EvidenceNotFound));
+        assert!(!observation
+            .iter()
+            .any(|published| *published == ProblemCode::EvidenceNotFound));
 
         let review = CapabilityKey::InspectReview.allowed_problem_codes();
         assert!(review.contains(&ProblemCode::AuthenticationFailed));
