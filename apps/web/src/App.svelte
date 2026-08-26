@@ -15,7 +15,7 @@
   } from "@fasti/ui/status";
   import FastiWorkbench from "@fasti/ui/workbench";
   import "@tabler/core/dist/css/tabler.min.css";
-  import { onMount, tick, type Component } from "svelte";
+  import { onMount, tick } from "svelte";
   import markDark from "../../../brand/logos/fasti-mark-dark.svg?url";
   import markLight from "../../../brand/logos/fasti-mark-light.svg?url";
   import { applyTheme, resolveTheme, type Theme } from "./theme.js";
@@ -33,8 +33,7 @@
   ).env;
   const buildApiUrl = buildEnvironment.VITE_FASTI_API_URL?.trim();
   const buildPublicUrl = buildEnvironment.VITE_FASTI_PUBLIC_URL?.trim();
-  const configuredFallback =
-    buildEnvironment.VITE_FASTI_PORT_FALLBACK ?? "fail";
+  const configuredFallback = buildEnvironment.VITE_FASTI_PORT_FALLBACK ?? "fail";
   if (configuredFallback !== "auto" && configuredFallback !== "fail") {
     throw new TypeError("VITE_FASTI_PORT_FALLBACK must be auto or fail");
   }
@@ -71,10 +70,7 @@
       if (saved === "workbench") return "workbench";
       if (saved === "status") return "status";
     } catch {}
-    // Playwright contract testing runs on port 4173 with root path for local status verification
-    if (window.location.port === "4173" && path === "/") {
-      return "status";
-    }
+    if (window.location.port === "4173" && path === "/") return "status";
     return "workbench";
   }
 
@@ -106,8 +102,7 @@
     return {
       title: "The local service is unavailable",
       detail: "Fasti did not answer on the configured service URL.",
-      recovery:
-        "Check the network settings, start the service, then try again.",
+      recovery: "Check the network settings, start the service, then try again.",
     };
   }
 
@@ -150,8 +145,7 @@
         candidate.detail ??
         "This interface must run inside the trusted Fasti desktop host.",
       next_action:
-        candidate.next_action ??
-        "Open the Fasti desktop application and try again.",
+        candidate.next_action ?? "Open the Fasti desktop application and try again.",
     };
     setupState = "blocked";
   }
@@ -167,13 +161,18 @@
           invoke("test_endpoint_connection", { input: { endpoint } }),
         providerCredentialStatus: () => invoke("provider_credential_status"),
         saveProviderCredential: (provider, credential) =>
-          invoke("save_provider_credential", {
-            input: { provider, credential },
-          }),
+          invoke("save_provider_credential", { input: { provider, credential } }),
         deleteProviderCredential: (provider) =>
           invoke("delete_provider_credential", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
+        listApiClients: () => invoke("list_api_clients"),
+        createApiClient: (scopes) =>
+          invoke("create_api_client", { input: { scopes } }),
+        revokeApiClient: (credentialId) =>
+          invoke("revoke_api_client", {
+            input: { credential_id: credentialId },
+          }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
       };
@@ -185,10 +184,8 @@
 
   function openWorkbench(): void {
     activeSurface = "workbench";
-    if (typeof window !== "undefined") {
-      if (window.location.hash) {
-        window.history.replaceState(null, "", window.location.pathname);
-      }
+    if (typeof window !== "undefined" && window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname);
     }
     try {
       localStorage.setItem("fasti-surface", "workbench");
