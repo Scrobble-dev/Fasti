@@ -31,7 +31,7 @@ export interface CastMember {
 export interface CrewMember {
   readonly id: string;
   readonly name: string;
-  readonly role: string; // Director, Writer, Composer, Producer
+  readonly role: string;
   readonly profileUrl?: string;
 }
 
@@ -57,15 +57,15 @@ export interface SeasonItem {
 }
 
 export interface MediaRecord {
-  readonly id: string; // rec_01K...
+  readonly id: string;
   title: string;
   originalTitle?: string;
   mediaKind: MediaKind;
   customTypeName?: string;
   releaseYear?: number;
   airDates?: string;
-  format?: string; // TV, Movie, OVA, Miniseries, Hardcover, LP
-  statusText?: string; // Ended, Returning Series, In Production
+  format?: string;
+  statusText?: string;
   country?: string;
   languages?: string[];
   runtimeMinutes?: number;
@@ -73,12 +73,8 @@ export interface MediaRecord {
   posterUrl?: string;
   backdropUrl?: string;
   status: WatchStatus;
-  userRating?: number; // 1-10
-  communityRating?: {
-    score: number;
-    votes: number;
-    source: string;
-  };
+  userRating?: number;
+  communityRating?: { score: number; votes: number; source: string };
   progressSeconds?: number;
   totalDurationSeconds?: number;
   progressEpisodes?: number;
@@ -93,12 +89,12 @@ export interface MediaRecord {
   seasons?: SeasonItem[];
   cast?: CastMember[];
   crew?: CrewMember[];
-  customFields?: Record<string, any>;
+  customFields?: Record<string, unknown>;
   collectionName?: string;
 }
 
 export interface ChronicleOccurrence {
-  readonly id: string; // occ_01K...
+  readonly id: string;
   readonly recordId: string;
   readonly title: string;
   readonly mediaKind: MediaKind;
@@ -132,15 +128,21 @@ export interface ReconciliationCase {
 }
 
 export interface CustomFieldDefinition {
-  readonly key: string; // e.g. games.gog_product_id
+  readonly key: string;
   readonly label: string;
   readonly targetType: MediaKind | "all";
   readonly valueType:
-    "string" | "number" | "boolean" | "date" | "url" | "identifier";
+    | "string"
+    | "number"
+    | "boolean"
+    | "date"
+    | "url"
+    | "identifier";
   readonly registeredNamespace?: string;
   readonly isFilterable: boolean;
 }
 
+/** Legacy prototype shape. Do not use for credential persistence. */
 export interface ScopedApiToken {
   readonly id: string;
   readonly name: string;
@@ -151,8 +153,22 @@ export interface ScopedApiToken {
   readonly lastUsedAt?: string;
 }
 
-export type ManagedSettingSource =
-  "default" | "saved" | "build" | "environment";
+export interface ApiClientCredentialSummary {
+  readonly client_id: string;
+  readonly credential_id: string;
+  readonly profile_id: string;
+  readonly scopes: string[];
+  readonly active: boolean;
+  readonly created_at: string;
+  readonly revoked_at?: string | null;
+}
+
+export interface CreatedApiClientCredential extends ApiClientCredentialSummary {
+  /** Returned only once by the trusted host. Never persist this value. */
+  readonly credential: string;
+}
+
+export type ManagedSettingSource = "default" | "saved" | "build" | "environment";
 
 export interface ManagedSetting<T> {
   readonly value: T;
@@ -236,22 +252,15 @@ export interface ProviderSearchCandidate {
 
 export interface WorkbenchHost {
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
-  saveNetworkConfiguration(
-    input: SaveNetworkConfigurationRequest,
-  ): Promise<NetworkConfiguration>;
+  saveNetworkConfiguration(input: SaveNetworkConfigurationRequest): Promise<NetworkConfiguration>;
   testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
-  saveProviderCredential(
-    provider: string,
-    credential: string,
-  ): Promise<ProviderCredentialStatus[]>;
-  deleteProviderCredential(
-    provider: string,
-  ): Promise<ProviderCredentialStatus[]>;
-  searchProvider(
-    provider: string,
-    query: string,
-  ): Promise<ProviderSearchCandidate[]>;
+  saveProviderCredential(provider: string, credential: string): Promise<ProviderCredentialStatus[]>;
+  deleteProviderCredential(provider: string): Promise<ProviderCredentialStatus[]>;
+  searchProvider(provider: string, query: string): Promise<ProviderSearchCandidate[]>;
+  listApiClients?(): Promise<ApiClientCredentialSummary[]>;
+  createApiClient?(scopes: string[]): Promise<CreatedApiClientCredential>;
+  revokeApiClient?(credentialId: string): Promise<ApiClientCredentialSummary[]>;
   clearSearchCache?(): void;
   getSearchCacheSize?(): number;
   listReviews?(): Promise<ReviewItem[]>;
@@ -267,7 +276,8 @@ export interface ReviewItem {
 }
 
 export type ReviewResolutionTargetInput =
-  { kind: "existing"; value: string } | { kind: "new"; value: string };
+  | { kind: "existing"; value: string }
+  | { kind: "new"; value: string };
 
 export interface ExternalIdentifierClaimInput {
   readonly namespace: string;
