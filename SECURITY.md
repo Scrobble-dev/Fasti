@@ -24,14 +24,19 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Credential authentication binds the selected profile, client, grant, credential epoch, and workspace. Ambiguous active grants, ungranted profiles, revoked state, and cross-workspace grants fail closed.
 - Evidence upload authorizes before temporary-file creation, enforces concurrent and byte budgets, hashes while streaming, rechecks authorization before durable promotion, and verifies existing content before deduplication.
 - Operation receipts bind workspace, client, operation, capability, and semantic digest. Replay and receipt streams remain profile/client scoped and bounded.
-- B2-only bootstrap, authentication, integrity, storage, cursor, evidence, identity, and review failures are accepted by the internal kernel policy but remain absent from finalized B1 public contract output.
+- Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 - `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
-These controls make the development baseline and B2 review implementation safer; they do not mount B2 in production or make Fasti a supported service.
+These controls make the development baseline and B2 review implementation safer. Production mounts only the durable loopback setup slice when `FASTI_DATA_ROOT` is explicit. This does not make Fasti a supported service.
+
+## Temporary dependency exception
+
+The desktop crate inherits `glib 0.18.5` and `RUSTSEC-2024-0429` from Tauri 2's GTK3 stack. Fasti does not depend on `glib` directly. The desktop lockfile audit ignores only this advisory and still fails for every other advisory. Remove the exception when the [upstream GTK4 migration](https://github.com/tauri-apps/tauri-docs/issues/3143) is available.
 
 ## Security Assurance Case
 
 Fasti provides a formal security assurance case structured around four core pillars:
+
 1. **Threat Model & Protected Assets**: Local identity integrity, raw immutable observations, authorization grants, deterministic receipts, and private runner credentials.
 2. **Trust Boundaries & Mediation**: Strict boundary between untrusted network/IPC inputs and the domain kernel. The production daemon binds loopback by default with link-local SSRF guards.
 3. **Secure Design Principles**: Fail-closed authorization, economy of mechanism, complete mediation, least privilege, and zero runtime telemetry.

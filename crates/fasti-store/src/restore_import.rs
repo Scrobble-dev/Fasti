@@ -3190,6 +3190,7 @@ mod tests {
         let rejected = restored
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::VerifyWorkspace,
                 SecretMaterial::try_from_hex(&fixture.source_credential_hex)
                     .expect("copy source credential"),
             ))
@@ -3201,6 +3202,7 @@ mod tests {
         let recovered_access = restored
             .authenticate_credential(AuthenticateCredentialQuery::new(
                 RequestCorrelationId::new_v7(),
+                CapabilityKey::VerifyWorkspace,
                 SecretMaterial::from_bytes([7_u8; 32]),
             ))
             .expect("recovery credential authenticates");

@@ -32,6 +32,7 @@ class BundleError(RuntimeError):
 
 
 def run_checked(parts: list[str | Path], *, cwd: Path = ROOT) -> str:
+    """Run a command and return stdout, raising CaptureError on failure."""
     result = subprocess.run(
         [str(part) for part in parts],
         cwd=cwd,
@@ -46,6 +47,7 @@ def run_checked(parts: list[str | Path], *, cwd: Path = ROOT) -> str:
 
 
 def sha256_file(path: Path) -> str:
+    """Calculate the SHA-256 hash of a file."""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -54,6 +56,7 @@ def sha256_file(path: Path) -> str:
 
 
 def snapshot_regular_file(source_path: Path, destination_path: Path, label: str) -> None:
+    """Snapshot a regular file through no-follow descriptor with integrity checks."""
     no_follow = getattr(os, "O_NOFOLLOW", None)
     if no_follow is None:
         raise BundleError(
@@ -97,6 +100,7 @@ def snapshot_regular_file(source_path: Path, destination_path: Path, label: str)
 
 
 def source_identity(cwd: Path = ROOT) -> dict[str, str]:
+    """Verify clean Git tree and return source identity metadata."""
     if run_checked(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=cwd):
         raise BundleError("runner handoff requires a clean source tree")
     return {
@@ -117,6 +121,7 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def validate_manifest_source(source: str) -> dict[str, Any]:
+    """Parse and validate manifest JSON from source string."""
     try:
         manifest = json.loads(source, object_pairs_hook=_reject_duplicate_keys)
     except BundleError:
@@ -140,10 +145,12 @@ def validate_manifest_source(source: str) -> dict[str, Any]:
 
 
 def validate_manifest(manifest: Any) -> dict[str, Any]:
+    """Validate a manifest object by serializing and parsing."""
     return validate_manifest_source(json.dumps(manifest))
 
 
 def verify_bundle(bundle_path: Path, manifest_path: Path) -> dict[str, Any]:
+    """Verify bundle integrity against its manifest."""
     if not bundle_path.is_file() or not manifest_path.is_file():
         raise BundleError("bundle and manifest files are both required")
     with tempfile.TemporaryDirectory(prefix="fasti-b1-bundle-snapshot-") as name:
@@ -193,6 +200,7 @@ def verify_bundle(bundle_path: Path, manifest_path: Path) -> dict[str, Any]:
 
 
 def create_bundle(output: Path, repository: Path = ROOT) -> None:
+    """Create a runner bundle from clean Git repository."""
     if not BUNDLE_BASENAME.fullmatch(output.name):
         raise BundleError("output must be a safe basename ending in .bundle")
     repository = repository.resolve()
@@ -240,6 +248,7 @@ def create_bundle(output: Path, repository: Path = ROOT) -> None:
 
 
 def unpack_bundle(bundle_path: Path, manifest_path: Path, destination: Path) -> None:
+    """Unpack a verified bundle into destination directory."""
     destination = Path(os.path.abspath(destination))
     if destination.exists() or destination.is_symlink():
         raise BundleError(f"refusing to replace existing destination: {destination}")
@@ -262,6 +271,7 @@ def unpack_bundle(bundle_path: Path, manifest_path: Path, destination: Path) -> 
 
 
 def self_test() -> None:
+    """Run self-tests for bundle creation and verification."""
     fixture = {
         "$schema": SCHEMA_URL,
         "schema_version": VERSION,
@@ -312,6 +322,7 @@ def self_test() -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for the bundle packaging tool."""
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     create = subparsers.add_parser("create")
@@ -328,6 +339,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    """Main entry point for the bundle packaging tool."""
     args = parse_args()
     try:
         if args.command == "create":

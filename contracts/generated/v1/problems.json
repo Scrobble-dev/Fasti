@@ -4,6 +4,24 @@
   "problems": [
     {
       "capability_id": "client.enroll",
+      "code": "bootstrap_closed",
+      "detail": "the one-time enrollment proof is invalid, expired, or already consumed",
+      "next_actions": [
+        {
+          "id": "inspect_node_status",
+          "label": "Inspect the local node status before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Bootstrap closed",
+      "type": "https://fasti.scrobble.dev/v1/problems/bootstrap-closed"
+    },
+    {
+      "capability_id": "client.enroll",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -19,6 +37,24 @@
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "client.enroll",
@@ -55,6 +91,24 @@
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "client.enroll",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "client.enroll",
@@ -598,6 +652,24 @@
     },
     {
       "capability_id": "node.initialize",
+      "code": "already_initialized",
+      "detail": "the local node has already completed its one-time initialization",
+      "next_actions": [
+        {
+          "id": "use_existing_node",
+          "label": "Use the existing node and enrolled client"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Node already initialized",
+      "type": "https://fasti.scrobble.dev/v1/problems/already-initialized"
+    },
+    {
+      "capability_id": "node.initialize",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
       "next_actions": [
@@ -613,6 +685,24 @@
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "node.initialize",
@@ -649,6 +739,24 @@
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "node.initialize",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "node.initialize",

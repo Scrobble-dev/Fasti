@@ -88,6 +88,7 @@ class CaptureError(RuntimeError):
 
 
 def command_text(args: list[str]) -> str:
+    """Convert a command argument list to a shell-quoted string representation."""
     return shlex.join(str(part) for part in args)
 
 
@@ -98,6 +99,7 @@ def run_checked(
     timeout: float = 30,
     input_text: str | None = None,
 ) -> str:
+    """Run a command and return stdout, raising CaptureError on failure."""
     result = subprocess.run(
         args,
         cwd=cwd,
@@ -114,6 +116,7 @@ def run_checked(
 
 
 def require_command(name: str) -> None:
+    """Verify that a required command exists in PATH, raising CaptureError if not."""
     if shutil.which(name) is None:
         raise CaptureError(f"required command is unavailable: {name}")
 
@@ -165,11 +168,13 @@ def sha256_regular_file(path: Path, label: str) -> tuple[str, int]:
 
 
 def sha256_file(path: Path) -> str:
+    """Calculate the SHA-256 hash of a file."""
     digest, _ = sha256_regular_file(path, "file")
     return digest
 
 
 def hash_retained_os_image(path: Path) -> dict[str, Any]:
+    """Hash a retained OS image file and return its metadata."""
     digest, size = sha256_regular_file(path, "retained OS image")
     if size <= 0:
         raise CaptureError(f"retained OS image is empty: {path}")
@@ -177,6 +182,7 @@ def hash_retained_os_image(path: Path) -> dict[str, Any]:
 
 
 def parse_os_release() -> str:
+    """Extract the OS description from /etc/os-release for runner fingerprint."""
     path = Path("/etc/os-release")
     if not path.is_file():
         raise CaptureError("/etc/os-release is required for the runner fingerprint")
@@ -193,6 +199,7 @@ def parse_os_release() -> str:
 
 
 def parse_os_image() -> dict[str, str | None]:
+    """Parse OS image metadata from /etc/os-release for fingerprint validation."""
     path = Path("/etc/os-release")
     if not path.is_file():
         raise CaptureError("/etc/os-release is required for the OS image fingerprint")
@@ -218,6 +225,7 @@ def parse_os_image() -> dict[str, str | None]:
 
 
 def reject_placeholder(label: str, value: str) -> str:
+    """Validate that a value is meaningful and not a placeholder, returning normalized form."""
     normalized = " ".join(value.split())
     if len(normalized) < 3 or not re.search(r"[A-Za-z0-9]", normalized):
         raise CaptureError(f"{label} must be a meaningful stable value")
@@ -229,6 +237,7 @@ def reject_placeholder(label: str, value: str) -> str:
 
 
 def read_machine_id() -> bytes:
+    """Read and validate the system machine-id from standard locations."""
     for path in [Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")]:
         try:
             value = path.read_text(encoding="ascii").strip()
@@ -245,6 +254,7 @@ def stable_machine_fingerprint(
     dmi: dict[str, str],
     storage_fingerprint_sha256: str,
 ) -> str:
+    """Derive a stable privacy-safe machine fingerprint from hardware identifiers."""
     payload = json.dumps(
         {
             "machine_id": read_machine_id().decode("ascii"),
@@ -260,6 +270,7 @@ def stable_machine_fingerprint(
 
 
 def parse_cpu_model() -> str:
+    """Extract the CPU model string from /proc/cpuinfo."""
     cpuinfo = Path("/proc/cpuinfo")
     if not cpuinfo.is_file():
         raise CaptureError("/proc/cpuinfo is required for the runner fingerprint")
@@ -273,6 +284,7 @@ def parse_cpu_model() -> str:
 
 
 def parse_device_tree_identity() -> dict[str, Any] | None:
+    """Parse device-tree model and compatible strings for embedded device identification."""
     bases = [Path("/proc/device-tree"), Path("/sys/firmware/devicetree/base")]
     for base in bases:
         try:
@@ -297,6 +309,7 @@ def parse_device_tree_identity() -> dict[str, Any] | None:
 
 
 def parse_device_model() -> str | None:
+    """Extract the device model string from device-tree if available."""
     identity = parse_device_tree_identity()
     return identity["model"] if identity is not None else None
 
@@ -322,6 +335,7 @@ def derive_hardware_profile(
 
 
 def parse_cpu_flags() -> set[str]:
+    """Extract CPU flags from /proc/cpuinfo for virtualization detection."""
     path = Path("/proc/cpuinfo")
     if not path.is_file():
         raise CaptureError("/proc/cpuinfo is required for virtualization checks")
@@ -334,6 +348,7 @@ def parse_cpu_flags() -> set[str]:
 
 
 def parse_dmi_identity() -> dict[str, str]:
+    """Extract DMI/SMBIOS system identification fields from sysfs."""
     result: dict[str, str] = {}
     for field in ["sys_vendor", "product_name", "product_version", "board_vendor", "board_name"]:
         path = Path("/sys/class/dmi/id") / field
@@ -347,6 +362,7 @@ def parse_dmi_identity() -> dict[str, str]:
 
 
 def parse_firmware_identity(hardware_profile: str) -> dict[str, str]:
+    """Collect firmware version information based on hardware profile."""
     if hardware_profile == "raspberry_pi_5_champion":
         require_command("vcgencmd")
         version = run_checked(["vcgencmd", "version"])
@@ -519,6 +535,7 @@ def top_level_block_device(source: str) -> str:
 
 
 def usb_link_speed_mbps(block_device: str) -> float | None:
+    """Determine USB link speed in Mbps for a block device if connected via USB."""
     sys_device = Path("/sys/class/block") / block_device / "device"
     try:
         resolved = sys_device.resolve(strict=True)
@@ -536,6 +553,7 @@ def usb_link_speed_mbps(block_device: str) -> float | None:
 
 
 def udev_storage_properties(block_device: str) -> dict[str, str]:
+    """Query udev for storage device properties to aid classification."""
     require_command("udevadm")
     output = run_checked(
         ["udevadm", "info", "--query=property", "--name", f"/dev/{block_device}"]
@@ -561,6 +579,7 @@ def udev_storage_properties(block_device: str) -> dict[str, str]:
 def classify_storage(
     transport: str, rotational: bool, udev: dict[str, str]
 ) -> tuple[str, list[str]]:
+    """Classify storage device type based on transport, rotation, and udev properties."""
     if rotational:
         return "hdd", ["lsblk.ROTA=1"]
     flash_markers = [
@@ -582,6 +601,7 @@ def classify_storage(
 
 
 def parse_storage_identity() -> tuple[dict[str, Any], str]:
+    """Collect root filesystem storage device identity and derive a fingerprint."""
     require_command("findmnt")
     require_command("lsblk")
     root_fields = run_checked(["findmnt", "-n", "-o", "SOURCE,FSTYPE,OPTIONS", "-T", "/"])
@@ -641,6 +661,7 @@ def parse_storage_identity() -> tuple[dict[str, Any], str]:
 
 
 def parse_pi_overclock_configuration() -> dict[str, Any]:
+    """Check Raspberry Pi overclock configuration for compliance with profile requirements."""
     require_command("vcgencmd")
     output = run_checked(["vcgencmd", "get_config", "int"])
     configured: dict[str, int] = {}
@@ -672,6 +693,7 @@ def parse_pi_overclock_configuration() -> dict[str, Any]:
 
 
 def parse_pi_active_cooling() -> dict[str, Any]:
+    """Verify that a kernel-visible active fan cooling device is present for Raspberry Pi."""
     observed: list[str] = []
     for path in sorted(Path("/sys/class/thermal").glob("cooling_device*/type")):
         try:
@@ -699,6 +721,7 @@ def validate_profile_requirements(
     storage: dict[str, Any],
     retained_os_image: dict[str, Any],
 ) -> dict[str, Any]:
+    """Validate hardware and OS configuration against profile-specific requirements."""
     if hardware_profile == "raspberry_pi_5_champion":
         policy = PI_PROFILE
         if architecture not in policy["architectures"]:
@@ -778,6 +801,7 @@ def validate_profile_requirements(
 
 
 def detect_systemd_virtualization() -> str:
+    """Detect virtualization status using systemd-detect-virt."""
     require_command("systemd-detect-virt")
     result = subprocess.run(
         ["systemd-detect-virt"],
@@ -802,6 +826,7 @@ def physicality_evidence(
     systemd_virtualization: str,
     device_tree: dict[str, Any] | None,
 ) -> dict[str, Any]:
+    """Collect cross-checked evidence that hardware is physical not virtualized."""
     if hardware_profile == "raspberry_pi_5_champion":
         required_compatible = set(PI_PROFILE["device_tree"]["required_compatible"])
         if systemd_virtualization != PI_PROFILE["systemd_detect_virt"]:
@@ -869,6 +894,7 @@ def physicality_evidence(
 
 
 def parse_total_memory_bytes() -> int:
+    """Parse total system memory in bytes from /proc/meminfo."""
     meminfo = Path("/proc/meminfo")
     if not meminfo.is_file():
         raise CaptureError("/proc/meminfo is required for the runner fingerprint")
@@ -881,6 +907,7 @@ def parse_total_memory_bytes() -> int:
 
 
 def ensure_clean_tree() -> tuple[str, str, str]:
+    """Verify Git tree is clean and return commit, tree, and contract object IDs."""
     status = run_checked(["git", "status", "--porcelain=v1", "--untracked-files=all"])
     if status:
         raise CaptureError(
@@ -895,6 +922,7 @@ def ensure_clean_tree() -> tuple[str, str, str]:
 
 
 def local_docker_socket_path(endpoint: str) -> Path:
+    """Validate and return the Docker Unix socket path from an endpoint string."""
     if not endpoint.startswith("unix://"):
         raise CaptureError(
             f"Docker must use a demonstrably local Unix socket; effective endpoint was {endpoint!r}"
@@ -912,6 +940,7 @@ def local_docker_socket_path(endpoint: str) -> Path:
 
 
 def verify_local_docker() -> dict[str, str]:
+    """Verify Docker is using a local Unix socket and return connection metadata."""
     context = run_checked(["docker", "context", "show"])
     configured_endpoint = json.loads(
         run_checked(
@@ -937,6 +966,7 @@ def verify_local_docker() -> dict[str, str]:
 
 
 def host_architecture() -> tuple[str, str]:
+    """Detect and normalize host architecture for artifact capture."""
     architecture = {
         "AMD64": ("x86_64", "linux/amd64"),
         "x86_64": ("x86_64", "linux/amd64"),
@@ -949,6 +979,7 @@ def host_architecture() -> tuple[str, str]:
 
 
 def inspect_bound_image(image_ref: str, expected_source: dict[str, str]) -> dict[str, Any]:
+    """Inspect Docker image and verify its source labels match expected values."""
     documents = json.loads(run_checked(["docker", "image", "inspect", image_ref]))
     if not isinstance(documents, list) or len(documents) != 1:
         raise CaptureError(f"Docker returned an unexpected image inspection for {image_ref!r}")
@@ -972,6 +1003,7 @@ def inspect_bound_image(image_ref: str, expected_source: dict[str, str]) -> dict
 def create_exact_git_archive_context(
     destination: Path, source_root: Path = ROOT
 ) -> dict[str, Any]:
+    """Create a verifier-owned build context from exact HEAD Git archive."""
     if destination.exists() or destination.is_symlink():
         raise CaptureError(f"verifier-owned build context must not already exist: {destination}")
     destination.mkdir(mode=0o700)
@@ -1029,6 +1061,7 @@ def create_exact_git_archive_context(
 
 
 def governed_build_image(args: argparse.Namespace, context: dict[str, Any]) -> list[str]:
+    """Build OCI image from governed Dockerfile and verify source labels."""
     with tempfile.TemporaryDirectory(prefix="fasti-b1-git-archive-") as temp_name:
         build_context = Path(temp_name) / "context"
         provenance = create_exact_git_archive_context(build_context)
@@ -1080,6 +1113,7 @@ def governed_build_image(args: argparse.Namespace, context: dict[str, Any]) -> l
 
 
 def verify_capture_inputs_unchanged(args: argparse.Namespace, context: dict[str, Any]) -> None:
+    """Verify that source tree and bound image remain unchanged since preflight."""
     commit, tree, contract_ref = ensure_clean_tree()
     source = context["source"]
     observed_source = {
@@ -1323,6 +1357,7 @@ def preflight(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def process_tree(root_pid: int) -> list[int]:
+    """Build a list of all process IDs in the tree rooted at the given PID."""
     pending = [root_pid]
     seen: set[int] = set()
     while pending:
@@ -1344,6 +1379,7 @@ def process_tree(root_pid: int) -> list[int]:
 
 
 def process_rss_bytes(pid: int) -> int:
+    """Read resident set size in bytes for a given process ID."""
     try:
         lines = Path(f"/proc/{pid}/status").read_text(encoding="ascii").splitlines()
     except (FileNotFoundError, PermissionError, ProcessLookupError):
@@ -1357,6 +1393,7 @@ def process_rss_bytes(pid: int) -> int:
 
 
 def process_cpu_runtime_ns(pid: int) -> int:
+    """Read CPU runtime in nanoseconds from process schedstat."""
     try:
         fields = Path(f"/proc/{pid}/schedstat").read_text(encoding="ascii").split()
     except (FileNotFoundError, PermissionError, ProcessLookupError):
@@ -1367,6 +1404,7 @@ def process_cpu_runtime_ns(pid: int) -> int:
 
 
 def validate_container_cgroup_identity(relative: str, container_id: str) -> None:
+    """Verify that container ID is valid and present in the cgroup path."""
     if re.fullmatch(r"[0-9a-f]{64}", container_id) is None:
         raise CaptureError(f"Docker returned an invalid container ID: {container_id!r}")
     if container_id not in relative:
@@ -1376,6 +1414,7 @@ def validate_container_cgroup_identity(relative: str, container_id: str) -> None
 
 
 def cgroup_path_for_pid(pid: int, container_id: str) -> Path:
+    """Resolve and validate the cgroup-v2 path for a container process."""
     try:
         lines = Path(f"/proc/{pid}/cgroup").read_text(encoding="ascii").splitlines()
     except (FileNotFoundError, PermissionError) as error:
@@ -1403,6 +1442,7 @@ def cgroup_path_for_pid(pid: int, container_id: str) -> Path:
 
 
 def cgroup_cpu_runtime_ns(path: Path) -> int:
+    """Read cgroup CPU usage in nanoseconds from cpu.stat."""
     for line in (path / "cpu.stat").read_text(encoding="ascii").splitlines():
         key, value = line.split(maxsplit=1)
         if key == "usage_usec":
@@ -1411,11 +1451,13 @@ def cgroup_cpu_runtime_ns(path: Path) -> int:
 
 
 def parse_cgroup_limit(path: Path) -> int | None:
+    """Parse cgroup limit value, returning None for 'max'."""
     value = path.read_text(encoding="ascii").strip()
     return None if value == "max" else int(value)
 
 
 def cgroup_oom_kill_count(path: Path) -> int:
+    """Read OOM kill count from cgroup memory.events."""
     for line in (path / "memory.events").read_text(encoding="ascii").splitlines():
         key, value = line.split(maxsplit=1)
         if key == "oom_kill":
@@ -1424,6 +1466,7 @@ def cgroup_oom_kill_count(path: Path) -> int:
 
 
 def read_cgroup(path: Path) -> tuple[int, int, int, int | None, int | None, int]:
+    """Read memory and CPU metrics from a cgroup-v2 path."""
     current = int((path / "memory.current").read_text(encoding="ascii").strip())
     peak_text = (path / "memory.peak").read_text(encoding="ascii").strip()
     if peak_text == "max":
@@ -1439,7 +1482,10 @@ def read_cgroup(path: Path) -> tuple[int, int, int, int | None, int | None, int]
 
 
 class Sampler:
+    """Background thread that samples process and cgroup metrics at regular intervals."""
+
     def __init__(self, root_pid: int, interval_ms: int, cgroup_path: Path | None = None):
+        """Initialize sampler with root PID, sampling interval, and optional cgroup path."""
         self.root_pid = root_pid
         self.interval_seconds = interval_ms / 1000
         self.cgroup_path = cgroup_path
@@ -1452,9 +1498,11 @@ class Sampler:
         self._accumulated_runtime_ns = 0
 
     def start(self) -> None:
+        """Start the sampling thread."""
         self._thread.start()
 
     def stop(self) -> None:
+        """Stop the sampling thread and raise any captured errors."""
         self._stop.set()
         self._thread.join(timeout=5)
         if self._thread.is_alive():
@@ -1463,10 +1511,12 @@ class Sampler:
             raise CaptureError(f"measurement sampler failed: {self.error}") from self.error
 
     def records_snapshot(self) -> list[dict[str, Any]]:
+        """Return a thread-safe snapshot of collected measurement records."""
         with self._records_lock:
             return list(self.records)
 
     def is_running(self) -> bool:
+        """Check if sampler thread is still running without errors."""
         return self._thread.is_alive() and self.error is None
 
     def _sample(self) -> None:
@@ -1517,6 +1567,7 @@ class Sampler:
 
 
 def wait_for_file(path: Path, process: subprocess.Popen[Any], timeout: float, log_path: Path) -> None:
+    """Wait for a file to exist, failing if process exits or timeout expires."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.exists():
@@ -1530,6 +1581,7 @@ def wait_for_file(path: Path, process: subprocess.Popen[Any], timeout: float, lo
 
 
 def wait_steady(process_alive: callable, seconds: float) -> None:
+    """Wait for a steady observation period, failing if process exits."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if not process_alive():
@@ -1540,6 +1592,7 @@ def wait_steady(process_alive: callable, seconds: float) -> None:
 def steady_observation_span_ns(
     records: list[dict[str, Any]], ready_at_ns: int
 ) -> int:
+    """Calculate the time span of steady observations since ready timestamp."""
     timestamps = [
         int(record["at_ns"])
         for record in records
@@ -1554,6 +1607,7 @@ def wait_for_observed_steady_span(
     ready_at_ns: int,
     required_seconds: float,
 ) -> None:
+    """Wait until steady observations span the required window duration."""
     required_ns = round(required_seconds * 1_000_000_000)
     deadline = time.monotonic() + required_seconds + max(
         5.0, sampler.interval_seconds * 3
@@ -1582,6 +1636,7 @@ def wait_for_observed_steady_span(
 
 
 def stop_process_group(process: subprocess.Popen[Any]) -> None:
+    """Gracefully stop a process group with SIGTERM, escalating to SIGKILL if needed."""
     if process.poll() is not None:
         return
     try:
@@ -1608,6 +1663,7 @@ def metrics_from_records(
     idle_cpu_window: bool = False,
     startup_ready_at_ns: int | None = None,
 ) -> dict[str, Any]:
+    """Derive performance metrics from sampled measurement records."""
     if not records:
         raise CaptureError("no process-tree measurements were captured")
     steady = [record for record in records if int(record["at_ns"]) >= ready_at_ns]
@@ -1734,6 +1790,7 @@ def run_native_once(
     run_number: int,
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], list[str]]:
+    """Execute a single native scenario run and return measurements."""
     with tempfile.TemporaryDirectory(prefix=f"fasti-b1-{scenario_id}-") as temp_name:
         temp = Path(temp_name)
         ready = temp / "ready"
@@ -1854,6 +1911,7 @@ exit 92
 
 
 def docker_container_pid(name: str, timeout: float) -> int:
+    """Poll for and return the host PID of a Docker container."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         value = run_checked(
@@ -1868,6 +1926,7 @@ def docker_container_pid(name: str, timeout: float) -> int:
 
 
 def docker_running(name: str) -> bool:
+    """Check if a Docker container is currently running."""
     result = subprocess.run(
         ["docker", "inspect", "--format", "{{.State.Running}}", name],
         cwd=ROOT,
@@ -1879,6 +1938,7 @@ def docker_running(name: str) -> bool:
 
 
 def docker_logs(name: str) -> str:
+    """Retrieve container logs from Docker."""
     result = subprocess.run(
         ["docker", "logs", name],
         cwd=ROOT,
@@ -1897,6 +1957,7 @@ def oci_run_command(
     script: str,
     memory_limit_bytes: int | None = None,
 ) -> list[str]:
+    """Build Docker run command for container measurement with network isolation."""
     if re.fullmatch(r"sha256:[0-9a-f]{64}", immutable_image) is None:
         raise CaptureError(f"OCI measurement requires an immutable image ID, got {immutable_image!r}")
     command = [
@@ -1932,6 +1993,7 @@ def run_oci_once(
     run_number: int,
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], list[str], int | None]:
+    """Execute a single OCI container scenario run and return measurements."""
     suffix = uuid.uuid4().hex[:10]
     name = f"fasti-b1-{scenario_id.replace('_', '-')}-{os.getpid()}-{run_number}-{suffix}"
     commands: list[str] = []
@@ -2125,6 +2187,7 @@ exec /bin/sleep 3600
 
 
 def summarize(values: list[int | float]) -> dict[str, int | float]:
+    """Compute minimum, median, and maximum summary statistics."""
     return {
         "minimum": min(values),
         "median": statistics.median(values),
@@ -2133,6 +2196,7 @@ def summarize(values: list[int | float]) -> dict[str, int | float]:
 
 
 def scenario_summary(samples: list[dict[str, Any]], with_cgroup: bool) -> dict[str, Any]:
+    """Aggregate scenario samples into summary statistics across all fields."""
     result = {
         field: summarize([sample[field] for sample in samples])
         for field in [
@@ -2158,6 +2222,7 @@ def scenario_summary(samples: list[dict[str, Any]], with_cgroup: bool) -> dict[s
 
 
 def unique_in_order(values: list[str]) -> list[str]:
+    """Deduplicate a list while preserving insertion order."""
     seen: set[str] = set()
     result: list[str] = []
     for value in values:
@@ -2168,6 +2233,7 @@ def unique_in_order(values: list[str]) -> list[str]:
 
 
 def capture_scenario(scenario_id: str, args: argparse.Namespace) -> dict[str, Any]:
+    """Run and capture performance measurements for a specific scenario."""
     samples: list[dict[str, Any]] = []
     commands: list[str] = []
     exits: list[int | None] = []
@@ -2232,6 +2298,7 @@ def capture_scenario(scenario_id: str, args: argparse.Namespace) -> dict[str, An
 def publish_content_addressed_artifact(
     source: Path, receipt_parent: Path
 ) -> dict[str, Any]:
+    """Publish artifact to content-addressed storage, verifying integrity."""
     digest, size = sha256_regular_file(source, "compressed benchmark artifact")
     artifact_root = receipt_parent / "artifacts" / "sha256"
     current = receipt_parent
@@ -2268,6 +2335,7 @@ def saved_oci_layer_bytes(
     source: dict[str, Any],
     unpacked_safety_ceiling_bytes: int = SAVED_OCI_UNPACKED_SAFETY_CEILING_BYTES,
 ) -> int:
+    """Calculate unpacked layer size from Docker save archive with integrity checks."""
     image_digest = image_id.removeprefix("sha256:")
     if not re.fullmatch(r"[0-9a-f]{64}", image_digest):
         raise CaptureError("Docker save image ID must be an immutable sha256 digest")
@@ -2607,6 +2675,7 @@ def saved_oci_layer_bytes(
 def artifact_sizes(
     args: argparse.Namespace, context: dict[str, Any]
 ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
+    """Measure sizes of all build artifacts including binaries, OCI image, and contracts."""
     binary_size_command = [
         "docker",
         "run",
@@ -2726,7 +2795,9 @@ def artifact_sizes(
 
 
 def artifact_budget_verdicts(sizes: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate budget verdicts by comparing measured artifact sizes to limits."""
     def measured(budget: str, value: int, reason: str) -> dict[str, Any]:
+        """Helper to create a measured budget verdict entry."""
         limit = ARTIFACT_LIMITS[budget]
         return {
             "budget": budget,
@@ -2772,6 +2843,7 @@ def artifact_budget_verdicts(sizes: dict[str, Any]) -> list[dict[str, Any]]:
 def extract_native_fastid(
     args: argparse.Namespace, context: dict[str, Any], destination: Path
 ) -> list[str]:
+    """Extract native fastid binary from immutable OCI image."""
     name = f"fasti-b1-native-artifact-{os.getpid()}-{uuid.uuid4().hex[:10]}"
     create_command = [
         "docker",
@@ -2899,6 +2971,7 @@ def capture_bound(
     native_artifact_commands: list[str],
     governed_build_commands: list[str],
 ) -> None:
+    """Run bound capture workflow including all scenarios and artifact measurements."""
     budgets_bytes = BUDGETS_PATH.read_bytes()
     budgets_document = json.loads(budgets_bytes)
     memory_budgets = budgets_document["memory_bytes"]
@@ -2999,6 +3072,7 @@ def capture_bound(
 
 
 def capture(args: argparse.Namespace) -> None:
+    """Run the complete B1 performance capture workflow."""
     context = preflight(args)
     build_commands = governed_build_image(args, context)
     with tempfile.TemporaryDirectory(prefix="fasti-b1-native-artifact-") as temp_name:
@@ -3009,11 +3083,13 @@ def capture(args: argparse.Namespace) -> None:
 
 
 def self_test() -> None:
+    """Run the B1 benchmark harness self-test validation."""
     run_checked(["node", str(VALIDATOR_PATH), "--self-test"])
     print("PASS: B1 benchmark harness validator self-test")
 
 
 def capture_artifact_budgets(args: argparse.Namespace) -> None:
+    """Capture artifact size budgets for native and OCI builds."""
     if platform.system() != "Linux":
         raise CaptureError("B1 artifact budget capture is Linux-only")
     for command in ["docker", "git", "gzip", "node", "pnpm", "tar"]:
@@ -3087,6 +3163,7 @@ def capture_artifact_budgets(args: argparse.Namespace) -> None:
 
 
 def add_runner_arguments(command_parser: argparse.ArgumentParser, *, with_output: bool) -> None:
+    """Add common runner configuration arguments to an argument parser."""
     command_parser.add_argument(
         "--image",
         required=True,
@@ -3139,6 +3216,7 @@ def add_runner_arguments(command_parser: argparse.ArgumentParser, *, with_output
 
 
 def parser() -> argparse.ArgumentParser:
+    """Create the command-line argument parser for the B1 benchmark harness."""
     root = argparse.ArgumentParser(
         description="Capture B1 Fasti native process-tree and OCI cgroup-v2 performance evidence."
     )
@@ -3169,6 +3247,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def validate_arguments(args: argparse.Namespace) -> None:
+    """Validate and normalize command-line arguments."""
     if args.command == "artifact-capture":
         args.output = args.output.resolve()
         args.native_binary = args.native_binary.resolve()
@@ -3205,6 +3284,7 @@ def validate_arguments(args: argparse.Namespace) -> None:
 
 
 def preflight_requirements() -> list[dict[str, str]]:
+    """Return list of B1 benchmark prerequisites and required actions."""
     return [
         {
             "id": "physical_profile",
@@ -3235,6 +3315,7 @@ def preflight_requirements() -> list[dict[str, str]]:
 
 
 def preflight_json(args: argparse.Namespace) -> None:
+    """Execute preflight checks and output JSON status."""
     context = preflight(args)
     result = {
         "schema_version": "fasti.b1.performance-preflight.v1",
@@ -3262,6 +3343,7 @@ def preflight_json(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    """Main entry point for the B1 benchmark harness."""
     args = parser().parse_args()
     try:
         validate_arguments(args)

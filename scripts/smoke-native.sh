@@ -128,6 +128,46 @@ if payload.get("status") != "healthy" or not payload.get("version"):
     raise SystemExit(f"Unexpected network-denied health payload: {payload!r}")
 PY
 
+# 4. Prove the shipped loopback daemon can perform durable one-time bootstrap.
+# Secrets stay inside this process and are never written to logs or URLs.
+python3 - <<'"'"'PY'"'"'
+import http.client
+import json
+import re
+
+def post(path, payload):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    connection.request(
+        "POST",
+        path,
+        body=json.dumps(payload),
+        headers={"content-type": "application/json"},
+    )
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
+status, initialized = post("/api/v1/node/initialization", {})
+if status != 200 or not re.fullmatch(r"[0-9a-f]{64}", initialized.get("initialization_proof", "")):
+    raise SystemExit("Durable node initialization failed")
+
+status, enrolled = post(
+    "/api/v1/client-enrollments",
+    {"initialization_proof": initialized["initialization_proof"]},
+)
+if (
+    status != 200
+    or enrolled.get("credential_scheme") != "Bearer"
+    or not re.fullmatch(r"[0-9a-f]{64}", enrolled.get("credential", ""))
+):
+    raise SystemExit("Durable first-client enrollment failed")
+
+status, problem = post("/api/v1/node/initialization", {})
+if status != 409 or problem.get("code") != "already_initialized":
+    raise SystemExit("One-time node initialization did not close after enrollment")
+PY
+
 # Idle memory. scripts/smoke-oci.sh already holds the container path to this
 # budget; the native path was unbounded, so the readiness gate could pass with a
 # daemon over the 64 MiB idle target. Measured from /proc rather than enforced
@@ -147,5 +187,5 @@ if (( rss_kib > idle_limit_mib * 1024 )); then
   exit 1
 fi
 
-echo "native offline smoke: CLI guard, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+echo "native offline smoke: CLI guard, durable bootstrap, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
 ' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"

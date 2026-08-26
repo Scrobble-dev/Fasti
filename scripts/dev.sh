@@ -26,7 +26,7 @@ FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:$FASTI_PORT}"
 # configurable here without also changing that file.
 WEB_PORT=5173
 FASTI_IMAGE="${FASTI_IMAGE:-fasti:b0}"
-FASTI_PORT_FALLBACK="${FASTI_PORT_FALLBACK:-auto}"
+FASTI_PORT_FALLBACK="${FASTI_PORT_FALLBACK:-fail}"
 FASTI_CONTAINER_RUNTIME="${FASTI_CONTAINER_RUNTIME:-podman}"
 FASTI_PUBLIC_URL="${FASTI_PUBLIC_URL:-}"
 BOUND_ADDR_FILE="$RUNDIR/bound-addr"
@@ -39,6 +39,8 @@ if [[ -z "${FASTI_API_URL:-}" ]]; then
     *) FASTI_API_URL="http://$FASTI_LISTEN" ;;
   esac
 fi
+FASTI_API_URL="${FASTI_API_URL%/}"
+FASTI_PUBLIC_URL="${FASTI_PUBLIC_URL%/}"
 DEV_SCOPE="${FASTI_DEV_SCOPE:-$(basename "$PROJECT_ROOT")}"
 DEV_SCOPE="${DEV_SCOPE//[^A-Za-z0-9_.-]/-}"
 CONTAINER_NAME="fasti-dev-$DEV_SCOPE"
@@ -65,8 +67,10 @@ esac
 
 _validate_origin_url() {
   local label="$1"
-  local value="${2%/}"
+  local value="$2"
   local rest=""
+  local lower=""
+  local port=""
   case "$value" in
     http://*) rest="${value#http://}" ;;
     https://*) rest="${value#https://}" ;;
@@ -76,8 +80,31 @@ _validate_origin_url() {
     echo "$label must be an origin URL without credentials, path, query, or fragment" >&2
     return 1
   fi
+  if [[ "$rest" == \[* ]]; then
+    if [[ "$rest" =~ ^\[[^]]+\]$ ]]; then
+      :
+    elif [[ "$rest" =~ ^\[[^]]+\]:(.*)$ ]]; then
+      port="${BASH_REMATCH[1]}"
+    else
+      echo "$label must contain a valid host and optional port" >&2
+      return 1
+    fi
+  elif [[ "$rest" =~ ^[^:]+$ ]]; then
+    :
+  elif [[ "$rest" =~ ^[^:]+:(.*)$ ]]; then
+    port="${BASH_REMATCH[1]}"
+  else
+    echo "$label must contain a valid host and optional port" >&2
+    return 1
+  fi
+  if [[ -n "$port" ]]; then
+    _validate_port "$label port" "$port" || return 1
+  elif [[ "$rest" == *: ]]; then
+    _validate_port "$label port" "$port" || return 1
+  fi
   if [[ "$value" == http://* ]]; then
-    case "$rest" in
+    lower="${rest,,}"
+    case "$lower" in
       localhost|localhost:*|127.0.0.1|127.0.0.1:*|\[::1\]|\[::1\]:*) ;;
       *) echo "$label must use https for non-loopback hosts" >&2; return 1 ;;
     esac
@@ -95,14 +122,72 @@ _api_url_for_addr() {
   esac
 }
 
-_preferred_addr() {
-  case "$FASTI_LISTEN" in
-    0.0.0.0:*) printf '127.0.0.1:%s\n' "${FASTI_LISTEN##*:}" ;;
-    \[::\]:*) printf '[::1]:%s\n' "${FASTI_LISTEN##*:}" ;;
-    *) printf '%s\n' "$FASTI_LISTEN" ;;
-  esac
+_canonical_socket_addr() {
+  python3 - "$1" <<'PY'
+import ipaddress
+import sys
+
+value = sys.argv[1]
+if value.startswith("["):
+    end = value.find("]")
+    if end < 0 or value[end + 1 : end + 2] != ":":
+        raise SystemExit("invalid IPv6 socket address")
+    host = value[1:end]
+    port = value[end + 2 :]
+    address = f"[{ipaddress.ip_address(host).compressed}]"
+else:
+    host, port = value.rsplit(":", 1)
+    address = str(ipaddress.ip_address(host))
+port_number = int(port)
+if not 1 <= port_number <= 65535:
+    raise SystemExit("socket port must be between 1 and 65535")
+print(f"{address}:{port_number}")
+PY
 }
 
+_listener_fell_back() {
+  local preferred=""
+  preferred="$(_canonical_socket_addr "$FASTI_LISTEN")" || return 0
+  [[ "$1" != "$preferred" ]]
+}
+
+_memory_ceiling_mib() {
+  python3 - "$PROJECT_ROOT/benchmarks/b1/budgets.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    ceiling = json.load(source)["memory_bytes"]["absolute_ceiling"]
+if not isinstance(ceiling, int) or ceiling <= 0 or ceiling % (1024 * 1024):
+    raise SystemExit("absolute memory ceiling must be a positive whole MiB value")
+print(ceiling // (1024 * 1024))
+PY
+}
+
+NATIVE_SCOPE_RUNNER=()
+
+_configure_native_scope() {
+  local ceiling_mib=""
+  local ceiling_bytes=""
+  ceiling_mib="$(_memory_ceiling_mib)"
+  ceiling_bytes=$((ceiling_mib * 1024 * 1024))
+  local properties=(-p "MemoryMax=${ceiling_bytes}" -p "MemorySwapMax=0")
+  if systemd-run --user --scope --quiet "${properties[@]}" -- python3 -c '
+from pathlib import Path
+import sys
+
+entry = next(line for line in Path("/proc/self/cgroup").read_text().splitlines() if line.startswith("0::"))
+root = Path("/sys/fs/cgroup") / entry[3:].lstrip("/")
+valid = (root / "memory.max").read_text().strip() == sys.argv[1]
+valid = valid and (root / "memory.swap.max").read_text().strip() == "0"
+raise SystemExit(0 if valid else 1)
+  ' "$ceiling_bytes" 2>/dev/null; then
+    NATIVE_SCOPE_RUNNER=(systemd-run --user --scope --quiet "${properties[@]}" --)
+    return 0
+  fi
+  echo "Native mode requires a user cgroup v2 scope with a ${ceiling_mib} MiB memory ceiling and swap disabled. Start a user systemd session or use --podman." >&2
+  return 1
+}
 _wait_for_health() {
   local pid="${1:-}"
   for _ in {1..10}; do
@@ -137,7 +222,14 @@ _write_bound_addr() {
 }
 
 _process_identity() {
-  ps -p "$1" -o lstart= 2>/dev/null | sed 's/^ *//'
+  local stat=""
+  local fields=()
+  [[ -r "/proc/$1/stat" ]] || return 1
+  IFS= read -r stat < "/proc/$1/stat" || return 1
+  stat="${stat##*) }"
+  read -r -a fields <<< "$stat"
+  [[ ${#fields[@]} -gt 19 ]] || return 1
+  printf '%s\n' "${fields[19]}"
 }
 
 _write_pidfile() {
@@ -321,8 +413,10 @@ _container_port() {
 }
 
 _run_container() {
+  local ceiling_mib=""
+  ceiling_mib="$(_memory_ceiling_mib)"
   "$FASTI_CONTAINER_RUNTIME" run -d --name "$CONTAINER_NAME" --rm \
-    --memory 192m --memory-swap 192m \
+    --memory "${ceiling_mib}m" --memory-swap "${ceiling_mib}m" \
     --publish "$1" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
@@ -345,6 +439,10 @@ _start_container() {
     publish="127.0.0.1::8420"
     used_fallback=1
   fi
+  if ((used_fallback)) && { ((FASTI_API_URL_EXPLICIT)) || [[ -n "$FASTI_PUBLIC_URL" ]]; }; then
+    echo "The preferred port is occupied. Automatic fallback is unsafe with FASTI_API_URL or FASTI_PUBLIC_URL configured." >&2
+    return 1
+  fi
 
   echo "=== Launching Fasti $FASTI_CONTAINER_RUNTIME container ($CONTAINER_NAME) ==="
   mkdir -p "$DATADIR"
@@ -361,11 +459,6 @@ _start_container() {
       "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
       return 1
     }
-    if ((FASTI_API_URL_EXPLICIT)) || [[ -n "$FASTI_PUBLIC_URL" ]]; then
-      echo "The preferred port is occupied. Automatic fallback is unsafe with FASTI_API_URL or FASTI_PUBLIC_URL configured." >&2
-      "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-      return 1
-    fi
     FASTI_API_URL="http://127.0.0.1:$actual_port"
     echo "Preferred port $FASTI_PORT was occupied; using $actual_port on 127.0.0.1."
   fi
@@ -389,12 +482,13 @@ _start_native() {
   rm -f "$BOUND_ADDR_FILE"
 
   echo "=== 1. Compiling and starting Fasti daemon ==="
+  _configure_native_scope
   cargo build --locked --bin fastid
   export FASTI_LISTEN FASTI_API_URL FASTI_PORT_FALLBACK
   export FASTI_BOUND_ADDR_FILE="$BOUND_ADDR_FILE"
   export FASTI_DATA_ROOT="$DATADIR"
 
-  "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
+  "${NATIVE_SCOPE_RUNNER[@]}" "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!
   set +m
   _write_pidfile daemon "$daemon_pid"
@@ -405,7 +499,7 @@ _start_native() {
     echo "Fasti daemon did not publish its bound address; see .dev-logs/fastid.log" >&2
     return 1
   }
-  if [[ "$actual_addr" != "$(_preferred_addr)" ]]; then
+  if _listener_fell_back "$actual_addr"; then
     if ((FASTI_API_URL_EXPLICIT)) || [[ -n "$FASTI_PUBLIC_URL" ]]; then
       echo "The preferred port is occupied. Automatic fallback is unsafe with FASTI_API_URL or FASTI_PUBLIC_URL configured." >&2
       return 1
@@ -447,32 +541,140 @@ _start_native() {
 
 _self_test() {
   local old_rundir="$RUNDIR"
+  local ceiling_mib=""
+  local exec_comm=""
+  local exec_go=""
+  local exec_pid=""
+  local exec_ready=""
+  local leader_file=""
   RUNDIR="$(mktemp -d)"
-  trap 'rm -rf "$RUNDIR"' EXIT
-  bash -c 'trap "" TERM; sleep 10 & wait' &
-  local leader=$!
+  leader_file="$RUNDIR/leader"
+  exec_ready="$RUNDIR/exec-ready"
+  exec_go="$RUNDIR/exec-go"
+  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
+  # The values expand in the child shell.
+  # shellcheck disable=SC2016
+  setsid --fork --wait bash -c 'printf "%s\n" "$$" > "$1"; trap "" TERM; sleep 30 & wait' _ "$leader_file" 2>/dev/null &
+  local launcher=$!
+  for _ in {1..10}; do
+    [[ -s "$leader_file" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -s "$leader_file" ]]; then
+    kill "$launcher" 2>/dev/null || true
+    wait "$launcher" 2>/dev/null || true
+    echo "self-test process group did not report its leader" >&2
+    return 1
+  fi
+  local leader=""
+  leader="$(<"$leader_file")"
   _write_pidfile child "$leader"
   [[ "$(_tracked_pid child)" == "$leader" ]]
   _stop_pidfile child
-  wait "$leader" 2>/dev/null || true
-  ! kill -0 "$leader" 2>/dev/null
+  wait "$launcher" 2>/dev/null || true
+  if kill -0 "$leader" 2>/dev/null; then
+    echo "self-test process group survived forced cleanup" >&2
+    return 1
+  fi
+  bash -c 'printf "%s\n" "$$" > "$1"; while [[ ! -e "$2" ]]; do sleep 0.01; done; exec sleep 30' _ "$exec_ready" "$exec_go" &
+  exec_pid=$!
+  for _ in {1..20}; do
+    [[ -s "$exec_ready" ]] && break
+    sleep 0.01
+  done
+  [[ "$(<"$exec_ready")" == "$exec_pid" ]]
+  _write_pidfile exec-child "$exec_pid"
+  : > "$exec_go"
+  for _ in {1..20}; do
+    exec_comm="$(ps -p "$exec_pid" -o comm= 2>/dev/null)"
+    exec_comm="${exec_comm//[[:space:]]/}"
+    [[ "$exec_comm" == sleep ]] && break
+    sleep 0.01
+  done
+  if [[ "$(_tracked_pid exec-child 2>/dev/null || true)" != "$exec_pid" ]]; then
+    echo "self-test lost process identity after exec" >&2
+    return 1
+  fi
+  _stop_pidfile exec-child
+  wait "$exec_pid" 2>/dev/null || true
   printf '%s|invalid start time\n' "$$" > "$RUNDIR/stale.pid"
   _stop_pidfile stale
   [[ ! -e "$RUNDIR/stale.pid" ]]
-  ! FASTI_PORT=0 "$0" --status >/dev/null 2>&1
+  if FASTI_PORT=0 "$0" --status >/dev/null 2>&1; then
+    echo "self-test accepted invalid FASTI_PORT" >&2
+    return 1
+  fi
   local status_output
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 "$0" --status)"
   [[ "$status_output" == *"http://127.0.0.1:18420"* ]]
+  if FASTI_LISTEN=0.0.0.0:18420 _listener_fell_back 0.0.0.0:18420; then
+    echo "self-test treated the requested wildcard listener as a fallback" >&2
+    return 1
+  fi
+  if ! FASTI_LISTEN=0.0.0.0:18420 _listener_fell_back 127.0.0.1:18420; then
+    echo "self-test missed a changed listener" >&2
+    return 1
+  fi
   status_output="$(FASTI_LISTEN=127.0.0.1:18420 FASTI_API_URL=http://localhost:18421 "$0" --status)"
   [[ "$status_output" == *"http://localhost:18421"* ]]
+  if FASTI_LISTEN='[0:0:0:0:0:0:0:1]:18420' _listener_fell_back '[::1]:18420'; then
+    echo "self-test treated equivalent IPv6 listener text as a fallback" >&2
+    return 1
+  fi
+  if ! FASTI_LISTEN='[::1]:18420' _listener_fell_back '[::1]:18421'; then
+    echo "self-test missed an IPv6 listener fallback" >&2
+    return 1
+  fi
+  if FASTI_API_URL='http://userinfo-marker@127.0.0.1:18421?query-marker' "$0" --status >/dev/null 2>&1; then
+    echo "self-test accepted credentials or a query in FASTI_API_URL" >&2
+    return 1
+  fi
+  if FASTI_API_URL=http://127.0.0.1:70000 "$0" --status >/dev/null 2>&1; then
+    echo "self-test accepted an out-of-range FASTI_API_URL port" >&2
+    return 1
+  fi
+  if FASTI_API_URL=http://127.0.0.1:not-a-port "$0" --status >/dev/null 2>&1; then
+    echo "self-test accepted a nonnumeric FASTI_API_URL port" >&2
+    return 1
+  fi
+  status_output="$(FASTI_API_URL=http://127.0.0.1:18421/ "$0" --status)"
+  [[ "$status_output" == *"http://127.0.0.1:18421"* ]]
+  if FASTI_CONTAINER_RUNTIME=podman FASTI_LISTEN=0.0.0.0:18420 FASTI_PORT=18420 _start_container >/dev/null 2>&1; then
+    echo "self-test accepted an unsupported container listener" >&2
+    return 1
+  fi
   podman() { return 1; }
-  ! _require_container_image >/dev/null 2>&1
+  if FASTI_CONTAINER_RUNTIME=podman _require_container_image >/dev/null 2>&1; then
+    echo "self-test accepted a missing container image" >&2
+    return 1
+  fi
   unset -f podman
   _validate_origin_url FASTI_PUBLIC_URL https://fasti.internal
   _validate_origin_url FASTI_API_URL http://localhost:8420
-  ! _validate_origin_url FASTI_PUBLIC_URL http://fasti.internal >/dev/null 2>&1
-  ! _validate_origin_url FASTI_API_URL 'https://user:secret@fasti.internal' >/dev/null 2>&1
-  rm -rf "$RUNDIR"
+  if _validate_origin_url FASTI_PUBLIC_URL http://fasti.internal >/dev/null 2>&1; then
+    echo "self-test accepted non-loopback HTTP" >&2
+    return 1
+  fi
+  if _validate_origin_url FASTI_API_URL 'https://userinfo-marker@fasti.internal' >/dev/null 2>&1; then
+    echo "self-test accepted URL user information" >&2
+    return 1
+  fi
+  if _validate_origin_url FASTI_API_URL 'https://fasti.internal:0' >/dev/null 2>&1; then
+    echo "self-test accepted URL port zero" >&2
+    return 1
+  fi
+  if _validate_origin_url FASTI_API_URL 'http://127.0.0.1:' >/dev/null 2>&1; then
+    echo "self-test accepted an empty URL port" >&2
+    return 1
+  fi
+  systemd-run() { return 0; }
+  _configure_native_scope
+  unset -f systemd-run
+  ceiling_mib="$(_memory_ceiling_mib)"
+  [[ "${NATIVE_SCOPE_RUNNER[*]}" == *"MemoryMax=$((ceiling_mib * 1024 * 1024))"* ]]
+  [[ "${NATIVE_SCOPE_RUNNER[*]}" == *"MemorySwapMax=0"* ]]
+  rm -f "$leader_file" "$exec_ready" "$exec_go"
+  rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
   trap - EXIT
   echo "dev launcher self-test passed"

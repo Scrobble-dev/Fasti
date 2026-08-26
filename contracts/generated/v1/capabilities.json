@@ -11,12 +11,15 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "bootstrap_closed",
         "forbidden",
+        "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
@@ -24,7 +27,7 @@
       "scopes": [
         "client_enroll"
       ],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_durable_bootstrap",
       "uat": []
     },
     {
@@ -292,18 +295,21 @@
       "lifecycle": {
         "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "already_initialized",
         "forbidden",
+        "integrity_failed",
         "malformed_json",
         "payload_too_large",
+        "storage_unavailable",
         "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [],
-      "surface_profile": "b1_http_fixture",
+      "surface_profile": "b1_durable_bootstrap",
       "uat": []
     },
     {
@@ -582,6 +588,58 @@
   "capability_base_uri": "https://fasti.scrobble.dev/ns/capabilities/v1/",
   "contract_version": "1.0.0",
   "surface_profiles": {
+    "b1_durable_bootstrap": {
+      "cli": {
+        "reason": "One-time secret delivery uses the loopback API and generated SDK.",
+        "state": "not_applicable"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Node bootstrap is operational state rather than linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-bootstrap",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Bootstrap is a finite local operation and has no event stream.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "The local host shell owns one-time secret setup and storage.",
+        "state": "not_applicable"
+      }
+    },
     "b1_http_fixture": {
       "cli": {
         "binding": "cli:capability-discovery",

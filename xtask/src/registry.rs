@@ -9,7 +9,8 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 7] = [
+const EXPECTED_PROFILES: [&str; 8] = [
+    "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_observation_accept",
     "b1_receipt_replay",
@@ -443,9 +444,11 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 problem_code.introduced_in().as_str()
             );
             ensure!(
-                body_rank(problem_code.introduced_in()) <= body_rank(capability.contract_body),
-                "{label}: problem code {problem:?} cannot precede its owning body {}",
-                problem_code.introduced_in().as_str()
+                body_rank(problem_code.introduced_in())
+                    <= body_rank(capability.contract_body).max(body_rank(capability.runtime_body)),
+                "{label}: problem code {problem:?} belongs after both contract body {} and runtime body {}",
+                capability.contract_body.as_str(),
+                capability.runtime_body.as_str()
             );
             ensure!(
                 capability_problems.insert(problem.as_str()),
@@ -599,6 +602,7 @@ fn nonempty(value: Option<&str>) -> bool {
 const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
     match key {
         CapabilityKey::SystemHealth => "health",
+        CapabilityKey::InitializeNode | CapabilityKey::EnrollFirstClient => "b1_durable_bootstrap",
         CapabilityKey::AcceptObservation => "b1_observation_accept",
         CapabilityKey::ReplayReceipt => "b1_receipt_replay",
         CapabilityKey::StreamReceipts => "b1_receipt_stream",
@@ -642,7 +646,7 @@ mod tests {
     fn surface_profile_policy_separates_finalized_and_later_contracts() {
         assert_eq!(
             expected_surface_profile(CapabilityKey::InitializeNode),
-            "b1_http_fixture"
+            "b1_durable_bootstrap"
         );
         assert_eq!(
             expected_surface_profile(CapabilityKey::AcceptObservation),
@@ -777,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    fn reserved_problem_codes_stay_out_of_the_b1_registry() {
+    fn staged_authentication_problem_stays_out_of_the_public_registry() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask lives under workspace root");
@@ -785,10 +789,14 @@ mod tests {
         let rendered = serde_json::to_string(&public).expect("serialize public registry");
 
         assert!(!rendered.contains(ProblemCode::AuthenticationFailed.as_str()));
-        assert!(!rendered.contains(ProblemCode::StorageUnavailable.as_str()));
+        assert!(rendered.contains(ProblemCode::StorageUnavailable.as_str()));
         assert_eq!(
             ProblemCode::AuthenticationFailed.contract_state(),
             ContractState::Reserved
+        );
+        assert_eq!(
+            ProblemCode::StorageUnavailable.contract_state(),
+            ContractState::Finalized
         );
     }
 
