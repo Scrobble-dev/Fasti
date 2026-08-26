@@ -345,7 +345,7 @@ _status() {
     printf '  %-19s NOT RUNNING\n' "Container:"
   fi
   echo ""
-  if _has_web; then
+  if _tracked_pid web >/dev/null 2>&1; then
     echo "  Web URL: http://127.0.0.1:$WEB_PORT"
   fi
   echo "  API URL: $FASTI_API_URL"
@@ -519,7 +519,9 @@ _start_native() {
   fi
 
   if _has_web; then
-    if _port_in_use "$WEB_PORT"; then
+    if ! command -v ss >/dev/null 2>&1; then
+      echo "Cannot verify port $WEB_PORT availability (ss command not found); not starting the web workbench." >&2
+    elif _port_in_use "$WEB_PORT"; then
       echo "Port $WEB_PORT is already in use; not starting the web workbench." >&2
     else
       echo "=== 2. Building and starting the web workbench ==="
@@ -533,6 +535,8 @@ _start_native() {
       _write_pidfile web "$web_pid"
       echo "Web workbench starting: http://127.0.0.1:$WEB_PORT (see .dev-logs/web.log)"
     fi
+  else
+    echo "apps/web is not present in this worktree; skipping web workbench."
   fi
 
   echo "Press Ctrl+C or run ./scripts/dev.sh --stop to shut down."
