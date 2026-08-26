@@ -339,6 +339,16 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
               this.searchProvider("rawg", trimmed).catch(() => []),
             );
           }
+          if (stored["comicvine"]) {
+            activeQueries.push(
+              this.searchProvider("comicvine", trimmed).catch(() => []),
+            );
+          }
+          if (stored["podcast-index"]) {
+            activeQueries.push(
+              this.searchProvider("podcast-index", trimmed).catch(() => []),
+            );
+          }
           const settled = await Promise.allSettled(activeQueries);
           const aggregated: ProviderSearchCandidate[] = [];
           for (const res of settled) {
@@ -792,6 +802,102 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
           return [];
         }
 
+        // 11. ComicVine (Comics)
+        if (providerKey === "comicvine") {
+          if (!apiKey) {
+            throw new Error(
+              "ComicVine requires an API Key. Configure it in Settings & Studio (https://comicvine.gamespot.com/api/).",
+            );
+          }
+          const res = await fetch(
+            `https://comicvine.gamespot.com/api/search/?api_key=${apiKey}&format=json&resources=volume&query=${encodeURIComponent(trimmed)}&limit=12`,
+            { signal: AbortSignal.timeout(10000) },
+          );
+          if (!res.ok)
+            throw new Error(`ComicVine search failed: ${res.statusText}`);
+          const data = await res.json();
+          return (data.results || []).map((v: any) => ({
+            provider: "comicvine",
+            provider_id: String(v.id),
+            title: v.name || "Untitled",
+            kind: "comic",
+            release_year: v.start_year
+              ? parseInt(v.start_year, 10)
+              : undefined,
+            authors: v.publisher?.name ? [v.publisher.name] : [],
+            image_url: v.image?.medium_url || null,
+            overview: v.deck || undefined,
+            external_ids: [
+              {
+                namespace: "comicvine",
+                value: String(v.id),
+                status: "matched" as const,
+                source: "comicvine",
+              },
+            ],
+          }));
+        }
+
+        // 12. Podcast Index (Podcasts) -- key stored as "apiKey:apiSecret"
+        if (providerKey === "podcast-index") {
+          const [podcastKey, podcastSecret] = apiKey.split(":");
+          if (!podcastKey || !podcastSecret) {
+            throw new Error(
+              'Podcast Index requires an API Key and Secret, entered as "key:secret". Configure it in Settings & Studio (https://podcastindex.org/apps).',
+            );
+          }
+          const authTime = Math.floor(Date.now() / 1000).toString();
+          const hashInput = new TextEncoder().encode(
+            podcastKey + podcastSecret + authTime,
+          );
+          const hashBuffer = await crypto.subtle.digest("SHA-1", hashInput);
+          const authHash = Array.from(new Uint8Array(hashBuffer))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
+          const res = await fetch(
+            `https://api.podcastindex.org/api/1.0/search/byterm?q=${encodeURIComponent(trimmed)}`,
+            {
+              headers: {
+                "X-Auth-Date": authTime,
+                "X-Auth-Key": podcastKey,
+                Authorization: authHash,
+                "User-Agent": "Fasti/0.1",
+              },
+              signal: AbortSignal.timeout(10000),
+            },
+          );
+          if (!res.ok)
+            throw new Error(`Podcast Index search failed: ${res.statusText}`);
+          const data = await res.json();
+          return (data.feeds || []).slice(0, 12).map((f: any) => ({
+            provider: "podcast-index",
+            provider_id: String(f.id),
+            title: f.title || "Untitled",
+            kind: "podcast",
+            release_year: f.newestItemPublishTime
+              ? new Date(f.newestItemPublishTime * 1000).getFullYear()
+              : undefined,
+            authors: f.author ? [f.author] : [],
+            image_url: f.image || f.artwork || null,
+            overview: f.description || undefined,
+            external_ids: [
+              {
+                namespace: "podcast_index",
+                value: String(f.id),
+                status: "matched" as const,
+                source: "podcast-index",
+              },
+            ],
+          }));
+        }
+
+        // IGDB is intentionally not implemented here: igdb.com requires a
+        // Twitch client_id/client_secret OAuth exchange and does not send
+        // CORS headers on its query endpoint, so it cannot work from a
+        // browser tab regardless of credentials entered. A real IGDB
+        // integration needs a native host doing the request server-side
+        // (see apps/desktop/src-tauri/src/providers.rs for that pattern),
+        // not this web-only shell.
         throw new Error(
           `Provider '${provider}' is not configured for live search.`,
         );
