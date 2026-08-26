@@ -5,6 +5,7 @@
 
 pub mod authorization;
 pub mod capabilities;
+pub mod client_credentials;
 #[cfg(feature = "conformance-fixture")]
 pub mod conformance;
 pub mod corrections;
@@ -23,6 +24,7 @@ pub mod scopes;
 
 pub use authorization::*;
 pub use capabilities::*;
+pub use client_credentials::*;
 pub use corrections::*;
 pub use ingest::*;
 pub use kernel::*;
