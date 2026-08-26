@@ -32,6 +32,11 @@ pub(crate) struct DesktopProblem {
 }
 
 impl DesktopProblem {
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
+    }
+
     pub(crate) fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
@@ -96,7 +101,16 @@ impl DesktopProblem {
         }
     }
 
-    fn application(problem: &FastiProblem) -> Self {
+    pub(crate) fn not_authenticated() -> Self {
+        Self {
+            code: "not_authenticated",
+            title: "Setup is not complete",
+            detail: "This capability needs a saved administrator credential.".to_owned(),
+            next_action: "Complete setup, then retry.",
+        }
+    }
+
+    pub(crate) fn application(problem: &FastiProblem) -> Self {
         let contract = problem.code().contract();
         Self {
             code: problem.code().as_str(),
@@ -210,7 +224,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     }
 }
 
-fn authenticate(
+pub(crate) fn authenticate(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
 ) -> Result<Option<RequestAccessContext>, DesktopProblem> {

@@ -144,6 +144,8 @@
           invoke("delete_provider_credential", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
+        listReviews: () => invoke("list_reviews"),
+        resolveReview: (input) => invoke("resolve_review", { input }),
       };
       DesktopWorkbench = workbench;
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
