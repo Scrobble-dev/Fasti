@@ -166,5 +166,175 @@ mod tests {
             CapabilityKey::InitializeNode.runtime_availability(),
             RuntimeAvailability::Implemented
         );
+        assert_eq!(
+            CapabilityKey::CreateRecord.contract_state(),
+            ContractState::Reserved
+        );
+        assert_eq!(
+            CapabilityKey::CreateRecord.runtime_availability(),
+            RuntimeAvailability::LaterBody
+        );
+    }
+
+    #[test]
+    fn b3_contracts_remain_reserved_or_guarded() {
+        assert_eq!(
+            CapabilityKey::AppendCorrection.runtime_availability(),
+            RuntimeAvailability::LaterBody
+        );
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.runtime_availability(),
+            RuntimeAvailability::Guarded
+        );
+        assert_eq!(
+            CapabilityKey::RestoreWorkspace.runtime_availability(),
+            RuntimeAvailability::Guarded
+        );
+        assert_eq!(
+            CapabilityKey::RestoreWorkspace.authorization_kind(),
+            AuthorizationKind::LocalOperator
+        );
+        assert!(CapabilityKey::RestoreWorkspace.required_scopes().is_empty());
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.authorization_kind(),
+            AuthorizationKind::Scoped
+        );
+        assert_eq!(
+            CapabilityKey::ExportWorkspace.required_scopes(),
+            &[ScopeKey::WorkspaceExport]
+        );
+        assert_eq!(
+            CapabilityKey::VerifyWorkspace.authorization_kind(),
+            AuthorizationKind::Scoped
+        );
+        assert_eq!(
+            CapabilityKey::VerifyWorkspace.required_scopes(),
+            &[ScopeKey::WorkspaceVerify]
+        );
+
+        let local_operator_capabilities: Vec<_> = CapabilityKey::ALL
+            .iter()
+            .copied()
+            .filter(|capability| {
+                capability.authorization_kind() == AuthorizationKind::LocalOperator
+            })
+            .collect();
+        assert_eq!(
+            local_operator_capabilities,
+            [CapabilityKey::RestoreWorkspace]
+        );
+    }
+
+    #[test]
+    fn staged_runtime_failures_are_checked_but_not_published() {
+        let discovery = CapabilityKey::DiscoverCapabilities.allowed_problem_codes();
+        assert!(discovery.contains(&ProblemCode::AuthenticationFailed));
+        assert!(!discovery
+            .iter()
+            .any(|code| *code == ProblemCode::AuthenticationFailed));
+
+        let enrollment = CapabilityKey::EnrollFirstClient.allowed_problem_codes();
+        assert!(enrollment.contains(&ProblemCode::BootstrapClosed));
+        assert!(enrollment
+            .iter()
+            .any(|code| *code == ProblemCode::BootstrapClosed));
+
+        let review = CapabilityKey::InspectReview.allowed_problem_codes();
+        assert!(review.contains(&ProblemCode::AuthenticationFailed));
+        assert!(!review
+            .iter()
+            .any(|code| *code == ProblemCode::AuthenticationFailed));
+
+        for capability in CapabilityKey::ALL.iter().copied().filter(|capability| {
+            capability.authorization_kind() == AuthorizationKind::Scoped
+                && *capability != CapabilityKey::EnrollFirstClient
+        }) {
+            assert!(
+                capability
+                    .allowed_problem_codes()
+                    .contains(&ProblemCode::AuthenticationFailed),
+                "{capability:?} must accept route-attributed authentication failures"
+            );
+        }
+
+        let review = CapabilityKey::ResolveReview.allowed_problem_codes();
+        assert!(review.contains(&ProblemCode::ReviewNotFound));
+        assert!(!review
+            .iter()
+            .any(|code| code.contract_state() == ContractState::Reserved));
+
+        let export = CapabilityKey::ExportWorkspace.allowed_problem_codes();
+        for code in [
+            ProblemCode::CapacityExceeded,
+            ProblemCode::DataRootLocked,
+            ProblemCode::ExportCanceled,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StoppedNodeExportRequired,
+            ProblemCode::StorageUnavailable,
+            ProblemCode::UnsupportedPlatform,
+        ] {
+            assert!(export.contains(&code));
+            assert!(!export.iter().any(|published| *published == code));
+        }
+
+        let restore = CapabilityKey::RestoreWorkspace.allowed_problem_codes();
+        for code in [
+            ProblemCode::BootstrapClosed,
+            ProblemCode::OperationCanceled,
+            ProblemCode::RecoveryBootstrapPending,
+            ProblemCode::UnsupportedPlatform,
+        ] {
+            assert!(restore.contains(&code));
+            assert!(!restore.iter().any(|published| *published == code));
+        }
+
+        let verify = CapabilityKey::VerifyWorkspace.allowed_problem_codes();
+        assert!(verify.contains(&ProblemCode::DataRootLocked));
+        assert!(!verify
+            .iter()
+            .any(|published| *published == ProblemCode::DataRootLocked));
+    }
+
+    #[test]
+    fn every_problem_policy_is_unique_disjoint_and_explicit() {
+        fn assert_unique(capability: CapabilityKey, set_name: &str, codes: &[ProblemCode]) {
+            for (index, code) in codes.iter().enumerate() {
+                assert!(
+                    !codes[index + 1..].contains(code),
+                    "{capability:?} has duplicate {set_name} problem {}",
+                    code.as_str()
+                );
+            }
+        }
+
+        for capability in CapabilityKey::ALL {
+            let policy = capability.allowed_problem_codes();
+            assert_unique(*capability, "public", policy.public());
+            assert_unique(*capability, "staged", policy.staged());
+
+            for code in policy.public() {
+                assert!(
+                    !policy.staged().contains(code),
+                    "{capability:?} exposes problem {} as both public and staged",
+                    code.as_str()
+                );
+                assert!(policy.contains(code));
+            }
+
+            for code in policy.staged() {
+                assert!(policy.contains(code));
+                assert!(
+                    !policy.iter().any(|published| published == code),
+                    "{capability:?} publishes staged problem {}",
+                    code.as_str()
+                );
+            }
+
+            assert_eq!(
+                policy.iter().copied().collect::<Vec<_>>().as_slice(),
+                policy.public(),
+                "{capability:?} public iteration must remain exact"
+            );
+        }
     }
 }
