@@ -33,7 +33,9 @@
   let secretNotice: HTMLDivElement | undefined;
 
   const canManage = $derived(
-    Boolean(host?.listApiClients && host?.createApiClient && host?.revokeApiClient),
+    Boolean(
+      host?.listApiClients && host?.createApiClient && host?.revokeApiClient,
+    ),
   );
 
   async function load(): Promise<void> {
@@ -43,7 +45,10 @@
     try {
       clients = await host.listApiClients();
     } catch (error) {
-      problem = error instanceof Error ? error.message : "Fasti could not load API clients.";
+      problem =
+        error instanceof Error
+          ? error.message
+          : "Fasti could not load API clients.";
     } finally {
       loading = false;
     }
@@ -64,7 +69,10 @@
       await tick();
       secretNotice?.focus();
     } catch (error) {
-      problem = error instanceof Error ? error.message : "Fasti could not create an API client.";
+      problem =
+        error instanceof Error
+          ? error.message
+          : "Fasti could not create an API client.";
     } finally {
       creating = false;
     }
@@ -81,7 +89,10 @@
         revealCredential = false;
       }
     } catch (error) {
-      problem = error instanceof Error ? error.message : "Fasti could not revoke the API client.";
+      problem =
+        error instanceof Error
+          ? error.message
+          : "Fasti could not revoke the API client.";
     }
   }
 
@@ -92,7 +103,8 @@
       copied = true;
       window.setTimeout(() => (copied = false), 1800);
     } catch {
-      problem = "Clipboard access was denied. Reveal the one-time credential and copy it manually.";
+      problem =
+        "Clipboard access was denied. Reveal the one-time credential and copy it manually.";
     }
   }
 
@@ -112,12 +124,17 @@
     <div>
       <h2 id="api-client-title">API clients</h2>
       <p>
-        Create a separate, revocable credential for each external observer. Fasti stores only a
-        digest and the granted scopes.
+        Create a separate, revocable credential for each external observer.
+        Fasti stores only a digest and the granted scopes.
       </p>
     </div>
     {#if canManage}
-      <button type="button" class="secondary-action" onclick={() => void load()} disabled={loading}>
+      <button
+        type="button"
+        class="secondary-action"
+        onclick={() => void load()}
+        disabled={loading}
+      >
         <IconRefresh size={18} aria-hidden="true" />
         {loading ? "Loading…" : "Refresh"}
       </button>
@@ -130,14 +147,15 @@
       <strong>Current ingress contract</strong>
       <p>
         <code>POST /api/v1/observations</code> accepts authenticated durable consumption
-        occurrences on the local Fasti API. Safe retries use the same source event identity and
-        return the prior receipt. Partial progress is rejected until the separate progress
-        capability is active.
+        occurrences on the local Fasti API. Safe retries use the same source event
+        identity and return the prior receipt. Partial progress is rejected until
+        the separate progress capability is active.
       </p>
       <p>
-        Native Nuvio pairing and two-way synchronization are not active. Current upstream Nuvio
-        exposes Trakt and SIMKL tracking providers; a Fasti provider still needs an upstream client
-        integration before Nuvio can send these requests directly.
+        Native Nuvio pairing and two-way synchronization are not active. Current
+        upstream Nuvio exposes Trakt and SIMKL tracking providers; a Fasti
+        provider still needs an upstream client integration before Nuvio can
+        send these requests directly.
       </p>
     </div>
   </div>
@@ -146,10 +164,11 @@
     <div class="unavailable" role="status">
       <IconKey size={22} aria-hidden="true" />
       <div>
-        <strong>Credential administration is not available in this host.</strong>
+        <strong>Credential administration is not available in this host.</strong
+        >
         <p>
-          Use the trusted packaged Fasti host. The browser workbench does not create, receive, or
-          persist bearer credentials.
+          Use the trusted packaged Fasti host. The browser workbench does not
+          create, receive, or persist bearer credentials.
         </p>
       </div>
     </div>
@@ -158,11 +177,16 @@
       <div>
         <strong>Observation client</strong>
         <p>
-          Grants only <code>observation_accept</code>. Use one credential per device or adapter so
-          it can be revoked independently.
+          Grants only <code>observation_accept</code>. Use one credential per
+          device or adapter so it can be revoked independently.
         </p>
       </div>
-      <button type="button" class="primary-action" onclick={() => void createObserver()} disabled={creating}>
+      <button
+        type="button"
+        class="primary-action"
+        onclick={() => void createObserver()}
+        disabled={creating}
+      >
         <IconKey size={18} aria-hidden="true" />
         {creating ? "Creating…" : "Create credential"}
       </button>
@@ -178,16 +202,27 @@
         <div>
           <strong>Copy this credential now.</strong>
           <p>
-            Fasti will not return this plaintext value again. It is masked by default to reduce
-            accidental exposure in screen sharing and screenshots. Closing this notice removes it
-            from the workbench memory.
+            Fasti will not return this plaintext value again. It is masked by
+            default to reduce accidental exposure in screen sharing and
+            screenshots. Closing this notice removes it from the workbench
+            memory.
           </p>
-          <code aria-label={revealCredential ? "One-time bearer credential" : "One-time bearer credential masked"}>
-            {revealCredential ? oneTimeCredential.credential : "••••••••••••••••••••••••••••••••"}
+          <code
+            aria-label={revealCredential
+              ? "One-time bearer credential"
+              : "One-time bearer credential masked"}
+          >
+            {revealCredential
+              ? oneTimeCredential.credential
+              : "••••••••••••••••••••••••••••••••"}
           </code>
         </div>
         <div class="secret-actions">
-          <button type="button" class="primary-action" onclick={() => void copyCredential()}>
+          <button
+            type="button"
+            class="primary-action"
+            onclick={() => void copyCredential()}
+          >
             {#if copied}
               <IconCheck size={18} aria-hidden="true" /> Copied
             {:else}
@@ -206,7 +241,9 @@
               <IconEye size={18} aria-hidden="true" /> Reveal
             {/if}
           </button>
-          <button type="button" class="secondary-action" onclick={closeSecret}>Done</button>
+          <button type="button" class="secondary-action" onclick={closeSecret}
+            >Done</button
+          >
         </div>
       </div>
     {/if}
@@ -215,14 +252,16 @@
       <div class="empty-state" role="status">
         <strong>No external API clients</strong>
         <p>
-          Your local administrator credential is not shown here. Create a scoped client only when
-          an integration needs it.
+          Your local administrator credential is not shown here. Create a scoped
+          client only when an integration needs it.
         </p>
       </div>
     {:else if clients.length > 0}
       <div class="table-wrap">
         <table>
-          <caption class="visually-hidden">External Fasti API client credentials</caption>
+          <caption class="visually-hidden"
+            >External Fasti API client credentials</caption
+          >
           <thead>
             <tr>
               <th scope="col">Client</th>
@@ -237,7 +276,9 @@
               <tr>
                 <td>
                   <code>{client.client_id}</code>
-                  <span class="credential-id">Credential {client.credential_id}</span>
+                  <span class="credential-id"
+                    >Credential {client.credential_id}</span
+                  >
                 </td>
                 <td>
                   <div class="scope-list">
@@ -250,7 +291,11 @@
                 <td>{client.active ? "Active" : "Revoked"}</td>
                 <td>
                   {#if client.active && pendingRevoke === client.credential_id}
-                    <div class="confirm-actions" role="group" aria-label={`Confirm revocation for API client ${client.client_id}`}>
+                    <div
+                      class="confirm-actions"
+                      role="group"
+                      aria-label={`Confirm revocation for API client ${client.client_id}`}
+                    >
                       <button
                         type="button"
                         class="danger-action"
@@ -258,7 +303,11 @@
                       >
                         Confirm revoke
                       </button>
-                      <button type="button" class="secondary-action" onclick={() => (pendingRevoke = undefined)}>
+                      <button
+                        type="button"
+                        class="secondary-action"
+                        onclick={() => (pendingRevoke = undefined)}
+                      >
                         Cancel
                       </button>
                     </div>
@@ -327,7 +376,8 @@
   .create-row,
   .one-time-secret,
   .empty-state {
-    border: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
     border-radius: 8px;
     background: var(--fasti-surface-paper);
     padding: 18px;
@@ -426,7 +476,8 @@
   td {
     text-align: left;
     padding: 12px;
-    border-bottom: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 16%, transparent));
+    border-bottom: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 16%, transparent));
     vertical-align: top;
   }
 

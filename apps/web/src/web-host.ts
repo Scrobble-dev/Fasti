@@ -14,21 +14,71 @@ const PROVIDERS: ReadonlyArray<{
   label: string;
   docs_url: string;
 }> = [
-  { provider: "open-library", label: "Open Library (Books)", docs_url: "https://openlibrary.org/developers/api" },
-  { provider: "kitsu", label: "Kitsu (Anime & Manga)", docs_url: "https://kitsu.docs.apiary.io" },
-  { provider: "anilist", label: "AniList GraphQL (Anime/Manga)", docs_url: "https://docs.anilist.co" },
-  { provider: "musicbrainz", label: "MusicBrainz (Music)", docs_url: "https://musicbrainz.org/doc/MusicBrainz_API" },
-  { provider: "tmdb", label: "TheMovieDatabase (TMDB)", docs_url: "https://developer.themoviedb.org/docs" },
-  { provider: "tvdb", label: "TheTVDB v4", docs_url: "https://thetvdb.com/api-information" },
-  { provider: "google-books", label: "Google Books API", docs_url: "https://developers.google.com/books/docs/v1/using" },
-  { provider: "mal", label: "MyAnimeList API v2", docs_url: "https://myanimelist.net/apiconfig/references/api/v2" },
-  { provider: "rawg", label: "RAWG Video Games Database", docs_url: "https://rawg.io/apidocs" },
-  { provider: "igdb", label: "IGDB (Games)", docs_url: "https://api-docs.igdb.com" },
-  { provider: "comicvine", label: "ComicVine (Comics)", docs_url: "https://comicvine.gamespot.com/api/documentation" },
-  { provider: "podcast-index", label: "Podcast Index (Podcasts)", docs_url: "https://podcastindex-org.github.io/docs-api" },
+  {
+    provider: "open-library",
+    label: "Open Library (Books)",
+    docs_url: "https://openlibrary.org/developers/api",
+  },
+  {
+    provider: "kitsu",
+    label: "Kitsu (Anime & Manga)",
+    docs_url: "https://kitsu.docs.apiary.io",
+  },
+  {
+    provider: "anilist",
+    label: "AniList GraphQL (Anime/Manga)",
+    docs_url: "https://docs.anilist.co",
+  },
+  {
+    provider: "musicbrainz",
+    label: "MusicBrainz (Music)",
+    docs_url: "https://musicbrainz.org/doc/MusicBrainz_API",
+  },
+  {
+    provider: "tmdb",
+    label: "TheMovieDatabase (TMDB)",
+    docs_url: "https://developer.themoviedb.org/docs",
+  },
+  {
+    provider: "tvdb",
+    label: "TheTVDB v4",
+    docs_url: "https://thetvdb.com/api-information",
+  },
+  {
+    provider: "google-books",
+    label: "Google Books API",
+    docs_url: "https://developers.google.com/books/docs/v1/using",
+  },
+  {
+    provider: "mal",
+    label: "MyAnimeList API v2",
+    docs_url: "https://myanimelist.net/apiconfig/references/api/v2",
+  },
+  {
+    provider: "rawg",
+    label: "RAWG Video Games Database",
+    docs_url: "https://rawg.io/apidocs",
+  },
+  {
+    provider: "igdb",
+    label: "IGDB (Games)",
+    docs_url: "https://api-docs.igdb.com",
+  },
+  {
+    provider: "comicvine",
+    label: "ComicVine (Comics)",
+    docs_url: "https://comicvine.gamespot.com/api/documentation",
+  },
+  {
+    provider: "podcast-index",
+    label: "Podcast Index (Podcasts)",
+    docs_url: "https://podcastindex-org.github.io/docs-api",
+  },
 ];
 
-function defaultNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
+function defaultNetworkConfiguration(
+  defaultApiUrl: string,
+): NetworkConfiguration {
   return {
     connection: {
       service_url: {
@@ -88,8 +138,16 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     ): Promise<NetworkConfiguration> {
       const config: NetworkConfiguration = {
         connection: {
-          service_url: { value: input.service_url, source: "saved", managed: false },
-          public_url: { value: input.public_url, source: "saved", managed: false },
+          service_url: {
+            value: input.service_url,
+            source: "saved",
+            managed: false,
+          },
+          public_url: {
+            value: input.public_url,
+            source: "saved",
+            managed: false,
+          },
         },
         outbound_policy: input.outbound_policy,
       };
@@ -99,7 +157,9 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       return config;
     },
 
-    async testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus> {
+    async testEndpointConnection(
+      endpoint: string,
+    ): Promise<EndpointConnectionStatus> {
       const normalized = endpoint.replace(/\/+$/, "");
       const parsed = new URL(normalized);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -109,7 +169,9 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         parsed.protocol === "http:" &&
         !["127.0.0.1", "localhost", "::1"].includes(parsed.hostname)
       ) {
-        throw unavailable("Cleartext HTTP is allowed only for loopback endpoints.");
+        throw unavailable(
+          "Cleartext HTTP is allowed only for loopback endpoints.",
+        );
       }
       const response = await fetch(`${normalized}/api/v1/health`, {
         signal: AbortSignal.timeout(3_000),
@@ -117,7 +179,10 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       if (!response.ok) {
         throw unavailable(`The endpoint returned status ${response.status}.`);
       }
-      const data = (await response.json()) as { status?: string; version?: string };
+      const data = (await response.json()) as {
+        status?: string;
+        version?: string;
+      };
       return {
         endpoint: normalized,
         scheme: parsed.protocol === "https:" ? "https" : "http",
@@ -137,13 +202,17 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       }));
     },
 
-    async saveProviderCredential(provider: string): Promise<ProviderCredentialStatus[]> {
+    async saveProviderCredential(
+      provider: string,
+    ): Promise<ProviderCredentialStatus[]> {
       throw unavailable(
         `${provider} credentials require the trusted native or server host. The browser host never accepts or stores provider secrets.`,
       );
     },
 
-    async deleteProviderCredential(provider: string): Promise<ProviderCredentialStatus[]> {
+    async deleteProviderCredential(
+      provider: string,
+    ): Promise<ProviderCredentialStatus[]> {
       throw unavailable(
         `${provider} credentials are not managed by the browser host.`,
       );

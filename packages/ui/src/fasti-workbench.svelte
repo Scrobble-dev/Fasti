@@ -22,7 +22,9 @@
   let activeSection = $state<Section>("overview");
 
   const credentialAdministration = $derived(
-    Boolean(host.listApiClients && host.createApiClient && host.revokeApiClient),
+    Boolean(
+      host.listApiClients && host.createApiClient && host.revokeApiClient,
+    ),
   );
 
   function sectionFromPath(): Section {
@@ -44,7 +46,9 @@
     if (window.location.pathname !== path) {
       window.history.pushState({}, "", path);
     }
-    window.requestAnimationFrame(() => document.getElementById("main-content")?.focus());
+    window.requestAnimationFrame(() =>
+      document.getElementById("main-content")?.focus(),
+    );
   }
 
   onMount(() => {
@@ -57,7 +61,12 @@
 
 <div class="workbench-shell">
   <aside class="rail" aria-label="Fasti workbench">
-    <button type="button" class="brand" onclick={() => select("overview")} aria-label="Fasti overview">
+    <button
+      type="button"
+      class="brand"
+      onclick={() => select("overview")}
+      aria-label="Fasti overview"
+    >
       <span class="brand-mark" aria-hidden="true">F</span>
       <span>Fasti</span>
     </button>
@@ -104,8 +113,9 @@
           <p class="eyebrow">Local workbench</p>
           <h1>Current Fasti capability</h1>
           <p>
-            This surface reports only behavior that the active host and local API can perform. It
-            does not load sample media or substitute browser storage for the Chronicle.
+            This surface reports only behavior that the active host and local
+            API can perform. It does not load sample media or substitute browser
+            storage for the Chronicle.
           </p>
         </header>
 
@@ -115,9 +125,10 @@
             <div>
               <h2>Durable occurrence ingress</h2>
               <p>
-                <strong>Active on the local API.</strong> Scoped bearer clients can submit complete
-                consumption occurrences to <code>POST /api/v1/observations</code>. Fasti stores
-                evidence, applies idempotency, and returns a durable receipt.
+                <strong>Active on the local API.</strong> Scoped bearer clients
+                can submit complete consumption occurrences to
+                <code>POST /api/v1/observations</code>. Fasti stores evidence,
+                applies idempotency, and returns a durable receipt.
               </p>
             </div>
           </article>
@@ -127,9 +138,10 @@
             <div>
               <h2>Media library presentation</h2>
               <p>
-                <strong>Not active yet.</strong> Record listing, Chronicle listing, metadata
-                editing, collections, ratings, imports, and progress need their application and
-                public contracts before this workbench can present them as working product state.
+                <strong>Not active yet.</strong> Record listing, Chronicle listing,
+                metadata editing, collections, ratings, imports, and progress need
+                their application and public contracts before this workbench can present
+                them as working product state.
               </p>
             </div>
           </article>
@@ -139,13 +151,23 @@
             <div>
               <h2>Nuvio pathway</h2>
               <p>
-                <strong>Fasti-side occurrence ingress is ready for an authenticated observer.</strong>
-                Current upstream Nuvio exposes Trakt and SIMKL tracking providers, not Fasti. Native
-                Nuvio pairing, progress synchronization, and two-way state are therefore not
-                claimed here.
+                <strong
+                  >Fasti-side occurrence ingress is ready for an authenticated
+                  observer.</strong
+                >
+                Current upstream Nuvio exposes Trakt and SIMKL tracking providers,
+                not Fasti. Native Nuvio pairing, progress synchronization, and two-way
+                state are therefore not claimed here.
               </p>
-              <button type="button" class="inline-action" onclick={() => select("connections")}>
-                Open Connections <IconChevronRight size={17} aria-hidden="true" />
+              <button
+                type="button"
+                class="inline-action"
+                onclick={() => select("connections")}
+              >
+                Open Connections <IconChevronRight
+                  size={17}
+                  aria-hidden="true"
+                />
               </button>
             </div>
           </article>
@@ -159,8 +181,15 @@
                   ? "The trusted packaged host can create, list, and revoke independently scoped API client credentials. Plaintext is returned once and is not stored by the workbench."
                   : "This host does not expose credential administration. Browser distributions fail closed and do not create or persist API bearer secrets."}
               </p>
-              <button type="button" class="inline-action" onclick={() => select("connections")}>
-                Manage API clients <IconChevronRight size={17} aria-hidden="true" />
+              <button
+                type="button"
+                class="inline-action"
+                onclick={() => select("connections")}
+              >
+                Manage API clients <IconChevronRight
+                  size={17}
+                  aria-hidden="true"
+                />
               </button>
             </div>
           </article>
@@ -169,9 +198,10 @@
         <section class="next-step" aria-labelledby="next-step-title">
           <h2 id="next-step-title">Next implementation gate</h2>
           <p>
-            Activate record and Chronicle query/mutation contracts, then bind the media UI to those
-            services. Until that gate passes, Fasti keeps the richer prototype out of the runtime
-            path instead of presenting fake success.
+            Activate record and Chronicle query/mutation contracts, then bind
+            the media UI to those services. Until that gate passes, Fasti keeps
+            the richer prototype out of the runtime path instead of presenting
+            fake success.
           </p>
         </section>
       </div>
@@ -197,7 +227,8 @@
     gap: 20px;
     padding: 18px 12px;
     background: var(--fasti-surface-paper);
-    border-right: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-right: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
   }
 
   .brand {
@@ -323,7 +354,8 @@
     align-items: flex-start;
     gap: 14px;
     padding: 20px;
-    border: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
     border-radius: 8px;
     background: var(--fasti-surface-paper);
   }
@@ -364,7 +396,8 @@
   .next-step {
     margin-top: 24px;
     padding: 20px;
-    border: 1px dashed var(--fasti-border, color-mix(in srgb, currentColor 25%, transparent));
+    border: 1px dashed
+      var(--fasti-border, color-mix(in srgb, currentColor 25%, transparent));
     border-radius: 8px;
   }
 
@@ -432,7 +465,8 @@
       align-items: center;
       padding: 6px 8px;
       border-right: 0;
-      border-top: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+      border-top: 1px solid
+        var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
     }
 
     .brand {

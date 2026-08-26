@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { IconExternalLink, IconKey, IconRefresh, IconSettings } from "@tabler/icons-svelte";
+  import {
+    IconExternalLink,
+    IconKey,
+    IconRefresh,
+    IconSettings,
+  } from "@tabler/icons-svelte";
   import NetworkSettings from "./network-settings.svelte";
   import { hostProblemText } from "./host-problem.js";
   import type {
@@ -34,7 +39,10 @@
     try {
       network = await host.loadNetworkConfiguration();
     } catch (error) {
-      networkProblem = hostProblemText(error, "Fasti could not load network configuration.");
+      networkProblem = hostProblemText(
+        error,
+        "Fasti could not load network configuration.",
+      );
     } finally {
       networkLoading = false;
     }
@@ -55,7 +63,10 @@
     try {
       providers = await host.providerCredentialStatus();
     } catch (error) {
-      providerProblem = hostProblemText(error, "Fasti could not load provider status.");
+      providerProblem = hostProblemText(
+        error,
+        "Fasti could not load provider status.",
+      );
     } finally {
       providerLoading = false;
     }
@@ -71,7 +82,10 @@
       providers = await host.saveProviderCredential(provider, credential);
       providerNotice = "Credential saved in the platform credential store.";
     } catch (error) {
-      providerProblem = hostProblemText(error, "Fasti rejected the provider credential.");
+      providerProblem = hostProblemText(
+        error,
+        "Fasti rejected the provider credential.",
+      );
     } finally {
       editing = { ...editing, [provider]: "" };
       busyProvider = undefined;
@@ -87,7 +101,10 @@
       providers = await host.deleteProviderCredential(provider);
       providerNotice = "Credential removed from the platform credential store.";
     } catch (error) {
-      providerProblem = hostProblemText(error, "Fasti could not remove the provider credential.");
+      providerProblem = hostProblemText(
+        error,
+        "Fasti could not remove the provider credential.",
+      );
     } finally {
       busyProvider = undefined;
     }
@@ -106,9 +123,21 @@
 
   <div class="settings-layout">
     <nav aria-label="Settings sections">
-      <button type="button" class:active={active === "network"} onclick={() => (active = "network")}>Network</button>
-      <button type="button" class:active={active === "providers"} onclick={() => (active = "providers")}>Metadata credentials</button>
-      <button type="button" class:active={active === "system"} onclick={() => (active = "system")}>Capability status</button>
+      <button
+        type="button"
+        class:active={active === "network"}
+        onclick={() => (active = "network")}>Network</button
+      >
+      <button
+        type="button"
+        class:active={active === "providers"}
+        onclick={() => (active = "providers")}>Metadata credentials</button
+      >
+      <button
+        type="button"
+        class:active={active === "system"}
+        onclick={() => (active = "system")}>Capability status</button
+      >
     </nav>
 
     <div class="settings-panel">
@@ -127,12 +156,19 @@
             <div>
               <h2 id="provider-settings-title">Metadata credentials</h2>
               <p>
-                Fasti never reads a stored secret back into this interface. Credential entry is
-                available only when the host can write to a protected credential store.
+                Fasti never reads a stored secret back into this interface.
+                Credential entry is available only when the host can write to a
+                protected credential store.
               </p>
             </div>
-            <button type="button" class="secondary" onclick={() => void loadProviders()} disabled={providerLoading}>
-              <IconRefresh size={18} aria-hidden="true" /> {providerLoading ? "Loading…" : "Refresh"}
+            <button
+              type="button"
+              class="secondary"
+              onclick={() => void loadProviders()}
+              disabled={providerLoading}
+            >
+              <IconRefresh size={18} aria-hidden="true" />
+              {providerLoading ? "Loading…" : "Refresh"}
             </button>
           </div>
 
@@ -148,8 +184,15 @@
                         : "No credential is configured."}
                     </p>
                   </div>
-                  <a href={provider.docs_url} target="_blank" rel="noopener noreferrer">
-                    Documentation <IconExternalLink size={14} aria-hidden="true" />
+                  <a
+                    href={provider.docs_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Documentation <IconExternalLink
+                      size={14}
+                      aria-hidden="true"
+                    />
                   </a>
                 </div>
 
@@ -161,7 +204,9 @@
                       void saveProvider(provider.provider);
                     }}
                   >
-                    <label for={`provider-${provider.provider}`}>New credential</label>
+                    <label for={`provider-${provider.provider}`}
+                      >New credential</label
+                    >
                     <div>
                       <input
                         id={`provider-${provider.provider}`}
@@ -178,7 +223,8 @@
                       <button
                         type="submit"
                         class="primary"
-                        disabled={!editing[provider.provider]?.trim() || Boolean(busyProvider)}
+                        disabled={!editing[provider.provider]?.trim() ||
+                          Boolean(busyProvider)}
                       >
                         <IconKey size={18} aria-hidden="true" /> Save
                       </button>
@@ -196,32 +242,60 @@
                   </form>
                 {:else}
                   <p class="managed-note">
-                    This distribution does not accept a secret for this provider. Use the native
-                    or server host when the provider requires protected credentials.
+                    This distribution does not accept a secret for this
+                    provider. Use the native or server host when the provider
+                    requires protected credentials.
                   </p>
                 {/if}
               </article>
             {/each}
           </div>
 
-          {#if providerNotice}<p class="notice" role="status">{providerNotice}</p>{/if}
-          {#if providerProblem}<p class="problem" role="alert">{providerProblem}</p>{/if}
+          {#if providerNotice}<p class="notice" role="status">
+              {providerNotice}
+            </p>{/if}
+          {#if providerProblem}<p class="problem" role="alert">
+              {providerProblem}
+            </p>{/if}
         </section>
       {:else}
         <section aria-labelledby="capability-settings-title">
-          <h2 id="capability-settings-title">Configuration capability status</h2>
+          <h2 id="capability-settings-title">
+            Configuration capability status
+          </h2>
           <p>
-            Fasti does not render configuration forms before their host-side validation and storage
-            capability exists.
+            Fasti does not render configuration forms before their host-side
+            validation and storage capability exists.
           </p>
           <dl class="status-list">
-            <div><dt>Network policy and endpoint</dt><dd>Active</dd></div>
-            <div><dt>Protected metadata credentials</dt><dd>Host-dependent</dd></div>
-            <div><dt>Scoped external API clients</dt><dd>Managed in Connections on the trusted packaged host</dd></div>
-            <div><dt>OIDC administration</dt><dd>Not active</dd></div>
-            <div><dt>Apprise notification administration</dt><dd>Not active</dd></div>
-            <div><dt>Source-specific importers</dt><dd>Not active</dd></div>
-            <div><dt>Native Nuvio pairing</dt><dd>Not active</dd></div>
+            <div>
+              <dt>Network policy and endpoint</dt>
+              <dd>Active</dd>
+            </div>
+            <div>
+              <dt>Protected metadata credentials</dt>
+              <dd>Host-dependent</dd>
+            </div>
+            <div>
+              <dt>Scoped external API clients</dt>
+              <dd>Managed in Connections on the trusted packaged host</dd>
+            </div>
+            <div>
+              <dt>OIDC administration</dt>
+              <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Apprise notification administration</dt>
+              <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Source-specific importers</dt>
+              <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Native Nuvio pairing</dt>
+              <dd>Not active</dd>
+            </div>
           </dl>
         </section>
       {/if}
@@ -239,7 +313,8 @@
   header {
     margin-bottom: 24px;
     padding-bottom: 16px;
-    border-bottom: 2px solid color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
+    border-bottom: 2px solid
+      color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
   }
 
   h1,
@@ -322,7 +397,8 @@
   }
 
   .provider-card {
-    border: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
     border-radius: 7px;
     padding: 16px;
     background: var(--fasti-surface-paper);
@@ -420,7 +496,8 @@
     display: grid;
     gap: 1px;
     margin: 20px 0 0;
-    border: 1px solid var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
     border-radius: 7px;
     overflow: hidden;
   }

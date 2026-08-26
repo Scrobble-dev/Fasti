@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { IconDeviceTv, IconInfoCircle, IconPlug, IconRadio } from "@tabler/icons-svelte";
+  import {
+    IconDeviceTv,
+    IconInfoCircle,
+    IconPlug,
+    IconRadio,
+  } from "@tabler/icons-svelte";
   import ApiClientsPanel from "./api-clients-panel.svelte";
   import type { WorkbenchHost } from "./types.js";
 
@@ -45,33 +50,49 @@
   <header class="view-header">
     <h1 class="view-title">Connections</h1>
     <p class="view-subtitle">
-      See what Fasti can accept now, create scoped external-client credentials, and distinguish
-      active capability from later integration work.
+      See what Fasti can accept now, create scoped external-client credentials,
+      and distinguish active capability from later integration work.
     </p>
   </header>
 
-  <section class="availability-card" aria-labelledby="connections-availability-title">
+  <section
+    class="availability-card"
+    aria-labelledby="connections-availability-title"
+  >
     <IconInfoCircle size={28} stroke={1.75} aria-hidden="true" />
     <div>
-      <h2 id="connections-availability-title">Durable occurrence ingress is active locally</h2>
+      <h2 id="connections-availability-title">
+        Durable occurrence ingress is active locally
+      </h2>
       <p>
-        Fasti now accepts authenticated consumption occurrences through the local API and returns
-        durable idempotency receipts. This is not the same as native Nuvio support. Partial
-        progress, pairing, discovery, two-way state synchronization, and source-specific webhooks
-        remain unavailable until their own contracts and adapters are active.
+        Fasti now accepts authenticated consumption occurrences through the
+        local API and returns durable idempotency receipts. This is not the same
+        as native Nuvio support. Partial progress, pairing, discovery, two-way
+        state synchronization, and source-specific webhooks remain unavailable
+        until their own contracts and adapters are active.
       </p>
     </div>
   </section>
 
   <ApiClientsPanel {host} />
 
-  <section class="connectors-section" aria-labelledby="integration-status-title">
-    <h2 class="section-title" id="integration-status-title">Integration status</h2>
+  <section
+    class="connectors-section"
+    aria-labelledby="integration-status-title"
+  >
+    <h2 class="section-title" id="integration-status-title">
+      Integration status
+    </h2>
     <div class="connectors-grid">
       {#each connectors as conn (conn.id)}
         <article class="connector-card">
           <div class="card-head">
-            <conn.icon size={24} stroke={1.75} class="conn-icon" aria-hidden="true" />
+            <conn.icon
+              size={24}
+              stroke={1.75}
+              class="conn-icon"
+              aria-hidden="true"
+            />
             <div>
               <h3 class="conn-name">{conn.name}</h3>
               <span class="conn-status-pill">{conn.status}</span>
@@ -95,7 +116,8 @@
   }
 
   .view-header {
-    border-bottom: 2px solid color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
+    border-bottom: 2px solid
+      color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
     padding-bottom: 16px;
   }
 
@@ -133,7 +155,8 @@
     align-items: flex-start;
     gap: 16px;
     padding: 20px;
-    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     border-radius: 8px;
     background: var(--fasti-surface-paper);
   }
@@ -164,7 +187,8 @@
 
   .connector-card {
     background: var(--fasti-surface-paper);
-    border: 1px solid color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     border-radius: 6px;
     padding: 20px;
     display: flex;

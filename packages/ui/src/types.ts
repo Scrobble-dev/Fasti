@@ -135,12 +135,7 @@ export interface CustomFieldDefinition {
   readonly label: string;
   readonly targetType: MediaKind | "all";
   readonly valueType:
-    | "string"
-    | "number"
-    | "boolean"
-    | "date"
-    | "url"
-    | "identifier";
+    "string" | "number" | "boolean" | "date" | "url" | "identifier";
   readonly registeredNamespace?: string;
   readonly isFilterable: boolean;
 }
@@ -257,7 +252,9 @@ export interface WorkbenchHost {
     provider: string,
     credential: string,
   ): Promise<ProviderCredentialStatus[]>;
-  deleteProviderCredential(provider: string): Promise<ProviderCredentialStatus[]>;
+  deleteProviderCredential(
+    provider: string,
+  ): Promise<ProviderCredentialStatus[]>;
   searchProvider(
     provider: string,
     query: string,
@@ -280,8 +277,7 @@ export interface ReviewItem {
 }
 
 export type ReviewResolutionTargetInput =
-  | { kind: "existing"; value: string }
-  | { kind: "new"; value: string };
+  { kind: "existing"; value: string } | { kind: "new"; value: string };
 
 export interface ExternalIdentifierClaimInput {
   readonly namespace: string;
