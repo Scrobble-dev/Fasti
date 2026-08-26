@@ -10,12 +10,12 @@ use axum::{
 };
 use fasti_application::{
     derive_deterministic_operation_id, AcceptObservationCommand, AuthenticateCredentialQuery,
-    CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel, SecretMaterial,
+    CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel, SecretMaterial, Violation,
 };
 use fasti_contracts::{ProblemDetails, SubmitObservationRequest, SubmitObservationResponse};
 use fasti_domain::{
     ClaimedTrust, ExternalIdentifierClaim, Grain, ObservedAt, OccurredAt, ObservationResolution,
-    RequestCorrelationId, Violation,
+    RequestCorrelationId,
 };
 use std::sync::Arc;
 
@@ -119,7 +119,7 @@ fn bearer_secret(
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .filter(|value| !value.is_empty() && !value.contains(char::is_whitespace))
+        .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
         .ok_or_else(|| {
             application_problem(Box::new(FastiProblem::authentication_failed(
                 CapabilityKey::AcceptObservation,
@@ -242,17 +242,20 @@ pub(crate) async fn submit_observation(
         )))
     })?;
     if evidence_bytes.len() > MAX_NORMALIZED_EVIDENCE_BYTES {
-        return Err(application_problem(Box::new(FastiProblem::payload_too_large(
-            CapabilityKey::AcceptObservation,
-            correlation_id,
-            vec![Violation::try_new(
-                "invalid_representation",
-                "/",
-                "normalized observation evidence exceeds the ingress bound",
-                "at most 65536 bytes",
+        return Err(application_problem(Box::new(
+            FastiProblem::payload_too_large(
+                CapabilityKey::AcceptObservation,
+                correlation_id,
+                vec![Violation::try_new(
+                    "invalid_representation",
+                    "/",
+                    "normalized observation evidence exceeds the ingress bound",
+                    "at most 65536 bytes",
+                )
+                .expect("adapter-owned representation violation is valid")],
             )
-            .expect("adapter-owned representation violation is valid")],
-        ).expect("one violation is within bounds"))));
+            .expect("one violation is within bounds"),
+        )));
     }
 
     let source = request.source;
