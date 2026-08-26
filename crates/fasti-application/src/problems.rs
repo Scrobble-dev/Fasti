@@ -459,6 +459,7 @@ impl ProblemCode {
     pub const fn contract_state(self) -> ContractState {
         match self {
             Self::AlreadyInitialized
+            | Self::AuthenticationFailed
             | Self::BootstrapClosed
             | Self::IntegrityFailed
             | Self::StorageUnavailable => ContractState::Finalized,
@@ -924,6 +925,7 @@ mod tests {
     fn only_activated_problem_contracts_are_finalized() {
         for code in [
             ProblemCode::AlreadyInitialized,
+            ProblemCode::AuthenticationFailed,
             ProblemCode::BootstrapClosed,
             ProblemCode::IntegrityFailed,
             ProblemCode::StorageUnavailable,
@@ -933,7 +935,6 @@ mod tests {
         }
 
         for code in [
-            ProblemCode::AuthenticationFailed,
             ProblemCode::CursorExpired,
             ProblemCode::EvidenceNotFound,
             ProblemCode::IdentityConflict,
