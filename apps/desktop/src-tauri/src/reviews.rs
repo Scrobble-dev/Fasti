@@ -90,19 +90,19 @@ pub(crate) fn resolve_review(
     let review_item_id: ReviewItemId = input
         .review_item_id
         .parse()
-        .map_err(|_| DesktopProblem::configuration("The review item ID is malformed."))?;
+        .map_err(|_| DesktopProblem::invalid_input("The review item ID is malformed."))?;
 
     let target = match input.target {
         ReviewResolutionTargetInput::Existing(raw) => {
             let record_id: RecordId = raw.parse().map_err(|_| {
-                DesktopProblem::configuration("The candidate record ID is malformed.")
+                DesktopProblem::invalid_input("The candidate record ID is malformed.")
             })?;
             ReviewResolutionTarget::Existing(record_id)
         }
         ReviewResolutionTargetInput::New(raw) => {
             let grain: Grain = raw
                 .parse()
-                .map_err(|_| DesktopProblem::configuration("The media grain is not recognized."))?;
+                .map_err(|_| DesktopProblem::invalid_input("The media grain is not recognized."))?;
             ReviewResolutionTarget::New(grain)
         }
     };
@@ -112,10 +112,10 @@ pub(crate) fn resolve_review(
         .into_iter()
         .map(|claim| {
             let grain: Grain = claim.grain.parse().map_err(|_| {
-                DesktopProblem::configuration("An identifier's media grain is not recognized.")
+                DesktopProblem::invalid_input("An identifier's media grain is not recognized.")
             })?;
             ExternalIdentifierClaim::try_new(claim.namespace, grain, claim.value)
-                .map_err(|_| DesktopProblem::configuration("An identifier claim is invalid."))
+                .map_err(|_| DesktopProblem::invalid_input("An identifier claim is invalid."))
         })
         .collect::<Result<Vec<_>, DesktopProblem>>()?;
 
@@ -139,44 +139,8 @@ pub(crate) fn resolve_review(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::setup::{complete_setup, SetupSecret};
-    use fasti_application::SecretMaterial;
-    use std::collections::BTreeMap;
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct MemoryStore(Mutex<BTreeMap<SetupSecret, [u8; 32]>>);
-
-    impl SetupSecretStore for MemoryStore {
-        fn load(&self, secret: SetupSecret) -> Result<Option<SecretMaterial>, DesktopProblem> {
-            Ok(self
-                .0
-                .lock()
-                .expect("memory store")
-                .get(&secret)
-                .copied()
-                .map(SecretMaterial::from_bytes))
-        }
-
-        fn store(&self, secret: SetupSecret, value: &SecretMaterial) -> Result<(), DesktopProblem> {
-            self.0
-                .lock()
-                .expect("memory store")
-                .insert(secret, *value.expose_bytes());
-            Ok(())
-        }
-
-        fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem> {
-            self.0.lock().expect("memory store").remove(&secret);
-            Ok(())
-        }
-    }
-
-    fn new_kernel() -> (tempfile::TempDir, SqliteKernel) {
-        let root = tempfile::tempdir().expect("temporary data root");
-        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
-        (root, kernel)
-    }
+    use crate::setup::complete_setup;
+    use crate::setup::test_support::{new_kernel, MemoryStore};
 
     #[test]
     fn list_reviews_refuses_before_setup_completes() {
@@ -206,7 +170,7 @@ mod tests {
 
         let input = ResolveReviewInput {
             review_item_id: "rev_00000000000000000000000000".to_owned(),
-            target: ReviewResolutionTargetInput::New("movie".to_owned()),
+            target: ReviewResolutionTargetInput::New("film".to_owned()),
             identifiers: Vec::new(),
         };
 
@@ -224,13 +188,39 @@ mod tests {
 
         let input = ResolveReviewInput {
             review_item_id: "not-a-real-id".to_owned(),
-            target: ReviewResolutionTargetInput::New("movie".to_owned()),
+            target: ReviewResolutionTargetInput::New("film".to_owned()),
             identifiers: Vec::new(),
         };
 
         assert!(matches!(
             resolve_review(&kernel, &store, input),
-            Err(problem) if problem.code() == "configuration_invalid"
+            Err(problem) if problem.code() == "invalid_input"
+        ));
+    }
+
+    #[test]
+    fn resolve_review_reports_a_well_formed_but_nonexistent_review_item() {
+        // A genuine "happy path" test needs a seeded review item, which only
+        // exists as a side effect of the observation -> interpretation ->
+        // ambiguity-detection pipeline that fasti-store's own test suite
+        // doesn't shortcut either (see review.rs's own resolution test,
+        // which also uses a fresh, never-persisted ReviewItemId). This test
+        // instead proves the part that's actually new here: a well-formed,
+        // authenticated request reaches the real kernel and its real
+        // "not found" response surfaces correctly through this layer.
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+
+        let input = ResolveReviewInput {
+            review_item_id: ReviewItemId::new_v7().to_string(),
+            target: ReviewResolutionTargetInput::New("film".to_owned()),
+            identifiers: Vec::new(),
+        };
+
+        assert!(matches!(
+            resolve_review(&kernel, &store, input),
+            Err(problem) if problem.code() == "review_not_found"
         ));
     }
 }
