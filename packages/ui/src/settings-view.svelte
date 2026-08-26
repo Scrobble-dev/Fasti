@@ -2,7 +2,10 @@
   import type {
     CustomFieldDefinition,
     ScopedApiToken,
-    ProviderApiKeyConfig,
+    ProviderCredentialStatus,
+    NetworkConfiguration,
+    SaveNetworkConfigurationRequest,
+    EndpointConnectionStatus,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
@@ -11,6 +14,8 @@
     ContextMenuItemConfig,
   } from "./types.js";
   import { createDefaultWorkbenchPreferences } from "./defaults.js";
+  import NetworkSettings from "./network-settings.svelte";
+  import { hostProblemText } from "./host-problem.js";
   import {
     IconKey,
     IconPalette,
@@ -30,12 +35,19 @@
     IconTrash,
     IconDeviceTv,
     IconExternalLink,
+    IconSettings,
   } from "@tabler/icons-svelte";
 
   interface Props {
     customFields: CustomFieldDefinition[];
     tokens: ScopedApiToken[];
-    providerKeys: ProviderApiKeyConfig[];
+    providerKeys?: ProviderCredentialStatus[];
+    networkConfiguration?: NetworkConfiguration;
+    providerLoading?: boolean;
+    networkLoading?: boolean;
+    providerLoadProblem?: string;
+    networkLoadProblem?: string;
+    initialSection?: "providers" | "advanced";
     oidcConfig: OidcConfiguration;
     appriseConfig: AppriseNotificationConfig;
     themeSettings: ThemeSettings;
@@ -44,7 +56,14 @@
     onUpdateWorkbenchPreferences?: (
       prefs: Partial<WorkbenchPreferences>,
     ) => void;
-    onSaveProviderKey?: (provider: string, key: string) => void;
+    onSaveProviderKey?: (provider: string, key: string) => Promise<void>;
+    onDeleteProviderKey?: (provider: string) => Promise<void>;
+    onSaveNetworkConfiguration?: (
+      input: SaveNetworkConfigurationRequest,
+    ) => Promise<NetworkConfiguration>;
+    onTestEndpoint?: (endpoint: string) => Promise<EndpointConnectionStatus>;
+    onRetryProviderState?: () => void;
+    onRetryNetworkState?: () => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
   }
@@ -53,6 +72,12 @@
     customFields,
     tokens,
     providerKeys,
+    networkConfiguration,
+    providerLoading = false,
+    networkLoading = false,
+    providerLoadProblem,
+    networkLoadProblem,
+    initialSection,
     oidcConfig,
     appriseConfig,
     themeSettings,
@@ -60,6 +85,11 @@
     onUpdateTheme,
     onUpdateWorkbenchPreferences,
     onSaveProviderKey,
+    onDeleteProviderKey,
+    onSaveNetworkConfiguration,
+    onTestEndpoint,
+    onRetryProviderState,
+    onRetryNetworkState,
     onSaveOidc,
     onSaveApprise,
   }: Props = $props();
@@ -72,7 +102,8 @@
     | "tokens"
     | "oidc"
     | "notifications"
-    | "importers" = $state("appearance");
+    | "importers"
+    | "advanced" = $state("appearance");
 
   // Local state for token generator
   let newTokenName = $state("");
@@ -81,6 +112,9 @@
 
   // Local state for keys
   let editingKeyMap: Record<string, string> = $state({});
+  let providerBusy = $state<string | undefined>();
+  let providerNotice = $state("");
+  let providerProblem = $state("");
   let oidcDraft = $state({
     enabled: false,
     issuerUrl: "",
@@ -95,6 +129,10 @@
     notifyOnReviewRequired: false,
     notifyOnSyncError: false,
     notifyOnMilestone: false,
+  });
+
+  $effect(() => {
+    if (initialSection) activeSettingsSection = initialSection;
   });
 
   $effect(() => {
@@ -176,6 +214,51 @@
   function handleResetNavPreferences(): void {
     onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
   }
+
+  async function saveProviderKey(provider: string): Promise<void> {
+    const credential = editingKeyMap[provider]?.trim() ?? "";
+    if (!credential || !onSaveProviderKey || providerBusy) return;
+    editingKeyMap[provider] = "";
+    providerBusy = provider;
+    providerNotice = "";
+    providerProblem = "";
+    try {
+      await onSaveProviderKey(provider, credential);
+      providerNotice = "Credential saved securely for this Fasti node.";
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "The trusted desktop host rejected this credential request.",
+      );
+    } finally {
+      providerBusy = undefined;
+    }
+  }
+
+  async function deleteProviderKey(provider: string): Promise<void> {
+    if (!onDeleteProviderKey || providerBusy) return;
+    providerBusy = provider;
+    providerNotice = "";
+    providerProblem = "";
+    try {
+      await onDeleteProviderKey(provider);
+      editingKeyMap[provider] = "";
+      providerNotice = "Credential removed from the platform credential store.";
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "The trusted desktop host rejected this credential request.",
+      );
+    } finally {
+      providerBusy = undefined;
+    }
+  }
+
+  function confirmProviderDelete(provider: string): void {
+    if (window.confirm("Remove this provider key from the credential store?")) {
+      void deleteProviderKey(provider);
+    }
+  }
 </script>
 
 <div class="settings-container">
@@ -183,8 +266,8 @@
     <div>
       <h1 class="view-title">Settings & Studio</h1>
       <p class="view-subtitle">
-        Configure metadata API keys, appearance themes, media server connectors,
-        and security.
+        Configure available metadata providers, network access, appearance, and
+        navigation. Unavailable sections say so.
       </p>
     </div>
   </header>
@@ -196,6 +279,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "appearance"}
+        aria-pressed={activeSettingsSection === "appearance"}
         onclick={() => (activeSettingsSection = "appearance")}
       >
         <IconPalette size={18} /> Appearance & Theme
@@ -205,6 +289,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "navigation"}
+        aria-pressed={activeSettingsSection === "navigation"}
         onclick={() => (activeSettingsSection = "navigation")}
       >
         <IconLayoutSidebar size={18} /> Navigation & Menus
@@ -214,6 +299,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "providers"}
+        aria-pressed={activeSettingsSection === "providers"}
         onclick={() => (activeSettingsSection = "providers")}
       >
         <IconKey size={18} /> Metadata Providers & Keys
@@ -222,7 +308,18 @@
       <button
         type="button"
         class="nav-tab-btn"
+        class:active={activeSettingsSection === "advanced"}
+        aria-pressed={activeSettingsSection === "advanced"}
+        onclick={() => (activeSettingsSection = "advanced")}
+      >
+        <IconSettings size={18} /> Advanced Network Access
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
         class:active={activeSettingsSection === "connectors"}
+        aria-pressed={activeSettingsSection === "connectors"}
         onclick={() => (activeSettingsSection = "connectors")}
       >
         <IconDeviceTv size={18} /> Nuvio & Media Connectors
@@ -232,6 +329,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "tokens"}
+        aria-pressed={activeSettingsSection === "tokens"}
         onclick={() => (activeSettingsSection = "tokens")}
       >
         <IconCode size={18} /> Personal Access Tokens (PAT)
@@ -241,6 +339,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "oidc"}
+        aria-pressed={activeSettingsSection === "oidc"}
         onclick={() => (activeSettingsSection = "oidc")}
       >
         <IconUserCheck size={18} /> Single Sign-On (OIDC)
@@ -250,6 +349,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "notifications"}
+        aria-pressed={activeSettingsSection === "notifications"}
         onclick={() => (activeSettingsSection = "notifications")}
       >
         <IconBell size={18} /> Notifications & Apprise
@@ -259,6 +359,7 @@
         type="button"
         class="nav-tab-btn"
         class:active={activeSettingsSection === "importers"}
+        aria-pressed={activeSettingsSection === "importers"}
         onclick={() => (activeSettingsSection = "importers")}
       >
         <IconDatabaseImport size={18} /> Lossless Importers & Backups
@@ -266,7 +367,7 @@
     </nav>
 
     <!-- Right Settings Content Panel -->
-    <main class="settings-content-card">
+    <div class="settings-content-card">
       <!-- 1. Appearance & Theme Editor (Tabler Customizer) -->
       {#if activeSettingsSection === "appearance"}
         <section class="section-pane">
@@ -651,23 +752,40 @@
         <!-- 3. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
-          <h2 class="pane-title">Metadata Providers & API Credentials</h2>
+          <h2 id="provider-settings-title" class="pane-title" tabindex="-1">
+            Metadata Providers & API Credentials
+          </h2>
           <p class="pane-desc">
-            Provider credentials are not available in this build. Fasti does not
-            accept or store a key until the matching host command exists.
+            Add a provider credential to enable real metadata search. Fasti
+            never returns a stored secret to this interface.
           </p>
 
           <div class="providers-list">
-            {#if providerKeys.length === 0}
-              <p class="unavailable-note">No provider commands are active.</p>
+            {#if providerLoading}
+              <p class="unavailable-note" role="status">
+                Loading provider credential status…
+              </p>
+            {:else if providerKeys === undefined && providerLoadProblem}
+              <p class="provider-problem" role="alert">
+                {providerLoadProblem}
+              </p>
+              {#if onRetryProviderState}
+                <button
+                  id="provider-retry"
+                  type="button"
+                  onclick={onRetryProviderState}
+                >
+                  Retry host connection
+                </button>
+              {/if}
             {/if}
-            {#each providerKeys as prov}
+            {#each providerKeys ?? [] as prov}
               <div class="provider-key-card">
                 <div class="provider-key-header">
                   <div>
                     <h3 class="provider-title">{prov.label}</h3>
                     <a
-                      href={prov.docsUrl}
+                      href={prov.docs_url}
                       target="_blank"
                       rel="noopener"
                       class="docs-link"
@@ -677,41 +795,93 @@
                   </div>
                   <span
                     class="prov-status-chip"
-                    class:configured={prov.isConfigured}
+                    class:configured={prov.configured}
                   >
-                    {prov.isConfigured ? "Configured" : "Not configured"}
+                    {prov.configured ? "Configured" : "Not configured"}
                   </span>
                 </div>
 
-                <div class="key-input-row">
+                <p class="wb-help">
+                  {#if prov.source === "environment"}
+                    Source: environment. This value is read-only and applies to
+                    this app process.
+                  {:else if prov.source === "credential_store"}
+                    Source: platform credential store. This value is shared by
+                    all profiles on this Fasti node.
+                  {:else}
+                    No key is saved for this Fasti node.
+                  {/if}
+                  Google Books is required for Discover book search.
+                </p>
+                <form
+                  class="key-input-row"
+                  onsubmit={(event) => {
+                    event.preventDefault();
+                    void saveProviderKey(prov.provider);
+                  }}
+                >
                   <input
                     type="password"
-                    placeholder="Enter API Key / Access Token..."
+                    placeholder={prov.writable
+                      ? "Enter a new API key"
+                      : "Managed by the environment"}
                     value={editingKeyMap[prov.provider] ?? ""}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
                     aria-label="API Key for {prov.label}"
+                    autocomplete="off"
+                    spellcheck="false"
+                    disabled={!prov.writable || providerBusy === prov.provider}
                   />
                   <button
-                    type="button"
+                    type="submit"
                     class="save-key-btn"
-                    disabled={!onSaveProviderKey}
-                    title={!onSaveProviderKey
-                      ? "Provider credential storage is not available in this build"
-                      : undefined}
-                    onclick={() => {
-                      const val = editingKeyMap[prov.provider] ?? "";
-                      onSaveProviderKey?.(prov.provider, val);
-                    }}
+                    disabled={!prov.writable ||
+                      !editingKeyMap[prov.provider]?.trim() ||
+                      !!providerBusy}
                   >
-                    Save Key
+                    {providerBusy === prov.provider ? "Saving…" : "Save key"}
                   </button>
-                </div>
+                  {#if prov.writable && prov.configured}
+                    <button
+                      type="button"
+                      class="remove-key-btn"
+                      disabled={!!providerBusy}
+                      onclick={() => confirmProviderDelete(prov.provider)}
+                    >
+                      Remove key
+                    </button>
+                  {/if}
+                </form>
               </div>
             {/each}
           </div>
+          {#if providerNotice}
+            <p class="provider-notice" role="status">{providerNotice}</p>
+          {/if}
+          {#if providerProblem}
+            <p class="provider-problem" role="alert">{providerProblem}</p>
+          {/if}
         </section>
+      {:else if activeSettingsSection === "advanced"}
+        {#if onSaveNetworkConfiguration && onTestEndpoint}
+          <NetworkSettings
+            configuration={networkConfiguration}
+            loading={networkLoading}
+            loadProblem={networkLoadProblem}
+            onSave={onSaveNetworkConfiguration}
+            onTest={onTestEndpoint}
+            onRetry={onRetryNetworkState}
+          />
+        {:else}
+          <section class="section-pane">
+            <h2 class="pane-title">Advanced network access</h2>
+            <p class="pane-desc" role="alert">
+              The trusted desktop host does not expose network settings.
+            </p>
+          </section>
+        {/if}
 
         <!-- 3. Nuvio & Media Server Connectors -->
       {:else if activeSettingsSection === "connectors"}
@@ -729,8 +899,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Personal Access Tokens (PAT)</h2>
           <p class="pane-desc">
-            Generate cryptographically verified Bearer tokens for scripts and
-            devices.
+            Token creation and revocation are not available in this build. The
+            disabled controls show the planned scope model.
           </p>
 
           <!-- New Token Form -->
@@ -983,7 +1153,8 @@
         <section class="section-pane">
           <h2 class="pane-title">Lossless Importers & Migrations</h2>
           <p class="pane-desc">
-            Migrate your entire scrobble and media history with zero data loss.
+            Importers are not available in this build. Each disabled option
+            shows its planned source formats.
           </p>
 
           <div class="importers-grid">
@@ -1007,7 +1178,7 @@
           </div>
         </section>
       {/if}
-    </main>
+    </div>
   </div>
 </div>
 
@@ -1066,6 +1237,7 @@
     color: var(--fasti-text-muted);
     cursor: pointer;
     text-align: left;
+    min-height: 44px;
   }
 
   .nav-tab-btn:hover {
@@ -1211,6 +1383,8 @@
 
   .provider-key-header {
     display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: 12px;
@@ -1222,12 +1396,13 @@
     margin: 0;
   }
   .docs-link {
+    min-height: 44px;
     font-size: 0.78rem;
-    color: var(--fasti-action-primary);
+    color: var(--fasti-text-primary);
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    text-decoration: none;
+    text-decoration: underline;
   }
   .prov-status-chip {
     font-family: var(--fasti-font-mono);
@@ -1253,7 +1428,7 @@
 
   .api-key-input {
     flex: 1;
-    height: 40px;
+    min-height: 44px;
     padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1263,14 +1438,50 @@
     background: var(--fasti-surface-paper);
   }
 
-  .save-key-btn {
+  .save-key-btn,
+  .remove-key-btn {
+    min-height: 44px;
     padding: 8px 18px;
-    background: var(--fasti-action-primary);
-    color: white;
     font-weight: 600;
-    border: none;
     border-radius: 4px;
     cursor: pointer;
+  }
+
+  .save-key-btn {
+    background: var(--fasti-action-primary);
+    color: white;
+    border: none;
+  }
+
+  .remove-key-btn {
+    background: transparent;
+    color: var(--fasti-text-primary);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+  }
+
+  .provider-notice,
+  .provider-problem {
+    margin: 14px 0 0;
+    font-size: 0.86rem;
+  }
+
+  .provider-notice {
+    color: var(--fasti-state-verified);
+  }
+
+  .provider-problem {
+    color: var(--fasti-state-error, #b42318);
+  }
+
+  :is(
+    .nav-tab-btn,
+    .api-key-input,
+    .save-key-btn,
+    .remove-key-btn
+  ):focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
   }
 
   .wb-help {
@@ -1454,14 +1665,12 @@
     }
 
     .settings-nav {
-      flex-direction: row;
-      overflow-x: auto;
-      padding-bottom: 4px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
     }
 
     .nav-tab-btn {
-      flex: 0 0 auto;
-      white-space: nowrap;
+      width: 100%;
     }
 
     .settings-content-card {
@@ -1472,6 +1681,10 @@
     .options-grid-3,
     .importers-grid {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .key-input-row {
+      flex-direction: column;
     }
   }
 </style>

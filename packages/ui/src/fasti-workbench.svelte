@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import type {
     ActiveNavSection,
     MediaKind,
@@ -7,7 +7,10 @@
     WatchStatus,
     ChronicleOccurrence,
     ReconciliationCase,
-    ProviderApiKeyConfig,
+    ProviderCredentialStatus,
+    NetworkConfiguration,
+    SaveNetworkConfigurationRequest,
+    WorkbenchHost,
     OidcConfiguration,
     AppriseNotificationConfig,
     ThemeSettings,
@@ -38,12 +41,25 @@
     IconLoader2,
   } from "@tabler/icons-svelte";
 
+  interface Props {
+    host: WorkbenchHost;
+  }
+
+  let { host }: Props = $props();
+
   let activeSection: ActiveNavSection = $state("home");
   let records = $state<MediaRecord[]>([]);
   let chronicle = $state<ChronicleOccurrence[]>([]);
   let reconciliationCases = $state<ReconciliationCase[]>([]);
   let tokens = $state([]);
-  let providerKeys = $state<ProviderApiKeyConfig[]>([]);
+  let providerKeys = $state<ProviderCredentialStatus[] | undefined>();
+  let networkConfiguration = $state<NetworkConfiguration | undefined>();
+  let providerLoading = $state(false);
+  let networkLoading = $state(false);
+  let providerProblem = $state("");
+  let networkProblem = $state("");
+  let healthCheckRunning = false;
+  let settingsTarget = $state<"providers" | "advanced" | undefined>();
   let oidcConfig = $state<OidcConfiguration>({
     enabled: false,
     issuerUrl: "",
@@ -360,15 +376,80 @@
   });
 
   async function checkNodeHealth(): Promise<void> {
-    if (typeof fetch === "undefined") return;
+    if (!networkConfiguration || healthCheckRunning) return;
+    healthCheckRunning = true;
     try {
-      const res = await fetch("/api/v1/health", {
-        signal: AbortSignal.timeout(3000),
-      });
-      nodeHealthy = res.ok;
+      await host.testEndpointConnection(
+        networkConfiguration.connection.service_url.value,
+      );
+      nodeHealthy = true;
     } catch {
       nodeHealthy = false;
+    } finally {
+      healthCheckRunning = false;
     }
+  }
+
+  async function loadHostState(): Promise<void> {
+    networkLoading = true;
+    providerLoading = true;
+    networkProblem = "";
+    providerProblem = "";
+    const [configuration, credentials] = await Promise.allSettled([
+      host.loadNetworkConfiguration(),
+      host.providerCredentialStatus(),
+    ]);
+    if (configuration.status === "fulfilled") {
+      networkConfiguration = configuration.value;
+    } else {
+      networkProblem = "The trusted host could not load network settings.";
+    }
+    if (credentials.status === "fulfilled") {
+      providerKeys = credentials.value;
+    } else {
+      providerProblem = "The trusted host could not load provider status.";
+    }
+    networkLoading = false;
+    providerLoading = false;
+    await checkNodeHealth();
+  }
+
+  async function retryHostState(
+    kind: "network" | "provider",
+    successTarget: string,
+  ): Promise<void> {
+    await loadHostState();
+    await tick();
+    const failed = kind === "network" ? networkProblem : providerProblem;
+    document.getElementById(failed ? `${kind}-retry` : successTarget)?.focus();
+  }
+
+  async function saveNetworkConfiguration(
+    input: SaveNetworkConfigurationRequest,
+  ): Promise<NetworkConfiguration> {
+    const response = await host.saveNetworkConfiguration(input);
+    networkConfiguration = response;
+    await checkNodeHealth();
+    return response;
+  }
+
+  async function saveProviderKey(
+    provider: string,
+    credential: string,
+  ): Promise<void> {
+    providerKeys = await host.saveProviderCredential(provider, credential);
+  }
+
+  async function deleteProviderKey(provider: string): Promise<void> {
+    providerKeys = await host.deleteProviderCredential(provider);
+  }
+
+  async function openProviderSettings(): Promise<void> {
+    settingsTarget = "providers";
+    handleSelectSection("settings");
+    await tick();
+    document.getElementById("provider-settings-title")?.focus();
+    settingsTarget = undefined;
   }
 
   onMount(() => {
@@ -387,7 +468,7 @@
       };
     };
     narrowViewport.addEventListener("change", handleViewportChange);
-    void checkNodeHealth();
+    void loadHostState();
     const healthInterval = window.setInterval(() => {
       void checkNodeHealth();
     }, 30_000);
@@ -553,11 +634,7 @@
 
   <div class="workbench-main-shell">
     <!-- Top Bar Header (Search, Scope, View Mode, Filters, Theme Drawer Toggle) -->
-    <header
-      class="top-nav-bar"
-      role="toolbar"
-      aria-label="Global workbench toolbar"
-    >
+    <header class="top-nav-bar">
       <div
         class="d-flex align-items-center gap-2 flex-grow-1"
         style="max-width: 480px;"
@@ -565,7 +642,7 @@
         {#if workbenchPreferences.sidebarHidden}
           <button
             type="button"
-            class="btn btn-icon btn-outline-secondary btn-sm"
+            class="btn btn-icon btn-outline-secondary sidebar-toggle"
             onclick={() =>
               (workbenchPreferences = {
                 ...workbenchPreferences,
@@ -689,7 +766,14 @@
           />
         {/if}
       {:else if activeSection === "discover"}
-        <DiscoverView />
+        <DiscoverView
+          providerCredentials={providerKeys}
+          loading={providerLoading}
+          hostProblem={providerProblem}
+          onSearch={(provider, query) => host.searchProvider(provider, query)}
+          onOpenSettings={openProviderSettings}
+          onRetry={() => void retryHostState("provider", "discover-title")}
+        />
       {:else if activeSection === "detail" && selectedRecord}
         <MediaDetailView
           record={selectedRecord}
@@ -722,6 +806,12 @@
           customFields={[]}
           {tokens}
           {providerKeys}
+          {networkConfiguration}
+          {providerLoading}
+          {networkLoading}
+          providerLoadProblem={providerProblem}
+          networkLoadProblem={networkProblem}
+          initialSection={settingsTarget}
           {oidcConfig}
           {appriseConfig}
           {themeSettings}
@@ -729,6 +819,14 @@
           onUpdateTheme={handleUpdateTheme}
           onUpdateWorkbenchPreferences={(prefs) =>
             (workbenchPreferences = { ...workbenchPreferences, ...prefs })}
+          onSaveProviderKey={saveProviderKey}
+          onDeleteProviderKey={deleteProviderKey}
+          onSaveNetworkConfiguration={saveNetworkConfiguration}
+          onTestEndpoint={(endpoint) => host.testEndpointConnection(endpoint)}
+          onRetryProviderState={() =>
+            void retryHostState("provider", "provider-settings-title")}
+          onRetryNetworkState={() =>
+            void retryHostState("network", "advanced-settings-title")}
         />
       {:else}
         <!-- Media Category Grid (Shows, Movies, Anime, Manga, Games, Books, etc.) -->
@@ -898,6 +996,11 @@
     font-weight: 500;
     cursor: pointer;
     transition: all 120ms ease;
+  }
+
+  :global(.sidebar-toggle) {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .tool-btn:hover {

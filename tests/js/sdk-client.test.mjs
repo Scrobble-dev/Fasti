@@ -624,12 +624,12 @@ test("connection endpoints preserve custom domains and expose loopback alternati
     port: 443,
     source: "build",
     managed: true,
-    trust: "https",
+    scheme: "https",
     loopbackAliases: [],
   });
   assert.deepEqual(
     connectionEndpoint("http://localhost:8420").loopbackAliases,
-    ["http://localhost:8420", "http://127.0.0.1:8420", "http://[::1]:8420"],
+    ["http://localhost:8420", "http://127.0.0.1:8420"],
   );
 });
 
@@ -641,11 +641,12 @@ test("connection endpoints reject unsafe origins", () => {
     "https://fasti.internal/path",
     "https://fasti.internal?query=yes",
     "https://fasti.internal#fragment",
+    "https://fasti.internal:0",
+    "http://127.0.0.1:0",
   ]) {
     assert.throws(() => connectionEndpoint(value));
   }
 });
-
 test("generated public metadata preserves complete registry and surface dispositions", () => {
   assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 22);
   assert.equal(

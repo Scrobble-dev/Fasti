@@ -65,14 +65,14 @@ export interface FastiClientOptions {
 export type ConnectionValueSource =
   "default" | "saved" | "environment" | "build";
 
-export type ConnectionTrust = "http" | "https";
+export type ConnectionScheme = "http" | "https";
 
 export interface ConnectionEndpoint {
   readonly url: string;
   readonly port: number;
   readonly source: ConnectionValueSource;
   readonly managed: boolean;
-  readonly trust: ConnectionTrust;
+  readonly scheme: ConnectionScheme;
   readonly loopbackAliases: readonly string[];
 }
 
@@ -89,11 +89,10 @@ export function connectionEndpoint(
     port: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
     source,
     managed: source === "environment" || source === "build",
-    trust: url.protocol === "https:" ? "https" : "http",
+    scheme: url.protocol === "https:" ? "https" : "http",
     loopbackAliases: loopbackAliases(url),
   });
 }
-
 export interface CallOptions {
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -748,6 +747,9 @@ export function normalizeBaseUrl(value: string): URL {
       "baseUrl must be an origin URL without an application path",
     );
   }
+  if (url.port === "0") {
+    throw new TypeError("baseUrl port must be from 1 to 65535");
+  }
   return url;
 }
 
@@ -758,13 +760,14 @@ function isLoopbackHostname(hostname: string): boolean {
 function loopbackAliases(url: URL): readonly string[] {
   if (!isLoopbackHostname(url.hostname)) return Object.freeze([]);
   const port = url.port === "" ? "" : `:${url.port}`;
+  if (url.hostname.toLowerCase() === "[::1]") {
+    return Object.freeze([`${url.protocol}//[::1]${port}`]);
+  }
   return Object.freeze([
     `${url.protocol}//localhost${port}`,
     `${url.protocol}//127.0.0.1${port}`,
-    `${url.protocol}//[::1]${port}`,
   ]);
 }
-
 function normalizeRetryPolicy(
   override?: Partial<RetryPolicy>,
   fallback: RetryPolicy = DEFAULT_RETRY_POLICY,

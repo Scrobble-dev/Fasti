@@ -3,13 +3,10 @@ use fasti_application::{
     FastiProblem, InitializeNodeCommand, ProblemCode, RequestAccessContext, SecretMaterial,
 };
 use fasti_domain::RequestCorrelationId;
-use fasti_store::SqliteKernel;
+use fasti_store::{DataRootIdentity, SqliteKernel};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
-use std::fmt::Write as _;
-use std::path::Path;
 
-const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
+pub(crate) const KEYRING_SERVICE: &str = "dev.scrobble.fasti.desktop";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum SetupSecret {
@@ -35,7 +32,7 @@ pub(crate) struct DesktopProblem {
 }
 
 impl DesktopProblem {
-    fn secure_storage(detail: impl Into<String>) -> Self {
+    pub(crate) fn secure_storage(detail: impl Into<String>) -> Self {
         Self {
             code: "secure_storage_unavailable",
             title: "Secure storage is unavailable",
@@ -59,6 +56,43 @@ impl DesktopProblem {
             title: "Local storage is unavailable",
             detail: detail.into(),
             next_action: "Check the Fasti data directory, then retry.",
+        }
+    }
+
+    pub(crate) fn configuration(detail: impl Into<String>) -> Self {
+        Self {
+            code: "configuration_invalid",
+            title: "Network configuration is invalid",
+            detail: detail.into(),
+            next_action: "Check the network settings, then retry.",
+        }
+    }
+
+    pub(crate) fn connection(detail: impl Into<String>) -> Self {
+        Self {
+            code: "connection_failed",
+            title: "Connection failed",
+            detail: detail.into(),
+            next_action: "Check the address, network policy, and certificate trust, then retry.",
+        }
+    }
+
+    pub(crate) fn provider(detail: impl Into<String>) -> Self {
+        Self {
+            code: "provider_unavailable",
+            title: "Provider is unavailable",
+            detail: detail.into(),
+            next_action: "Check the provider settings and outbound policy, then retry.",
+        }
+    }
+
+    pub(crate) fn provider_credential(detail: impl Into<String>) -> Self {
+        Self {
+            code: "provider.credential_invalid",
+            title: "Provider credential is invalid",
+            detail: detail.into(),
+            next_action:
+                "Replace or remove the provider credential. Fasti local data is unchanged.",
         }
     }
 
@@ -113,21 +147,18 @@ pub(crate) struct KeyringSetupSecretStore {
 }
 
 impl KeyringSetupSecretStore {
-    pub(crate) fn new(data_root: &Path) -> Self {
-        let digest = Sha256::digest(data_root.as_os_str().as_encoded_bytes());
-        let mut account_scope = String::with_capacity(digest.len() * 2);
-        for byte in digest {
-            write!(account_scope, "{byte:02x}").expect("writing to a String cannot fail");
+    pub(crate) fn new(identity: DataRootIdentity) -> Self {
+        Self {
+            account_scope: crate::secure_storage::account_scope(identity),
         }
-        Self { account_scope }
     }
 
     fn account(&self, secret: SetupSecret) -> String {
         format!("{}-{}", secret.label(), self.account_scope)
     }
 
-    fn entry(&self, secret: SetupSecret) -> Result<keyring::Entry, DesktopProblem> {
-        keyring::Entry::new(KEYRING_SERVICE, &self.account(secret)).map_err(|_| {
+    fn entry(&self, secret: SetupSecret) -> Result<crate::secure_storage::Entry, DesktopProblem> {
+        crate::secure_storage::Entry::new(KEYRING_SERVICE, &self.account(secret)).map_err(|_| {
             DesktopProblem::secure_storage("Fasti could not open the system credential store.")
         })
     }
@@ -145,7 +176,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
                 })?;
                 Ok(Some(SecretMaterial::from_bytes(bytes)))
             }
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(crate::secure_storage::Error::NoEntry) => Ok(None),
             Err(_) => Err(DesktopProblem::secure_storage(
                 "Fasti could not read the system credential store.",
             )),
@@ -171,7 +202,7 @@ impl SetupSecretStore for KeyringSetupSecretStore {
     fn delete(&self, secret: SetupSecret) -> Result<(), DesktopProblem> {
         let entry = self.entry(secret)?;
         match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(crate::secure_storage::Error::NoEntry) => Ok(()),
             Err(_) => Err(DesktopProblem::secure_storage(
                 "Fasti could not remove the consumed setup proof.",
             )),
@@ -338,10 +369,18 @@ mod tests {
 
     #[test]
     fn keyring_accounts_are_scoped_to_the_data_root() {
-        let root_a = tempfile::tempdir().expect("first data root");
-        let root_b = tempfile::tempdir().expect("second data root");
-        let store_a = KeyringSetupSecretStore::new(root_a.path());
-        let store_b = KeyringSetupSecretStore::new(root_b.path());
+        let (_root_a, kernel_a) = new_kernel();
+        let (_root_b, kernel_b) = new_kernel();
+        let store_a = KeyringSetupSecretStore::new(kernel_a.data_root_identity());
+        let store_b = KeyringSetupSecretStore::new(kernel_b.data_root_identity());
+
+        assert_eq!(
+            store_a.account(SetupSecret::Credential),
+            format!(
+                "local-admin-credential-v1-{}",
+                crate::secure_storage::account_scope(kernel_a.data_root_identity())
+            )
+        );
 
         assert_ne!(
             store_a.account(SetupSecret::Credential),

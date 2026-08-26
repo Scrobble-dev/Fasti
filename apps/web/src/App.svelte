@@ -4,6 +4,7 @@
     FastiProtocolError,
     connectionEndpoint,
   } from "@fasti/sdk";
+  import type { WorkbenchHost } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
     type SetupViewState,
@@ -57,6 +58,7 @@
   let setupProblem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
   let DesktopWorkbench: Component | undefined = $state();
+  let desktopHost: WorkbenchHost | undefined = $state();
 
   function statusProblemFor(error: unknown): StatusProblem {
     if (error instanceof FastiProtocolError) {
@@ -127,6 +129,22 @@
         import("@tauri-apps/api/core"),
         import("@tabler/core/dist/css/tabler.min.css"),
       ]);
+      desktopHost = {
+        loadNetworkConfiguration: () => invoke("load_network_configuration"),
+        saveNetworkConfiguration: (input) =>
+          invoke("save_network_configuration", { input }),
+        testEndpointConnection: (endpoint) =>
+          invoke("test_endpoint_connection", { input: { endpoint } }),
+        providerCredentialStatus: () => invoke("provider_credential_status"),
+        saveProviderCredential: (provider, credential) =>
+          invoke("save_provider_credential", {
+            input: { provider, credential },
+          }),
+        deleteProviderCredential: (provider) =>
+          invoke("delete_provider_credential", { input: { provider } }),
+        searchProvider: (provider, query) =>
+          invoke("search_provider", { input: { provider, query } }),
+      };
       DesktopWorkbench = workbench;
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
     } catch (error) {
@@ -165,8 +183,8 @@
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 {#if isTauri}
-  {#if setupState === "ready" && DesktopWorkbench}
-    <DesktopWorkbench />
+  {#if setupState === "ready" && DesktopWorkbench && desktopHost}
+    <DesktopWorkbench host={desktopHost} />
   {:else}
     <SetupPanel
       state={setupState}

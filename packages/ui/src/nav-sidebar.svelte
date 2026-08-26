@@ -454,7 +454,7 @@
       var(--fasti-action-primary) 14%,
       transparent
     ) !important;
-    color: var(--fasti-action-primary) !important;
+    color: var(--fasti-text-primary) !important;
     font-weight: 600;
   }
 

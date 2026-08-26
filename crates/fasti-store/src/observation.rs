@@ -3,7 +3,7 @@ use crate::evidence::{canonical_digest_hex, path_to_storage_value, relative_evid
 use crate::identity::matching_record_ids;
 use crate::kernel::{
     authorize_connection, authorize_transaction, map_json, map_sql, now, parse_timestamp,
-    reject_unsafe_existing_file, timestamp, SqliteKernel,
+    timestamp, SqliteKernel,
 };
 use fasti_application::{
     AcceptObservationCommand, AcceptObservationOutcome, AcceptObservationReceipt,
@@ -20,7 +20,6 @@ use fasti_domain::{
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::json;
 use std::collections::BTreeSet;
-use std::fs::File;
 
 impl ObservationAcceptancePort for SqliteKernel {
     fn authorize_and_accept(
@@ -494,10 +493,8 @@ fn validate_prepared_evidence(
             correlation_id,
         )));
     }
-    let full_path = kernel.inner.current_root.join(expected_relative_path);
-    reject_unsafe_existing_file(&full_path)
-        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
-    let file = File::open(full_path)
+    let file = kernel
+        .open_evidence_file(digest_hex)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let (observed_digest, observed_size) = sha256_reader(file)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
