@@ -37,8 +37,10 @@ pub(crate) struct CreatedApiClient {
     pub credential_id: String,
     pub profile_id: String,
     pub scopes: Vec<String>,
-    pub credential: String,
+    pub active: bool,
     pub created_at: String,
+    pub revoked_at: Option<String>,
+    pub credential: String,
 }
 
 fn parse_scope(value: &str) -> Option<ScopeKey> {
@@ -130,8 +132,10 @@ pub(crate) fn create(
             .iter()
             .map(|scope| scope.as_str().to_owned())
             .collect(),
-        credential: encode_secret(outcome.credential().expose_bytes()),
+        active: true,
         created_at: outcome.created_at().to_rfc3339(),
+        revoked_at: None,
+        credential: encode_secret(outcome.credential().expose_bytes()),
     })
 }
 
