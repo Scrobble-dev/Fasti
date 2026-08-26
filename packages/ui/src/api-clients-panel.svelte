@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import {
     IconCheck,
     IconCopy,
+    IconEye,
+    IconEyeOff,
     IconKey,
     IconRefresh,
     IconShieldCheck,
@@ -26,6 +28,9 @@
   let problem = $state<string>();
   let oneTimeCredential = $state<CreatedApiClientCredential>();
   let copied = $state(false);
+  let revealCredential = $state(false);
+  let pendingRevoke = $state<string>();
+  let secretNotice: HTMLDivElement | undefined;
 
   const canManage = $derived(
     Boolean(host?.listApiClients && host?.createApiClient && host?.revokeApiClient),
@@ -50,10 +55,14 @@
     problem = undefined;
     oneTimeCredential = undefined;
     copied = false;
+    revealCredential = false;
+    pendingRevoke = undefined;
     try {
       const created = await host.createApiClient(["observation_accept"]);
       oneTimeCredential = created;
       await load();
+      await tick();
+      secretNotice?.focus();
     } catch (error) {
       problem = error instanceof Error ? error.message : "Fasti could not create an API client.";
     } finally {
@@ -66,8 +75,10 @@
     problem = undefined;
     try {
       clients = await host.revokeApiClient(credentialId);
+      pendingRevoke = undefined;
       if (oneTimeCredential?.credential_id === credentialId) {
         oneTimeCredential = undefined;
+        revealCredential = false;
       }
     } catch (error) {
       problem = error instanceof Error ? error.message : "Fasti could not revoke the API client.";
@@ -81,8 +92,14 @@
       copied = true;
       window.setTimeout(() => (copied = false), 1800);
     } catch {
-      problem = "Clipboard access was denied. Select and copy the one-time credential manually.";
+      problem = "Clipboard access was denied. Reveal the one-time credential and copy it manually.";
     }
+  }
+
+  function closeSecret(): void {
+    oneTimeCredential = undefined;
+    revealCredential = false;
+    copied = false;
   }
 
   onMount(() => {
@@ -152,14 +169,22 @@
     </div>
 
     {#if oneTimeCredential}
-      <div class="one-time-secret" aria-live="polite">
+      <div
+        class="one-time-secret"
+        aria-live="polite"
+        tabindex="-1"
+        bind:this={secretNotice}
+      >
         <div>
           <strong>Copy this credential now.</strong>
           <p>
-            Fasti will not return this plaintext value again. Closing this notice removes it from
-            the workbench memory.
+            Fasti will not return this plaintext value again. It is masked by default to reduce
+            accidental exposure in screen sharing and screenshots. Closing this notice removes it
+            from the workbench memory.
           </p>
-          <code>{oneTimeCredential.credential}</code>
+          <code aria-label={revealCredential ? "One-time bearer credential" : "One-time bearer credential masked"}>
+            {revealCredential ? oneTimeCredential.credential : "••••••••••••••••••••••••••••••••"}
+          </code>
         </div>
         <div class="secret-actions">
           <button type="button" class="primary-action" onclick={() => void copyCredential()}>
@@ -169,9 +194,19 @@
               <IconCopy size={18} aria-hidden="true" /> Copy
             {/if}
           </button>
-          <button type="button" class="secondary-action" onclick={() => (oneTimeCredential = undefined)}>
-            Done
+          <button
+            type="button"
+            class="secondary-action"
+            aria-pressed={revealCredential}
+            onclick={() => (revealCredential = !revealCredential)}
+          >
+            {#if revealCredential}
+              <IconEyeOff size={18} aria-hidden="true" /> Hide
+            {:else}
+              <IconEye size={18} aria-hidden="true" /> Reveal
+            {/if}
           </button>
+          <button type="button" class="secondary-action" onclick={closeSecret}>Done</button>
         </div>
       </div>
     {/if}
@@ -179,7 +214,10 @@
     {#if clients.length === 0 && !loading}
       <div class="empty-state" role="status">
         <strong>No external API clients</strong>
-        <p>Your local administrator credential is not shown here. Create a scoped client only when an integration needs it.</p>
+        <p>
+          Your local administrator credential is not shown here. Create a scoped client only when
+          an integration needs it.
+        </p>
       </div>
     {:else if clients.length > 0}
       <div class="table-wrap">
@@ -211,11 +249,24 @@
                 <td>{new Date(client.created_at).toLocaleString()}</td>
                 <td>{client.active ? "Active" : "Revoked"}</td>
                 <td>
-                  {#if client.active}
+                  {#if client.active && pendingRevoke === client.credential_id}
+                    <div class="confirm-actions" role="group" aria-label={`Confirm revocation for API client ${client.client_id}`}>
+                      <button
+                        type="button"
+                        class="danger-action"
+                        onclick={() => void revoke(client.credential_id)}
+                      >
+                        Confirm revoke
+                      </button>
+                      <button type="button" class="secondary-action" onclick={() => (pendingRevoke = undefined)}>
+                        Cancel
+                      </button>
+                    </div>
+                  {:else if client.active}
                     <button
                       type="button"
                       class="danger-action"
-                      onclick={() => void revoke(client.credential_id)}
+                      onclick={() => (pendingRevoke = client.credential_id)}
                       aria-label={`Revoke API client ${client.client_id}`}
                     >
                       <IconTrash size={18} aria-hidden="true" /> Revoke
@@ -297,6 +348,11 @@
     border-color: var(--fasti-state-attention, #b26a00);
   }
 
+  .one-time-secret:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
+  }
+
   .one-time-secret code {
     display: block;
     max-width: 42rem;
@@ -308,7 +364,8 @@
   }
 
   .secret-actions,
-  .scope-list {
+  .scope-list,
+  .confirm-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
