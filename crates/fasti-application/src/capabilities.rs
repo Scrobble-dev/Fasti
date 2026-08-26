@@ -164,7 +164,7 @@ define_capabilities!(
         B1,
         B2,
         Finalized,
-        FixtureOnly,
+        Implemented,
         BootstrapOnly,
         [],
         [
@@ -172,16 +172,19 @@ define_capabilities!(
             MalformedJson,
             PayloadTooLarge,
             UnsupportedMediaType,
-            ValidationFailed
+            ValidationFailed,
+            AlreadyInitialized,
+            IntegrityFailed,
+            StorageUnavailable
         ],
-        [AlreadyInitialized, IntegrityFailed, StorageUnavailable]
+        []
     ),
     (
         EnrollFirstClient,
         B1,
         B2,
         Finalized,
-        FixtureOnly,
+        Implemented,
         Scoped,
         [ClientEnroll],
         [
@@ -189,9 +192,12 @@ define_capabilities!(
             MalformedJson,
             PayloadTooLarge,
             UnsupportedMediaType,
-            ValidationFailed
+            ValidationFailed,
+            BootstrapClosed,
+            IntegrityFailed,
+            StorageUnavailable
         ],
-        [BootstrapClosed, IntegrityFailed, StorageUnavailable]
+        []
     ),
     (
         SelectProfile,
@@ -202,7 +208,7 @@ define_capabilities!(
         Scoped,
         [ProfileSelect],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         RotateCredential,
@@ -213,7 +219,7 @@ define_capabilities!(
         Scoped,
         [CredentialManage],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         RevokeCredential,
@@ -235,7 +241,12 @@ define_capabilities!(
         Scoped,
         [ListenerConfigure],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable, UnsupportedListener]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            StorageUnavailable,
+            UnsupportedListener
+        ]
     ),
     (
         AcceptObservation,
@@ -255,7 +266,12 @@ define_capabilities!(
             UnsupportedMediaType,
             ValidationFailed
         ],
-        [EvidenceNotFound, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            EvidenceNotFound,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
     (
         ReplayReceipt,
@@ -266,7 +282,7 @@ define_capabilities!(
         Scoped,
         [ReceiptRead],
         [Forbidden, ReceiptNotFound],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         StreamReceipts,
@@ -277,7 +293,12 @@ define_capabilities!(
         Scoped,
         [ReceiptRead],
         [Forbidden, ReceiptNotFound],
-        [CursorExpired, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            CursorExpired,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
     (
         CreateRecord,
@@ -288,7 +309,12 @@ define_capabilities!(
         Scoped,
         [IdentityWrite],
         [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
-        [Forbidden, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
     (
         AttachIdentifier,
@@ -300,6 +326,7 @@ define_capabilities!(
         [IdentityWrite],
         [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [
+            AuthenticationFailed,
             Forbidden,
             IdentityConflict,
             IntegrityFailed,
@@ -316,7 +343,7 @@ define_capabilities!(
         Scoped,
         [ReviewRead],
         [CapabilityUnavailable, Forbidden],
-        [IntegrityFailed, StorageUnavailable]
+        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
     ),
     (
         DeferReview,
@@ -327,7 +354,12 @@ define_capabilities!(
         Scoped,
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, ReviewNotFound, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         ResumeReview,
@@ -338,7 +370,12 @@ define_capabilities!(
         Scoped,
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, ReviewNotFound, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            ReviewNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         ResolveReview,
@@ -350,6 +387,7 @@ define_capabilities!(
         [ReviewWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
         [
+            AuthenticationFailed,
             IdentityConflict,
             IntegrityFailed,
             InvalidIdentifier,
@@ -367,7 +405,12 @@ define_capabilities!(
         Scoped,
         [CorrectionWrite],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [IntegrityFailed, RecordNotFound, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            IntegrityFailed,
+            RecordNotFound,
+            StorageUnavailable
+        ]
     ),
     (
         InspectCorrectionChain,
@@ -378,7 +421,12 @@ define_capabilities!(
         Scoped,
         [CorrectionRead],
         [CapabilityUnavailable, Forbidden],
-        [ValidationFailed, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            ValidationFailed,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
     (
         ExportWorkspace,
@@ -390,6 +438,7 @@ define_capabilities!(
         [WorkspaceExport],
         [CapabilityUnavailable, Forbidden],
         [
+            AuthenticationFailed,
             CapacityExceeded,
             DataRootLocked,
             ExportCanceled,
@@ -428,7 +477,12 @@ define_capabilities!(
         Scoped,
         [WorkspaceVerify],
         [CapabilityUnavailable, Forbidden, ValidationFailed],
-        [DataRootLocked, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            DataRootLocked,
+            IntegrityFailed,
+            StorageUnavailable
+        ]
     ),
 );
 
@@ -444,9 +498,16 @@ mod tests {
     }
 
     #[test]
-    fn b2_runtime_capabilities_remain_non_production_until_activation() {
+    fn durable_bootstrap_activation_is_narrow() {
         for capability in [
             CapabilityKey::InitializeNode,
+            CapabilityKey::EnrollFirstClient,
+        ] {
+            assert_eq!(capability.runtime_body(), CapabilityBody::B2);
+            assert!(capability.is_production_executable());
+        }
+
+        for capability in [
             CapabilityKey::AcceptObservation,
             CapabilityKey::CreateRecord,
             CapabilityKey::ResolveReview,
@@ -457,7 +518,7 @@ mod tests {
 
         assert_eq!(
             CapabilityKey::InitializeNode.runtime_availability(),
-            RuntimeAvailability::FixtureOnly
+            RuntimeAvailability::Implemented
         );
         assert_eq!(
             CapabilityKey::CreateRecord.contract_state(),
@@ -528,9 +589,27 @@ mod tests {
 
         let enrollment = CapabilityKey::EnrollFirstClient.allowed_problem_codes();
         assert!(enrollment.contains(&ProblemCode::BootstrapClosed));
-        assert!(!enrollment
+        assert!(enrollment
             .iter()
             .any(|code| *code == ProblemCode::BootstrapClosed));
+
+        let review = CapabilityKey::InspectReview.allowed_problem_codes();
+        assert!(review.contains(&ProblemCode::AuthenticationFailed));
+        assert!(!review
+            .iter()
+            .any(|code| *code == ProblemCode::AuthenticationFailed));
+
+        for capability in CapabilityKey::ALL.iter().copied().filter(|capability| {
+            capability.authorization_kind() == AuthorizationKind::Scoped
+                && *capability != CapabilityKey::EnrollFirstClient
+        }) {
+            assert!(
+                capability
+                    .allowed_problem_codes()
+                    .contains(&ProblemCode::AuthenticationFailed),
+                "{capability:?} must accept route-attributed authentication failures"
+            );
+        }
 
         let review = CapabilityKey::ResolveReview.allowed_problem_codes();
         assert!(review.contains(&ProblemCode::ReviewNotFound));

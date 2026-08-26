@@ -5,7 +5,7 @@
 Before planning or implementation, read these in order:
 
 1. [`docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md`](docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md)
-2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-24.md)
+2. [`docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md`](docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2026-08-25.md)
 3. [`README.md`](README.md)
 4. [`docs/constitution.md`](docs/constitution.md)
 5. [`docs/definition-of-done.md`](docs/definition-of-done.md)
@@ -40,6 +40,7 @@ Provider identifiers are evidence, not canonical identity.
 - Adapters must not redefine business rules.
 - Reuse existing ownership before creating new abstractions.
 - Keep provider integrations modular.
+- Route governed outbound access through application policy. Provider declarations are maximum grants; operator allow lists only narrow them, and denies win.
 
 ## Contract changes
 
@@ -63,6 +64,12 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
+- Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
+- Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
+- Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
+- Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
+- Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
+- Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
 - Bound memory, files, requests, archives, and retries.
 - Validate recovery and interruption paths.
 
@@ -105,6 +112,16 @@ cargo fetch --manifest-path benchmarks/b1/tauri-shell/src-tauri/Cargo.toml --loc
 
 Without the second fetch the gate fails with a misleading `swift-rs` version-resolution error.
 
+Listener, public URL, loopback alias, container port, and certificate-trust
+ownership is documented in [`docs/network-configuration.md`](docs/network-configuration.md).
+Do not merge the bind address, client URL, and public reverse-proxy URL into one
+setting.
+
+Android sandbox selection, data-root locking, and descriptor-rooted kernel
+directories are implemented in source but are not Android build- or
+device-verified. Do not claim Android package support until the NDK build and
+device evidence pass. B3 restore and startup recovery remain Linux-only.
+
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
 UI changes require design review. Headless changes should state when visual evidence is not applicable.
@@ -123,11 +140,28 @@ the documented local development URL at `127.0.0.1:5173`. A QA harness is
 evidence tooling. It does not activate a product milestone, runtime listener
 setting, or desktop surface.
 
-## Design system
+## Design system & UI Component Standards
 
-Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision. Font choices, colors, spacing, and aesthetic direction are defined there. Do not deviate without explicit approval.
+Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision.
 
-In QA mode, flag any code that does not match `brand/DESIGN.md`.
+### UI Invariants & Requirements:
+- **Tabler-First Policy**: Always use upstream Tabler (`@tabler/core` and `@tabler/icons`) layout, grid, typography, cards, tables, forms, modals, and badge classes first.
+- **Component Decision Hierarchy**:
+  1. Tabler Core Component (direct usage)
+  2. Tabler Pattern Composition
+  3. Fasti Token-Skinned Tabler Element (`brand/tokens/tokens.json`)
+  4. Custom Svelte Component (STRICT EXCEPTION: only if Tabler has zero equivalent; requires explicit documented architectural rationale).
+- **Impeccable Craft Floor**: Surface mode must be `Operate` (workbench, triage, settings) or `Read` (annal, chronicle, markdown docs). Zero layout shifts (`CLS = 0`), no purple/violet AI gradients, no generic SaaS card walls, no continuous decorative animations, and strict 44px min touch targets.
+- **Interaction & Usability Standards**: All UI flows must be audited against:
+  - AskTog interaction principles (anticipation, Fitts's law, latency reduction, user work protection, state continuity)
+  - Gestalt grouping principles (proximity, similarity, common region, continuity, closure, figure/ground)
+  - All 10 Nielsen Norman usability heuristics
+  - IxDF research topics (cognitive load reduction, progressive disclosure, dark mode halation prevention, motor precision)
+- **Accessibility & Regulatory Conformance**:
+  - WCAG 2.2 Level AA full compliance (3px high-contrast focus rings with 2px offset, >= 4.5:1 text contrast / 7.0:1 on paper cards, 44px hitboxes, non-obscured focus).
+  - EN 301 549 compliance across Clause 9 (Web), Clause 10 (Non-Web Docs), Clause 11 (Desktop/Software Assistive Tech Interoperability), and Clause 12 (Documentation).
+
+In QA mode, flag any code that does not match `brand/DESIGN.md` or violates the Tabler-first ladder.
 
 ## Skill routing
 
@@ -143,15 +177,13 @@ Key routing rules:
 - Bugs/errors → invoke /investigate
 - QA/testing site behavior → invoke /qa or /qa-only
 - Code review/diff check → invoke /review
-- Visual polish → invoke /design-review
+- Visual polish → invoke /design-review or /impeccable polish
 - Ship/deploy/PR → invoke /ship or /land-and-deploy
 - Save progress → invoke /context-save
 - Resume context → invoke /context-restore
 - Author a backlog-ready spec/issue → invoke /spec
 
 ## Review and handoff
-
-Preserve issue and PR history. Do not edit another contributor's original body.
 
 Document:
 
@@ -160,6 +192,16 @@ Document:
 - offline impact;
 - security impact;
 - performance evidence;
-- accessibility impact;
+- design & Tabler-first component compliance;
+- accessibility evidence (WCAG 2.2 AA & EN 301 549 audit + Axe-core zero-violation report);
 - tests;
 - rollback.
+
+## Quality and Security Invariants
+
+- **Single Integration Branch**: All active development and pull requests target `dev`. `release` is reserved strictly for release candidate stabilization.
+- **Zero Deployment Blockers**: External SaaS/AI tools (CodeRabbit, Codacy, Codecov, Scorecard) provide advisory feedback and must never block emergency hotfixes, local builds, or CI deployments.
+- **Strict Bounded Performance**: The daemon (`fastid`) must strictly observe memory ceilings: 64 MiB idle, 96 MiB normal, 192 MiB process tree ceiling.
+- **Zero Runtime Telemetry**: The daemon and client libraries must never include phone-home code, tracking SDKs, or external analytics.
+- **YouTrack Workflow**: Fasti uses YouTrack (`fasti.youtrack.cloud`) for sprint execution, milestone tracking (B0–B8), and hardware receipts. Prefix commit messages and PR titles with YouTrack IDs (`FASTI-###`).
+- **No-Publish Guardrail**: Workflows in `.github/workflows/` must have strictly read-only permissions before Milestone B8 release readiness.

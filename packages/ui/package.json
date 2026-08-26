@@ -11,6 +11,21 @@
       "types": "./src/index.ts",
       "svelte": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./setup": {
+      "types": "./src/setup.ts",
+      "svelte": "./src/setup.ts",
+      "default": "./src/setup.ts"
+    },
+    "./status": {
+      "types": "./src/status.ts",
+      "svelte": "./src/status.ts",
+      "default": "./src/status.ts"
+    },
+    "./workbench": {
+      "types": "./src/workbench.ts",
+      "svelte": "./src/workbench.ts",
+      "default": "./src/workbench.ts"
     }
   },
   "scripts": {
@@ -19,6 +34,8 @@
   },
   "dependencies": {
     "@fasti/sdk": "workspace:*",
+    "@fasti/tokens": "workspace:*",
+    "@tabler/core": "^1.4.0",
     "@tabler/icons-svelte": "3.46.0"
   },
   "devDependencies": {

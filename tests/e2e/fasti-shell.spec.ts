@@ -19,6 +19,82 @@ async function mockHealth(page: Page) {
   );
 }
 
+async function mockTrustedHost(page: Page) {
+  await page.addInitScript(() => {
+    const networkConfiguration = {
+      connection: {
+        service_url: {
+          value: "http://127.0.0.1:8420",
+          source: "default",
+          managed: false,
+        },
+        public_url: { value: null, source: "default", managed: false },
+      },
+      outbound_policy: {
+        allow_providers: [],
+        deny_providers: [],
+        allow_capabilities: [],
+        deny_capabilities: [],
+        allow_hosts: [],
+        deny_hosts: [],
+        allow_networks: [],
+        deny_networks: [],
+      },
+    };
+    const providerStatus = [
+      {
+        provider: "google-books",
+        label: "Google Books",
+        configured: false,
+        source: "none",
+        writable: true,
+        docs_url: "https://developers.google.com/books/docs/v1/using",
+      },
+    ];
+    const browserWindow = window as typeof window & {
+      __PROVIDER_SECRET_MATCH__?: boolean;
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+      };
+    };
+    browserWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command, arguments_) => {
+        switch (command) {
+          case "setup_status":
+            return { phase: "ready", proof_cleanup_pending: false };
+          case "load_network_configuration":
+            return networkConfiguration;
+          case "provider_credential_status":
+            return providerStatus;
+          case "test_endpoint_connection":
+            return {
+              endpoint: "http://127.0.0.1:8420",
+              scheme: "http",
+              status: "healthy",
+              version: "0.1.0-test",
+            };
+          case "save_provider_credential": {
+            const candidate = arguments_ as {
+              input?: { provider?: string; credential?: string };
+            };
+            browserWindow.__PROVIDER_SECRET_MATCH__ =
+              candidate.input?.provider === "google-books" &&
+              candidate.input?.credential === "test-secret-not-retained";
+            throw {
+              code: "secure_storage_unavailable",
+              title: "Secure storage is unavailable",
+              detail: "The credential store rejected the test value.",
+              next_action: "Unlock the credential store, then retry.",
+            };
+          }
+          default:
+            throw new Error(`Unexpected trusted-host command: ${command}`);
+        }
+      },
+    };
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
     test(`${theme} theme at ${viewport.width}px is truthful, reflowable, and accessible`, async ({
@@ -39,6 +115,15 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         page.getByRole("heading", { name: "Local service available" }),
       ).toBeVisible();
+      await expect(
+        page.getByRole("heading", { name: "Network settings" }),
+      ).toBeVisible();
+      await expect(
+        page
+          .locator("#network-settings dd")
+          .filter({ hasText: "http://127.0.0.1:8420" }),
+      ).toBeVisible();
+      await expect(page.getByText("http://localhost:8420")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute(
         "data-bs-theme",
         theme,
@@ -298,18 +383,23 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
 
 test("reduced motion stops the loading animation", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
+  let releaseHealth = () => {};
+  const pendingHealth = new Promise<void>((resolve) => {
+    releaseHealth = resolve;
+  });
   await page.route(healthEndpoint, async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await pendingHealth;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.locator(".spinner")).toHaveCSS("animation-name", "none");
+  releaseHealth();
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
@@ -348,4 +438,61 @@ test("the harness does not contact third-party origins", async ({ page }) => {
   ).toBeVisible();
 
   expect([...externalOrigins]).toEqual([]);
+});
+
+test("trusted-host provider settings clear a rejected secret", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await mockTrustedHost(page);
+  await page.goto("/settings");
+
+  await expect(
+    page.getByRole("heading", { name: "Settings & Studio" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Metadata Providers & Keys" }).click();
+  await expect(
+    page.getByText("No key is saved for this Fasti node."),
+  ).toBeVisible();
+
+  const credential = page.getByLabel("API Key for Google Books");
+  await credential.fill("test-secret-not-retained");
+  await page.getByRole("button", { name: "Save key" }).click();
+
+  await expect(page.getByRole("alert")).toContainText(
+    "The credential store rejected the test value.",
+  );
+  await expect(credential).toHaveValue("");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SECRET_MATCH__?: boolean })
+          .__PROVIDER_SECRET_MATCH__,
+    ),
+  ).toBe(true);
+  expect((await page.locator("body").textContent()) ?? "").not.toContain(
+    "test-secret-not-retained",
+  );
+
+  const undersizedControls = await page
+    .locator("button:visible, input:visible")
+    .evaluateAll((controls) =>
+      controls.flatMap((control) => {
+        const box = control.getBoundingClientRect();
+        return box.width < 44 || box.height < 44
+          ? [
+              `${control.getAttribute("aria-label") ?? control.textContent?.trim()}: ${box.width}x${box.height}`,
+            ]
+          : [];
+      }),
+    );
+  expect(undersizedControls).toEqual([]);
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+  await page.screenshot({
+    path: testInfo.outputPath("provider-settings-rejected-secret-320.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
 });

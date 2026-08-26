@@ -143,6 +143,31 @@ const CONFORMANCE_OPERATIONS: [ConformanceOperation; 9] = [
     },
 ];
 
+const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
+    ConformanceOperation {
+        alias: "initializeDurableNode",
+        operation_id: "initialize_node",
+        method: "post",
+        path: "/api/v1/node/initialization",
+        capability_id: "node.initialize",
+        authenticated: false,
+        request: Some("InitializeNodeRequest"),
+        response: Some("NodeInitializationResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "enrollDurableFirstClient",
+        operation_id: "enroll_first_client",
+        method: "post",
+        path: "/api/v1/client-enrollments",
+        capability_id: "client.enroll",
+        authenticated: false,
+        request: Some("EnrollFirstClientRequest"),
+        response: Some("ClientEnrollmentResponse"),
+        retry: "never",
+    },
+];
+
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     generate_to(workspace_root, workspace_root)
 }
@@ -227,7 +252,12 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
-    enrich_production_health_openapi(workspace_root, &mut production_openapi, &public_registry)?;
+    enrich_production_openapi(
+        workspace_root,
+        &mut production_openapi,
+        &public_registry,
+        &capability_keys,
+    )?;
     let mut conformance_openapi = serde_json::to_value(fasti_api::b1_conformance_openapi())
         .context("B1 conformance OpenAPI is not serializable")?;
     enrich_conformance_openapi(
@@ -247,7 +277,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &problem_catalog,
         &health_schema,
     )?;
-    insert(&mut artifacts, OPENAPI_PATH, production_openapi)?;
+    insert(&mut artifacts, OPENAPI_PATH, production_openapi.clone())?;
     insert(
         &mut artifacts,
         CAPABILITY_REGISTRY_PATH,
@@ -279,6 +309,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
             &health_schema,
             &problem_schema,
             &asyncapi,
+            &production_openapi,
             &conformance_openapi,
         )?
         .into_bytes(),
@@ -440,10 +471,8 @@ fn enrich_conformance_openapi(
                 )
             })?;
         let scopes = array_at(capability, "/scopes")?.to_vec();
-        let problems = array_at(capability, "/problems")?.to_vec();
+        let problems = conformance_problem_codes(capability, expected)?;
         let examples = array_at(capability, "/examples")?.to_vec();
-        let runtime_availability =
-            string_at(capability, "/lifecycle/runtime_availability")?.to_owned();
         let pointer = format!(
             "/paths/{}/{}",
             escape_pointer(expected.path),
@@ -477,7 +506,7 @@ fn enrich_conformance_openapi(
         );
         operation.insert(
             "x-fasti-runtime-availability".to_owned(),
-            Value::String(runtime_availability),
+            Value::String("fixture_only".to_owned()),
         );
         validate_problem_responses(operation, expected, capability_keys, &problems)?;
         bind_governed_examples(
@@ -493,6 +522,36 @@ fn enrich_conformance_openapi(
     }
     enrich_discovery_collection_schema(openapi, public_registry)?;
     Ok(())
+}
+
+fn conformance_problem_codes(
+    capability: &Value,
+    expected: ConformanceOperation,
+) -> anyhow::Result<Vec<Value>> {
+    let production_only: &[&str] = match expected.capability_id {
+        "node.initialize" => &[
+            "already_initialized",
+            "bootstrap_closed",
+            "integrity_failed",
+            "storage_unavailable",
+        ],
+        "client.enroll" => &[
+            "already_initialized",
+            "bootstrap_closed",
+            "integrity_failed",
+            "storage_unavailable",
+        ],
+        _ => &[],
+    };
+    Ok(array_at(capability, "/problems")?
+        .iter()
+        .filter(|problem| {
+            problem
+                .as_str()
+                .is_none_or(|code| !production_only.contains(&code))
+        })
+        .cloned()
+        .collect())
 }
 
 fn enrich_discovery_collection_schema(
@@ -734,6 +793,79 @@ fn validate_problem_schema_parity(
     Ok(())
 }
 
+fn enrich_production_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+    capability_keys: &BTreeMap<String, CapabilityKey>,
+) -> anyhow::Result<()> {
+    enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
+    let capabilities = array_at(public_registry, "/capabilities")?;
+    for expected in PRODUCTION_BOOTSTRAP_OPERATIONS {
+        let capability = capabilities
+            .iter()
+            .find(|capability| string_at(capability, "/id").ok() == Some(expected.capability_id))
+            .with_context(|| {
+                format!(
+                    "production operation {} references absent registry capability {}",
+                    expected.operation_id, expected.capability_id
+                )
+            })?;
+        let pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = openapi
+            .pointer_mut(&pointer)
+            .and_then(Value::as_object_mut)
+            .with_context(|| {
+                format!(
+                    "production OpenAPI omits {} {}",
+                    expected.method, expected.path
+                )
+            })?;
+        operation.insert(
+            "x-fasti-capability-id".to_owned(),
+            Value::String(expected.capability_id.to_owned()),
+        );
+        operation.insert(
+            "x-fasti-required-scopes".to_owned(),
+            Value::Array(array_at(capability, "/scopes")?.clone()),
+        );
+        operation.insert(
+            "x-fasti-authorization".to_owned(),
+            Value::String(string_at(capability, "/authorization")?.to_owned()),
+        );
+        let problems = array_at(capability, "/problems")?.clone();
+        operation.insert(
+            "x-fasti-problem-codes".to_owned(),
+            Value::Array(problems.clone()),
+        );
+        let examples = array_at(capability, "/examples")?.clone();
+        operation.insert(
+            "x-fasti-example-ids".to_owned(),
+            Value::Array(examples.clone()),
+        );
+        operation.insert(
+            "x-fasti-runtime-availability".to_owned(),
+            Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
+        );
+        validate_problem_responses(operation, expected, capability_keys, &problems)?;
+        bind_governed_examples(
+            workspace_root,
+            operation,
+            public_registry,
+            capability,
+            expected,
+            capability_keys,
+            &examples,
+            &Value::Null,
+        )?;
+    }
+    Ok(())
+}
+
 fn enrich_production_health_openapi(
     workspace_root: &Path,
     openapi: &mut Value,
@@ -911,6 +1043,10 @@ fn resolve_required_binding(
                 openapi_has_capability(conformance_openapi, capability_id)?,
                 "conformance operation schema is absent"
             ),
+            "schema:production-openapi-operation:{capability_id}" => ensure!(
+                openapi_has_capability(production_openapi, capability_id)?,
+                "production operation schema is absent"
+            ),
             "schema:asyncapi-message:receiptCommitted" => ensure!(
                 asyncapi
                     .pointer("/components/messages/receiptCommitted/payload/schema")
@@ -945,6 +1081,9 @@ fn resolve_required_binding(
             ensure!(
                 capability_id == "system.health"
                     || capability_id == "receipt.stream"
+                    || PRODUCTION_BOOTSTRAP_OPERATIONS
+                        .iter()
+                        .any(|operation| operation.capability_id == capability_id)
                     || CONFORMANCE_OPERATIONS
                         .iter()
                         .any(|operation| operation.capability_id == capability_id),
@@ -983,6 +1122,14 @@ fn resolve_required_binding(
                         && test.contains("withRustFixture")
                         && test.contains(&format!(".{sdk_method}(")),
                     "B1 conformance package smoke does not exercise {capability_id} through {sdk_method}"
+                );
+            }
+            "package-smoke:production-bootstrap" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/node/initialization")
+                        && smoke.contains("/api/v1/client-enrollments"),
+                    "production bootstrap package smoke is absent"
                 );
             }
             _ => anyhow::bail!("unknown package-smoke binding"),
@@ -1383,12 +1530,184 @@ fn rust_capability_ids(workspace_root: &Path) -> anyhow::Result<String> {
     Ok(output)
 }
 
+fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<String> {
+    ensure!(
+        string_at(openapi, "/openapi")? == "3.1.0",
+        "production OpenAPI must remain 3.1.0"
+    );
+    let expected_paths: BTreeSet<_> = std::iter::once("/api/v1/health")
+        .chain(
+            PRODUCTION_BOOTSTRAP_OPERATIONS
+                .iter()
+                .map(|operation| operation.path),
+        )
+        .collect();
+    let actual_paths: BTreeSet<_> = object_at(openapi, "/paths")?
+        .keys()
+        .map(String::as_str)
+        .collect();
+    ensure!(
+        actual_paths == expected_paths,
+        "production OpenAPI route inventory changed: expected {expected_paths:?}, found {actual_paths:?}"
+    );
+
+    let schemas = object_at(openapi, "/components/schemas")?;
+    let mut output = String::new();
+    for name in ["ClientEnrollmentResponse", "NodeInitializationResponse"] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        output.push_str(&render_interface(name, schema)?);
+        output.push('\n');
+    }
+
+    output.push_str("// prettier-ignore\nexport const LOCAL_BOOTSTRAP_OPERATIONS = {\n");
+    for expected in PRODUCTION_BOOTSTRAP_OPERATIONS {
+        let operation_pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = value_at(openapi, &operation_pointer)?;
+        ensure!(
+            string_at(operation, "/operationId")? == expected.operation_id,
+            "production operation ID changed for {} {}",
+            expected.method,
+            expected.path
+        );
+
+        // Extract and validate request schema from OpenAPI
+        let request_name = match expected.request {
+            Some(expected_request) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/requestBody/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_request);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production request schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_request)
+            }
+            None => {
+                ensure!(
+                    operation.get("requestBody").is_none(),
+                    "unexpected request body for {} {}",
+                    expected.method,
+                    expected.path
+                );
+                None
+            }
+        };
+
+        // Extract and validate response schema from OpenAPI
+        let response_name = match expected.response {
+            Some(expected_response) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/responses/200/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_response);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production response schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_response)
+            }
+            None => None,
+        };
+
+        // Bootstrap proofs stay in request bodies. Existing bearer credentials must not
+        // be attached to either one-time setup operation.
+        let authorization = string_at(operation, "/x-fasti-authorization")?;
+        let authenticated = expected.authenticated;
+        let has_security = operation
+            .get("security")
+            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
+        ensure!(
+            has_security == authenticated,
+            "production security declaration changed for {} {}",
+            expected.method,
+            expected.path
+        );
+
+        let required_scopes =
+            serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
+        let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
+        let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
+        writeln!(
+            output,
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: \"never\", requestSchema: {}, responseSchema: {} }},",
+            expected.alias,
+            json_string(expected.operation_id)?,
+            json_string(&expected.method.to_ascii_uppercase())?,
+            json_string(expected.path)?,
+            json_string(expected.capability_id)?,
+            json_string(authorization)?,
+            authenticated,
+            json_string(string_at(
+                operation,
+                "/x-fasti-runtime-availability"
+            )?)?,
+            request_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+            response_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+        )?;
+    }
+    output.push_str("} as const;\n\n");
+
+    let schemas_json = serde_json::to_string_pretty(&sort_json(Value::Object(schemas.clone())))?;
+    writeln!(
+        output,
+        "// prettier-ignore\nconst PRODUCTION_BOOTSTRAP_SCHEMAS = {schemas_json} as const;\n"
+    )?;
+    output.push_str(
+        r#"// prettier-ignore
+export function parseNodeInitializationResponse(value: unknown): NodeInitializationResponse {
+  return parseProductionBootstrapDto("NodeInitializationResponse", value);
+}
+
+// prettier-ignore
+export function parseClientEnrollmentResponse(value: unknown): ClientEnrollmentResponse {
+  return parseProductionBootstrapDto("ClientEnrollmentResponse", value);
+}
+
+// prettier-ignore
+function parseProductionBootstrapDto<T>(schemaName: string, value: unknown): T {
+  const schema = (PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>)[schemaName];
+  if (schema === undefined) {
+    throw new FastiContractParseError(`Unknown production bootstrap schema ${schemaName}`);
+  }
+  validateOpenApiValue(value, schema, schemaName, PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>);
+  return value as T;
+}
+
+"#,
+    );
+    Ok(output)
+}
+
 fn typescript_sdk(
     public_registry: &Value,
     problem_catalog: &Value,
     health_schema: &Value,
     problem_schema: &Value,
     asyncapi: &Value,
+    production_openapi: &Value,
     conformance_openapi: &Value,
 ) -> anyhow::Result<String> {
     validate_receipt_stream_metadata(asyncapi)?;
@@ -1423,6 +1742,7 @@ fn typescript_sdk(
         "export interface ReceiptCommittedEnvelope {\n  readonly id: string;\n  readonly event: \"receiptCommitted\";\n  readonly data: ReceiptCommittedEvent;\n}\n\n",
     );
 
+    output.push_str(&render_production_bootstrap_contract(production_openapi)?);
     output.push_str(&render_conformance_contract(conformance_openapi)?);
 
     let capabilities = array_at(public_registry, "/capabilities")?;
@@ -2121,12 +2441,12 @@ function parseConformanceDto<T>(schemaName: string, value: unknown): T {
   if (schema === undefined) {
     throw new FastiContractParseError(`Unknown conformance schema ${schemaName}`);
   }
-  validateOpenApiValue(value, schema, schemaName);
+  validateOpenApiValue(value, schema, schemaName, B1_CONFORMANCE_SCHEMAS as Record<string, unknown>);
   return value as T;
 }
 
 // prettier-ignore
-function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string): void {
+function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string, schemas: Record<string, unknown>): void {
   const schema = schemaValue as Record<string, unknown>;
   if (typeof schema.$ref === "string") {
     const prefix = "#/components/schemas/";
@@ -2134,18 +2454,18 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       throw new FastiContractParseError(`${path} has an unsupported schema reference`);
     }
     const name = schema.$ref.slice(prefix.length);
-    const target = (B1_CONFORMANCE_SCHEMAS as Record<string, unknown>)[name];
+    const target = schemas[name];
     if (target === undefined) {
       throw new FastiContractParseError(`${path} references an unknown schema`);
     }
-    validateOpenApiValue(value, target, path);
+    validateOpenApiValue(value, target, path, schemas);
     return;
   }
   if (Array.isArray(schema.oneOf)) {
     let matches = 0;
     for (const candidate of schema.oneOf) {
       try {
-        validateOpenApiValue(value, candidate, path);
+        validateOpenApiValue(value, candidate, path, schemas);
         matches += 1;
       } catch (error) {
         if (!(error instanceof FastiContractParseError)) throw error;
@@ -2204,7 +2524,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) {
       throw new FastiContractParseError(`${path} exceeds its bounded items`);
     }
-    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`));
+    value.forEach((item, index) => validateOpenApiValue(item, schema.items, `${path}[${index}]`, schemas));
     return;
   }
   if (schemaTypes.includes("object")) {
@@ -2224,14 +2544,14 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
       : {};
     for (const key of keys) {
       if (isPlainObject(schema.propertyNames)) {
-        validateOpenApiValue(key, schema.propertyNames, `${path} property name`);
+        validateOpenApiValue(key, schema.propertyNames, `${path} property name`, schemas);
       }
       if (!Object.hasOwn(properties, key)) {
         if (schema.additionalProperties === false) {
           throw new FastiContractParseError(`${path} contains unknown field ${key}`);
         }
         if (isPlainObject(schema.additionalProperties)) {
-          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`);
+          validateOpenApiValue(object[key], schema.additionalProperties, `${path}.${key}`, schemas);
         }
       }
     }
@@ -2243,7 +2563,7 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     for (const [field, fieldSchema] of Object.entries(properties)) {
       if (Object.hasOwn(object, field)) {
-        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`);
+        validateOpenApiValue(object[field], fieldSchema, `${path}.${field}`, schemas);
       }
     }
     return;

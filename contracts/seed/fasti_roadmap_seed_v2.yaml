@@ -1,0 +1,224 @@
+schema: https://scrobble.dev/schemas/fasti/roadmap/2
+version: 2.0.0-planning-seed
+generated_on: '2026-08-21'
+status: planning_seed_not_commitment
+product: Fasti
+strategy:
+  category: self-hosted local-first media Chronicle, identity authority and interoperability service
+  boundary: Fasti records. Players play.
+  identity_promise: Fasti keeps the record stable while its understanding improves.
+  north_star_user_outcome: A person or household can keep, understand, repair, move and recover a media record without
+    surrendering it to one provider.
+  scrobble_dev_role: Neutral vocabulary, knowledge, schemas and conformance. Never a required Fasti runtime.
+prioritisation_rules:
+- user capability and immediate payoff
+- Chronicle safety
+- identity and migration irreversibility risk
+- foundational leverage
+- dependency order
+- offline and self-hosted behavior
+- feasibility and maintainer capacity
+- public contract and knowledge readiness
+milestones:
+- id: M0
+  name: Identity constitution and conformance
+  status: next
+  user_capability: The team and ecosystem can state what a media record means and prove difficult identity cases.
+  immediate_payoff: Implementation stops drifting between providers, imports, UI and APIs.
+  epics:
+  - product constitution and glossary
+  - stable Fasti ID and lifecycle
+  - namespace registry
+  - typed identity and topology assertions
+  - evidence, derivation roots and source snapshots
+  - cross-domain fixture corpus
+  - Electric-Town capability conformance
+  - threat and license posture
+  - OpenAPI, AsyncAPI, JSON Schema, capability and knowledge generation pipeline
+  exit_gates:
+  - fifty representative cross-domain records fit the model
+  - all initial anime topology capabilities have positive and negative fixtures
+  - title-only merge is impossible through public application services
+  - redirect and revocation lifecycle is cycle-safe and auditable
+  - provider terms and data acquisition routes have an explicit register
+  user_success_loop:
+    practice: Classify sample records, aliases, relations and unresolved evidence.
+    feedback: Fixtures show accepted state, rejected shape and exact loss.
+    payoff: Contributors can predict Fasti behavior before writing code.
+- id: M1
+  name: Local Chronicle and identity kernel
+  status: planned
+  user_capability: My record is safe locally even when Fasti does not yet know exactly what the media is.
+  immediate_payoff: One occurrence survives restart, outage, uncertainty, export and restore.
+  epics:
+  - Rust domain and application crates
+  - SQLite controlled writer and bounded reads
+  - catalog entity, external identity and assertion persistence
+  - observed reference and occurrence interpretation
+  - local API and CLI
+  - multi-user workspace/profile minimum
+  - Tabler/Svelte Chronicle shell
+  - canonical export, backup and restore equivalence
+  - local notification inbox
+  exit_gates:
+  - atomic mutation, receipt, sequence and outbox crash tests pass
+  - unresolved occurrence remains readable and exportable
+  - provider outage cannot delete canonical state
+  - clean restore preserves entity IDs, evidence and interpretation history
+  user_success_loop:
+    practice: Record, inspect, correct and restore one occurrence.
+    feedback: Persistent local, unresolved, corrected and restored states.
+    payoff: The user proves the record is owned and recoverable.
+- id: M2
+  name: Safe migration and partial-identity healing
+  status: planned
+  user_capability: I can bring an existing record into Fasti without losing what cannot yet be matched.
+  immediate_payoff: A SIMKL, Floppy or other partial record works now and improves later.
+  epics:
+  - versioned canonical import format
+  - Floppy and SIMKL adapters
+  - resumable import jobs
+  - created/reused/candidate/unresolved classification
+  - source payload preservation policy
+  - identity enrichment jobs
+  - import report and rollback checkpoint
+  - manual local records with empty provider state
+  exit_gates:
+  - every source row is classified and reported
+  - repeat import is idempotent
+  - IMDb plus Kitsu without MAL remains usable
+  - import interruption resumes from checkpoint
+  - ambiguous source data is never silently deleted or merged
+  user_success_loop:
+    practice: Preview an import and review one uncertain row.
+    feedback: Exact counts, preserved evidence and safe-state explanation.
+    payoff: Years of history can move without a provider lock-in gamble.
+- id: M3
+  name: Metadata claims and purpose-specific resolution
+  status: planned
+  user_capability: I can improve presentation and connect services without changing the identity of my record.
+  immediate_payoff: Better titles, artwork and routes appear while history stays attached.
+  epics:
+  - provider manifest and SDK
+  - field-level metadata claims
+  - user override and projection policy
+  - purpose-specific resolution plans
+  - last-known-good and stale-while-revalidate cache
+  - provider-switch impact preview
+  - one video and one non-video provider proof
+  exit_gates:
+  - display-provider change never changes Fasti entity ID
+  - read alias and exact write route can differ safely
+  - field provenance is visible
+  - provider failure leaves prior valid projection and local record intact
+  - fixture-backed provider can be scaffolded and validated in under thirty minutes
+  user_success_loop:
+    practice: Add one provider and compare one field or route.
+    feedback: Fasti shows source, age, effect and safe fallback.
+    payoff: The record improves without becoming dependent on the new provider.
+- id: M4
+  name: Reconciliation and mapping bundles
+  status: planned
+  user_capability: I can understand and repair an ambiguous or changing identity safely.
+  immediate_payoff: A wrong or incomplete match becomes correct without hidden history movement.
+  epics:
+  - persistent reconciliation cases
+  - candidate generation and policy engine
+  - identifier-only and topology comparison UI
+  - negative assertions
+  - bundle staging and impact report
+  - overlay, revocation and rollback
+  - optional AniBridge adapter
+  - identity decision traces and KCS
+  exit_gates:
+  - mapping update cannot move old occurrences automatically
+  - bundle rollback restores future resolution behavior
+  - target existence and stale identifier checks pass
+  - moderated users complete three repair tasks correctly
+  - Electric-Town structural cases pass against the resolver
+  user_success_loop:
+    practice: Review one suggested assertion and one topology conflict.
+    feedback: Outcome, reason, evidence and exact effect are visible.
+    payoff: The user can make the record more truthful without fear.
+- id: M5
+  name: Player and multi-device interoperability
+  status: planned
+  user_capability: My preferred players and devices contribute to one correct Chronicle.
+  immediate_payoff: Two devices can disconnect, retry and converge without false rewatches.
+  epics:
+  - device identity and grants
+  - durable local outbox and receipts
+  - snapshot and delta sync
+  - WebTransport preferred binding with fallbacks
+  - mDNS discovery and secure pairing
+  - Nuvio and Kodi observation paths
+  - Play With registry
+  - context actions
+  - calendar, Upcoming and Up Next
+  - mobile and desktop packaging proof
+  exit_gates:
+  - duplicate delivery never creates a rewatch
+  - profile, actor, device and client attribution remain exact
+  - cursor expiry rebuilds without missing tombstones
+  - manual and QR pairing work when multicast fails
+  - Play With never claims a consumption occurrence by itself
+  user_success_loop:
+    practice: Pair one player, disconnect, record and reconnect.
+    feedback: Local, queued, accepted and duplicate states remain visible.
+    payoff: The user keeps using the player they prefer while Fasti remembers correctly.
+- id: M6
+  name: Open connections and 1.0 hardening
+  status: planned
+  user_capability: I can extend, diagnose, automate, migrate and leave Fasti.
+  immediate_payoff: A new platform can connect without a Fasti release and the full record remains portable.
+  epics:
+  - Connection Studio
+  - MQTT and Home Assistant preset
+  - MCP and AI packages
+  - declarative add-ons and context contributions
+  - custom record types and fields
+  - Yamtrack, Cinephage and general compatibility imports
+  - RSS/Atom
+  - signed releases, SBOM and reproducible build
+  - performance qualification
+  - security audit
+  - KCS/OKF knowledge packs
+  - Scrobble.dev conformance publication
+  exit_gates:
+  - Connection mappings cannot bypass scopes, schema validation or network policy
+  - backup and restore equivalence passes across all canonical identity state
+  - public contracts have version, deprecation and migration policy
+  - documentation examples execute in CI
+  - performance, accessibility and security gates pass
+  user_success_loop:
+    practice: Connect one unknown API, run one conformance test and restore elsewhere.
+    feedback: Preview, validation, health, errors and migration report.
+    payoff: The user can adapt Fasti without surrendering control or waiting for the core team.
+kill_or_defer:
+- item: primary external identifier
+  decision: kill
+  reason: Provider switching and partial imports become destructive.
+- item: title-only automatic merge
+  decision: kill
+  reason: Unsafe across all major media domains.
+- item: one global numeric identity confidence
+  decision: kill
+  reason: Hides evidence type and irreversible risk.
+- item: graph database
+  decision: defer
+  revisit_trigger: SQLite bounded-resolution benchmark fails.
+- item: direct AniList integration
+  decision: gated
+  revisit_trigger: Written authorization and adapter proof.
+- item: public add-on marketplace
+  decision: defer
+  revisit_trigger: Signing, revocation, reporting and moderation exist.
+- item: WASI executable plugins
+  decision: defer
+  revisit_trigger: Two real capabilities cannot fit declarative add-ons safely.
+- item: Cloudflare deployment
+  decision: defer
+  revisit_trigger: Local product, auth abstraction and restore semantics pass.
+- item: alternate canonical database
+  decision: defer
+  revisit_trigger: Measured SQLite limit, not novelty.

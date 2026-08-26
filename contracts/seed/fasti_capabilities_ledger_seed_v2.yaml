@@ -1,0 +1,1272 @@
+schema: https://scrobble.dev/schemas/fasti/capabilities-ledger/2
+version: 2.0.0-planning-seed
+generated_on: '2026-08-21'
+status: planning_seed_not_runtime_contract
+product: Fasti
+product_boundary: Fasti records. Players play.
+source_of_truth_rule: Each public product capability has one semantic identity and may have multiple bindings.
+network_boundary_classes:
+- safe_http
+- local_discovery
+- safe_broker
+- live_transport
+- external_action
+default_security_rules:
+- deny undeclared capability and scope
+- derive workspace, profile, device and client authority from authenticated context
+- require explicit deletion or tombstone
+- require application-level idempotency for remote mutations
+- keep personal data out of mDNS TXT records and MQTT topic names
+- do not treat discovery as authentication
+- do not route broker or connector input directly to storage
+user_success_rules:
+- state the user capability and immediate payoff
+- teach complex concepts at the point of need
+- make local, queued, synced, failed and approval states visible
+- measure meaningful user results instead of feature activity
+capabilities:
+- id: node.discovery.advertise
+  title: Advertise this Fasti node
+  plain_language: Make this Fasti node visible to approved devices on the local network.
+  domain: local_discovery
+  risk: read
+  offline: local_network_only
+  scopes:
+  - node.discovery:advertise
+  network:
+    class: local_multicast
+    default_policy: trusted_private_interfaces_only
+    service_type: _fasti._tcp.local.
+  data_exposed:
+  - opaque_node_id
+  - protocol_version
+  - endpoint
+  - pairing_support
+  events:
+    emits:
+    - node.discovery.advertised
+  knowledge: knowledge/capabilities/node-discovery-advertise.md
+  user_payoff: A local client can find Fasti without an IP address.
+  status: planned_alpha
+- id: node.discovery.browse
+  title: Find local Fasti nodes
+  plain_language: Find Fasti nodes that advertise on the local network.
+  domain: local_discovery
+  risk: read
+  offline: local_network_only
+  scopes:
+  - node.discovery:browse
+  network:
+    class: local_multicast
+  events:
+    emits:
+    - node.discovery.found
+    - node.discovery.lost
+  knowledge: knowledge/capabilities/node-discovery-browse.md
+  user_payoff: The device shows nearby Fasti nodes automatically.
+  status: planned_alpha
+- id: node.discovery.diagnostics.read
+  title: Read local discovery diagnostics
+  plain_language: Show which network interfaces and service records Fasti is using.
+  domain: local_discovery
+  risk: read_sensitive
+  offline: local_network_only
+  scopes:
+  - diagnostics:read
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/node-discovery-diagnostics.md
+  user_payoff: A user can resolve discovery problems without guessing.
+  status: planned_alpha
+- id: device.pair.local
+  title: Pair a local device
+  plain_language: Approve a device and give it limited access to this Fasti workspace.
+  domain: access
+  risk: privileged_write
+  offline: local_network_only
+  scopes:
+  - devices:pair
+  approval: required
+  events:
+    emits:
+    - device.paired
+  knowledge: knowledge/capabilities/device-pair-local.md
+  user_payoff: The user can connect a trusted device with a short confirmation step.
+  status: planned_alpha
+- id: device.revoke
+  title: Revoke a device
+  plain_language: Stop a device from sending new work to this workspace.
+  domain: access
+  risk: privileged_write
+  offline: server_required
+  scopes:
+  - devices:revoke
+  approval: recent_authentication
+  events:
+    emits:
+    - device.revoked
+  knowledge: knowledge/capabilities/device-revoke.md
+  user_payoff: The user can remove a lost or untrusted device without deleting history.
+  status: foundation
+- id: chronicle.record
+  title: Record a media occurrence
+  plain_language: Add one durable record of media activity.
+  domain: chronicle
+  risk: write
+  offline: queued_local_first
+  record_types:
+  - movie
+  - episode
+  - anime_episode
+  - track
+  - podcast_episode
+  - book
+  - game
+  - custom
+  scopes:
+  - chronicle:write
+  rest:
+    operation_id: chronicleRecord
+  mcp:
+    tool: fasti_record_occurrence
+    default: confirm
+  events:
+    emits:
+    - chronicle.occurrence.recorded
+  addons:
+    callable: true
+    context_action: false
+  idempotency: required_for_remote_mutations
+  knowledge: knowledge/capabilities/chronicle-record.md
+  user_payoff: The activity is safe locally even when delivery fails.
+  status: foundation
+- id: chronicle.read
+  title: Read the Chronicle
+  plain_language: Read durable media occurrences for an approved profile.
+  domain: chronicle
+  risk: read_sensitive
+  offline: local
+  record_types:
+  - '*'
+  scopes:
+  - chronicle:read
+  rest:
+    operation_id: chronicleList
+  mcp:
+    resource: fasti://chronicle
+    default: allow_read
+  events:
+    emits: []
+  addons:
+    callable: true
+  knowledge: knowledge/capabilities/chronicle-read.md
+  user_payoff: The user can inspect what was recorded and when.
+  status: foundation
+- id: chronicle.correct
+  title: Correct a recorded occurrence
+  plain_language: Change the interpreted identity or details of an occurrence without changing the original observation.
+  domain: chronicle
+  risk: destructive_write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - chronicle:correct
+  rest:
+    operation_id: chronicleCorrect
+  mcp:
+    tool: fasti_correct_occurrence
+    default: confirm
+  events:
+    emits:
+    - chronicle.occurrence.corrected
+  addons:
+    callable: false
+    context_action: true
+  approval: affected_record_preview
+  knowledge: knowledge/capabilities/chronicle-correct.md
+  user_payoff: The user can fix meaning without erasing what was observed.
+  status: foundation
+- id: chronicle.remove
+  title: Remove a recorded occurrence
+  plain_language: Remove one occurrence and keep explicit evidence of the removal.
+  domain: chronicle
+  risk: destructive_write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - chronicle:delete
+  rest:
+    operation_id: chronicleRemove
+  mcp:
+    tool: fasti_remove_occurrence
+    default: deny_without_confirmation
+  events:
+    emits:
+    - chronicle.occurrence.removed
+  approval: affected_record_preview
+  tombstone: required
+  knowledge: knowledge/capabilities/chronicle-remove.md
+  user_payoff: The user can remove a mistake without an ambiguous absence.
+  status: foundation
+- id: progress.get
+  title: Read progress
+  plain_language: Read where an approved profile stopped.
+  domain: progress
+  risk: read_sensitive
+  offline: local
+  record_types:
+  - movie
+  - episode
+  - anime_episode
+  - podcast_episode
+  - audiobook
+  - book
+  - game
+  - custom
+  scopes:
+  - progress:read
+  rest:
+    operation_id: progressGet
+  mcp:
+    tool: fasti_get_progress
+    default: allow_read
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/progress-get.md
+  user_payoff: A player can resume from the correct place.
+  status: foundation
+- id: progress.set
+  title: Update progress
+  plain_language: Save where an approved profile stopped.
+  domain: progress
+  risk: write
+  offline: queued_local_first
+  record_types:
+  - movie
+  - episode
+  - anime_episode
+  - podcast_episode
+  - audiobook
+  - book
+  - game
+  - custom
+  progress_units:
+  - seconds
+  - milliseconds
+  - pages
+  - chapters
+  - episodes
+  - percent
+  - steps
+  - custom
+  scopes:
+  - progress:write
+  rest:
+    operation_id: progressSet
+  mcp:
+    tool: fasti_set_progress
+    default: confirm
+  events:
+    emits:
+    - progress.changed
+  mqtt:
+    publish: events/progress.changed
+    command: commands/progress.set
+    default_qos: 1
+  addons:
+    callable: true
+    context_action: true
+  idempotency: required_for_remote_mutations
+  knowledge: knowledge/capabilities/progress-set.md
+  user_payoff: A device can save progress safely and retry without creating history.
+  status: foundation
+- id: progress.reset
+  title: Reset progress
+  plain_language: Explicitly set progress to an earlier or empty position.
+  domain: progress
+  risk: destructive_write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - progress:write
+  rest:
+    operation_id: progressReset
+  events:
+    emits:
+    - progress.reset
+  approval: explicit_intent
+  knowledge: knowledge/capabilities/progress-reset.md
+  user_payoff: A lower position is not mistaken for stale data.
+  status: foundation
+- id: watched.get
+  title: Read consumed state
+  plain_language: Read whether an approved profile explicitly completed a record.
+  domain: consumed_state
+  risk: read_sensitive
+  offline: local
+  record_types:
+  - movie
+  - episode
+  - anime_episode
+  - track
+  - podcast_episode
+  - book
+  - game
+  - custom
+  scopes:
+  - watched:read
+  rest:
+    operation_id: watchedGet
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/watched-get.md
+  user_payoff: Players agree on current completion without inventing viewing history.
+  status: foundation
+- id: watched.set
+  title: Set consumed state
+  plain_language: Mark one exact record as completed for an approved profile.
+  domain: consumed_state
+  risk: write
+  offline: queued_local_first
+  record_types:
+  - movie
+  - episode
+  - anime_episode
+  - track
+  - podcast_episode
+  - book
+  - game
+  - custom
+  scopes:
+  - watched:write
+  rest:
+    operation_id: watchedSet
+  mcp:
+    tool: fasti_set_watched
+    default: confirm
+  events:
+    emits:
+    - watched.changed
+  mqtt:
+    publish: events/watched.changed
+    command: commands/watched.set
+    default_qos: 1
+  idempotency: required_for_remote_mutations
+  knowledge: knowledge/capabilities/watched-set.md
+  user_payoff: Current completion can sync without rewriting occurrence history.
+  status: foundation
+- id: watched.unset
+  title: Undo consumed state
+  plain_language: Explicitly remove current completion state without deleting history.
+  domain: consumed_state
+  risk: destructive_write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - watched:write
+  rest:
+    operation_id: watchedUnset
+  events:
+    emits:
+    - watched.changed
+  approval: explicit_intent
+  knowledge: knowledge/capabilities/watched-unset.md
+  user_payoff: The user can correct current state while preserving real past activity.
+  status: foundation
+- id: saved.get
+  title: Read saved state
+  plain_language: Read records that an approved profile intends to return to.
+  domain: library
+  risk: read_sensitive
+  offline: local
+  record_types:
+  - '*'
+  scopes:
+  - saved:read
+  rest:
+    operation_id: savedList
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/saved-get.md
+  user_payoff: A player can show the same saved records.
+  status: foundation
+- id: saved.add
+  title: Save a record
+  plain_language: Add a record to an approved profile's saved state.
+  domain: library
+  risk: write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - saved:write
+  rest:
+    operation_id: savedAdd
+  events:
+    emits:
+    - saved.changed
+  mqtt:
+    publish: events/saved.changed
+    command: commands/saved.add
+    default_qos: 1
+  idempotency: required_for_remote_mutations
+  knowledge: knowledge/capabilities/saved-add.md
+  user_payoff: A saved item remains available across approved players.
+  status: foundation
+- id: saved.remove
+  title: Remove saved state
+  plain_language: Explicitly remove a record from an approved profile's saved state.
+  domain: library
+  risk: destructive_write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - saved:write
+  rest:
+    operation_id: savedRemove
+  events:
+    emits:
+    - saved.changed
+  tombstone: required_for_sync
+  knowledge: knowledge/capabilities/saved-remove.md
+  user_payoff: Removal is explicit and cannot be inferred from a missing page.
+  status: foundation
+- id: ratings.set
+  title: Set a rating
+  plain_language: Save an approved profile's rating for a record.
+  domain: ratings
+  risk: write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - ratings:write
+  rest:
+    operation_id: ratingsSet
+  mcp:
+    tool: fasti_set_rating
+    default: confirm
+  events:
+    emits:
+    - rating.changed
+  knowledge: knowledge/capabilities/ratings-set.md
+  user_payoff: The user's judgement remains separate from provider metadata.
+  status: foundation
+- id: lists.add_member
+  title: Add a record to a list
+  plain_language: Add one record to a user-owned list.
+  domain: collections
+  risk: write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - lists:write
+  rest:
+    operation_id: listAddMember
+  events:
+    emits:
+    - list.membership.changed
+  knowledge: knowledge/capabilities/lists-add-member.md
+  user_payoff: The user can organise records without changing watched or saved state.
+  status: foundation
+- id: lists.remove_member
+  title: Remove a record from a list
+  plain_language: Remove one record from a user-owned list.
+  domain: collections
+  risk: destructive_write
+  offline: queued_local_first
+  record_types:
+  - '*'
+  scopes:
+  - lists:write
+  rest:
+    operation_id: listRemoveMember
+  events:
+    emits:
+    - list.membership.changed
+  knowledge: knowledge/capabilities/lists-remove-member.md
+  user_payoff: List changes stay separate from library ownership and history.
+  status: foundation
+- id: metadata.search
+  title: Search metadata projections
+  plain_language: Search approved metadata sources without making them the source of user history.
+  domain: metadata
+  risk: network_read
+  offline: last_good_or_unavailable
+  record_types:
+  - '*'
+  scopes:
+  - metadata:read
+  rest:
+    operation_id: metadataSearch
+  network:
+    class: safe_http
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/metadata-search.md
+  user_payoff: The user can find records while Fasti preserves source and uncertainty.
+  status: alpha
+- id: metadata.refresh
+  title: Refresh metadata
+  plain_language: Refresh provider metadata while keeping user-owned data unchanged.
+  domain: metadata
+  risk: network_write_projection
+  offline: queued_or_last_good
+  record_types:
+  - '*'
+  scopes:
+  - metadata:refresh
+  rest:
+    operation_id: metadataRefresh
+  events:
+    emits:
+    - metadata.refreshed
+    - metadata.refresh_failed
+  mqtt:
+    command: commands/metadata.refresh
+    default_qos: 1
+  network:
+    class: safe_http
+  knowledge: knowledge/capabilities/metadata-refresh.md
+  user_payoff: Provider failure does not remove the local record or user correction.
+  status: alpha
+- id: metadata.reconcile
+  title: Reconcile identity and metadata
+  plain_language: Review conflicting or incomplete identity evidence before Fasti changes resolved metadata.
+  domain: identity
+  risk: privileged_write
+  offline: local_review
+  record_types:
+  - '*'
+  scopes:
+  - metadata:reconcile
+  rest:
+    operation_id: metadataReconcile
+  events:
+    emits:
+    - identity.resolved
+    - identity.unresolved
+  approval: preview_and_confirmation
+  knowledge: knowledge/capabilities/metadata-reconcile.md
+  user_payoff: The user can resolve ambiguity without title-only guessing.
+  status: alpha
+- id: play.handoff
+  title: Play with an external player
+  plain_language: Open an approved player with a record reference.
+  domain: playback_coordination
+  risk: external_action
+  offline: local_if_player_available
+  record_types:
+  - '*'
+  scopes:
+  - play:handoff
+  rest:
+    operation_id: playHandoff
+  events:
+    emits:
+    - play.handoff.requested
+  history_effect: none
+  knowledge: knowledge/capabilities/play-handoff.md
+  user_payoff: The user can choose a player without creating false watch history.
+  status: alpha
+- id: imports.preview
+  title: Preview an import
+  plain_language: Inspect counts, conflicts and unresolved records before Fasti changes local state.
+  domain: portability
+  risk: read_and_staging_write
+  offline: local
+  scopes:
+  - imports:preview
+  rest:
+    operation_id: importsPreview
+  events:
+    emits:
+    - import.preview_ready
+  knowledge: knowledge/capabilities/imports-preview.md
+  user_payoff: The user knows what will change before approving migration.
+  status: foundation
+- id: imports.apply
+  title: Apply an import
+  plain_language: Apply approved migration records with resumable and idempotent processing.
+  domain: portability
+  risk: bulk_write
+  offline: local
+  scopes:
+  - imports:apply
+  rest:
+    operation_id: importsApply
+  events:
+    emits:
+    - import.started
+    - import.progress
+    - import.completed
+    - import.failed
+  approval: preview_and_confirmation
+  idempotency: required
+  knowledge: knowledge/capabilities/imports-apply.md
+  user_payoff: The user can bring an existing record into Fasti without silent loss.
+  status: foundation
+- id: exports.create
+  title: Create a portable export
+  plain_language: Create a versioned, checksummed archive of approved Fasti state.
+  domain: portability
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - exports:create
+  rest:
+    operation_id: exportsCreate
+  events:
+    emits:
+    - export.started
+    - export.completed
+    - export.failed
+  knowledge: knowledge/capabilities/exports-create.md
+  user_payoff: The user can leave Fasti without losing the record's meaning.
+  status: foundation
+- id: backups.create
+  title: Create a backup
+  plain_language: Create a consistent backup with checksums and an optional encrypted secret package.
+  domain: portability
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - backups:create
+  rest:
+    operation_id: backupsCreate
+  events:
+    emits:
+    - backup.started
+    - backup.completed
+    - backup.failed
+  mqtt:
+    command: commands/backup.create
+    default_qos: 1
+  knowledge: knowledge/capabilities/backups-create.md
+  user_payoff: The user can protect the Chronicle before upgrades or failure.
+  status: foundation
+- id: backups.restore
+  title: Restore a backup
+  plain_language: Restore a verified backup into a clean or approved Fasti node.
+  domain: portability
+  risk: bulk_destructive_write
+  offline: local
+  scopes:
+  - backups:restore
+  rest:
+    operation_id: backupsRestore
+  events:
+    emits:
+    - restore.started
+    - restore.completed
+    - restore.failed
+  approval: full_preview_and_recent_authentication
+  knowledge: knowledge/capabilities/backups-restore.md
+  user_payoff: The user can prove that the backup is usable, not merely present.
+  status: foundation
+- id: sync.push
+  title: Push queued operations
+  plain_language: Send locally accepted operations to an approved workspace authority.
+  domain: sync
+  risk: write
+  offline: queued_local_first
+  scopes:
+  - sync:write
+  rest:
+    operation_id: syncPush
+  events:
+    emits:
+    - sync.operation.accepted
+    - sync.operation.rejected
+  idempotency: required
+  knowledge: knowledge/capabilities/sync-push.md
+  user_payoff: A device can reconnect without duplicating accepted work.
+  status: beta
+- id: sync.pull
+  title: Pull ordered changes
+  plain_language: Read ordered changes after a bound cursor.
+  domain: sync
+  risk: read_sensitive
+  offline: server_required
+  scopes:
+  - sync:read
+  rest:
+    operation_id: syncPull
+  events:
+    emits: []
+  cursor: opaque_user_workspace_client_resource_bound
+  knowledge: knowledge/capabilities/sync-pull.md
+  user_payoff: A device receives only the changes it needs.
+  status: beta
+- id: sync.snapshot
+  title: Create a sync snapshot
+  plain_language: Create a stable bounded snapshot for initial or expired-cursor recovery.
+  domain: sync
+  risk: read_sensitive
+  offline: server_required
+  scopes:
+  - sync:read
+  rest:
+    operation_id: syncSnapshot
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/sync-snapshot.md
+  user_payoff: A long-offline device can recover without deleting local work.
+  status: beta
+- id: connections.test
+  title: Test a connection
+  plain_language: Run a redacted dry test of one external mapping without applying canonical changes.
+  domain: connections
+  risk: network_test
+  offline: network_required
+  scopes:
+  - connections:test
+  rest:
+    operation_id: connectionsTest
+  network:
+    class: governed_network_boundary
+  events:
+    emits:
+    - connection.tested
+  knowledge: knowledge/capabilities/connections-test.md
+  user_payoff: The user can see the request and mapped result before saving.
+  status: open_connections_beta
+- id: connections.execute
+  title: Execute a connection
+  plain_language: Run one approved external mapping through a governed network adapter.
+  domain: connections
+  risk: network_and_domain_write
+  offline: queued_when_supported
+  scopes:
+  - connections:execute
+  rest:
+    operation_id: connectionsExecute
+  mcp:
+    tool: fasti_execute_connection
+    default: deny_unless_scoped
+  network:
+    class: governed_network_boundary
+  events:
+    emits:
+    - connection.succeeded
+    - connection.failed
+  idempotency: required_for_write_mappings
+  knowledge: knowledge/capabilities/connections-execute.md
+  user_payoff: The user can connect an unknown API without a Fasti code release.
+  status: open_connections_beta
+- id: mqtt.publish
+  title: Publish an approved MQTT event
+  plain_language: Publish an approved Fasti event or bounded state projection to a configured MQTT broker.
+  domain: connections
+  risk: network_write
+  offline: queued_or_dropped_by_event_policy
+  scopes:
+  - connections:mqtt:publish
+  network:
+    class: safe_broker
+    tls_default: true
+  events:
+    emits:
+    - mqtt.publish_succeeded
+    - mqtt.publish_failed
+  knowledge: knowledge/capabilities/mqtt-publish.md
+  user_payoff: Local automation can observe Fasti without a core patch.
+  status: open_connections_beta
+- id: mqtt.subscribe
+  title: Receive an approved MQTT command
+  plain_language: Receive a broker message, validate it and map it to one approved Fasti capability.
+  domain: connections
+  risk: network_and_domain_write
+  offline: broker_required
+  scopes:
+  - connections:mqtt:subscribe
+  network:
+    class: safe_broker
+    tls_default: true
+  events:
+    emits:
+    - mqtt.message_accepted
+    - mqtt.message_rejected
+  idempotency: required_for_mutating_commands
+  knowledge: knowledge/capabilities/mqtt-subscribe.md
+  user_payoff: Automation can request safe actions through the same domain rules as HTTP.
+  status: open_connections_beta
+- id: homeassistant.discovery.publish
+  title: Publish Home Assistant discovery
+  plain_language: Publish selected Fasti entities and actions through Home Assistant MQTT discovery.
+  domain: automation
+  risk: network_write
+  offline: broker_required
+  scopes:
+  - automation:homeassistant:publish
+  network:
+    class: safe_broker
+    tls_default: true
+  retained_policy: discovery_and_bounded_current_state_only
+  events:
+    emits:
+    - homeassistant.discovery_published
+  knowledge: knowledge/capabilities/homeassistant-discovery-publish.md
+  user_payoff: The user can see health and run safe actions from Home Assistant.
+  status: open_connections_beta
+- id: notifications.test
+  title: Test a notification endpoint
+  plain_language: Send one test through an approved notification endpoint and show the result.
+  domain: notifications
+  risk: network_write
+  offline: queued_or_fail_visible
+  scopes:
+  - notifications:test
+  rest:
+    operation_id: notificationsTest
+  events:
+    emits:
+    - notification.test_succeeded
+    - notification.test_failed
+  knowledge: knowledge/capabilities/notifications-test.md
+  user_payoff: The user can verify delivery without losing the local inbox event.
+  status: foundation
+- id: knowledge.search
+  title: Search local knowledge
+  plain_language: Search versioned local help, capability and recovery content.
+  domain: support
+  risk: read
+  offline: local
+  scopes:
+  - knowledge:read
+  rest:
+    operation_id: knowledgeSearch
+  mcp:
+    resource: fasti://knowledge
+    default: allow_read
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/knowledge-search.md
+  user_payoff: The user can find the next recovery action without the internet.
+  status: foundation
+- id: identity.entity.create
+  title: Create a stable Fasti entity
+  plain_language: Create a local media record that does not depend on any external provider.
+  domain: identity
+  risk: write
+  offline: local
+  scopes:
+  - identity:write
+  rest:
+    operation_id: identityEntityCreate
+  events:
+    emits:
+    - identity.entity.created
+  knowledge: knowledge/capabilities/identity-entity-create.md
+  user_payoff: The record remains usable even when no provider can resolve it.
+  status: foundation
+- id: identity.entity.read
+  title: Read identity and lifecycle
+  plain_language: Show the stable record, known external identifiers, relations and current identity state.
+  domain: identity
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - identity:read
+  rest:
+    operation_id: identityEntityGet
+  mcp:
+    resource: fasti://identity/entities/{entity_id}
+    default: allow_read
+  knowledge: knowledge/capabilities/identity-entity-read.md
+  user_payoff: The user can understand what Fasti knows and where it came from.
+  status: foundation
+- id: identity.assertion.add
+  title: Add an identity assertion
+  plain_language: Attach an external identifier or relationship with its evidence and scope.
+  domain: identity
+  risk: write
+  offline: local
+  scopes:
+  - identity:write
+  rest:
+    operation_id: identityAssertionAdd
+  idempotency: required_for_remote_mutations
+  events:
+    emits:
+    - identity.assertion.added
+  knowledge: knowledge/capabilities/identity-assertion-add.md
+  user_payoff: New information enriches the same stable record instead of replacing it.
+  status: foundation
+- id: identity.assertion.revoke
+  title: Revoke an identity assertion
+  plain_language: Mark one identity claim as wrong while keeping its audit history.
+  domain: identity
+  risk: destructive_write
+  offline: local
+  scopes:
+  - identity:manage
+  approval: required
+  rest:
+    operation_id: identityAssertionRevoke
+  events:
+    emits:
+    - identity.assertion.revoked
+  knowledge: knowledge/capabilities/identity-assertion-revoke.md
+  user_payoff: A bad mapping can be corrected without erasing what happened.
+  status: foundation
+- id: identity.negative_assertion.add
+  title: Mark records as not the same
+  plain_language: Record that two records must not be merged and state why.
+  domain: identity
+  risk: write
+  offline: local
+  scopes:
+  - identity:write
+  rest:
+    operation_id: identityNegativeAssertionAdd
+  events:
+    emits:
+    - identity.negative_assertion.added
+  knowledge: knowledge/capabilities/identity-negative-assertion-add.md
+  user_payoff: Fasti does not repeat the same bad match later.
+  status: foundation
+- id: identity.resolve
+  title: Resolve identity for one purpose
+  plain_language: Choose the safest known identifier route for a named operation.
+  domain: identity
+  risk: read_sensitive
+  offline: local_with_cached_evidence
+  scopes:
+  - identity:read
+  rest:
+    operation_id: identityResolve
+  mcp:
+    tool: fasti_resolve_identity
+    default: allow_read
+  events:
+    emits:
+    - identity.resolution.planned
+  knowledge: knowledge/capabilities/identity-resolve.md
+  user_payoff: Metadata, playback and sync can use different safe routes without changing the record.
+  status: foundation
+- id: identity.enrich
+  title: Find and attach more identity evidence
+  plain_language: Use known identifiers and approved sources to find additional coordinates for the same record.
+  domain: identity
+  risk: write_external
+  offline: queued_when_offline
+  scopes:
+  - identity:write
+  - metadata:read
+  rest:
+    operation_id: identityEnrich
+  events:
+    emits:
+    - identity.enrichment.started
+    - identity.enrichment.completed
+  knowledge: knowledge/capabilities/identity-enrich.md
+  user_payoff: A partial import can heal later without being recreated.
+  status: foundation
+- id: identity.reconcile.preview
+  title: Preview an identity repair
+  plain_language: Compare candidates, evidence and exact effects before changing anything.
+  domain: identity
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - identity:read
+  rest:
+    operation_id: identityReconcilePreview
+  events:
+    emits: []
+  knowledge: knowledge/capabilities/identity-reconcile-preview.md
+  user_payoff: The user can see what will change and what will stay safe.
+  status: foundation
+- id: identity.reconcile.apply
+  title: Apply a reviewed identity decision
+  plain_language: Accept, reject, defer or limit an identity repair after reviewing its effect.
+  domain: identity
+  risk: privileged_write
+  offline: local
+  scopes:
+  - identity:manage
+  approval: required
+  rest:
+    operation_id: identityReconcileApply
+  idempotency: required
+  events:
+    emits:
+    - identity.reconciliation.resolved
+  knowledge: knowledge/capabilities/identity-reconcile-apply.md
+  user_payoff: The record becomes more accurate without hidden history movement.
+  status: foundation
+- id: identity.provider_change.preview
+  title: Preview a provider preference change
+  plain_language: Show metadata, topology and outward-operation effects before changing a provider preference.
+  domain: identity
+  risk: read_sensitive
+  offline: local_with_cached_evidence
+  scopes:
+  - identity:read
+  - settings:read
+  rest:
+    operation_id: identityProviderChangePreview
+  knowledge: knowledge/capabilities/identity-provider-change-preview.md
+  user_payoff: The user can improve metadata without ripping a show or history apart.
+  status: foundation
+- id: identity.provider_change.apply
+  title: Apply a safe provider preference change
+  plain_language: Change display or operation preferences after a reviewed impact check.
+  domain: identity
+  risk: privileged_write
+  offline: local
+  scopes:
+  - settings:write
+  approval: required_when_topology_changes
+  rest:
+    operation_id: identityProviderChangeApply
+  events:
+    emits:
+    - identity.provider_preference.changed
+  knowledge: knowledge/capabilities/identity-provider-change-apply.md
+  user_payoff: Preferences change views and routes, not the stable Chronicle.
+  status: foundation
+- id: identity.mapping_bundle.stage
+  title: Stage a mapping bundle
+  plain_language: Verify and inspect a mapping dataset before it can affect resolution.
+  domain: identity
+  risk: privileged_write_external
+  offline: local_after_download
+  scopes:
+  - identity:bundles:manage
+  rest:
+    operation_id: identityMappingBundleStage
+  events:
+    emits:
+    - identity.mapping_bundle.staged
+  knowledge: knowledge/capabilities/identity-mapping-bundle-stage.md
+  user_payoff: Mapping updates cannot silently change the record.
+  status: planned_beta
+- id: identity.mapping_bundle.impact
+  title: Read mapping-bundle impact
+  plain_language: Show which records and historical interpretations a mapping update could affect.
+  domain: identity
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - identity:read
+  rest:
+    operation_id: identityMappingBundleImpact
+  knowledge: knowledge/capabilities/identity-mapping-bundle-impact.md
+  user_payoff: The user can judge a mapping update before activation.
+  status: planned_beta
+- id: identity.mapping_bundle.activate
+  title: Activate a reviewed mapping bundle
+  plain_language: Use a verified mapping version for future resolution without moving old history automatically.
+  domain: identity
+  risk: privileged_write
+  offline: local
+  scopes:
+  - identity:bundles:manage
+  approval: required
+  rest:
+    operation_id: identityMappingBundleActivate
+  events:
+    emits:
+    - identity.mapping_bundle.activated
+  knowledge: knowledge/capabilities/identity-mapping-bundle-activate.md
+  user_payoff: New mapping knowledge is controlled and reversible.
+  status: planned_beta
+- id: identity.mapping_bundle.rollback
+  title: Roll back a mapping bundle
+  plain_language: Return future resolution to the prior verified mapping version.
+  domain: identity
+  risk: privileged_write
+  offline: local
+  scopes:
+  - identity:bundles:manage
+  approval: required
+  rest:
+    operation_id: identityMappingBundleRollback
+  events:
+    emits:
+    - identity.mapping_bundle.rolled_back
+  knowledge: knowledge/capabilities/identity-mapping-bundle-rollback.md
+  user_payoff: A bad mapping release can be contained without deleting the Chronicle.
+  status: planned_beta
+- id: identity.decision_trace.read
+  title: Read an identity decision trace
+  plain_language: Explain which policy, evidence and source versions produced one result.
+  domain: identity
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - identity:read
+  - diagnostics:read
+  rest:
+    operation_id: identityDecisionTraceGet
+  mcp:
+    tool: fasti_explain_identity_decision
+    default: allow_read
+  knowledge: knowledge/capabilities/identity-decision-trace-read.md
+  user_payoff: The user or support engineer can understand and reproduce a match.
+  status: foundation
+- id: metadata.claims.read
+  title: Read metadata claims and provenance
+  plain_language: Show each provider value, locale, age and source for a metadata field.
+  domain: metadata
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - metadata:read
+  rest:
+    operation_id: metadataClaimsGet
+  knowledge: knowledge/capabilities/metadata-claims-read.md
+  user_payoff: The user can understand why one title, date or image is displayed.
+  status: foundation
+- id: metadata.projection.preference.set
+  title: Set metadata projection preference
+  plain_language: Choose display sources or field rules without changing the stable identity.
+  domain: metadata
+  risk: write
+  offline: local
+  scopes:
+  - metadata:write
+  rest:
+    operation_id: metadataProjectionPreferenceSet
+  events:
+    emits:
+    - metadata.projection.preference_changed
+  knowledge: knowledge/capabilities/metadata-projection-preference-set.md
+  user_payoff: Presentation can improve without moving the Chronicle.
+  status: foundation
+- id: metadata.cache.dump
+  title: Export cached metadata evidence
+  plain_language: Create a safe diagnostic export of normalized metadata and source status.
+  domain: metadata
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - metadata:read
+  - diagnostics:read
+  rest:
+    operation_id: metadataCacheDump
+  knowledge: knowledge/capabilities/metadata-cache-dump.md
+  user_payoff: The user can diagnose a broken provider without exposing secrets.
+  status: planned_alpha
+- id: record_types.define
+  title: Define a record type
+  plain_language: Create a versioned media or activity type with its own fields, progress and actions.
+  domain: record_types
+  risk: privileged_write
+  offline: local
+  scopes:
+  - record_types:manage
+  rest:
+    operation_id: recordTypeDefine
+  events:
+    emits:
+    - record_type.defined
+  knowledge: knowledge/capabilities/record-types-define.md
+  user_payoff: The user can chronicle media Fasti did not ship with.
+  status: planned_beta
+- id: fields.define
+  title: Define a custom field
+  plain_language: Add a typed, versioned field to one record type.
+  domain: record_types
+  risk: privileged_write
+  offline: local
+  scopes:
+  - record_types:manage
+  rest:
+    operation_id: fieldDefine
+  events:
+    emits:
+    - field_definition.created
+  knowledge: knowledge/capabilities/fields-define.md
+  user_payoff: The record can hold domain-specific information without a fork.
+  status: planned_beta
+- id: fields.identity_namespace.register
+  title: Register a custom identity namespace
+  plain_language: Define the owner, grain, format and behavior of a custom identifier field.
+  domain: identity
+  risk: privileged_write
+  offline: local
+  scopes:
+  - identity:namespaces:manage
+  approval: required
+  rest:
+    operation_id: identityNamespaceRegister
+  events:
+    emits:
+    - identity.namespace.registered
+  knowledge: knowledge/capabilities/identity-namespace-register.md
+  user_payoff: A long-tail provider ID can participate safely in matching and APIs.
+  status: planned_beta
+- id: imports.identity_report.read
+  title: Read import identity classifications
+  plain_language: Show which imported rows were created, reused, unresolved, invalid or blocked.
+  domain: imports
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - imports:read
+  rest:
+    operation_id: importIdentityReportGet
+  knowledge: knowledge/capabilities/imports-identity-report-read.md
+  user_payoff: No source row disappears without an explanation.
+  status: foundation
+- id: chronicle.interpretation.read
+  title: Read occurrence interpretation history
+  plain_language: Show how one original observation has been interpreted over time.
+  domain: chronicle
+  risk: read_sensitive
+  offline: local
+  scopes:
+  - chronicle:read
+  - identity:read
+  rest:
+    operation_id: chronicleInterpretationHistoryGet
+  knowledge: knowledge/capabilities/chronicle-interpretation-read.md
+  user_payoff: The user can correct meaning without losing the original fact.
+  status: foundation
+- id: chronicle.interpretation.change
+  title: Change a reviewed occurrence interpretation
+  plain_language: Attach an occurrence to a corrected entity or segment while preserving the old interpretation.
+  domain: chronicle
+  risk: destructive_semantic_write
+  offline: local
+  scopes:
+  - chronicle:correct
+  - identity:manage
+  approval: required
+  rest:
+    operation_id: chronicleInterpretationChange
+  events:
+    emits:
+    - chronicle.interpretation.changed
+  knowledge: knowledge/capabilities/chronicle-interpretation-change.md
+  user_payoff: A bad match can be fixed without rewriting what was observed.
+  status: foundation
+- id: identity.conformance.run
+  title: Run identity conformance
+  plain_language: Test a provider, mapping bundle or Fasti build against public identity cases.
+  domain: identity
+  risk: read
+  offline: local
+  scopes:
+  - diagnostics:read
+  cli:
+    command: fasti conformance identity
+  knowledge: knowledge/capabilities/identity-conformance-run.md
+  user_payoff: Developers can prove compatibility before user data is touched.
+  status: foundation
+identity_constitution:
+- Fasti IDs are stable and provider-neutral.
+- External IDs are assertions with provenance and lifecycle.
+- Resolution is intent-specific.
+- Original observations and later interpretations are separate.
+- Irreversible identity changes require review.
+capability_count: 66

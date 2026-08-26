@@ -1,5 +1,5 @@
 # Rust build outputs
-/target/
+target/
 **/*.rs.bk
 Cargo.lock.backup
 
@@ -9,6 +9,8 @@ dist/
 .svelte-check/
 !benchmarks/b1/tauri-shell/dist/
 !benchmarks/b1/tauri-shell/dist/index.html
+gen/
+!benchmarks/b1/tauri-shell/src-tauri/gen/
 .pnpm-store/
 .next/
 .turbo/
@@ -55,8 +57,12 @@ test-results/
 __pycache__/
 *.py[cod]
 
-
-
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs
+# Local tools & dev runtime
+.air/
+.codex/
+.dev-logs/
+.dev-data/
+.dev-run/

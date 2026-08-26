@@ -1,0 +1,41 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "identifier": "fasti",
+  "name": "Fasti",
+  "description": "An identity-first, self-hosted system of record for media activity. Fasti records; players play.",
+  "license": "https://spdx.org/licenses/AGPL-3.0-or-later",
+  "codeRepository": "https://github.com/Scrobble-dev/Fasti",
+  "url": "https://scrobble.dev",
+  "programmingLanguage": [
+    "Rust",
+    "TypeScript"
+  ],
+  "runtimePlatform": [
+    "Linux",
+    "macOS",
+    "Windows"
+  ],
+  "author": [
+    {
+      "@type": "Organization",
+      "name": "Fasti Contributors",
+      "url": "https://scrobble.dev"
+    }
+  ],
+  "keywords": [
+    "scrobble",
+    "scrobbling",
+    "media-tracker",
+    "self-hosted",
+    "digital-preservation",
+    "local-first",
+    "offline-first",
+    "rust",
+    "sqlite",
+    "tauri",
+    "interoperability"
+  ],
+  "version": "0.1.0",
+  "developmentStatus": "active"
+}
