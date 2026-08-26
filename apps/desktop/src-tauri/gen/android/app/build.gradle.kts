@@ -39,9 +39,8 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             proguardFiles(
-                *fileTree(".") { include("**/*.pro") }
-                    .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
-                    .toList().toTypedArray()
+                fileTree(".") { include("**/*.pro") },
+                getDefaultProguardFile("proguard-android-optimize.txt")
             )
         }
     }
