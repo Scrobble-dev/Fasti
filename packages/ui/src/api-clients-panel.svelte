@@ -25,6 +25,7 @@
   let clients = $state<ApiClientCredentialSummary[]>([]);
   let loading = $state(false);
   let creating = $state(false);
+  let revoking = $state<string>();
   let problem = $state<string>();
   let oneTimeCredential = $state<CreatedApiClientCredential>();
   let copied = $state(false);
@@ -306,11 +307,14 @@
                         disabled={Boolean(revoking)}
                         onclick={() => void revoke(client.credential_id)}
                       >
-                        Confirm revoke
+                        {revoking === client.credential_id
+                          ? "Revoking…"
+                          : "Confirm revoke"}
                       </button>
                       <button
                         type="button"
                         class="secondary-action"
+                        disabled={Boolean(revoking)}
                         onclick={() => (pendingRevoke = undefined)}
                       >
                         Cancel
@@ -320,6 +324,7 @@
                     <button
                       type="button"
                       class="danger-action"
+                      disabled={Boolean(revoking)}
                       onclick={() => (pendingRevoke = client.credential_id)}
                       aria-label={`Revoke API client ${client.client_id}`}
                     >
