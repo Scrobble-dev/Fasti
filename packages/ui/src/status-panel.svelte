@@ -74,8 +74,9 @@
     <section class="status-panel" aria-labelledby="status-title">
       <h1 id="status-title">Local service status</h1>
       <p class="intro">
-        This diagnostic surface checks the only active production capability.
-        Fasti records media activity. Players play it.
+        This page checks the local service health contract. A healthy response
+        proves service availability. It does not authenticate Records or
+        occurrence ingress.
       </p>
 
       <div class="state-region">
@@ -122,7 +123,7 @@
           </div>
           <p class="command-help">
             From the repository root, run
-            <code>cargo run --locked -p fastid</code>.
+            <code>./scripts/dev.sh</code>.
           </p>
           <div class="recovery-actions">
             <button
@@ -148,8 +149,9 @@
       </div>
 
       <p class="scope-note">
-        Catalogue, review, playback, provider, and account controls remain
-        unavailable until their contracts and milestone gates are active.
+        Records and durable occurrence ingress have separate authenticated
+        contracts. Provider, review, playback, and account features report their
+        own availability in the Workbench.
       </p>
     </section>
 

@@ -603,7 +603,9 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
         document.documentElement.clientWidth,
     ),
   ).toBeLessThanOrEqual(0);
-  await expect(page.getByText("Catalogue, review, playback")).toBeVisible();
+  await expect(
+    page.getByText("Records and durable occurrence ingress"),
+  ).toBeVisible();
 });
 
 test("reduced motion stops the loading animation", async ({ page }) => {
