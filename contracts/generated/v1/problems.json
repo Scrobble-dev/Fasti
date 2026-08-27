@@ -310,6 +310,24 @@
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -325,6 +343,60 @@
       "status": 501,
       "title": "Capability unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "identity_conflict",
+      "detail": "an exact external identifier is already attached to another active Record",
+      "next_actions": [
+        {
+          "id": "review_identity_conflict",
+          "label": "Review the existing Record before attaching the identifier"
+        }
+      ],
+      "param": "/identifier",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-conflict"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "identity.identifier.attach",
@@ -346,6 +418,96 @@
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -361,6 +523,186 @@
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
     },
     {
       "capability_id": "identity.record.create",
@@ -382,6 +724,42 @@
     },
     {
       "capability_id": "identity.record.create",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "invalid_identifier",
       "detail": "identifier does not satisfy the governed format",
       "next_actions": [
@@ -400,6 +778,78 @@
     },
     {
       "capability_id": "identity.record.create",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -415,6 +865,96 @@
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "identity.review.defer",
@@ -796,6 +1336,24 @@
     },
     {
       "capability_id": "observation.accept",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "capacity_exceeded",
       "detail": "bounded application capacity has been reached",
       "next_actions": [
@@ -850,6 +1408,24 @@
     },
     {
       "capability_id": "observation.accept",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "observation.accept",
       "code": "invalid_observation",
       "detail": "observation does not satisfy the governed contract",
       "next_actions": [
@@ -901,6 +1477,24 @@
       "status": 413,
       "title": "Payload too large",
       "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "observation.accept",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "observation.accept",

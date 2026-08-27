@@ -3,7 +3,8 @@
 use crate::{ApplicationResult, RequestAccessContext};
 use fasti_domain::{
     EvidenceReference, ExternalIdentifierClaim, ExternalIdentifierId, Grain, InterpretationId,
-    ProfileId, RecordId, ReviewItemId, ReviewStatus, WorkspaceId,
+    InterpretationState, OccurredAt, ProfileId, RecordId, RecordStatus, ResolvedField,
+    ReviewItemId, ReviewStatus, WorkspaceId,
 };
 use std::fmt;
 
@@ -61,6 +62,17 @@ impl SecretMaterial {
 
     pub fn expose_bytes(&self) -> &[u8; SECRET_BYTES] {
         &self.bytes
+    }
+
+    /// Constant-time equality. The derived `PartialEq` short-circuits on the
+    /// first differing byte; for a secret comparison that timing signal can
+    /// leak how many leading bytes an attacker's guess got right.
+    pub fn constant_time_eq(&self, other: &Self) -> bool {
+        let mut diff = 0_u8;
+        for (left, right) in self.bytes.iter().zip(other.bytes.iter()) {
+            diff |= left ^ right;
+        }
+        diff == 0
     }
 }
 
@@ -372,6 +384,18 @@ impl ConfigureListenerCommand {
 }
 
 pub trait AccessAdministrationPort: Send + Sync {
+    /// Returns the bootstrap secret, generating and persisting it (with
+    /// owner-only file permissions) on first call. A legitimate client
+    /// proves it can read a file owned by this data root's OS user -- the
+    /// same trust boundary the data root's own exclusive lock already
+    /// assumes for the daemon process itself -- by presenting this value
+    /// back to [`AccessAdministrationPort::initialize_node`]. Loopback
+    /// reachability alone is not proof of authorization: without this,
+    /// a second local process could race the legitimate first client for
+    /// the one-time bootstrap credential. The daemon calls this once at
+    /// startup so the file exists before any HTTP request can arrive.
+    fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial>;
+
     fn initialize_node(
         &self,
         command: InitializeNodeCommand,
@@ -640,6 +664,126 @@ impl RegisterNamespaceDefinitionOutcome {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListRecordsQuery {
+    correlation_id: fasti_domain::RequestCorrelationId,
+    access: RequestAccessContext,
+}
+
+impl ListRecordsQuery {
+    pub const fn new(
+        correlation_id: fasti_domain::RequestCorrelationId,
+        access: RequestAccessContext,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> fasti_domain::RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+}
+
+/// The most recent Chronicle activity touching a Record, when any exists.
+///
+/// A Record with no Occurrence yet (created directly, or only ever the
+/// unresolved side of an ambiguous match) has no activity to report; that is
+/// a first-class, valid state, not an error -- callers see `None`, not a
+/// fabricated placeholder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordActivity {
+    occurred_at: Option<OccurredAt>,
+    interpretation_state: InterpretationState,
+}
+
+impl RecordActivity {
+    pub const fn new(
+        occurred_at: Option<OccurredAt>,
+        interpretation_state: InterpretationState,
+    ) -> Self {
+        Self {
+            occurred_at,
+            interpretation_state,
+        }
+    }
+
+    pub const fn occurred_at(&self) -> Option<&OccurredAt> {
+        self.occurred_at.as_ref()
+    }
+
+    pub const fn interpretation_state(&self) -> InterpretationState {
+        self.interpretation_state
+    }
+}
+
+/// One Record projected for display: its identity, its resolved display
+/// fields, and its most recent Chronicle activity.
+///
+/// `title` and `poster` are always present as a [`ResolvedField`], even when
+/// no provider has ever supplied a claim and no override exists -- that
+/// resolves to [`fasti_domain::FieldResolutionTier::Empty`], not an absent
+/// field. A local-only Record with zero metadata is a valid row, never a
+/// skipped one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordSummary {
+    record_id: RecordId,
+    grain: Grain,
+    status: RecordStatus,
+    title: ResolvedField,
+    poster: ResolvedField,
+    latest_activity: Option<RecordActivity>,
+}
+
+impl RecordSummary {
+    pub fn new(
+        record_id: RecordId,
+        grain: Grain,
+        status: RecordStatus,
+        title: ResolvedField,
+        poster: ResolvedField,
+        latest_activity: Option<RecordActivity>,
+    ) -> Self {
+        Self {
+            record_id,
+            grain,
+            status,
+            title,
+            poster,
+            latest_activity,
+        }
+    }
+
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn grain(&self) -> Grain {
+        self.grain
+    }
+
+    pub const fn status(&self) -> RecordStatus {
+        self.status
+    }
+
+    pub const fn title(&self) -> &ResolvedField {
+        &self.title
+    }
+
+    pub const fn poster(&self) -> &ResolvedField {
+        &self.poster
+    }
+
+    pub const fn latest_activity(&self) -> Option<&RecordActivity> {
+        self.latest_activity.as_ref()
+    }
+}
+
 pub trait IdentityPort: Send + Sync {
     fn register_namespace_definition(
         &self,
@@ -653,6 +797,8 @@ pub trait IdentityPort: Send + Sync {
         &self,
         command: AttachIdentifierCommand,
     ) -> ApplicationResult<AttachIdentifierOutcome>;
+
+    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<Vec<RecordSummary>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

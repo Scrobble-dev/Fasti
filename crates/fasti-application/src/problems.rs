@@ -459,8 +459,11 @@ impl ProblemCode {
     pub const fn contract_state(self) -> ContractState {
         match self {
             Self::AlreadyInitialized
+            | Self::AuthenticationFailed
             | Self::BootstrapClosed
+            | Self::IdentityConflict
             | Self::IntegrityFailed
+            | Self::RecordNotFound
             | Self::StorageUnavailable => ContractState::Finalized,
             _ => match self.introduced_in() {
                 CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
@@ -924,8 +927,11 @@ mod tests {
     fn only_activated_problem_contracts_are_finalized() {
         for code in [
             ProblemCode::AlreadyInitialized,
+            ProblemCode::AuthenticationFailed,
             ProblemCode::BootstrapClosed,
+            ProblemCode::IdentityConflict,
             ProblemCode::IntegrityFailed,
+            ProblemCode::RecordNotFound,
             ProblemCode::StorageUnavailable,
         ] {
             assert_eq!(code.introduced_in(), CapabilityBody::B2);
@@ -933,11 +939,8 @@ mod tests {
         }
 
         for code in [
-            ProblemCode::AuthenticationFailed,
             ProblemCode::CursorExpired,
             ProblemCode::EvidenceNotFound,
-            ProblemCode::IdentityConflict,
-            ProblemCode::RecordNotFound,
             ProblemCode::ReviewNotFound,
             ProblemCode::UnsupportedListener,
         ] {

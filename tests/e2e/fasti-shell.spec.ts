@@ -447,17 +447,13 @@ test("trusted-host provider settings clear a rejected secret", async ({
   await mockTrustedHost(page);
   await page.goto("/settings");
 
-  await expect(
-    page.getByRole("heading", { name: "Settings & Studio" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Metadata Providers & Keys" }).click();
-  await expect(
-    page.getByText("No key is saved for this Fasti node."),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await page.getByRole("button", { name: "Metadata credentials" }).click();
+  await expect(page.getByText("No credential is configured.")).toBeVisible();
 
-  const credential = page.getByLabel("API Key for Google Books");
+  const credential = page.getByLabel("New credential");
   await credential.fill("test-secret-not-retained");
-  await page.getByRole("button", { name: "Save key" }).click();
+  await page.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByRole("alert")).toContainText(
     "The credential store rejected the test value.",

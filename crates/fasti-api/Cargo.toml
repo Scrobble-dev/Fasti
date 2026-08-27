@@ -14,7 +14,7 @@ fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }
 getrandom = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { version = "0.1", optional = true }
 utoipa = { workspace = true }
@@ -23,7 +23,6 @@ utoipa = { workspace = true }
 default = []
 conformance-fixture = [
   "dep:getrandom",
-  "dep:serde_json",
   "dep:tokio-stream",
   "fasti-application/conformance-fixture",
 ]
@@ -36,7 +35,6 @@ required-features = ["conformance-fixture"]
 [dev-dependencies]
 fasti-store = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 static_assertions = { workspace = true }
 tempfile = "3.27.0"
 tokio = { workspace = true }

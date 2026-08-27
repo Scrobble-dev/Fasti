@@ -18,6 +18,7 @@
     portFallback,
     onRetry,
     onToggleTheme,
+    onOpenWorkbench,
   }: {
     status: StatusPanelState;
     theme: "light" | "dark";
@@ -27,6 +28,7 @@
     portFallback: "auto" | "fail";
     onRetry: () => void;
     onToggleTheme: () => void;
+    onOpenWorkbench?: () => void;
   } = $props();
 </script>
 
@@ -38,6 +40,15 @@
         <span>Fasti</span>
       </div>
       <div class="header-actions">
+        {#if onOpenWorkbench}
+          <button
+            type="button"
+            class="button workbench-launch"
+            onclick={onOpenWorkbench}
+          >
+            Open Media Workbench
+          </button>
+        {/if}
         <a class="button settings-link" href="#network-settings">
           <IconSettings size={20} stroke={1.8} aria-hidden="true" />
           Network settings
@@ -113,15 +124,26 @@
             From the repository root, run
             <code>cargo run --locked -p fastid</code>.
           </p>
-          <button
-            id="retry-health"
-            type="button"
-            class="button primary"
-            onclick={onRetry}
-          >
-            <IconRefresh size={20} stroke={1.8} aria-hidden="true" />
-            Try again
-          </button>
+          <div class="recovery-actions">
+            <button
+              id="retry-health"
+              type="button"
+              class="button primary"
+              onclick={onRetry}
+            >
+              <IconRefresh size={20} stroke={1.8} aria-hidden="true" />
+              Try again
+            </button>
+            {#if onOpenWorkbench}
+              <button
+                type="button"
+                class="button workbench-launch"
+                onclick={onOpenWorkbench}
+              >
+                Open Media Workbench
+              </button>
+            {/if}
+          </div>
         {/if}
       </div>
 
@@ -195,6 +217,14 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .recovery-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 16px;
   }
 
   .settings-link,

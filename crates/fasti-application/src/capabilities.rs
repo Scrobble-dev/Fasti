@@ -46,11 +46,6 @@ pub enum AuthorizationKind {
     Scoped,
 }
 
-/// Problem policy for one capability.
-///
-/// Iteration exposes only the finalized public contract. Runtime validation also
-/// accepts staged failures that are implemented in the current local kernel but
-/// remain reserved until their owning contract body is activated.
 #[derive(Debug, Clone, Copy)]
 pub struct CapabilityProblemPolicy {
     public: &'static [ProblemCode],
@@ -62,22 +57,18 @@ impl CapabilityProblemPolicy {
         Self { public, staged }
     }
 
-    /// Return the problem codes that belong to the active public contract.
     pub const fn public(self) -> &'static [ProblemCode] {
         self.public
     }
 
-    /// Return implemented runtime failures that are not public yet.
     pub const fn staged(self) -> &'static [ProblemCode] {
         self.staged
     }
 
-    /// Return true when runtime validation permits the problem for this capability.
     pub fn contains(self, code: &ProblemCode) -> bool {
         self.public().contains(code) || self.staged().contains(code)
     }
 
-    /// Iterate only the active public problem contract.
     pub fn iter(self) -> std::slice::Iter<'static, ProblemCode> {
         self.public().iter()
     }
@@ -87,46 +78,21 @@ macro_rules! define_capabilities {
     ($(($variant:ident, $contract_body:ident, $runtime_body:ident, $contract_state:ident, $runtime_availability:ident, $authorization:ident, [$($scope:ident),*], [$($problem:ident),*], [$($staged_problem:ident),*])),+ $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
         #[serde(rename_all = "snake_case")]
-        pub enum CapabilityKey {
-            $($variant),+
-        }
+        pub enum CapabilityKey { $($variant),+ }
 
         impl CapabilityKey {
             pub const ALL: &'static [Self] = &[$(Self::$variant),+];
-
-            pub const fn contract_body(self) -> CapabilityBody {
-                match self { $(Self::$variant => CapabilityBody::$contract_body),+ }
-            }
-
-            pub const fn runtime_body(self) -> CapabilityBody {
-                match self { $(Self::$variant => CapabilityBody::$runtime_body),+ }
-            }
-
-            pub const fn contract_state(self) -> ContractState {
-                match self { $(Self::$variant => ContractState::$contract_state),+ }
-            }
-
-            pub const fn runtime_availability(self) -> RuntimeAvailability {
-                match self { $(Self::$variant => RuntimeAvailability::$runtime_availability),+ }
-            }
-
-            pub const fn authorization_kind(self) -> AuthorizationKind {
-                match self { $(Self::$variant => AuthorizationKind::$authorization),+ }
-            }
-
-            pub const fn required_scopes(self) -> &'static [ScopeKey] {
-                match self { $(Self::$variant => &[$(ScopeKey::$scope),*]),+ }
-            }
-
+            pub const fn contract_body(self) -> CapabilityBody { match self { $(Self::$variant => CapabilityBody::$contract_body),+ } }
+            pub const fn runtime_body(self) -> CapabilityBody { match self { $(Self::$variant => CapabilityBody::$runtime_body),+ } }
+            pub const fn contract_state(self) -> ContractState { match self { $(Self::$variant => ContractState::$contract_state),+ } }
+            pub const fn runtime_availability(self) -> RuntimeAvailability { match self { $(Self::$variant => RuntimeAvailability::$runtime_availability),+ } }
+            pub const fn authorization_kind(self) -> AuthorizationKind { match self { $(Self::$variant => AuthorizationKind::$authorization),+ } }
+            pub const fn required_scopes(self) -> &'static [ScopeKey] { match self { $(Self::$variant => &[$(ScopeKey::$scope),*]),+ } }
             pub const fn allowed_problem_codes(self) -> CapabilityProblemPolicy {
                 match self {
-                    $(Self::$variant => CapabilityProblemPolicy::new(
-                        &[$(ProblemCode::$problem),*],
-                        &[$(ProblemCode::$staged_problem),*],
-                    )),+
+                    $(Self::$variant => CapabilityProblemPolicy::new(&[$(ProblemCode::$problem),*], &[$(ProblemCode::$staged_problem),*])),+
                 }
             }
-
             pub const fn is_production_executable(self) -> bool {
                 matches!(self.runtime_availability(), RuntimeAvailability::Implemented)
             }
@@ -134,8 +100,6 @@ macro_rules! define_capabilities {
     };
 }
 
-// One application table owns capability lifecycle, authorization, scope, and
-// problem semantics. Transport bindings map stable public IDs onto these keys.
 define_capabilities!(
     (
         SystemHealth,
@@ -253,25 +217,23 @@ define_capabilities!(
         B1,
         B2,
         Finalized,
-        FixtureOnly,
+        Implemented,
         Scoped,
         [ObservationAccept],
         [
+            AuthenticationFailed,
             CapacityExceeded,
             Forbidden,
             IdempotencyConflict,
+            IntegrityFailed,
             InvalidObservation,
             MalformedJson,
             PayloadTooLarge,
+            StorageUnavailable,
             UnsupportedMediaType,
             ValidationFailed
         ],
-        [
-            AuthenticationFailed,
-            EvidenceNotFound,
-            IntegrityFailed,
-            StorageUnavailable
-        ]
+        [EvidenceNotFound]
     ),
     (
         ReplayReceipt,
@@ -302,37 +264,87 @@ define_capabilities!(
     ),
     (
         CreateRecord,
+        B1,
         B2,
-        B2,
-        Reserved,
-        LaterBody,
+        Finalized,
+        Implemented,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [
             AuthenticationFailed,
+            CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
-            StorageUnavailable
-        ]
+            InvalidIdentifier,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         AttachIdentifier,
+        B1,
         B2,
-        B2,
-        Reserved,
-        LaterBody,
+        Finalized,
+        Implemented,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [
             AuthenticationFailed,
+            CapabilityUnavailable,
             Forbidden,
             IdentityConflict,
             IntegrityFailed,
+            InvalidIdentifier,
+            MalformedJson,
+            PayloadTooLarge,
             RecordNotFound,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ListRecords,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [IdentityRead],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
             StorageUnavailable
-        ]
+        ],
+        []
+    ),
+    (
+        RegisterNamespace,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [IdentityWrite],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         InspectReview,
@@ -498,23 +510,23 @@ mod tests {
     }
 
     #[test]
-    fn durable_bootstrap_activation_is_narrow() {
+    fn durable_local_activation_is_narrow() {
         for capability in [
             CapabilityKey::InitializeNode,
             CapabilityKey::EnrollFirstClient,
+            CapabilityKey::AcceptObservation,
+            CapabilityKey::CreateRecord,
+            CapabilityKey::AttachIdentifier,
+            CapabilityKey::ListRecords,
+            CapabilityKey::RegisterNamespace,
         ] {
             assert_eq!(capability.runtime_body(), CapabilityBody::B2);
             assert!(capability.is_production_executable());
         }
 
-        for capability in [
-            CapabilityKey::AcceptObservation,
-            CapabilityKey::CreateRecord,
-            CapabilityKey::ResolveReview,
-        ] {
-            assert_eq!(capability.runtime_body(), CapabilityBody::B2);
-            assert!(!capability.is_production_executable());
-        }
+        let capability = CapabilityKey::ResolveReview;
+        assert_eq!(capability.runtime_body(), CapabilityBody::B2);
+        assert!(!capability.is_production_executable());
 
         assert_eq!(
             CapabilityKey::InitializeNode.runtime_availability(),
@@ -522,11 +534,11 @@ mod tests {
         );
         assert_eq!(
             CapabilityKey::CreateRecord.contract_state(),
-            ContractState::Reserved
+            ContractState::Finalized
         );
         assert_eq!(
             CapabilityKey::CreateRecord.runtime_availability(),
-            RuntimeAvailability::LaterBody
+            RuntimeAvailability::Implemented
         );
     }
 
@@ -592,6 +604,20 @@ mod tests {
         assert!(enrollment
             .iter()
             .any(|code| *code == ProblemCode::BootstrapClosed));
+
+        let observation = CapabilityKey::AcceptObservation.allowed_problem_codes();
+        for code in [
+            ProblemCode::AuthenticationFailed,
+            ProblemCode::IntegrityFailed,
+            ProblemCode::StorageUnavailable,
+        ] {
+            assert!(observation.contains(&code));
+            assert!(observation.iter().any(|published| *published == code));
+        }
+        assert!(observation.contains(&ProblemCode::EvidenceNotFound));
+        assert!(!observation
+            .iter()
+            .any(|published| *published == ProblemCode::EvidenceNotFound));
 
         let review = CapabilityKey::InspectReview.allowed_problem_codes();
         assert!(review.contains(&ProblemCode::AuthenticationFailed));

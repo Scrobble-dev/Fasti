@@ -1,6 +1,77 @@
 {
   "components": {
     "schemas": {
+      "AttachIdentifierRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "namespace": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "namespace",
+          "grain",
+          "value"
+        ],
+        "type": "object"
+      },
+      "AttachIdentifierResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "external_identifier_id": {
+            "type": "string"
+          },
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_identifier_id",
+          "record_id",
+          "created"
+        ],
+        "type": "object"
+      },
+      "ClaimedPrecisionDto": {
+        "enum": [
+          "date",
+          "second",
+          "millisecond",
+          "microsecond",
+          "nanosecond"
+        ],
+        "type": "string"
+      },
+      "ClaimedTrustDto": {
+        "enum": [
+          "source_claim",
+          "device_observed",
+          "user_entered",
+          "inferred"
+        ],
+        "type": "string"
+      },
       "ClientEnrollmentResponse": {
         "additionalProperties": false,
         "description": "One-time credential returned by durable first-client enrollment.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
@@ -19,6 +90,36 @@
         "required": [
           "credential_scheme",
           "credential"
+        ],
+        "type": "object"
+      },
+      "CreateRecordRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "grain"
+        ],
+        "type": "object"
+      },
+      "CreateRecordResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "grain"
         ],
         "type": "object"
       },
@@ -65,6 +166,21 @@
         "additionalProperties": false,
         "type": "object"
       },
+      "ListRecordsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/RecordSummaryDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "records"
+        ],
+        "type": "object"
+      },
       "NodeInitializationResponse": {
         "additionalProperties": false,
         "description": "One-time proof returned by durable node initialization.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
@@ -79,6 +195,62 @@
         },
         "required": [
           "initialization_proof"
+        ],
+        "type": "object"
+      },
+      "ObservationIdentifierInput": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "namespace": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "grain",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ObservationIngressKind": {
+        "enum": [
+          "consumption_occurrence"
+        ],
+        "type": "string"
+      },
+      "OccurredTimeDto": {
+        "additionalProperties": false,
+        "properties": {
+          "original": {
+            "format": "iso-date-or-rfc3339",
+            "maxLength": 35,
+            "minLength": 10,
+            "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2}))$",
+            "type": "string"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/ClaimedPrecisionDto"
+          },
+          "trust": {
+            "$ref": "#/components/schemas/ClaimedTrustDto"
+          }
+        },
+        "required": [
+          "original",
+          "precision",
+          "trust"
         ],
         "type": "object"
       },
@@ -171,6 +343,322 @@
           "correlation_id",
           "actual",
           "violations"
+        ],
+        "type": "object"
+      },
+      "RecordActivityDto": {
+        "additionalProperties": false,
+        "properties": {
+          "interpretation_state": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OccurredTimeDto",
+                "description": "The full claimed-time structure (original text, precision, trust), not\na collapsed string -- matches the desktop host's `RecordActivityView`\nso both surfaces expose the same field shape for the same data."
+              }
+            ]
+          }
+        },
+        "required": [
+          "interpretation_state"
+        ],
+        "type": "object"
+      },
+      "RecordSummaryDto": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "latest_activity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RecordActivityDto"
+              }
+            ]
+          },
+          "poster": {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        },
+        "required": [
+          "record_id",
+          "grain",
+          "status",
+          "title",
+          "poster"
+        ],
+        "type": "object"
+      },
+      "RegisterNamespaceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "grains": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "type": "array"
+          },
+          "id_pattern": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "licence_posture": {
+            "type": "string"
+          },
+          "namespace": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "normalization": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "label",
+          "grains",
+          "id_pattern",
+          "normalization",
+          "licence_posture"
+        ],
+        "type": "object"
+      },
+      "RegisterNamespaceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "created"
+        ],
+        "type": "object"
+      },
+      "ResolvedFieldDto": {
+        "additionalProperties": false,
+        "properties": {
+          "is_stale": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tier": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "tier",
+          "is_stale"
+        ],
+        "type": "object"
+      },
+      "SubmitObservationRequest": {
+        "additionalProperties": false,
+        "description": "Durable provider-neutral occurrence ingress envelope.\n\n`source_event_id` is source-owned and must remain stable when the same\ndelivery is retried. Fasti derives the operation ID from the authenticated\nclient, source, and event identity. The complete normalized request is\nstored as immutable evidence before observation acceptance.",
+        "properties": {
+          "duration_seconds": {
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationIdentifierInput"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ObservationIngressKind"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "maxLength": 35,
+            "minLength": 20,
+            "type": "string"
+          },
+          "occurred_at": {
+            "maxLength": 35,
+            "minLength": 10,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "progress_percent": {
+            "format": "double",
+            "maximum": 100,
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "source": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_event_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_grain": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 512,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "source",
+          "source_event_id",
+          "observed_at",
+          "identifiers"
+        ],
+        "type": "object"
+      },
+      "SubmitObservationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "committed_at": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "interpretation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observation_id": {
+            "type": "string"
+          },
+          "occurrence_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "payload_digest": {
+            "type": "string"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string"
+          },
+          "record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "review_item_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_client_id": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disposition",
+          "receipt_id",
+          "operation_id",
+          "workspace_id",
+          "profile_id",
+          "source_client_id",
+          "observation_id",
+          "evidence_id",
+          "payload_digest",
+          "resolution",
+          "received_at",
+          "committed_at"
         ],
         "type": "object"
       },
@@ -408,6 +896,178 @@
         "x-fasti-runtime-availability": "implemented"
       }
     },
+    "/api/v1/namespaces": {
+      "post": {
+        "operationId": "register_namespace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterNamespaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterNamespaceResponse"
+                }
+              }
+            },
+            "description": "The registered (or already-present) namespace"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks record-write scope"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "identity.namespace.register.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "identity.namespace.register",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000024",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Namespace definition does not satisfy the domain contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "This capability is not available in the current runtime body"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "records"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "identity.namespace.register",
+        "x-fasti-example-ids": [
+          "identity.namespace.register.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/node/initialization": {
       "post": {
         "operationId": "initialize_node",
@@ -450,7 +1110,7 @@
                 }
               }
             },
-            "description": "Bootstrap authorization was denied"
+            "description": "Bootstrap authorization was denied -- the bootstrap secret header is missing, malformed, or does not match the secret at <data_root>/bootstrap.secret"
           },
           "409": {
             "content": {
@@ -564,6 +1224,692 @@
           "validation_failed"
         ],
         "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/observations": {
+      "post": {
+        "operationId": "submit_observation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable observation receipt; a safe retry can return a replayed disposition"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Source event identity was reused with different evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request or evidence exceeds a bounded limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Observation does not satisfy the governed contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "observations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/records": {
+      "get": {
+        "operationId": "list_records",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRecordsResponse"
+                }
+              }
+            },
+            "description": "Records visible to this credential's workspace"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "identity.record.list.forbidden": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "identity.record.list",
+                      "code": "forbidden",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000023",
+                      "detail": "request is not authorized for this capability",
+                      "next_actions": [
+                        {
+                          "id": "verify_request_authorization",
+                          "label": "Verify the request context and local grant"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks record-read scope"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "This capability is not available in the current runtime body"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "records"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "identity.record.list",
+        "x-fasti-example-ids": [
+          "identity.record.list.forbidden"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "post": {
+        "operationId": "create_record",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRecordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRecordResponse"
+                }
+              }
+            },
+            "description": "The new record's identity"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks record-write scope"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "identity.record.create.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "identity.record.create",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000021",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Grain is not a registered Fasti grain"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "This capability is not available in the current runtime body"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "records"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "identity.record.create",
+        "x-fasti-example-ids": [
+          "identity.record.create.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "invalid_identifier",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/records/identifiers": {
+      "post": {
+        "operationId": "attach_identifier",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachIdentifierRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachIdentifierResponse"
+                }
+              }
+            },
+            "description": "The attached (or already-present) identifier claim"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks record-write scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record does not exist"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "This identifier is already attached to a different active record"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "identity.identifier.attach.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "identity.identifier.attach",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000022",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record ID, grain, or namespace does not satisfy the domain contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "This capability is not available in the current runtime body"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "records"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "identity.identifier.attach",
+        "x-fasti-example-ids": [
+          "identity.identifier.attach.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "identity_conflict",
+          "integrity_failed",
+          "invalid_identifier",
+          "malformed_json",
+          "payload_too_large",
+          "record_not_found",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "identity_write"
+        ],
         "x-fasti-runtime-availability": "implemented"
       }
     }

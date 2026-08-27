@@ -13,10 +13,13 @@
     type StatusPanelState,
     type StatusProblem,
   } from "@fasti/ui/status";
-  import { onMount, tick, type Component } from "svelte";
+  import FastiWorkbench from "@fasti/ui/workbench";
+  import "@tabler/core/dist/css/tabler.min.css";
+  import { onMount, tick } from "svelte";
   import markDark from "../../../brand/logos/fasti-mark-dark.svg?url";
   import markLight from "../../../brand/logos/fasti-mark-light.svg?url";
   import { applyTheme, resolveTheme, type Theme } from "./theme.js";
+  import { createWebHost } from "./web-host.js";
 
   interface SetupStatus {
     readonly phase: "needs_setup" | "ready";
@@ -44,12 +47,45 @@
     ? connectionEndpoint(buildPublicUrl, "build")
     : undefined;
 
-  const isTauri = "__TAURI_INTERNALS__" in window;
+  const isTauri =
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const client = new FastiClient({
-    baseUrl: buildApiUrl || window.location.origin,
+    baseUrl:
+      buildApiUrl ||
+      (typeof window !== "undefined"
+        ? window.location.origin
+        : "http://127.0.0.1:8420"),
     timeoutMs: 3_000,
     retryPolicy: { maxAttempts: 1 },
   });
+
+  const WORKBENCH_PATHS = new Set([
+    "/connections",
+    "/settings",
+    "/discover",
+    "/reconciliation",
+    "/reviews",
+    "/library",
+    "/calendar",
+  ]);
+
+  function computeInitialSurface(): "status" | "workbench" {
+    if (typeof window === "undefined") return "status";
+    const path = window.location.pathname;
+    if (path === "/status") return "status";
+    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records")) {
+      return "workbench";
+    }
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("surface") === "workbench") return "workbench";
+    if (urlParams.get("surface") === "status") return "status";
+    try {
+      const saved = localStorage.getItem("fasti-surface");
+      if (saved === "workbench") return "workbench";
+      if (saved === "status") return "status";
+    } catch {}
+    return "status";
+  }
 
   let status: StatusPanelState = $state({ view: "loading" });
   let theme: Theme = $state(resolveTheme());
@@ -57,8 +93,15 @@
   let setupState: SetupViewState = $state("loading");
   let setupProblem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
-  let DesktopWorkbench: Component | undefined = $state();
-  let desktopHost: WorkbenchHost | undefined = $state();
+  let host: WorkbenchHost = $state(
+    createWebHost(
+      buildApiUrl ||
+        (typeof window !== "undefined"
+          ? window.location.origin
+          : "http://127.0.0.1:8420"),
+    ),
+  );
+  let activeSurface = $state<"status" | "workbench">(computeInitialSurface());
 
   function statusProblemFor(error: unknown): StatusProblem {
     if (error instanceof FastiProtocolError) {
@@ -124,12 +167,8 @@
 
   async function inspectDesktop(): Promise<void> {
     try {
-      const [{ default: workbench }, { invoke }] = await Promise.all([
-        import("@fasti/ui/workbench"),
-        import("@tauri-apps/api/core"),
-        import("@tabler/core/dist/css/tabler.min.css"),
-      ]);
-      desktopHost = {
+      const { invoke } = await import("@tauri-apps/api/core");
+      host = {
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
         saveNetworkConfiguration: (input) =>
           invoke("save_network_configuration", { input }),
@@ -144,14 +183,34 @@
           invoke("delete_provider_credential", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
+        listApiClients: () => invoke("list_api_clients"),
+        createApiClient: (scopes) =>
+          invoke("create_api_client", { input: { scopes } }),
+        revokeApiClient: (credentialId) =>
+          invoke("revoke_api_client", {
+            input: { credential_id: credentialId },
+          }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
+        listRecords: () => invoke("list_records"),
+        createRecord: (grain) => invoke("create_record", { grain }),
+        attachIdentifier: (input) => invoke("attach_identifier", { input }),
+        registerNamespace: (input) => invoke("register_namespace", { input }),
       };
-      DesktopWorkbench = workbench;
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
     } catch (error) {
       applySetupProblem(error);
     }
+  }
+
+  function openWorkbench(): void {
+    activeSurface = "workbench";
+    if (typeof window !== "undefined" && window.location.hash) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    try {
+      localStorage.setItem("fasti-surface", "workbench");
+    } catch {}
   }
 
   async function setup(): Promise<void> {
@@ -185,8 +244,8 @@
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 {#if isTauri}
-  {#if setupState === "ready" && DesktopWorkbench && desktopHost}
-    <DesktopWorkbench host={desktopHost} />
+  {#if setupState === "ready" && host}
+    <FastiWorkbench {host} />
   {:else}
     <SetupPanel
       state={setupState}
@@ -196,14 +255,19 @@
     />
   {/if}
 {:else}
-  <StatusPanel
-    {status}
-    {theme}
-    mark={theme === "dark" ? markDark : markLight}
-    {endpoint}
-    {publicEndpoint}
-    portFallback={configuredFallback}
-    onRetry={retryHealth}
-    onToggleTheme={toggleTheme}
-  />
+  {#if activeSurface === "workbench" && host}
+    <FastiWorkbench {host} />
+  {:else}
+    <StatusPanel
+      {status}
+      {theme}
+      mark={theme === "dark" ? markDark : markLight}
+      {endpoint}
+      {publicEndpoint}
+      portFallback={configuredFallback}
+      onRetry={retryHealth}
+      onToggleTheme={toggleTheme}
+      onOpenWorkbench={openWorkbench}
+    />
+  {/if}
 {/if}

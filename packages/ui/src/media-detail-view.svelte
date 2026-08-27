@@ -25,11 +25,30 @@
     IconEdit,
     IconClock,
     IconDeviceTv,
+    IconPhoto,
   } from "@tabler/icons-svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
+  import ArtworkModal, { type ArtworkCandidate } from "./artwork-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+
+  /** Namespaces whose external ID value is a real key an image CDN can
+   * resolve directly, and the resolver for that namespace. Providers whose
+   * poster lives behind an opaque image path/hash (TMDB, TVDB, AniList, MAL,
+   * Kitsu, IGDB, ...) are deliberately absent: there's no live provider
+   * search wired here to fetch that path, so fabricating a guessed URL would
+   * be dishonest. Add a resolver here once a provider integration can supply
+   * the real path. */
+  const ARTWORK_URL_RESOLVERS: Record<
+    string,
+    (value: string) => string | null
+  > = {
+    openlibrary: (value) =>
+      /^OL\d+[MW]$/i.test(value)
+        ? `https://covers.openlibrary.org/b/olid/${value}-L.jpg`
+        : null,
+  };
 
   interface Props {
     record: MediaRecord;
@@ -50,6 +69,11 @@
     onUpdateNotes?: (recordId: string, notes: string) => void;
     onAddTag?: (recordId: string, tag: string) => void;
     onRemoveTag?: (recordId: string, tag: string) => void;
+    onUpdatePoster?: (
+      recordId: string,
+      posterUrl: string,
+      backdropUrl?: string,
+    ) => void;
   }
 
   let {
@@ -66,6 +90,7 @@
     onUpdateNotes,
     onAddTag,
     onRemoveTag,
+    onUpdatePoster,
   }: Props = $props();
 
   let activeTab: "overview" | "actions" | "history" | "sources" | "reviews" =
@@ -80,6 +105,7 @@
   let showProgressModal = $state(false);
   let showReviewModal = $state(false);
   let showCollectionModal = $state(false);
+  let showArtworkModal = $state(false);
 
   // Context Menu State
   let contextMenuState = $state<{
@@ -106,6 +132,22 @@
     occurrences.filter((occ) => occ.recordId === record.id),
   );
 
+  const candidatePosters = $derived(
+    record.externalIds
+      .map((xid): ArtworkCandidate | null => {
+        const resolver = ARTWORK_URL_RESOLVERS[xid.namespace.toLowerCase()];
+        const url = resolver?.(xid.value) ?? null;
+        return url
+          ? {
+              id: `${xid.namespace}:${xid.value}`,
+              namespace: xid.namespace,
+              url,
+            }
+          : null;
+      })
+      .filter((c): c is ArtworkCandidate => c !== null),
+  );
+
   const statusOptions: Array<{ id: WatchStatus; label: string }> = [
     { id: "watching", label: "In Progress / Watching" },
     { id: "completed", label: "Completed" },
@@ -124,6 +166,35 @@
     if (newTagInput.trim().length > 0) {
       onAddTag?.(record.id, newTagInput.trim());
       newTagInput = "";
+    }
+  }
+
+  function handleMarkSeasonWatched(seasonIndex: number): void {
+    const season = record.seasons?.[seasonIndex];
+    if (!season) return;
+    for (const ep of season.episodes ?? []) {
+      if (!ep.watched) onToggleEpisode?.(record.id, ep.id);
+    }
+  }
+
+  function handleMarkSeasonUnwatched(seasonIndex: number): void {
+    const season = record.seasons?.[seasonIndex];
+    if (!season) return;
+    for (const ep of season.episodes ?? []) {
+      if (ep.watched) onToggleEpisode?.(record.id, ep.id);
+    }
+  }
+
+  function handleMarkPreviousEpisodesWatched(
+    seasonIndex: number,
+    upToEpisodeNumber: number,
+  ): void {
+    const season = record.seasons?.[seasonIndex];
+    if (!season) return;
+    for (const ep of season.episodes ?? []) {
+      if (ep.number < upToEpisodeNumber && !ep.watched) {
+        onToggleEpisode?.(record.id, ep.id);
+      }
     }
   }
 
@@ -286,6 +357,15 @@
         <button
           type="button"
           class="icon-action-btn"
+          onclick={() => (showArtworkModal = true)}
+          title="Edit Artwork"
+        >
+          <IconPhoto size={18} />
+        </button>
+
+        <button
+          type="button"
+          class="icon-action-btn"
           onclick={() => (showProgressModal = true)}
           title="Update Progress"
         >
@@ -405,6 +485,25 @@
           {/each}
         </div>
       </div>
+
+      <!-- Custom Fields -->
+      <div class="sidebar-section">
+        <h4 class="sidebar-subheading">Custom Fields</h4>
+        {#if record.customFields && Object.keys(record.customFields).length > 0}
+          <dl class="sidebar-meta-list">
+            {#each Object.entries(record.customFields) as [key, value]}
+              <div class="meta-pair">
+                <dt>{key}</dt>
+                <dd>{value}</dd>
+              </div>
+            {/each}
+          </dl>
+        {:else}
+          <p class="empty-custom-fields-hint">
+            No custom fields. Add some in Settings → Custom Fields.
+          </p>
+        {/if}
+      </div>
     </aside>
 
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
@@ -487,9 +586,29 @@
             <!-- Episode Checklist -->
             {#if record.seasons[selectedSeasonIndex]}
               <div class="episodes-deck">
-                <h3 class="deck-title">
-                  Episodes — {record.seasons[selectedSeasonIndex].title}
-                </h3>
+                <div class="deck-header-row">
+                  <h3 class="deck-title">
+                    Episodes — {record.seasons[selectedSeasonIndex].title}
+                  </h3>
+                  <div class="season-bulk-actions">
+                    <button
+                      type="button"
+                      class="btn-secondary-sm"
+                      onclick={() =>
+                        handleMarkSeasonWatched(selectedSeasonIndex)}
+                    >
+                      Mark Watched
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary-sm"
+                      onclick={() =>
+                        handleMarkSeasonUnwatched(selectedSeasonIndex)}
+                    >
+                      Mark Unwatched
+                    </button>
+                  </div>
+                </div>
                 <div class="episodes-table-wrap">
                   {#each record.seasons[selectedSeasonIndex].episodes ?? [] as ep (ep.id)}
                     <div class="episode-item-row" class:watched={ep.watched}>
@@ -531,6 +650,20 @@
                             { month: "short", day: "numeric" },
                           )}
                         </div>
+                      {/if}
+
+                      {#if ep.number > 1 && !ep.watched}
+                        <button
+                          type="button"
+                          class="mark-prev-btn"
+                          onclick={() =>
+                            handleMarkPreviousEpisodesWatched(
+                              selectedSeasonIndex,
+                              ep.number,
+                            )}
+                        >
+                          Mark 1–{ep.number - 1} Seen
+                        </button>
                       {/if}
                     </div>
                   {/each}
@@ -846,6 +979,15 @@
   />
 {/if}
 
+{#if showArtworkModal}
+  <ArtworkModal
+    {record}
+    candidates={candidatePosters}
+    onClose={() => (showArtworkModal = false)}
+    onSave={onUpdatePoster}
+  />
+{/if}
+
 {#if contextMenuState}
   <ContextMenu
     x={contextMenuState.x}
@@ -1132,6 +1274,11 @@
   .xid-link:hover {
     color: var(--fasti-action-primary);
   }
+  .empty-custom-fields-hint {
+    font-size: 0.82rem;
+    color: var(--fasti-text-muted);
+    margin: 0;
+  }
 
   .main-content-pane {
     background: var(--fasti-surface-paper);
@@ -1336,6 +1483,30 @@
     color: var(--fasti-text-muted);
   }
 
+  .deck-header-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .season-bulk-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .btn-secondary-sm {
+    padding: 6px 12px;
+    min-height: 44px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
   .episodes-table-wrap {
     display: flex;
     flex-direction: column;
@@ -1395,6 +1566,29 @@
     font-size: 0.82rem;
     color: var(--fasti-text-muted);
     margin: 4px 0 0;
+  }
+  .mark-prev-btn {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    min-height: 44px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .mark-prev-btn:hover {
+    color: var(--fasti-action-primary);
+    border-color: var(--fasti-action-primary);
+  }
+
+  :is(.btn-secondary-sm, .mark-prev-btn):focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
   }
 
   .cast-grid {

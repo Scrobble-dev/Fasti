@@ -1,0 +1,312 @@
+import { FastiClient } from "@fasti/sdk";
+import type {
+  AttachIdentifierInput,
+  AttachIdentifierResult,
+  CreateRecordResult,
+  EndpointConnectionStatus,
+  NetworkConfiguration,
+  ProviderCredentialStatus,
+  ProviderSearchCandidate,
+  RecordSummary,
+  RegisterNamespaceInput,
+  RegisterNamespaceResult,
+  SaveNetworkConfigurationRequest,
+  WorkbenchHost,
+} from "@fasti/ui";
+
+const NETWORK_STORAGE_KEY = "fasti-network-config";
+
+/** Bearer credential for this browser's own session, distinct from provider
+ * API keys (never stored client-side at all -- see `providerCredentialStatus`
+ * below). Nothing writes this key yet: the browser has no working sign-in
+ * flow (`auth-modal.svelte` is UI-only pending a real passkey/OIDC/PAT
+ * backend), so every call below fails closed with a clear message until one
+ * exists. The SDK methods are real and wired now; only the credential source
+ * is still missing. */
+const CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
+
+function storedCredential(): string | undefined {
+  if (typeof localStorage === "undefined") return undefined;
+  try {
+    return localStorage.getItem(CREDENTIAL_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const PROVIDERS: ReadonlyArray<{
+  provider: string;
+  label: string;
+  docs_url: string;
+}> = [
+  {
+    provider: "open-library",
+    label: "Open Library (Books)",
+    docs_url: "https://openlibrary.org/developers/api",
+  },
+  {
+    provider: "kitsu",
+    label: "Kitsu (Anime & Manga)",
+    docs_url: "https://kitsu.docs.apiary.io",
+  },
+  {
+    provider: "anilist",
+    label: "AniList GraphQL (Anime/Manga)",
+    docs_url: "https://docs.anilist.co",
+  },
+  {
+    provider: "musicbrainz",
+    label: "MusicBrainz (Music)",
+    docs_url: "https://musicbrainz.org/doc/MusicBrainz_API",
+  },
+  {
+    provider: "tmdb",
+    label: "TheMovieDatabase (TMDB)",
+    docs_url: "https://developer.themoviedb.org/docs",
+  },
+  {
+    provider: "tvdb",
+    label: "TheTVDB v4",
+    docs_url: "https://thetvdb.com/api-information",
+  },
+  {
+    provider: "google-books",
+    label: "Google Books API",
+    docs_url: "https://developers.google.com/books/docs/v1/using",
+  },
+  {
+    provider: "mal",
+    label: "MyAnimeList API v2",
+    docs_url: "https://myanimelist.net/apiconfig/references/api/v2",
+  },
+  {
+    provider: "rawg",
+    label: "RAWG Video Games Database",
+    docs_url: "https://rawg.io/apidocs",
+  },
+  {
+    provider: "igdb",
+    label: "IGDB (Games)",
+    docs_url: "https://api-docs.igdb.com",
+  },
+  {
+    provider: "comicvine",
+    label: "ComicVine (Comics)",
+    docs_url: "https://comicvine.gamespot.com/api/documentation",
+  },
+  {
+    provider: "podcast-index",
+    label: "Podcast Index (Podcasts)",
+    docs_url: "https://podcastindex-org.github.io/docs-api",
+  },
+];
+
+function defaultNetworkConfiguration(
+  defaultApiUrl: string,
+): NetworkConfiguration {
+  return {
+    connection: {
+      service_url: {
+        value: defaultApiUrl || "http://127.0.0.1:8420",
+        source: "default",
+        managed: false,
+      },
+      public_url: { value: null, source: "default", managed: false },
+    },
+    outbound_policy: {
+      allow_providers: ["*"],
+      deny_providers: [],
+      allow_capabilities: ["*"],
+      deny_capabilities: [],
+      allow_hosts: ["*"],
+      deny_hosts: [],
+      allow_networks: ["public", "loopback", "private"],
+      deny_networks: [],
+    },
+  };
+}
+
+function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
+  if (typeof localStorage === "undefined") {
+    return defaultNetworkConfiguration(defaultApiUrl);
+  }
+  try {
+    const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
+    if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
+    const value = JSON.parse(raw) as Partial<NetworkConfiguration>;
+    if (
+      typeof value?.connection?.service_url?.value !== "string" ||
+      !value.outbound_policy ||
+      !Array.isArray(value.outbound_policy.allow_networks) ||
+      !Array.isArray(value.outbound_policy.deny_networks)
+    ) {
+      return defaultNetworkConfiguration(defaultApiUrl);
+    }
+    return value as NetworkConfiguration;
+  } catch {
+    return defaultNetworkConfiguration(defaultApiUrl);
+  }
+}
+
+function unavailable(message: string): Error {
+  return new Error(message);
+}
+
+function requireCredential(): string {
+  const credential = storedCredential();
+  if (!credential) {
+    throw unavailable(
+      "Sign in to Fasti to see and manage records. This browser has no stored credential yet.",
+    );
+  }
+  return credential;
+}
+
+export function createWebHost(defaultApiUrl: string): WorkbenchHost {
+  let client = new FastiClient({
+    baseUrl: defaultApiUrl,
+    credential: requireCredential,
+  });
+
+  return {
+    async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
+      return loadNetworkConfiguration(defaultApiUrl);
+    },
+
+    async saveNetworkConfiguration(
+      input: SaveNetworkConfigurationRequest,
+    ): Promise<NetworkConfiguration> {
+      const config: NetworkConfiguration = {
+        connection: {
+          service_url: {
+            value: input.service_url,
+            source: "saved",
+            managed: false,
+          },
+          public_url: {
+            value: input.public_url,
+            source: "saved",
+            managed: false,
+          },
+        },
+        outbound_policy: input.outbound_policy,
+      };
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
+        } catch {
+          // Best-effort: a blocked or full localStorage should not fail a
+          // save the caller already validated -- the returned config is
+          // still correct, it just won't survive a reload.
+        }
+      }
+      // Recreate the client with the saved service URL so subsequent SDK
+      // calls use the new endpoint rather than the original defaultApiUrl.
+      client = new FastiClient({
+        baseUrl: input.service_url,
+        credential: requireCredential,
+      });
+      return config;
+    },
+
+    async testEndpointConnection(
+      endpoint: string,
+    ): Promise<EndpointConnectionStatus> {
+      const normalized = endpoint.replace(/\/+$/, "");
+      const parsed = new URL(normalized);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
+      }
+      if (
+        parsed.protocol === "http:" &&
+        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
+      ) {
+        throw unavailable(
+          "Cleartext HTTP is allowed only for loopback endpoints.",
+        );
+      }
+      const response = await fetch(`${normalized}/api/v1/health`, {
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok) {
+        throw unavailable(`The endpoint returned status ${response.status}.`);
+      }
+      const data = (await response.json()) as {
+        status?: string;
+        version?: string;
+      };
+      return {
+        endpoint: normalized,
+        scheme: parsed.protocol === "https:" ? "https" : "http",
+        status: data.status ?? "healthy",
+        version: data.version ?? "unknown",
+      };
+    },
+
+    async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
+      return PROVIDERS.map((provider) => ({
+        provider: provider.provider,
+        label: provider.label,
+        configured: false,
+        source: "none",
+        writable: false,
+        docs_url: provider.docs_url,
+      }));
+    },
+
+    async saveProviderCredential(
+      provider: string,
+    ): Promise<ProviderCredentialStatus[]> {
+      throw unavailable(
+        `${provider} credentials require the trusted native or server host. The browser host never accepts or stores provider secrets.`,
+      );
+    },
+
+    async deleteProviderCredential(
+      provider: string,
+    ): Promise<ProviderCredentialStatus[]> {
+      throw unavailable(
+        `${provider} credentials are not managed by the browser host.`,
+      );
+    },
+
+    async searchProvider(
+      provider: string,
+      _query: string,
+    ): Promise<ProviderSearchCandidate[]> {
+      throw unavailable(
+        `${provider} search is not active in the browser host. Provider requests must use the governed native or server host.`,
+      );
+    },
+
+    clearSearchCache(): void {},
+    getSearchCacheSize(): number {
+      return 0;
+    },
+
+    async listRecords(): Promise<RecordSummary[]> {
+      requireCredential();
+      const response = await client.listRecords();
+      return response.records as RecordSummary[];
+    },
+
+    async createRecord(grain: string): Promise<CreateRecordResult> {
+      requireCredential();
+      return client.createRecord({ grain });
+    },
+
+    async attachIdentifier(
+      input: AttachIdentifierInput,
+    ): Promise<AttachIdentifierResult> {
+      requireCredential();
+      return client.attachIdentifier(input);
+    },
+
+    async registerNamespace(
+      input: RegisterNamespaceInput,
+    ): Promise<RegisterNamespaceResult> {
+      requireCredential();
+      return client.registerNamespace(input);
+    },
+  };
+}

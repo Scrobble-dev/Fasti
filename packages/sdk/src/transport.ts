@@ -1,36 +1,55 @@
 import {
   B1_CONFORMANCE_OPERATIONS,
   LOCAL_BOOTSTRAP_OPERATIONS,
+  LOCAL_RUNTIME_OPERATIONS,
   FastiContractParseError,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
+  parseAttachIdentifierRequest,
+  parseAttachIdentifierResponse,
   parseCapabilityDiscoveryResponse,
   parseClientEnrollmentResponse,
+  parseCreateRecordRequest,
+  parseCreateRecordResponse,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
+  parseListRecordsResponse,
   parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
   parseReceiptCommittedEvent,
+  parseRegisterNamespaceRequest,
+  parseRegisterNamespaceResponse,
   parseReplayReceiptResponse,
+  parseSubmitObservationRequest,
+  parseSubmitObservationResponse,
   RECEIPT_STREAM_CONTRACT,
   type AcceptObservationRequest,
   type AcceptObservationResponse,
+  type AttachIdentifierRequest,
+  type AttachIdentifierResponse,
   type CapabilityDiscoveryResponse,
   type CapabilityId,
   type ClientEnrollmentResponse,
+  type CreateRecordRequest,
+  type CreateRecordResponse,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
+  type ListRecordsResponse,
   type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
   type ReceiptCommittedEnvelope,
+  type RegisterNamespaceRequest,
+  type RegisterNamespaceResponse,
   type ReplayReceiptResponse,
+  type SubmitObservationRequest,
+  type SubmitObservationResponse,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -416,6 +435,112 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Receipt replay response",
+      options,
+    });
+  }
+
+  submitObservation(
+    request: SubmitObservationRequest,
+    options: CallOptions = {},
+  ): Promise<SubmitObservationResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.submitObservation;
+    const body = parseOutgoing(
+      parseSubmitObservationRequest,
+      request,
+      "Submit-observation request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "stable-idempotency",
+      body,
+      responseParser: parseSubmitObservationResponse,
+      responseLabel: "Submit-observation response",
+      options,
+    });
+  }
+
+  createRecord(
+    request: CreateRecordRequest,
+    options: CallOptions = {},
+  ): Promise<CreateRecordResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.createRecord;
+    const body = parseOutgoing(
+      parseCreateRecordRequest,
+      request,
+      "Create-record request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseCreateRecordResponse,
+      responseLabel: "Create-record response",
+      options,
+    });
+  }
+
+  listRecords(options: CallOptions = {}): Promise<ListRecordsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listRecords;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListRecordsResponse,
+      responseLabel: "List-records response",
+      options,
+    });
+  }
+
+  attachIdentifier(
+    request: AttachIdentifierRequest,
+    options: CallOptions = {},
+  ): Promise<AttachIdentifierResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.attachIdentifier;
+    const body = parseOutgoing(
+      parseAttachIdentifierRequest,
+      request,
+      "Attach-identifier request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseAttachIdentifierResponse,
+      responseLabel: "Attach-identifier response",
+      options,
+    });
+  }
+
+  registerNamespace(
+    request: RegisterNamespaceRequest,
+    options: CallOptions = {},
+  ): Promise<RegisterNamespaceResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.registerNamespace;
+    const body = parseOutgoing(
+      parseRegisterNamespaceRequest,
+      request,
+      "Register-namespace request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseRegisterNamespaceResponse,
+      responseLabel: "Register-namespace response",
       options,
     });
   }

@@ -31,7 +31,7 @@ export interface CastMember {
 export interface CrewMember {
   readonly id: string;
   readonly name: string;
-  readonly role: string; // Director, Writer, Composer, Producer
+  readonly role: string;
   readonly profileUrl?: string;
 }
 
@@ -57,15 +57,15 @@ export interface SeasonItem {
 }
 
 export interface MediaRecord {
-  readonly id: string; // rec_01K...
+  readonly id: string;
   readonly title: string;
   readonly originalTitle?: string;
   readonly mediaKind: MediaKind;
   readonly customTypeName?: string;
   readonly releaseYear?: number;
   readonly airDates?: string;
-  readonly format?: string; // TV, Movie, OVA, Miniseries, Hardcover, LP
-  readonly statusText?: string; // Ended, Returning Series, In Production
+  readonly format?: string;
+  readonly statusText?: string;
   readonly country?: string;
   readonly languages?: string[];
   readonly runtimeMinutes?: number;
@@ -73,7 +73,7 @@ export interface MediaRecord {
   readonly posterUrl?: string;
   readonly backdropUrl?: string;
   readonly status: WatchStatus;
-  readonly userRating?: number; // 1-10
+  readonly userRating?: number;
   readonly communityRating?: {
     readonly score: number;
     readonly votes: number;
@@ -94,10 +94,12 @@ export interface MediaRecord {
   readonly cast?: CastMember[];
   readonly crew?: CrewMember[];
   readonly collectionName?: string;
+  /** User-defined key/value metadata registered in Settings → Custom Fields. */
+  readonly customFields?: Record<string, string>;
 }
 
 export interface ChronicleOccurrence {
-  readonly id: string; // occ_01K...
+  readonly id: string;
   readonly recordId: string;
   readonly title: string;
   readonly mediaKind: MediaKind;
@@ -114,32 +116,29 @@ export interface ChronicleOccurrence {
   readonly userRating?: number;
 }
 
-export interface ReconciliationCase {
-  readonly id: string;
-  readonly recordId: string;
-  readonly title: string;
-  readonly mediaKind: MediaKind;
-  readonly suppliedIds: ExternalId[];
-  readonly candidateId: string;
-  readonly candidateTitle: string;
-  readonly candidateNamespace: string;
-  readonly candidateExternalId: string;
-  readonly candidatePosterUrl?: string;
-  readonly matchingReasons: string[];
-  readonly conflictingFactors: string[];
-  readonly status: "open" | "resolved" | "deferred";
-}
-
 export interface CustomFieldDefinition {
-  readonly key: string; // e.g. games.gog_product_id
+  readonly key: string;
   readonly label: string;
   readonly targetType: MediaKind | "all";
   readonly valueType:
-    "string" | "number" | "boolean" | "date" | "url" | "identifier";
+    "string" | "number" | "boolean" | "date" | "url" | "identifier" | "select";
   readonly registeredNamespace?: string;
   readonly isFilterable: boolean;
+  /** Choices for the field when `valueType` is `"select"`. */
+  readonly options?: string[];
 }
 
+export interface CustomMediaTypeDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly singular: string;
+  readonly plural: string;
+  readonly icon: string;
+  readonly progressTrackingType:
+    "episodes" | "percentage" | "pages" | "sessions" | "none";
+}
+
+/** Legacy type retained for compatibility with prototype-only components. */
 export interface ScopedApiToken {
   readonly id: string;
   readonly name: string;
@@ -148,6 +147,21 @@ export interface ScopedApiToken {
   readonly scopes: string[];
   readonly createdAt: string;
   readonly lastUsedAt?: string;
+}
+
+export interface ApiClientCredentialSummary {
+  readonly client_id: string;
+  readonly credential_id: string;
+  readonly profile_id: string;
+  readonly scopes: string[];
+  readonly active: boolean;
+  readonly created_at: string;
+  readonly revoked_at?: string | null;
+}
+
+export interface CreatedApiClientCredential extends ApiClientCredentialSummary {
+  /** Returned once by the trusted host. The workbench must never persist this value. */
+  readonly credential: string;
 }
 
 export type ManagedSettingSource =
@@ -216,9 +230,13 @@ export interface ProviderSearchCandidate {
   readonly provider: string;
   readonly provider_id: string;
   readonly title: string;
-  readonly kind: "book";
+  readonly original_title?: string;
+  readonly kind: MediaKind | string;
+  readonly release_year?: number;
   readonly authors: string[];
-  readonly image_url: null;
+  readonly image_url: string | null;
+  readonly overview?: string;
+  readonly external_ids?: ExternalId[];
 }
 
 export interface WorkbenchHost {
@@ -239,8 +257,108 @@ export interface WorkbenchHost {
     provider: string,
     query: string,
   ): Promise<ProviderSearchCandidate[]>;
+  listApiClients?(): Promise<ApiClientCredentialSummary[]>;
+  createApiClient?(scopes: string[]): Promise<CreatedApiClientCredential>;
+  revokeApiClient?(credentialId: string): Promise<ApiClientCredentialSummary[]>;
+  clearSearchCache?(): void;
+  getSearchCacheSize?(): number;
   listReviews?(): Promise<ReviewItem[]>;
   resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
+  listRecords?(): Promise<RecordSummary[]>;
+  createRecord?(grain: string): Promise<CreateRecordResult>;
+  attachIdentifier?(
+    input: AttachIdentifierInput,
+  ): Promise<AttachIdentifierResult>;
+  registerNamespace?(
+    input: RegisterNamespaceInput,
+  ): Promise<RegisterNamespaceResult>;
+}
+
+/** Wire shape of the desktop host's `create_record` command output. */
+export interface CreateRecordResult {
+  readonly record_id: string;
+  readonly grain: string;
+}
+
+/** Wire shape of the desktop host's `attach_identifier` command input.
+ * `grain` must match the target record's own grain -- the host rejects a
+ * mismatch, and rejects any namespace that hasn't been registered first
+ * (see `registerNamespace`). */
+export interface AttachIdentifierInput {
+  readonly record_id: string;
+  readonly namespace: string;
+  readonly grain: string;
+  readonly value: string;
+}
+
+export interface AttachIdentifierResult {
+  readonly external_identifier_id: string;
+  readonly record_id: string;
+  readonly created: boolean;
+}
+
+/** Wire shape of the desktop host's `register_namespace` command input.
+ * Declares which grains a provider namespace (e.g. "google_books") may
+ * attach claims for -- required once per namespace before the first
+ * `attachIdentifier` call under it. */
+export interface RegisterNamespaceInput {
+  readonly namespace: string;
+  readonly label: string;
+  readonly grains: string[];
+  readonly id_pattern: string;
+  readonly normalization: string;
+  readonly licence_posture:
+    "open" | "identifiers_only" | "indirect_only" | "excluded" | "unknown";
+}
+
+export interface RegisterNamespaceResult {
+  readonly namespace: string;
+  readonly created: boolean;
+}
+
+/** Which tier of the resolution order actually supplied a field's displayed value.
+ * Mirrors `fasti_domain::FieldResolutionTier`'s serde representation. */
+export type FieldResolutionTier =
+  | "user_override"
+  | "preferred_provider_claim"
+  | "fallback_provider_claim"
+  | "last_known_good"
+  | "empty";
+
+/** Wire projection of `fasti_domain::ResolvedField` / the desktop host's `ResolvedFieldView`. */
+export interface ResolvedFieldView {
+  readonly tier: FieldResolutionTier;
+  readonly value: string | null;
+  readonly source: string | null;
+  readonly is_stale: boolean;
+}
+
+/** Mirrors `fasti_domain::ClaimedTime`'s wire shape (`ClaimedTimeWire`). */
+export interface ClaimedTimeView {
+  readonly original: string;
+  readonly precision:
+    "date" | "second" | "millisecond" | "microsecond" | "nanosecond";
+  readonly trust:
+    "source_claim" | "device_observed" | "user_entered" | "inferred";
+}
+
+export interface RecordActivityView {
+  readonly occurred_at: ClaimedTimeView | null;
+  readonly interpretation_state: "unresolved" | "resolved" | "conflicted";
+}
+
+/** Wire shape of the desktop host's `list_records` command output
+ * (`apps/desktop/src-tauri/src/records.rs`'s `RecordSummary`). `grain` is
+ * identity granularity (`fasti_domain::Grain`), not the frontend's display
+ * `MediaKind` — see `projectRecordSummary` in `record-projection.ts` for the
+ * mapping. */
+export interface RecordSummary {
+  readonly record_id: string;
+  readonly grain: string;
+  readonly status: "active";
+  readonly title: ResolvedFieldView;
+  readonly poster: ResolvedFieldView;
+  readonly latest_activity: RecordActivityView | null;
 }
 
 export interface ReviewItem {
@@ -344,9 +462,31 @@ export interface ContextMenuItemConfig {
   order: number;
 }
 
+export type TvMetadataProvider = "tmdb" | "tvdb_v4";
+export type AnimeMetadataProvider = "mal" | "anilist" | "kitsu";
+export type TitleLanguagePreference = "romaji" | "english" | "native";
+export type HideCompletedMode = "disabled" | "home_only" | "everywhere";
+export type GameLoggingMode = "repeats" | "sessions";
+export type ProgressFormat = "percentage" | "time_remaining" | "episodes";
+
 export interface WorkbenchPreferences {
   sidebarCollapsed: boolean;
   sidebarHidden: boolean;
   navItems: NavItemConfig[];
   contextMenuItems: ContextMenuItemConfig[];
+  /** ISO 3166-1 alpha-2 region used to bias provider search/availability. */
+  providerRegion: string;
+  /** BCP 47 language tag used to request localized metadata. */
+  metadataLanguage: string;
+  tvProvider: TvMetadataProvider;
+  animeProvider: AnimeMetadataProvider;
+  titleLanguage: TitleLanguagePreference;
+  hideCompleted: HideCompletedMode;
+  hideZeroRatings: boolean;
+  gameLogging: GameLoggingMode;
+  progressFormat: ProgressFormat;
+  /** Minutes of inactivity before a session is considered stale. */
+  sessionDuration: number;
+  customFields: CustomFieldDefinition[];
+  customMediaTypes: CustomMediaTypeDefinition[];
 }
