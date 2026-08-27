@@ -200,18 +200,21 @@
 
   .stars-row {
     display: flex;
-    gap: 4px;
+    gap: 2px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 100%;
   }
 
   .star-btn {
     background: transparent;
     border: none;
-    font-size: 1.8rem;
+    font-size: 1.5rem;
     color: color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     cursor: pointer;
-    min-width: 44px;
+    min-width: 36px;
     min-height: 44px;
-    padding: 0 4px;
+    padding: 0 2px;
     transition:
       transform 80ms ease,
       color 80ms ease;

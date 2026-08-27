@@ -369,13 +369,16 @@ impl AccessAdministrationPort for SqliteKernel {
             Ok(contents) if !contents.trim().is_empty() => contents,
             // Absent, unreadable, or empty (including a file left
             // zero-length by a prior write that never reached disk before a
-            // crash) -- (re)publish through a temporary file in the same
-            // directory so no reader can ever observe a partial write, and
+            // crash) -- (re)publish through a unique temporary file in the
+            // target's directory so concurrent callers don't collide, and
+            // publish with no-replace semantics so only the first write wins.
             // fsync before the rename so a crash after this point still
             // leaves either the old complete file or the new one, never a
             // truncated one that would wedge every future startup.
             _ => {
-                let temporary = path.with_extension("secret.tmp");
+                let parent = path.parent().ok_or_else(unavailable)?;
+                let unique_suffix = correlation_id.to_string();
+                let temporary = parent.join(format!("bootstrap.secret.tmp.{}", unique_suffix));
                 let secret = random_secret(capability, correlation_id)?;
                 let hex = secret.expose_hex();
                 let published = (|| -> std::io::Result<()> {
@@ -389,14 +392,26 @@ impl AccessAdministrationPort for SqliteKernel {
                     file.write_all(hex.as_bytes())?;
                     file.sync_all()?;
                     drop(file);
-                    std::fs::rename(&temporary, &path)
+                    // Use create_new semantics via hard link + unlink to ensure
+                    // no-replace behavior: if the target exists, link fails.
+                    #[cfg(unix)]
+                    {
+                        std::fs::hard_link(&temporary, &path)?;
+                        std::fs::remove_file(&temporary)?;
+                        Ok(())
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        // On Windows, try rename; if it fails, the target likely exists
+                        std::fs::rename(&temporary, &path)
+                    }
                 })();
                 match published {
                     Ok(()) => hex,
                     // Another caller may have won the rename race (e.g.
-                    // concurrent startup priming) -- read what it published
-                    // rather than discarding our own and returning a value
-                    // nobody can match.
+                    // concurrent startup priming) -- clean up our temporary
+                    // file and read what the winner published rather than
+                    // returning a value nobody can match.
                     Err(_) => {
                         let _ = std::fs::remove_file(&temporary);
                         read_existing().map_err(|_| unavailable())?
