@@ -95,6 +95,231 @@ async function mockTrustedHost(page: Page) {
   });
 }
 
+async function mockRecords(page: Page, credential: string) {
+  await page.route(/\/api\/v1\/records$/, (route) => {
+    expect(route.request().headers().authorization).toBe(
+      `Bearer ${credential}`,
+    );
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        records: [
+          {
+            record_id: "018f7f2d-8f58-7a0a-8000-000000000001",
+            grain: "work",
+            status: "active",
+            title: {
+              tier: "preferred_provider_claim",
+              value: "A real local record",
+              source: "google-books",
+              is_stale: false,
+            },
+            poster: {
+              tier: "empty",
+              value: null,
+              source: null,
+              is_stale: false,
+            },
+            latest_activity: null,
+          },
+        ],
+      }),
+    });
+  });
+}
+
+async function connectBrowserRecords(page: Page, credential: string) {
+  await mockRecords(page, credential);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Connect records" }).click();
+  await page.getByLabel("API client credential").fill(credential);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "A real local record" }),
+  ).toBeVisible();
+}
+
+test("the product root restores the Workbench and ignores the retired surface preference", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem("fasti-surface", "status"),
+  );
+  await page.goto("/");
+
+  await expect(page).toHaveTitle("Fasti · Living Chronicle");
+  await expect(
+    page.getByRole("complementary", { name: "Main Navigation" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Overview" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Connect local credential" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open Workbench" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "Local service status" }),
+  ).toHaveCount(0);
+});
+
+test("browser record access uses a real memory-only bearer and exposes unsupported actions honestly", async ({
+  page,
+}) => {
+  const credential = "a".repeat(64);
+  await page.addInitScript((retiredCredential) => {
+    localStorage.setItem("fasti-bearer-credential", retiredCredential);
+  }, credential);
+  await mockRecords(page, credential);
+  await page.goto("/");
+
+  await expect(page.getByRole("alert")).toContainText(
+    "Records need an active local bearer credential",
+  );
+  await page.getByRole("button", { name: "Connect local credential" }).click();
+  await page.getByRole("tab", { name: "Passkey" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Passkey sign-in is not active" }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "OIDC / SSO" }).click();
+  await expect(
+    page.getByRole("heading", { name: "OIDC and SSO are not active" }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "NuvioTV Device" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "NuvioTV device pairing is not active",
+    }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Master Password" }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Master-password sign-in is not active",
+    }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "API Credential" }).click();
+  const input = page.getByLabel("API client credential");
+  await input.fill("not-a-credential");
+  await expect(
+    page.getByText("Enter exactly 64 hexadecimal characters."),
+  ).toHaveClass(/problem/);
+  await expect(
+    page.getByRole("button", { name: "Connect", exact: true }),
+  ).toBeDisabled();
+
+  await input.fill(credential);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "A real local record" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Clear browser credential" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("button", { name: "Watch-state changes unavailable" })
+      .first(),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Watchlists unavailable" }).first(),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Collections unavailable" }).first(),
+  ).toBeDisabled();
+  await expect(
+    page
+      .getByRole("button", { name: "Ratings and reviews unavailable" })
+      .first(),
+  ).toBeDisabled();
+
+  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+  await expect(page.getByText("tracking state unavailable")).toBeVisible();
+  await page
+    .getByRole("button", { name: "A real local record", exact: true })
+    .click();
+  await expect(
+    page.getByRole("combobox", { name: "User rating unavailable" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("combobox", { name: "Watch status unavailable" }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Actions & Progress" }).click();
+  await expect(
+    page.getByText("This host exposes this record as read-only."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Update Progress/ }),
+  ).toBeDisabled();
+
+  expect(
+    await page.evaluate(() =>
+      Object.keys(localStorage).filter((key) => key.includes("credential")),
+    ),
+  ).toEqual([]);
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText(
+    "Records need an active local bearer credential",
+  );
+});
+
+for (const theme of ["light", "dark"] as const) {
+  for (const viewport of viewports) {
+    test(`Workbench ${theme} theme at ${viewport.width}px is reflowable and accessible`, async ({
+      page,
+    }, testInfo) => {
+      const credential = "b".repeat(64);
+      await page.setViewportSize(viewport);
+      await page.addInitScript((mode) => {
+        localStorage.setItem(
+          "fasti-theme-settings",
+          JSON.stringify({
+            mode,
+            accentColor: "#a22f2b",
+            density: "normal",
+          }),
+        );
+      }, theme);
+      await connectBrowserRecords(page, credential);
+
+      await expect(page.locator("html")).toHaveAttribute(
+        "data-bs-theme",
+        theme,
+      );
+      expect(
+        await page.evaluate(
+          () =>
+            document.documentElement.scrollWidth -
+            document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+      const undersizedControls = await page
+        .locator("button:visible, input:visible, select:visible")
+        .evaluateAll((controls) =>
+          controls.flatMap((control) => {
+            const box = control.getBoundingClientRect();
+            return box.width < 44 || box.height < 44
+              ? [
+                  `${control.getAttribute("aria-label") ?? control.textContent?.trim()}: ${box.width}x${box.height}`,
+                ]
+              : [];
+          }),
+        );
+      expect(undersizedControls).toEqual([]);
+      const accessibility = await new AxeBuilder({ page }).analyze();
+      expect(accessibility.violations).toEqual([]);
+      await page.screenshot({
+        path: testInfo.outputPath(
+          `fasti-workbench-${theme}-${viewport.width}.png`,
+        ),
+        fullPage: true,
+        animations: "disabled",
+      });
+    });
+  }
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
     test(`${theme} theme at ${viewport.width}px is truthful, reflowable, and accessible`, async ({
@@ -106,7 +331,7 @@ for (const theme of ["light", "dark"] as const) {
         theme,
       );
       await mockHealth(page);
-      await page.goto("/");
+      await page.goto("/status");
 
       await expect(page).toHaveTitle("Local service status · Fasti");
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -165,7 +390,7 @@ test("keyboard path, theme persistence, and unavailable recovery remain clear", 
 }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await page.route(healthEndpoint, (route) => route.abort("connectionrefused"));
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.getByRole("alert")).toContainText(
     "local service is unavailable",
@@ -214,7 +439,7 @@ test("invalid health responses use the contract recovery state", async ({
       body: JSON.stringify({ status: "healthy" }),
     }),
   );
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", {
@@ -254,7 +479,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/");
+  await page.goto("/status");
   const retry = page.getByRole("button", { name: "Try again" });
   await expect(retry).toBeVisible();
 
@@ -279,7 +504,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
 });
 
 test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
@@ -291,7 +516,7 @@ test("the saved theme is applied before the application module", async ({
 }) => {
   await page.addInitScript(() => localStorage.setItem("fasti-theme", "dark"));
   await page.route(/\/src\/main\.ts$/, (route) => route.abort());
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(page.locator("body")).toHaveCSS(
@@ -313,7 +538,7 @@ test("system dark mode survives unavailable local storage", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(
@@ -332,7 +557,7 @@ test("theme changes remain usable when persistence is unavailable", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
@@ -346,7 +571,7 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
 }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.locator("html").evaluate((element) => {
     element.style.fontSize = "200%";
@@ -395,7 +620,7 @@ test("reduced motion stops the loading animation", async ({ page }) => {
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/status", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.locator(".spinner")).toHaveCSS("animation-name", "none");
@@ -410,7 +635,7 @@ test("forced colors preserves visible status and controls", async ({
 }) => {
   await page.emulateMedia({ forcedColors: "active" });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
@@ -432,7 +657,7 @@ test("the harness does not contact third-party origins", async ({ page }) => {
     if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();

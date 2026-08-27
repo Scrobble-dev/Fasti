@@ -59,32 +59,11 @@
     retryPolicy: { maxAttempts: 1 },
   });
 
-  const WORKBENCH_PATHS = new Set([
-    "/connections",
-    "/settings",
-    "/discover",
-    "/reconciliation",
-    "/reviews",
-    "/library",
-    "/calendar",
-  ]);
-
   function computeInitialSurface(): "status" | "workbench" {
-    if (typeof window === "undefined") return "status";
-    const path = window.location.pathname;
-    if (path === "/status") return "status";
-    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records")) {
-      return "workbench";
-    }
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("surface") === "workbench") return "workbench";
-    if (urlParams.get("surface") === "status") return "status";
-    try {
-      const saved = localStorage.getItem("fasti-surface");
-      if (saved === "workbench") return "workbench";
-      if (saved === "status") return "status";
-    } catch {}
-    return "status";
+    return typeof window !== "undefined" &&
+      window.location.pathname === "/status"
+      ? "status"
+      : "workbench";
   }
 
   let status: StatusPanelState = $state({ view: "loading" });
@@ -102,6 +81,15 @@
     ),
   );
   let activeSurface = $state<"status" | "workbench">(computeInitialSurface());
+
+  $effect(() => {
+    if (typeof document !== "undefined") {
+      document.title =
+        activeSurface === "status"
+          ? "Local service status · Fasti"
+          : "Fasti · Living Chronicle";
+    }
+  });
 
   function statusProblemFor(error: unknown): StatusProblem {
     if (error instanceof FastiProtocolError) {
@@ -205,12 +193,7 @@
 
   function openWorkbench(): void {
     activeSurface = "workbench";
-    if (typeof window !== "undefined" && window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-    try {
-      localStorage.setItem("fasti-surface", "workbench");
-    } catch {}
+    if (typeof window !== "undefined") window.history.pushState({}, "", "/");
   }
 
   async function setup(): Promise<void> {
@@ -236,7 +219,7 @@
       void inspectDesktop();
       return;
     }
-    void inspectHealth();
+    if (activeSurface === "status") void inspectHealth();
     return () => request?.abort();
   });
 </script>

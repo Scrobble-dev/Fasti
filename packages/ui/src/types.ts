@@ -11,7 +11,12 @@ export type MediaKind =
   | "custom";
 
 export type WatchStatus =
-  "watching" | "completed" | "plan_to_watch" | "on_hold" | "dropped";
+  | "unknown"
+  | "watching"
+  | "completed"
+  | "plan_to_watch"
+  | "on_hold"
+  | "dropped";
 
 export interface ExternalId {
   readonly namespace: string;
@@ -272,6 +277,8 @@ export interface WorkbenchHost {
   registerNamespace?(
     input: RegisterNamespaceInput,
   ): Promise<RegisterNamespaceResult>;
+  setSessionCredential?(credential: string): void;
+  clearSessionCredential?(): void;
 }
 
 /** Wire shape of the desktop host's `create_record` command output. */

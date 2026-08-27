@@ -107,15 +107,17 @@
   ];
 
   function handleToggleWatched(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
     const nextStatus: WatchStatus =
       rec.status === "completed" ? "watching" : "completed";
-    onUpdateStatus?.(rec.id, nextStatus);
+    onUpdateStatus(rec.id, nextStatus);
   }
 
   function handleToggleWatchlist(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
     const nextStatus: WatchStatus =
       rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
-    onUpdateStatus?.(rec.id, nextStatus);
+    onUpdateStatus(rec.id, nextStatus);
   }
 
   function handleOpenCollection(rec: MediaRecord): void {
@@ -185,6 +187,14 @@
         action: () => navigator.clipboard.writeText(rec.id),
       },
     };
+
+    if (!onUpdateStatus) {
+      delete allItems.watched;
+      delete allItems.watchlist;
+    }
+    if (!onUpdateProgress) delete allItems.progress;
+    if (!onSaveReview) delete allItems.review;
+    if (!onSaveCollection) delete allItems.collection;
 
     let items: ContextMenuItem[] = [];
     if (contextMenuConfigs && contextMenuConfigs.length > 0) {
@@ -353,10 +363,14 @@
           <div class="fast-action-toolbar-wrap">
             <FastActionBar
               record={rec}
-              onToggleWatched={handleToggleWatched}
-              onToggleWatchlist={handleToggleWatchlist}
-              onOpenCollection={handleOpenCollection}
-              onOpenReview={handleOpenReview}
+              onToggleWatched={onUpdateStatus ? handleToggleWatched : undefined}
+              onToggleWatchlist={onUpdateStatus
+                ? handleToggleWatchlist
+                : undefined}
+              onOpenCollection={onSaveCollection
+                ? handleOpenCollection
+                : undefined}
+              onOpenReview={onSaveReview ? handleOpenReview : undefined}
               onOpenContextMenu={handleOpenContextMenu}
             />
           </div>
@@ -372,7 +386,9 @@
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
               <span class="status-indicator {rec.status}"
-                >{rec.status.replaceAll("_", " ")}</span
+                >{rec.status === "unknown"
+                  ? "tracking state unavailable"
+                  : rec.status.replaceAll("_", " ")}</span
               >
             </div>
           </div>
@@ -419,7 +435,9 @@
               >
               <td
                 ><span class="status-pill {rec.status}"
-                  >{rec.status.replaceAll("_", " ")}</span
+                  >{rec.status === "unknown"
+                    ? "Unavailable"
+                    : rec.status.replaceAll("_", " ")}</span
                 ></td
               >
               <td>
@@ -445,7 +463,13 @@
                     class="table-btn"
                     class:active={rec.status === "completed"}
                     onclick={() => handleToggleWatched(rec)}
-                    title="Toggle Seen"
+                    title={onUpdateStatus
+                      ? "Toggle seen"
+                      : "Watch-state changes are not available on this host"}
+                    aria-label={onUpdateStatus
+                      ? "Toggle seen"
+                      : "Watch-state changes unavailable"}
+                    disabled={!onUpdateStatus}
                   >
                     {#if rec.status === "completed"}
                       <IconEyeCheck size={16} />
@@ -458,7 +482,13 @@
                     class="table-btn"
                     class:active={rec.status === "plan_to_watch"}
                     onclick={() => handleToggleWatchlist(rec)}
-                    title="Toggle Watchlist"
+                    title={onUpdateStatus
+                      ? "Toggle watchlist"
+                      : "Watchlists are not available on this host"}
+                    aria-label={onUpdateStatus
+                      ? "Toggle watchlist"
+                      : "Watchlists unavailable"}
+                    disabled={!onUpdateStatus}
                   >
                     <IconBookmark size={16} />
                   </button>
@@ -466,7 +496,13 @@
                     type="button"
                     class="table-btn"
                     onclick={() => handleOpenCollection(rec)}
-                    title="Collection"
+                    title={onSaveCollection
+                      ? "Collection"
+                      : "Collections are not available on this host"}
+                    aria-label={onSaveCollection
+                      ? "Collection"
+                      : "Collections unavailable"}
+                    disabled={!onSaveCollection}
                   >
                     <IconFolder size={16} />
                   </button>
@@ -481,7 +517,7 @@
 </div>
 
 <!-- Modal Dialogs -->
-{#if showProgressModal && activeModalRecord}
+{#if showProgressModal && activeModalRecord && onUpdateProgress}
   <ProgressModal
     record={activeModalRecord}
     onClose={() => {
@@ -489,22 +525,22 @@
       activeModalRecord = null;
     }}
     onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
+      onUpdateProgress(recId, eps, sec, st)}
   />
 {/if}
 
-{#if showReviewModal && activeModalRecord}
+{#if showReviewModal && activeModalRecord && onSaveReview}
   <RatingReviewModal
     record={activeModalRecord}
     onClose={() => {
       showReviewModal = false;
       activeModalRecord = null;
     }}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
   />
 {/if}
 
-{#if showCollectionModal && activeModalRecord}
+{#if showCollectionModal && activeModalRecord && onSaveCollection}
   <CollectionModal
     record={activeModalRecord}
     collections={availableCollections}
@@ -512,7 +548,7 @@
       showCollectionModal = false;
       activeModalRecord = null;
     }}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
   />
 {/if}
 
@@ -890,5 +926,10 @@
   .table-btn.active {
     color: var(--fasti-action-primary);
     border-color: var(--fasti-action-primary);
+  }
+
+  .table-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
 </style>

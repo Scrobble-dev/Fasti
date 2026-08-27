@@ -195,7 +195,7 @@
             {#if !collapsed}
               <li class="nav-section-title">
                 <span
-                  class="text-uppercase text-muted fw-bold d-flex align-items-center gap-1 fs-6"
+                  class="section-label text-uppercase fw-bold d-flex align-items-center gap-1 fs-6"
                 >
                   <IconPin size={12} /> Pinned
                 </span>
@@ -279,7 +279,7 @@
             {#if !collapsed}
               <li class="nav-section-title mt-2">
                 <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
+                  class="section-label text-uppercase fw-bold font-monospace fs-6"
                   >Media</span
                 >
               </li>
@@ -315,7 +315,7 @@
             {#if !collapsed}
               <li class="nav-section-title mt-2">
                 <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
+                  class="section-label text-uppercase fw-bold font-monospace fs-6"
                   >Library</span
                 >
               </li>
@@ -351,7 +351,7 @@
             {#if !collapsed}
               <li class="nav-section-title mt-2">
                 <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
+                  class="section-label text-uppercase fw-bold font-monospace fs-6"
                   >Utilities</span
                 >
               </li>
@@ -408,7 +408,6 @@
     background: var(--fasti-surface-paper);
     border-right: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    transition: width 150ms cubic-bezier(0.16, 1, 0.3, 1);
     flex-shrink: 0;
   }
 
@@ -434,6 +433,10 @@
     padding: 6px 8px 2px;
     font-size: 0.7rem;
     letter-spacing: 0.06em;
+  }
+
+  .section-label {
+    color: var(--fasti-text-muted);
   }
 
   .nav-link {

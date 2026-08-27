@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MediaRecord, WatchStatus } from "./types.js";
+  import type { MediaRecord } from "./types.js";
   import {
     IconEye,
     IconEyeCheck,
@@ -12,11 +12,11 @@
 
   interface Props {
     record: MediaRecord;
-    onToggleWatched: (record: MediaRecord) => void;
-    onToggleWatchlist: (record: MediaRecord) => void;
-    onOpenCollection: (record: MediaRecord) => void;
-    onOpenReview: (record: MediaRecord) => void;
-    onOpenContextMenu: (record: MediaRecord, event: MouseEvent) => void;
+    onToggleWatched?: (record: MediaRecord) => void;
+    onToggleWatchlist?: (record: MediaRecord) => void;
+    onOpenCollection?: (record: MediaRecord) => void;
+    onOpenReview?: (record: MediaRecord) => void;
+    onOpenContextMenu?: (record: MediaRecord, event: MouseEvent) => void;
   }
 
   let {
@@ -33,22 +33,28 @@
 </script>
 
 <div
-  class="fast-action-bar"
+  class="btn-group fast-action-bar"
   role="toolbar"
   aria-label="Quick actions for {record.title}"
 >
-  <!-- 1. Seen / Watched Fast Button -->
   <button
     type="button"
-    class="fast-btn"
+    class="btn btn-icon fast-btn"
     class:active={isWatched}
     onclick={(e) => {
       e.stopPropagation();
-      onToggleWatched(record);
+      onToggleWatched?.(record);
     }}
-    title={isWatched ? "Marked as completed / seen" : "Mark as seen"}
-    aria-label="Toggle watched"
+    title={onToggleWatched
+      ? isWatched
+        ? "Marked as completed / seen"
+        : "Mark as seen"
+      : "Watch-state changes are not available on this host"}
+    aria-label={onToggleWatched
+      ? "Toggle watched"
+      : "Watch-state changes unavailable"}
     aria-pressed={isWatched}
+    disabled={!onToggleWatched}
   >
     {#if isWatched}
       <IconEyeCheck size={16} stroke={2.5} class="icon-watched" />
@@ -60,15 +66,22 @@
   <!-- 2. Watchlist / Bookmark Fast Button -->
   <button
     type="button"
-    class="fast-btn"
+    class="btn btn-icon fast-btn"
     class:active={isWatchlist}
     onclick={(e) => {
       e.stopPropagation();
-      onToggleWatchlist(record);
+      onToggleWatchlist?.(record);
     }}
-    title={isWatchlist ? "In your watchlist" : "Add to watchlist"}
-    aria-label="Toggle watchlist"
+    title={onToggleWatchlist
+      ? isWatchlist
+        ? "In your watchlist"
+        : "Add to watchlist"
+      : "Watchlists are not available on this host"}
+    aria-label={onToggleWatchlist
+      ? "Toggle watchlist"
+      : "Watchlists unavailable"}
     aria-pressed={isWatchlist}
+    disabled={!onToggleWatchlist}
   >
     {#if isWatchlist}
       <IconBookmarkFilled size={16} class="icon-bookmark-active" />
@@ -80,15 +93,20 @@
   <!-- 3. Add to Collection Fast Button -->
   <button
     type="button"
-    class="fast-btn"
+    class="btn btn-icon fast-btn"
     onclick={(e) => {
       e.stopPropagation();
-      onOpenCollection(record);
+      onOpenCollection?.(record);
     }}
-    title={record.collectionName
-      ? `In collection: ${record.collectionName}`
-      : "Add to collection / lists"}
-    aria-label="Add to collection"
+    title={onOpenCollection
+      ? record.collectionName
+        ? `In collection: ${record.collectionName}`
+        : "Add to collection / lists"
+      : "Collections are not available on this host"}
+    aria-label={onOpenCollection
+      ? "Add to collection"
+      : "Collections unavailable"}
+    disabled={!onOpenCollection}
   >
     <IconFolder size={16} stroke={2} />
   </button>
@@ -96,15 +114,20 @@
   <!-- 4. Review / Rating Fast Button -->
   <button
     type="button"
-    class="fast-btn"
+    class="btn btn-icon fast-btn"
     onclick={(e) => {
       e.stopPropagation();
-      onOpenReview(record);
+      onOpenReview?.(record);
     }}
-    title={record.userRating
-      ? `Rated ${record.userRating}/10`
-      : "Add rating or review"}
-    aria-label="Add rating or review"
+    title={onOpenReview
+      ? record.userRating
+        ? `Rated ${record.userRating}/10`
+        : "Add rating or review"
+      : "Ratings and reviews are not available on this host"}
+    aria-label={onOpenReview
+      ? "Add rating or review"
+      : "Ratings and reviews unavailable"}
+    disabled={!onOpenReview}
   >
     <IconMessage size={16} stroke={2} />
   </button>
@@ -112,13 +135,18 @@
   <!-- 5. Context Menu Trigger -->
   <button
     type="button"
-    class="fast-btn menu-dots"
+    class="btn btn-icon fast-btn menu-dots"
     onclick={(e) => {
       e.stopPropagation();
-      onOpenContextMenu(record, e);
+      onOpenContextMenu?.(record, e);
     }}
-    title="More actions..."
-    aria-label="More actions context menu"
+    title={onOpenContextMenu
+      ? "More actions"
+      : "More actions are not available on this host"}
+    aria-label={onOpenContextMenu
+      ? "More actions context menu"
+      : "More actions unavailable"}
+    disabled={!onOpenContextMenu}
   >
     <IconDotsVertical size={16} stroke={2} />
   </button>
@@ -127,6 +155,7 @@
 <style>
   .fast-action-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-around;
     background: var(--fasti-surface-paper);
@@ -139,7 +168,8 @@
   }
 
   .fast-btn {
-    flex: 1;
+    flex: 1 1 44px;
+    min-width: 44px;
     min-height: 44px;
     height: 44px;
     display: grid;
@@ -156,6 +186,16 @@
   .fast-btn:hover {
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
+  }
+
+  .fast-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .fast-btn:disabled:hover {
+    background: transparent;
+    color: var(--fasti-text-muted);
   }
 
   .fast-btn:focus-visible {

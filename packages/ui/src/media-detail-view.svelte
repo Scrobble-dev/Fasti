@@ -131,6 +131,20 @@
   const recordOccurrences = $derived(
     occurrences.filter((occ) => occ.recordId === record.id),
   );
+  const hasRecordMutations = $derived(
+    Boolean(
+      onUpdateStatus ||
+      onUpdateRating ||
+      onToggleEpisode ||
+      onUpdateProgress ||
+      onSaveReview ||
+      onSaveCollection ||
+      onUpdateNotes ||
+      onAddTag ||
+      onRemoveTag ||
+      onUpdatePoster,
+    ),
+  );
 
   const candidatePosters = $derived(
     record.externalIds
@@ -157,31 +171,34 @@
   ];
 
   function handleSaveNotes(): void {
-    onUpdateNotes?.(record.id, editedNotesText);
+    if (!onUpdateNotes) return;
+    onUpdateNotes(record.id, editedNotesText);
     isEditingNotes = false;
   }
 
   function handleAddTagSubmit(e: Event): void {
     e.preventDefault();
-    if (newTagInput.trim().length > 0) {
-      onAddTag?.(record.id, newTagInput.trim());
+    if (onAddTag && newTagInput.trim().length > 0) {
+      onAddTag(record.id, newTagInput.trim());
       newTagInput = "";
     }
   }
 
   function handleMarkSeasonWatched(seasonIndex: number): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
-      if (!ep.watched) onToggleEpisode?.(record.id, ep.id);
+      if (!ep.watched) onToggleEpisode(record.id, ep.id);
     }
   }
 
   function handleMarkSeasonUnwatched(seasonIndex: number): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
-      if (ep.watched) onToggleEpisode?.(record.id, ep.id);
+      if (ep.watched) onToggleEpisode(record.id, ep.id);
     }
   }
 
@@ -189,47 +206,52 @@
     seasonIndex: number,
     upToEpisodeNumber: number,
   ): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
       if (ep.number < upToEpisodeNumber && !ep.watched) {
-        onToggleEpisode?.(record.id, ep.id);
+        onToggleEpisode(record.id, ep.id);
       }
     }
   }
 
   function handleOpenContextMenu(e: MouseEvent): void {
     e.preventDefault();
-    contextMenuState = {
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        {
-          id: "prog",
-          label: "Update Progress...",
-          icon: IconAdjustments,
-          action: () => (showProgressModal = true),
-        },
-        {
-          id: "review",
-          label: "Post a Review...",
-          icon: IconMessage,
-          action: () => (showReviewModal = true),
-        },
-        {
-          id: "coll",
-          label: "Add to Collection...",
-          icon: IconFolderPlus,
-          action: () => (showCollectionModal = true),
-        },
-        { id: "d1", label: "", divider: true, action: () => {} },
-        {
-          id: "copy_id",
-          label: `Copy Fasti ID (${record.id})`,
-          action: () => navigator.clipboard.writeText(record.id),
-        },
-      ],
-    };
+    const items: ContextMenuItem[] = [];
+    if (onUpdateProgress) {
+      items.push({
+        id: "prog",
+        label: "Update Progress...",
+        icon: IconAdjustments,
+        action: () => (showProgressModal = true),
+      });
+    }
+    if (onSaveReview) {
+      items.push({
+        id: "review",
+        label: "Post a Review...",
+        icon: IconMessage,
+        action: () => (showReviewModal = true),
+      });
+    }
+    if (onSaveCollection) {
+      items.push({
+        id: "coll",
+        label: "Add to Collection...",
+        icon: IconFolderPlus,
+        action: () => (showCollectionModal = true),
+      });
+    }
+    if (items.length > 0) {
+      items.push({ id: "d1", label: "", divider: true, action: () => {} });
+    }
+    items.push({
+      id: "copy_id",
+      label: `Copy Fasti ID (${record.id})`,
+      action: () => navigator.clipboard.writeText(record.id),
+    });
+    contextMenuState = { x: e.clientX, y: e.clientY, items };
   }
 </script>
 
@@ -320,7 +342,13 @@
             value={record.userRating ?? 0}
             onchange={(e) =>
               onUpdateRating?.(record.id, Number(e.currentTarget.value))}
-            aria-label="User Rating"
+            aria-label={onUpdateRating
+              ? "User rating"
+              : "User rating unavailable"}
+            title={onUpdateRating
+              ? "User rating"
+              : "Ratings are not available on this host"}
+            disabled={!onUpdateRating}
           >
             <option value="0">Unrated</option>
             {#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as num}
@@ -336,8 +364,17 @@
             value={record.status}
             onchange={(e) =>
               onUpdateStatus?.(record.id, e.currentTarget.value as WatchStatus)}
-            aria-label="Watch Status"
+            aria-label={onUpdateStatus
+              ? "Watch status"
+              : "Watch status unavailable"}
+            title={onUpdateStatus
+              ? "Watch status"
+              : "Watch-state changes are not available on this host"}
+            disabled={!onUpdateStatus}
           >
+            {#if record.status === "unknown"}
+              <option value="unknown">Tracking state unavailable</option>
+            {/if}
             {#each statusOptions as opt}
               <option value={opt.id}>{opt.label}</option>
             {/each}
@@ -349,7 +386,13 @@
           type="button"
           class="icon-action-btn"
           onclick={() => (showCollectionModal = true)}
-          title="Add to Collection"
+          title={onSaveCollection
+            ? "Add to collection"
+            : "Collections are not available on this host"}
+          aria-label={onSaveCollection
+            ? "Add to collection"
+            : "Collections unavailable"}
+          disabled={!onSaveCollection}
         >
           <IconBookmark size={18} />
         </button>
@@ -358,7 +401,13 @@
           type="button"
           class="icon-action-btn"
           onclick={() => (showArtworkModal = true)}
-          title="Edit Artwork"
+          title={onUpdatePoster
+            ? "Edit artwork"
+            : "Artwork changes are not available on this host"}
+          aria-label={onUpdatePoster
+            ? "Edit artwork"
+            : "Artwork changes unavailable"}
+          disabled={!onUpdatePoster}
         >
           <IconPhoto size={18} />
         </button>
@@ -367,7 +416,13 @@
           type="button"
           class="icon-action-btn"
           onclick={() => (showProgressModal = true)}
-          title="Update Progress"
+          title={onUpdateProgress
+            ? "Update progress"
+            : "Progress changes are not available on this host"}
+          aria-label={onUpdateProgress
+            ? "Update progress"
+            : "Progress changes unavailable"}
+          disabled={!onUpdateProgress}
         >
           <IconAdjustments size={18} />
         </button>
@@ -376,7 +431,8 @@
           type="button"
           class="icon-action-btn"
           onclick={handleOpenContextMenu}
-          title="More Actions..."
+          title="More actions"
+          aria-label="More actions"
         >
           <IconDotsVertical size={18} />
         </button>
@@ -596,6 +652,10 @@
                       class="btn-secondary-sm"
                       onclick={() =>
                         handleMarkSeasonWatched(selectedSeasonIndex)}
+                      title={onToggleEpisode
+                        ? "Mark season watched"
+                        : "Episode changes are not available on this host"}
+                      disabled={!onToggleEpisode}
                     >
                       Mark Watched
                     </button>
@@ -604,6 +664,10 @@
                       class="btn-secondary-sm"
                       onclick={() =>
                         handleMarkSeasonUnwatched(selectedSeasonIndex)}
+                      title={onToggleEpisode
+                        ? "Mark season unwatched"
+                        : "Episode changes are not available on this host"}
+                      disabled={!onToggleEpisode}
                     >
                       Mark Unwatched
                     </button>
@@ -617,7 +681,13 @@
                         class="ep-check-btn"
                         class:checked={ep.watched}
                         onclick={() => onToggleEpisode?.(record.id, ep.id)}
-                        aria-label="Toggle watched for Episode {ep.number}"
+                        aria-label={onToggleEpisode
+                          ? `Toggle watched for episode ${ep.number}`
+                          : `Episode ${ep.number} changes unavailable`}
+                        title={onToggleEpisode
+                          ? `Toggle watched for episode ${ep.number}`
+                          : "Episode changes are not available on this host"}
+                        disabled={!onToggleEpisode}
                       >
                         {#if ep.watched}
                           <IconCheck size={16} stroke={3} />
@@ -661,6 +731,10 @@
                               selectedSeasonIndex,
                               ep.number,
                             )}
+                          title={onToggleEpisode
+                            ? `Mark episodes 1 to ${ep.number - 1} seen`
+                            : "Episode changes are not available on this host"}
+                          disabled={!onToggleEpisode}
                         >
                           Mark 1–{ep.number - 1} Seen
                         </button>
@@ -704,8 +778,9 @@
         <section class="tab-pane">
           <h3 class="pane-heading">Media Action Center</h3>
           <p class="pane-sub">
-            Execute state changes, log manual occurrences, or re-organize
-            collections.
+            {hasRecordMutations
+              ? "Use the changes supported by the active host."
+              : "This host exposes this record as read-only. Each unavailable action is disabled."}
           </p>
 
           <div class="ryot-actions-grid">
@@ -713,6 +788,10 @@
               type="button"
               class="ryot-action-btn"
               onclick={() => (showProgressModal = true)}
+              title={onUpdateProgress
+                ? "Update progress"
+                : "Progress changes are not available on this host"}
+              disabled={!onUpdateProgress}
             >
               <div class="action-btn-icon"><IconAdjustments size={22} /></div>
               <div class="action-btn-text">
@@ -725,6 +804,10 @@
               type="button"
               class="ryot-action-btn"
               onclick={() => (showReviewModal = true)}
+              title={onSaveReview
+                ? "Post a review"
+                : "Reviews are not available on this host"}
+              disabled={!onSaveReview}
             >
               <div class="action-btn-icon"><IconMessage size={22} /></div>
               <div class="action-btn-text">
@@ -737,6 +820,10 @@
               type="button"
               class="ryot-action-btn"
               onclick={() => (showCollectionModal = true)}
+              title={onSaveCollection
+                ? "Add to collection"
+                : "Collections are not available on this host"}
+              disabled={!onSaveCollection}
             >
               <div class="action-btn-icon"><IconFolderPlus size={22} /></div>
               <div class="action-btn-text">
@@ -879,6 +966,10 @@
                   editedNotesText = record.userNotes ?? "";
                   isEditingNotes = true;
                 }}
+                title={onUpdateNotes
+                  ? "Edit notes"
+                  : "Notes are not editable on this host"}
+                disabled={!onUpdateNotes}
               >
                 <IconEdit size={14} /> Edit Notes
               </button>
@@ -912,8 +1003,9 @@
                 <p class="notes-text">{record.userNotes}</p>
               {:else}
                 <p class="empty-notes-hint">
-                  No personal notes recorded yet. Click 'Edit Notes' to add your
-                  thoughts.
+                  {onUpdateNotes
+                    ? "No personal notes are recorded. Select Edit Notes to add one."
+                    : "No personal notes are available. This host exposes notes as read-only."}
                 </p>
               {/if}
             </div>
@@ -930,6 +1022,10 @@
                   class="tag-delete-btn"
                   onclick={() => onRemoveTag?.(record.id, tag)}
                   aria-label="Remove tag {tag}"
+                  title={onRemoveTag
+                    ? `Remove tag ${tag}`
+                    : "Tags are not editable on this host"}
+                  disabled={!onRemoveTag}
                 >
                   <IconX size={12} />
                 </button>
@@ -943,6 +1039,10 @@
                 bind:value={newTagInput}
                 class="add-tag-input"
                 aria-label="New tag name"
+                title={onAddTag
+                  ? "Add tag"
+                  : "Tags are not editable on this host"}
+                disabled={!onAddTag}
               />
             </form>
           </div>
@@ -953,33 +1053,33 @@
 </div>
 
 <!-- Modal Dialogs -->
-{#if showProgressModal}
+{#if showProgressModal && onUpdateProgress}
   <ProgressModal
     {record}
     onClose={() => (showProgressModal = false)}
     onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
+      onUpdateProgress(recId, eps, sec, st)}
   />
 {/if}
 
-{#if showReviewModal}
+{#if showReviewModal && onSaveReview}
   <RatingReviewModal
     {record}
     onClose={() => (showReviewModal = false)}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
   />
 {/if}
 
-{#if showCollectionModal}
+{#if showCollectionModal && onSaveCollection}
   <CollectionModal
     {record}
     collections={availableCollections}
     onClose={() => (showCollectionModal = false)}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
   />
 {/if}
 
-{#if showArtworkModal}
+{#if showArtworkModal && onUpdatePoster}
   <ArtworkModal
     {record}
     candidates={candidatePosters}
@@ -1178,6 +1278,11 @@
   .icon-action-btn.active {
     color: #e11d48;
     border-color: #e11d48;
+  }
+
+  :is(button, select, input, textarea):disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .synopsis-prose {
@@ -1639,7 +1744,8 @@
       var(--fasti-state-verified) 12%,
       transparent
     );
-    border-left: 4px solid var(--fasti-state-verified);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-verified) 45%, transparent);
     border-radius: 4px;
     margin-bottom: 20px;
   }

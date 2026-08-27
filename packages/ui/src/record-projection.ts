@@ -1,9 +1,4 @@
-import type {
-  MediaKind,
-  MediaRecord,
-  RecordSummary,
-  WatchStatus,
-} from "./types.js";
+import type { MediaKind, MediaRecord, RecordSummary } from "./types.js";
 
 /**
  * Coarse `Grain` (identity granularity) -> `MediaKind` (display category)
@@ -43,18 +38,10 @@ function mediaKindForGrain(grain: string): MediaKind {
  * Projects the desktop host's real `RecordSummary` (from `list_records`)
  * onto the presentational `MediaRecord` shape the view components expect.
  *
- * No watch-status pipeline is wired yet (that needs Chronicle/occurrence
- * history, which this pass explicitly does not restore), so `status` is a
- * placeholder: "watching" if the record has any recorded activity, else
- * "plan_to_watch". This asserts nothing false, it just can't be precise yet.
- *
- * ponytail: status heuristic ceiling is "activity present or not"; upgrade
- * once occurrence-derived watch status exists.
+ * No watch-state query is wired yet, so the presentation reports that state
+ * as unknown instead of inferring it from unrelated activity.
  */
 export function projectRecordSummary(summary: RecordSummary): MediaRecord {
-  const status: WatchStatus = summary.latest_activity
-    ? "watching"
-    : "plan_to_watch";
   const titleValue =
     summary.title.tier !== "empty" && summary.title.value
       ? summary.title.value
@@ -68,7 +55,7 @@ export function projectRecordSummary(summary: RecordSummary): MediaRecord {
     id: summary.record_id,
     title: titleValue,
     mediaKind: mediaKindForGrain(summary.grain),
-    status,
+    status: "unknown",
     posterUrl: posterValue,
     externalIds: [],
     displaySource: "Fasti local record",

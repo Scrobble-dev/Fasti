@@ -23,7 +23,7 @@ Those commands report contract state. They do not activate later-body runtime be
 | Identity records, identifiers, and namespaces                                    | Durable production HTTP routes on the same local exposure (`/api/v1/records`, `/api/v1/records/identifiers`, `/api/v1/namespaces`), bearer-authenticated, covered by `cargo xtask contract verify` |
 | Identity review (inspect, defer, resume, resolve)                                | Implemented behind internal B2 ports for review; no production route exists                                     |
 | Corrections and portability                                                      | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards |
-| Browser QA harness                                                               | Local, private `system.health` evidence tooling; not a product UI or capability activation                      |
+| Browser Workbench                                                                | Local, private B4 review surface; `/` renders the media Workbench and `/status` keeps the separate health diagnostic |
 | Trusted desktop network settings and Google Books/TMDB search                    | Local Tauri IPC review body; no public HTTP route, event, record write, or browser provider execution           |
 | Product packaging and release behavior                                           | Later bodies; absent now                                                                                        |
 
@@ -31,7 +31,22 @@ The fixture separates contract proof from availability claims. Its finite routes
 
 Required surfaces are generated or validated from the registry across domain/application ownership, OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, semantic examples, CLI, typed TypeScript HTTP/SSE SDK, knowledge, and package smoke. Reasoned `N/A` is explicit—for example, operational health has no event stream and access administration is not linked-data domain state.
 
-The browser harness consumes the generated `system.health` SDK parser and adds no API shape, domain state, retry queue, persistence, or public binding. Its local Vite proxy is not an endpoint-configuration authority. The registry therefore keeps the product UI surface not applicable through B3.
+The browser Workbench consumes generated SDK parsers and adds no API shape,
+domain state, retry queue, persistence, or public binding. Its local Vite proxy
+is not an endpoint-configuration authority. The Workbench is review code, not a
+published web product or B4 completion claim.
+
+## Workbench presentation truth
+
+| Affordance                                                                                          | Current truth                                                                                                                 | Owner before activation                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Product root and media navigation                                                                   | `/` renders the preserved Tabler-based Workbench. Empty and error states come from the host; no mock catalogue is loaded.     | B4 presentation evidence and B8 packaging remain open.                                                                                                   |
+| Local service status                                                                                | `/status` consumes the generated `system.health` parser.                                                                      | `system.health`; no new capability required.                                                                                                             |
+| Browser record list                                                                                 | `GET /api/v1/records` uses a real `identity_read` bearer held only in tab memory. Reload clears it.                           | Existing `identity.record.list` registry/OpenAPI/SDK surface.                                                                                            |
+| Tauri record list                                                                                   | Trusted host invokes the authenticated local records query without an HTTP round trip.                                        | Existing access and identity application ports.                                                                                                          |
+| Activity, watch-state, watchlist, collection, rating, review, note, tag, artwork, and episode edits | Approved controls remain visible but disabled when the host has no matching command. The UI does not mutate local mock state. | B4 must land each domain/application capability, registry disposition, applicable OpenAPI/SDK or IPC adapter, typed recovery, and E2E evidence together. |
+| API credential connection                                                                           | Active in the browser for record reads; active API-client administration stays in the trusted packaged host.                  | [Authentication boundaries](architecture/authentication.md).                                                                                             |
+| Passkey, OIDC/SSO, NuvioTV device, and master-password tabs                                         | Preserved with precise unavailable states. They submit no placeholder challenge, code, or password.                           | The owned completion gates are in [authentication boundaries](architecture/authentication.md).                                                           |
 
 The trusted Tauri host can persist non-secret network preferences, test a
 configured Fasti service, store Google Books and TMDB credentials in the

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import {
     IconChevronRight,
+    IconActivityHeartbeat,
     IconDatabase,
     IconLayoutSidebar,
     IconLayoutSidebarLeftExpand,
@@ -9,6 +10,7 @@
     IconPlugConnected,
     IconSettings,
     IconShieldCheck,
+    IconLogout,
     IconUserCircle,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
@@ -160,6 +162,7 @@
   );
   let themeDrawerOpen = $state(false);
   let authModalOpen = $state(false);
+  let sessionCredentialActive = $state(false);
 
   $effect(() => {
     try {
@@ -318,6 +321,25 @@
     }
   }
 
+  async function connectSessionCredential(credential: string): Promise<void> {
+    if (!host.setSessionCredential) {
+      throw new Error("This host does not accept browser session credentials.");
+    }
+    host.setSessionCredential(credential);
+    sessionCredentialActive = true;
+    recordsLoaded = true;
+    await loadRecords();
+  }
+
+  function clearSessionCredential(): void {
+    host.clearSessionCredential?.();
+    sessionCredentialActive = false;
+    mediaRecords = [];
+    recordsLoaded = false;
+    recordsProblem =
+      "Records need an active local bearer credential. Select Connect records and paste a credential with identity_read scope.";
+  }
+
   /** Inverse of record-projection.ts's `mediaKindForGrain` -- picks one
    * representative grain per display kind so a Discover search result can
    * become a record. Only "book" is exercised for real today (Google Books
@@ -443,6 +465,20 @@
   }
 </script>
 
+{#snippet recordProblemState()}
+  <section class="state-message" aria-labelledby="record-problem-title">
+    <h1 id="record-problem-title">{formatSectionTitle(activeSection)}</h1>
+    <p class="problem" role="alert">{recordsProblem}</p>
+    {#if host.setSessionCredential}
+      <button
+        type="button"
+        class="link-btn"
+        onclick={() => (authModalOpen = true)}>Connect records</button
+      >
+    {/if}
+  </section>
+{/snippet}
+
 <div class="workbench-shell">
   <NavSidebar
     {activeSection}
@@ -505,25 +541,48 @@
         <span class="section-title">{formatSectionTitle(activeSection)}</span>
       </div>
 
-      <button
-        type="button"
-        class="icon-btn"
-        onclick={() => (themeDrawerOpen = true)}
-        title="Theme settings"
-        aria-label="Theme settings"
-      >
-        <IconPalette size={18} />
-      </button>
+      <div class="top-bar-actions">
+        <a
+          class="icon-btn"
+          href="/status"
+          title="Service status"
+          aria-label="Service status"
+        >
+          <IconActivityHeartbeat size={18} />
+        </a>
 
-      <button
-        type="button"
-        class="icon-btn"
-        onclick={() => (authModalOpen = true)}
-        title="Sign in"
-        aria-label="Sign in"
-      >
-        <IconUserCircle size={18} />
-      </button>
+        <button
+          type="button"
+          class="icon-btn"
+          onclick={() => (themeDrawerOpen = true)}
+          title="Theme settings"
+          aria-label="Theme settings"
+        >
+          <IconPalette size={18} />
+        </button>
+
+        {#if host.setSessionCredential}
+          <button
+            type="button"
+            class="icon-btn"
+            onclick={sessionCredentialActive
+              ? clearSessionCredential
+              : () => (authModalOpen = true)}
+            title={sessionCredentialActive
+              ? "Clear browser credential"
+              : "Connect local credential"}
+            aria-label={sessionCredentialActive
+              ? "Clear browser credential"
+              : "Connect local credential"}
+          >
+            {#if sessionCredentialActive}
+              <IconLogout size={18} />
+            {:else}
+              <IconUserCircle size={18} />
+            {/if}
+          </button>
+        {/if}
+      </div>
     </header>
 
     <main id="main-content" class="main-content" tabindex="-1">
@@ -580,7 +639,7 @@
         {#if recordsLoading}
           <p class="state-message" role="status">Loading records…</p>
         {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
+          {@render recordProblemState()}
         {:else}
           <LibraryView
             records={mediaRecords}
@@ -592,7 +651,7 @@
         {#if recordsLoading}
           <p class="state-message" role="status">Loading records…</p>
         {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
+          {@render recordProblemState()}
         {:else}
           <CalendarView {watchingRecords} onSelectRecord={openRecord} />
         {/if}
@@ -600,7 +659,7 @@
         {#if recordsLoading}
           <p class="state-message" role="status">Loading records…</p>
         {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
+          {@render recordProblemState()}
         {:else if selectedRecord}
           <MediaDetailView
             record={selectedRecord}
@@ -621,7 +680,7 @@
         {#if recordsLoading}
           <p class="state-message" role="status">Loading records…</p>
         {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
+          {@render recordProblemState()}
         {:else}
           <HomeView
             records={mediaRecords}
@@ -746,7 +805,13 @@
   onUpdateTheme={updateTheme}
 />
 
-<AuthModal show={authModalOpen} onClose={() => (authModalOpen = false)} />
+{#if host.setSessionCredential}
+  <AuthModal
+    show={authModalOpen}
+    onClose={() => (authModalOpen = false)}
+    onSubmit={connectSessionCredential}
+  />
+{/if}
 
 <style>
   .workbench-shell {
@@ -799,6 +864,12 @@
     min-width: 0;
   }
 
+  .top-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .section-title {
     font-family: var(--fasti-font-display);
     font-weight: 700;
@@ -819,6 +890,7 @@
     background: transparent;
     color: var(--fasti-text-muted);
     cursor: pointer;
+    text-decoration: none;
   }
 
   .icon-btn:hover {
@@ -846,8 +918,14 @@
     color: var(--fasti-text-muted);
   }
 
-  .state-message.problem {
+  .state-message .problem {
     color: var(--fasti-state-error, #b42318);
+  }
+
+  .state-message h1 {
+    margin-bottom: 8px;
+    color: var(--fasti-text-primary);
+    font-family: var(--fasti-font-display);
   }
 
   .link-btn {

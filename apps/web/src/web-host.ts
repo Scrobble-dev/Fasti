@@ -15,24 +15,7 @@ import type {
 } from "@fasti/ui";
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
-
-/** Bearer credential for this browser's own session, distinct from provider
- * API keys (never stored client-side at all -- see `providerCredentialStatus`
- * below). Nothing writes this key yet: the browser has no working sign-in
- * flow (`auth-modal.svelte` is UI-only pending a real passkey/OIDC/PAT
- * backend), so every call below fails closed with a clear message until one
- * exists. The SDK methods are real and wired now; only the credential source
- * is still missing. */
-const CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
-
-function storedCredential(): string | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    return localStorage.getItem(CREDENTIAL_STORAGE_KEY) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
+const RETIRED_CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
 
 const PROVIDERS: ReadonlyArray<{
   provider: string;
@@ -152,23 +135,43 @@ function unavailable(message: string): Error {
   return new Error(message);
 }
 
-function requireCredential(): string {
-  const credential = storedCredential();
-  if (!credential) {
-    throw unavailable(
-      "Sign in to Fasti to see and manage records. This browser has no stored credential yet.",
-    );
-  }
-  return credential;
-}
-
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.removeItem(RETIRED_CREDENTIAL_STORAGE_KEY);
+    } catch {
+      // The browser host still fails closed when storage is unavailable.
+    }
+  }
+  let sessionCredential: string | undefined;
+  const requireCredential = (): string => {
+    if (!sessionCredential) {
+      throw unavailable(
+        "Records need an active local bearer credential. Select Connect records and paste a credential with identity_read scope.",
+      );
+    }
+    return sessionCredential;
+  };
   let client = new FastiClient({
     baseUrl: defaultApiUrl,
     credential: requireCredential,
   });
 
   return {
+    setSessionCredential(credential: string): void {
+      const normalized = credential.trim();
+      if (!/^[0-9a-f]{64}$/i.test(normalized)) {
+        throw unavailable(
+          "The bearer credential must contain exactly 64 hexadecimal characters.",
+        );
+      }
+      sessionCredential = normalized;
+    },
+
+    clearSessionCredential(): void {
+      sessionCredential = undefined;
+    },
+
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return loadNetworkConfiguration(defaultApiUrl);
     },
