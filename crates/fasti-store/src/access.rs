@@ -17,6 +17,7 @@ use fasti_application::{
 };
 use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
+#[cfg(not(target_os = "linux"))]
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
@@ -353,28 +354,30 @@ const BOOTSTRAP_SECRET_FILENAME: &str = "bootstrap.secret";
 /// `fasti.lock` and evidence files already use (see `kernel.rs`).
 #[cfg(target_os = "linux")]
 fn create_new_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
-    if let Some(directory) = kernel.inner.data_root.anchored_directory() {
-        let fd = rustix::fs::openat2(
-            directory,
-            BOOTSTRAP_SECRET_FILENAME,
-            rustix::fs::OFlags::WRONLY
-                | rustix::fs::OFlags::CREATE
-                | rustix::fs::OFlags::EXCL
-                | rustix::fs::OFlags::CLOEXEC
-                | rustix::fs::OFlags::NOFOLLOW,
-            rustix::fs::Mode::from_raw_mode(0o600),
-            rustix::fs::ResolveFlags::BENEATH
-                | rustix::fs::ResolveFlags::NO_MAGICLINKS
-                | rustix::fs::ResolveFlags::NO_SYMLINKS
-                | rustix::fs::ResolveFlags::NO_XDEV,
-        )
-        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
-        return Ok(std::fs::File::from(fd));
-    }
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+    // anchored_directory() is Some on every target_os = "linux" build (see
+    // its own identically-gated impl in kernel.rs); there is no path-string
+    // fallback to keep this function's only sink anchored to the fd.
+    let directory = kernel
+        .inner
+        .data_root
+        .anchored_directory()
+        .expect("anchored directory is always present on linux");
+    let fd = rustix::fs::openat2(
+        directory,
+        BOOTSTRAP_SECRET_FILENAME,
+        rustix::fs::OFlags::WRONLY
+            | rustix::fs::OFlags::CREATE
+            | rustix::fs::OFlags::EXCL
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::from_raw_mode(0o600),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+    Ok(std::fs::File::from(fd))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -389,21 +392,25 @@ fn create_new_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<st
 /// same anchored-directory `openat2` guarantee as creation.
 #[cfg(target_os = "linux")]
 fn open_existing_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
-    if let Some(directory) = kernel.inner.data_root.anchored_directory() {
-        let fd = rustix::fs::openat2(
-            directory,
-            BOOTSTRAP_SECRET_FILENAME,
-            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
-            rustix::fs::Mode::empty(),
-            rustix::fs::ResolveFlags::BENEATH
-                | rustix::fs::ResolveFlags::NO_MAGICLINKS
-                | rustix::fs::ResolveFlags::NO_SYMLINKS
-                | rustix::fs::ResolveFlags::NO_XDEV,
-        )
-        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
-        return Ok(std::fs::File::from(fd));
-    }
-    std::fs::File::open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+    // See create_new_bootstrap_secret_file: anchored_directory() is always
+    // Some here, so this stays fd-anchored with no path-string fallback.
+    let directory = kernel
+        .inner
+        .data_root
+        .anchored_directory()
+        .expect("anchored directory is always present on linux");
+    let fd = rustix::fs::openat2(
+        directory,
+        BOOTSTRAP_SECRET_FILENAME,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+        rustix::fs::Mode::empty(),
+        rustix::fs::ResolveFlags::BENEATH
+            | rustix::fs::ResolveFlags::NO_MAGICLINKS
+            | rustix::fs::ResolveFlags::NO_SYMLINKS
+            | rustix::fs::ResolveFlags::NO_XDEV,
+    )
+    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+    Ok(std::fs::File::from(fd))
 }
 
 #[cfg(not(target_os = "linux"))]
