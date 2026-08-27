@@ -31,6 +31,7 @@
   import type {
     MediaRecord,
     ProviderCredentialStatus,
+    ProviderSearchCandidate,
     ResolveReviewInput,
     ReviewItem,
     ThemeSettings,
@@ -309,6 +310,65 @@
     }
   }
 
+  /** Inverse of record-projection.ts's `mediaKindForGrain` -- picks one
+   * representative grain per display kind so a Discover search result can
+   * become a record. Only "book" is exercised for real today (Google Books
+   * is the only working provider); the rest are best-effort for when a real
+   * provider search exists for them. */
+  function grainForMediaKind(kind: string): string {
+    switch (kind) {
+      case "movie":
+        return "film";
+      case "show":
+      case "anime":
+        return "series";
+      case "music":
+        return "recording";
+      case "book":
+      case "manga":
+      case "comic":
+        return "chapter";
+      case "podcast":
+        return "podcast_feed";
+      case "game":
+        return "game_release";
+      default:
+        return "custom";
+    }
+  }
+
+  async function trackRecordFromDiscover(
+    candidate: ProviderSearchCandidate,
+  ): Promise<void> {
+    if (
+      !host.createRecord ||
+      !host.attachIdentifier ||
+      !host.registerNamespace
+    ) {
+      throw new Error(
+        "Adding titles to your library is not available on this host.",
+      );
+    }
+    const grain = grainForMediaKind(candidate.kind);
+    await host.registerNamespace({
+      namespace: candidate.provider,
+      label: candidate.provider,
+      grains: [grain],
+      id_pattern: ".+",
+      normalization: "identity",
+      licence_posture: "identifiers_only",
+    });
+    const created = await host.createRecord(grain);
+    await host.attachIdentifier({
+      record_id: created.record_id,
+      namespace: candidate.provider,
+      grain,
+      value: candidate.provider_id,
+    });
+    recordsLoaded = false;
+    await loadRecords();
+  }
+
   const watchingRecords = $derived(
     mediaRecords.filter((record) => record.status === "watching"),
   );
@@ -476,6 +536,11 @@
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
+          onTrackRecord={host.createRecord &&
+          host.attachIdentifier &&
+          host.registerNamespace
+            ? trackRecordFromDiscover
+            : undefined}
         />
       {:else if activeSection === "reconciliation"}
         {#if reviewsLoading}

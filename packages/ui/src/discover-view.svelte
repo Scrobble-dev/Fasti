@@ -16,6 +16,7 @@
     ) => Promise<ProviderSearchCandidate[]>;
     onOpenSettings: () => void;
     onRetry: () => void;
+    onTrackRecord?: (candidate: ProviderSearchCandidate) => Promise<void>;
   }
 
   let {
@@ -25,6 +26,7 @@
     onSearch,
     onOpenSettings,
     onRetry,
+    onTrackRecord,
   }: Props = $props();
   let query = $state("");
   let results: ProviderSearchCandidate[] = $state([]);
@@ -32,6 +34,28 @@
   let problem = $state("");
   let searched = $state(false);
   let completedQuery = $state("");
+  let trackingId = $state("");
+  let trackedIds = $state<Set<string>>(new Set());
+  let trackProblem = $state("");
+
+  async function trackRecord(
+    candidate: ProviderSearchCandidate,
+  ): Promise<void> {
+    if (!onTrackRecord || trackingId) return;
+    trackingId = candidate.provider_id;
+    trackProblem = "";
+    try {
+      await onTrackRecord(candidate);
+      trackedIds = new Set([...trackedIds, candidate.provider_id]);
+    } catch (error) {
+      trackProblem = hostProblemText(
+        error,
+        "Fasti could not add this title to your library.",
+      );
+    } finally {
+      trackingId = "";
+    }
+  }
   const googleBooks = $derived(
     providerCredentials?.find((item) => item.provider === "google-books"),
   );
@@ -159,9 +183,29 @@
                   <dd><code>{result.provider_id}</code></dd>
                 </div>
               </dl>
+              {#if onTrackRecord}
+                <button
+                  type="button"
+                  class="track-btn"
+                  disabled={Boolean(trackingId) ||
+                    trackedIds.has(result.provider_id)}
+                  onclick={() => trackRecord(result)}
+                >
+                  {#if trackedIds.has(result.provider_id)}
+                    Added to library
+                  {:else if trackingId === result.provider_id}
+                    Adding…
+                  {:else}
+                    Track Now
+                  {/if}
+                </button>
+              {/if}
             </li>
           {/each}
         </ol>
+        {#if trackProblem}
+          <p class="problem" role="alert">{trackProblem}</p>
+        {/if}
       {:else}
         <p>Enter a title, author, or ISBN.</p>
       {/if}
@@ -316,6 +360,10 @@
 
   .problem {
     color: var(--fasti-state-error, #b42318);
+  }
+
+  .track-btn {
+    margin-top: 12px;
   }
 
   @media (max-width: 47.99rem) {

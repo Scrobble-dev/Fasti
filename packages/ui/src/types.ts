@@ -265,6 +265,55 @@ export interface WorkbenchHost {
   listReviews?(): Promise<ReviewItem[]>;
   resolveReview?(input: ResolveReviewInput): Promise<ResolveReviewOutcome>;
   listRecords?(): Promise<RecordSummary[]>;
+  createRecord?(grain: string): Promise<CreateRecordResult>;
+  attachIdentifier?(
+    input: AttachIdentifierInput,
+  ): Promise<AttachIdentifierResult>;
+  registerNamespace?(
+    input: RegisterNamespaceInput,
+  ): Promise<RegisterNamespaceResult>;
+}
+
+/** Wire shape of the desktop host's `create_record` command output. */
+export interface CreateRecordResult {
+  readonly record_id: string;
+  readonly grain: string;
+}
+
+/** Wire shape of the desktop host's `attach_identifier` command input.
+ * `grain` must match the target record's own grain -- the host rejects a
+ * mismatch, and rejects any namespace that hasn't been registered first
+ * (see `registerNamespace`). */
+export interface AttachIdentifierInput {
+  readonly record_id: string;
+  readonly namespace: string;
+  readonly grain: string;
+  readonly value: string;
+}
+
+export interface AttachIdentifierResult {
+  readonly external_identifier_id: string;
+  readonly record_id: string;
+  readonly created: boolean;
+}
+
+/** Wire shape of the desktop host's `register_namespace` command input.
+ * Declares which grains a provider namespace (e.g. "google_books") may
+ * attach claims for -- required once per namespace before the first
+ * `attachIdentifier` call under it. */
+export interface RegisterNamespaceInput {
+  readonly namespace: string;
+  readonly label: string;
+  readonly grains: string[];
+  readonly id_pattern: string;
+  readonly normalization: string;
+  readonly licence_posture:
+    "open" | "identifiers_only" | "indirect_only" | "excluded" | "unknown";
+}
+
+export interface RegisterNamespaceResult {
+  readonly namespace: string;
+  readonly created: boolean;
 }
 
 /** Which tier of the resolution order actually supplied a field's displayed value.

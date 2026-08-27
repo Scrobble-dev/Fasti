@@ -193,6 +193,9 @@
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
         listRecords: () => invoke("list_records"),
+        createRecord: (grain) => invoke("create_record", { grain }),
+        attachIdentifier: (input) => invoke("attach_identifier", { input }),
+        registerNamespace: (input) => invoke("register_namespace", { input }),
       };
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
     } catch (error) {
