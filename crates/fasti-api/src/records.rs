@@ -8,7 +8,8 @@ use axum::{
 };
 use fasti_application::{
     AttachIdentifierCommand, AuthenticateCredentialQuery, CapabilityKey, CreateRecordCommand,
-    FastiProblem, ListRecordsQuery, RegisterNamespaceDefinitionCommand, SecretMaterial,
+    FastiProblem, ListRecordsQuery, ProblemCode, RegisterNamespaceDefinitionCommand,
+    SecretMaterial,
 };
 use fasti_contracts::{
     AttachIdentifierRequest, AttachIdentifierResponse, CreateRecordRequest, CreateRecordResponse,
@@ -47,8 +48,22 @@ fn bearer_secret(
     })
 }
 
-fn invalid_grain(capability: CapabilityKey, correlation_id: RequestCorrelationId) -> HttpProblem {
+fn invalid_identifier_input(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> HttpProblem {
     application_problem(Box::new(FastiProblem::invalid_identifier(
+        capability,
+        correlation_id,
+    )))
+}
+
+fn validation_failed(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> HttpProblem {
+    application_problem(Box::new(FastiProblem::from_code(
+        ProblemCode::ValidationFailed,
         capability,
         correlation_id,
     )))
@@ -94,8 +109,8 @@ pub(crate) async fn create_record(
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
     let secret = bearer_secret(&headers, capability, correlation_id)?;
-    let grain =
-        Grain::from_str(&request.grain).map_err(|_| invalid_grain(capability, correlation_id))?;
+    let grain = Grain::from_str(&request.grain)
+        .map_err(|_| invalid_identifier_input(capability, correlation_id))?;
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
@@ -147,11 +162,11 @@ pub(crate) async fn attach_identifier(
     let record_id = request
         .record_id
         .parse()
-        .map_err(|_| invalid_grain(capability, correlation_id))?;
-    let grain =
-        Grain::from_str(&request.grain).map_err(|_| invalid_grain(capability, correlation_id))?;
+        .map_err(|_| invalid_identifier_input(capability, correlation_id))?;
+    let grain = Grain::from_str(&request.grain)
+        .map_err(|_| invalid_identifier_input(capability, correlation_id))?;
     let claim = ExternalIdentifierClaim::try_new(&request.namespace, grain, &request.value)
-        .map_err(|_| invalid_grain(capability, correlation_id))?;
+        .map_err(|_| invalid_identifier_input(capability, correlation_id))?;
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
@@ -181,7 +196,7 @@ pub(crate) async fn attach_identifier(
     path = "/api/v1/records",
     tag = "records",
     responses(
-        (status = 200, description = "Records visible to this credential's workspace", body = ListRecordsResponse),
+        (status = 200, description = "Active records visible to this credential's workspace", body = ListRecordsResponse),
         (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Credential lacks record-read scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
@@ -214,6 +229,8 @@ pub(crate) async fn list_records(
             .map(|summary| RecordSummaryDto {
                 record_id: summary.record_id().to_string(),
                 grain: summary.grain().as_str().to_owned(),
+                // The read model intentionally selects only active records. Do
+                // not fabricate a wider lifecycle state on this surface.
                 status: "active".to_owned(),
                 title: resolved_field_dto(summary.title()),
                 poster: resolved_field_dto(summary.poster()),
@@ -264,7 +281,7 @@ pub(crate) async fn register_namespace(
 
     let mut grains = Vec::with_capacity(request.grains.len());
     for grain in &request.grains {
-        grains.push(Grain::from_str(grain).map_err(|_| invalid_grain(capability, correlation_id))?);
+        grains.push(Grain::from_str(grain).map_err(|_| validation_failed(capability, correlation_id))?);
     }
     let licence_posture = match request.licence_posture.as_str() {
         "open" => NamespaceLicencePosture::Open,
@@ -272,7 +289,7 @@ pub(crate) async fn register_namespace(
         "indirect_only" => NamespaceLicencePosture::IndirectOnly,
         "excluded" => NamespaceLicencePosture::Excluded,
         "unknown" => NamespaceLicencePosture::Unknown,
-        _ => return Err(invalid_grain(capability, correlation_id)),
+        _ => return Err(validation_failed(capability, correlation_id)),
     };
     let definition = NamespaceDefinition::try_new(
         &request.namespace,
@@ -282,7 +299,7 @@ pub(crate) async fn register_namespace(
         &request.normalization,
         licence_posture,
     )
-    .map_err(|_| invalid_grain(capability, correlation_id))?;
+    .map_err(|_| validation_failed(capability, correlation_id))?;
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
