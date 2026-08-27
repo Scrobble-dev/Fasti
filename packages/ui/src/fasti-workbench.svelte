@@ -9,7 +9,9 @@
     IconPlugConnected,
     IconSettings,
     IconShieldCheck,
+    IconUserCircle,
   } from "@tabler/icons-svelte";
+  import AuthModal from "./auth-modal.svelte";
   import ConnectionsView from "./connections-view.svelte";
   import RuntimeSettingsView from "./runtime-settings-view.svelte";
   import DiscoverView from "./discover-view.svelte";
@@ -118,6 +120,7 @@
     loadPersisted("fasti-theme-settings", DEFAULT_THEME_SETTINGS),
   );
   let themeDrawerOpen = $state(false);
+  let authModalOpen = $state(false);
 
   $effect(() => {
     try {
@@ -412,6 +415,16 @@
       >
         <IconPalette size={18} />
       </button>
+
+      <button
+        type="button"
+        class="icon-btn"
+        onclick={() => (authModalOpen = true)}
+        title="Sign in"
+        aria-label="Sign in"
+      >
+        <IconUserCircle size={18} />
+      </button>
     </header>
 
     <main id="main-content" class="main-content" tabindex="-1">
@@ -611,6 +624,8 @@
   onClose={() => (themeDrawerOpen = false)}
   onUpdateTheme={updateTheme}
 />
+
+<AuthModal show={authModalOpen} onClose={() => (authModalOpen = false)} />
 
 <style>
   .workbench-shell {
