@@ -26,6 +26,19 @@ textarea {
   color: inherit;
 }
 
+:where(
+  button,
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea
+) {
+  min-height: var(--fasti-touch-target-min);
+}
+
+:where(button) {
+  min-width: var(--fasti-touch-target-min);
+}
+
 select option {
   background-color: var(--fasti-surface-paper, #ffffff) !important;
   color: var(--fasti-text-primary, #181716) !important;
