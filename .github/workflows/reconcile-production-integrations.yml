@@ -1,0 +1,67 @@
+name: Reconcile production integration generated artifacts
+
+on:
+  push:
+    branches:
+      - feat/production-integrations
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    if: >-
+      github.repository == 'Scrobble-dev/Fasti' &&
+      github.ref == 'refs/heads/feat/production-integrations' &&
+      startsWith(github.event.head_commit.message, 'ci(maintenance): reconcile integration generated artifacts')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out exact integration branch head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feat/production-integrations
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
+        with:
+          toolchain: stable
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+
+      - name: Reconcile lock, formatting, and generated contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          before_manifest="$(sha256sum Cargo.toml crates/*/Cargo.toml apps/*/Cargo.toml 2>/dev/null | sha256sum)"
+          cargo metadata --format-version 1 >/dev/null
+          after_manifest="$(sha256sum Cargo.toml crates/*/Cargo.toml apps/*/Cargo.toml 2>/dev/null | sha256sum)"
+          test "$before_manifest" = "$after_manifest"
+          cargo fmt --all
+          pnpm install --frozen-lockfile
+          pnpm format
+          cargo xtask contract generate
+          pnpm format
+
+      - name: Remove one-shot write authority and commit deterministic outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/reconcile-production-integrations.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'Expected at least the one-shot workflow deletion.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'chore(integrations): reconcile generated artifacts and remove maintenance authority'
+          git push origin HEAD:feat/production-integrations
