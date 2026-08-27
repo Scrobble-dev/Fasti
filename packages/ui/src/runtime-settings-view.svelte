@@ -284,28 +284,33 @@
       <button
         type="button"
         class:active={active === "network"}
+        aria-pressed={active === "network"}
         onclick={() => (active = "network")}>Network</button
       >
       <button
         type="button"
         class:active={active === "providers"}
+        aria-pressed={active === "providers"}
         onclick={() => (active = "providers")}>Metadata credentials</button
       >
       <button
         type="button"
         class:active={active === "preferences"}
+        aria-pressed={active === "preferences"}
         onclick={() => (active = "preferences")}
         ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</button
       >
       <button
         type="button"
         class:active={active === "custom_fields"}
+        aria-pressed={active === "custom_fields"}
         onclick={() => (active = "custom_fields")}
         ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
       >
       <button
         type="button"
         class:active={active === "system"}
+        aria-pressed={active === "system"}
         onclick={() => (active = "system")}>Capability status</button
       >
     </nav>
@@ -432,16 +437,17 @@
       {:else if active === "preferences"}
         <section aria-labelledby="preferences-settings-title">
           <h2 id="preferences-settings-title">Preferences & Metadata</h2>
-          <p>
-            Defaults used when searching providers, projecting metadata, and
-            displaying progress across the library.
+          <p id="preferences-inactive" class="inactive-note" role="note">
+            Not active. Saved values are preserved, but current provider
+            searches and Records do not read these preferences yet.
           </p>
 
-          <div class="prefs-grid">
+          <div class="prefs-grid" aria-describedby="preferences-inactive">
             <div class="form-field">
               <label for="pref-provider-region">Provider Region</label>
               <select
                 id="pref-provider-region"
+                disabled
                 value={workbenchPreferences.providerRegion}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -458,6 +464,7 @@
               <label for="pref-metadata-language">Metadata Language</label>
               <select
                 id="pref-metadata-language"
+                disabled
                 value={workbenchPreferences.metadataLanguage}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -474,6 +481,7 @@
               <label for="pref-tv-provider">TV Provider</label>
               <select
                 id="pref-tv-provider"
+                disabled
                 value={workbenchPreferences.tvProvider}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -489,6 +497,7 @@
               <label for="pref-anime-provider">Anime Provider</label>
               <select
                 id="pref-anime-provider"
+                disabled
                 value={workbenchPreferences.animeProvider}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -506,6 +515,7 @@
               <label for="pref-title-language">Title Language Preference</label>
               <select
                 id="pref-title-language"
+                disabled
                 value={workbenchPreferences.titleLanguage}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -523,6 +533,7 @@
               <label for="pref-hide-completed">Hide Completed</label>
               <select
                 id="pref-hide-completed"
+                disabled
                 value={workbenchPreferences.hideCompleted}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -540,6 +551,7 @@
               <label for="pref-game-logging">Game Logging</label>
               <select
                 id="pref-game-logging"
+                disabled
                 value={workbenchPreferences.gameLogging}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -556,6 +568,7 @@
               <label for="pref-progress-format">Progress Format</label>
               <select
                 id="pref-progress-format"
+                disabled
                 value={workbenchPreferences.progressFormat}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -573,6 +586,7 @@
               <label for="pref-session-duration">Session Duration</label>
               <select
                 id="pref-session-duration"
+                disabled
                 value={workbenchPreferences.sessionDuration}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
@@ -591,24 +605,25 @@
           <label class="checkbox-field">
             <input
               type="checkbox"
+              disabled
               checked={workbenchPreferences.hideZeroRatings}
               onchange={(e) =>
                 onUpdateWorkbenchPreferences?.({
                   hideZeroRatings: e.currentTarget.checked,
                 })}
             />
-            <span>Hide Zero Ratings</span>
+            <span>Hide zero ratings</span>
           </label>
         </section>
       {:else if active === "custom_fields"}
         <section aria-labelledby="custom-fields-settings-title">
           <h2 id="custom-fields-settings-title">Custom Types & Fields</h2>
-          <p>
-            Register custom metadata fields and custom media types for this
-            Fasti node. Both are stored in your local workbench preferences.
+          <p id="custom-fields-inactive" class="inactive-note" role="note">
+            Not active. Saved definitions are preserved, but Fasti does not
+            apply them to node Records or schemas yet.
           </p>
 
-          <div class="setting-group">
+          <div class="setting-group" aria-describedby="custom-fields-inactive">
             <h3>Custom Metadata Fields</h3>
             <form onsubmit={handleAddCustomField} class="custom-field-form">
               <div class="prefs-grid">
@@ -617,6 +632,7 @@
                   <input
                     id="cf-name"
                     type="text"
+                    disabled
                     bind:value={newFieldName}
                     required
                   />
@@ -626,6 +642,7 @@
                   <input
                     id="cf-key"
                     type="text"
+                    disabled
                     class="mono"
                     placeholder="e.g. rewatch_count"
                     bind:value={newFieldKey}
@@ -634,7 +651,7 @@
                 </div>
                 <div class="form-field">
                   <label for="cf-type">Type</label>
-                  <select id="cf-type" bind:value={newFieldType}>
+                  <select id="cf-type" bind:value={newFieldType} disabled>
                     <option value="string">Text</option>
                     <option value="number">Number</option>
                     <option value="boolean">Boolean</option>
@@ -646,7 +663,7 @@
                 </div>
                 <div class="form-field">
                   <label for="cf-target">Target Media Kind</label>
-                  <select id="cf-target" bind:value={newFieldTarget}>
+                  <select id="cf-target" bind:value={newFieldTarget} disabled>
                     {#each MEDIA_KIND_OPTIONS as kind}
                       <option value={kind}>{kind}</option>
                     {/each}
@@ -658,13 +675,14 @@
                     <input
                       id="cf-options"
                       type="text"
+                      disabled
                       placeholder="e.g. Physical, Digital, Both"
                       bind:value={newFieldOptions}
                     />
                   </div>
                 {/if}
               </div>
-              <button type="submit" class="secondary mt">
+              <button type="submit" class="secondary mt" disabled>
                 <IconPlus size={16} aria-hidden="true" /> Add Custom Field
               </button>
             </form>
@@ -682,6 +700,7 @@
                     <button
                       type="button"
                       class="danger icon-only"
+                      disabled
                       onclick={() => handleDeleteCustomField(field.key)}
                       aria-label="Delete custom field {field.label}"
                     >
@@ -697,7 +716,7 @@
             {/if}
           </div>
 
-          <div class="setting-group">
+          <div class="setting-group" aria-describedby="custom-fields-inactive">
             <h3>Custom Media Types</h3>
             <form onsubmit={handleAddCustomMediaType} class="custom-field-form">
               <div class="prefs-grid">
@@ -706,6 +725,7 @@
                   <input
                     id="cmt-name"
                     type="text"
+                    disabled
                     bind:value={newTypeName}
                     required
                   />
@@ -715,6 +735,7 @@
                   <input
                     id="cmt-singular"
                     type="text"
+                    disabled
                     placeholder="e.g. Board Game"
                     bind:value={newTypeSingular}
                     required
@@ -725,6 +746,7 @@
                   <input
                     id="cmt-plural"
                     type="text"
+                    disabled
                     placeholder="e.g. Board Games"
                     bind:value={newTypePlural}
                     required
@@ -735,13 +757,18 @@
                   <input
                     id="cmt-icon"
                     type="text"
+                    disabled
                     placeholder="🎲"
                     bind:value={newTypeIcon}
                   />
                 </div>
                 <div class="form-field">
                   <label for="cmt-progress">Progress Tracking</label>
-                  <select id="cmt-progress" bind:value={newTypeProgress}>
+                  <select
+                    id="cmt-progress"
+                    bind:value={newTypeProgress}
+                    disabled
+                  >
                     <option value="none">None</option>
                     <option value="episodes">Episodes</option>
                     <option value="percentage">Percentage</option>
@@ -750,7 +777,7 @@
                   </select>
                 </div>
               </div>
-              <button type="submit" class="secondary mt">
+              <button type="submit" class="secondary mt" disabled>
                 <IconPlus size={16} aria-hidden="true" /> Add Custom Media Type
               </button>
             </form>
@@ -769,6 +796,7 @@
                     <button
                       type="button"
                       class="danger icon-only"
+                      disabled
                       onclick={() => handleDeleteCustomMediaType(mediaType.id)}
                       aria-label="Delete custom media type {mediaType.name}"
                     >
@@ -803,6 +831,14 @@
             <div>
               <dt>Protected metadata credentials</dt>
               <dd>Host-dependent</dd>
+            </div>
+            <div>
+              <dt>Provider and display preferences</dt>
+              <dd>Not active; saved values are preserved</dd>
+            </div>
+            <div>
+              <dt>Custom types and fields</dt>
+              <dd>Not active; no node schema contract exists yet</dd>
             </div>
             <div>
               <dt>Scoped external API clients</dt>
@@ -1041,6 +1077,17 @@
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
     margin-top: 20px;
+  }
+
+  .inactive-note {
+    padding: 12px 14px;
+    border-left: 3px solid var(--fasti-state-attention);
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-attention) 9%,
+      transparent
+    );
+    color: var(--fasti-text-primary);
   }
 
   .form-field {
