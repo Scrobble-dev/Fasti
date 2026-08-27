@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 use utoipa::OpenApi;
 
+mod integrations;
 mod local;
 mod observation;
 mod problem;
@@ -44,7 +45,13 @@ pub async fn health_check() -> Json<HealthResponse> {
         records::create_record,
         records::attach_identifier,
         records::list_records,
-        records::register_namespace
+        records::register_namespace,
+        integrations::integration_status,
+        integrations::nuvio_webhook,
+        integrations::tautulli_webhook,
+        integrations::jellyfin_webhook,
+        integrations::emby_webhook,
+        integrations::plex_webhook
     ),
     components(schemas(
         HealthResponse,
@@ -56,6 +63,9 @@ pub async fn health_check() -> Json<HealthResponse> {
         fasti_contracts::CredentialSchemeDto,
         fasti_contracts::EnrollFirstClientRequest,
         fasti_contracts::InitializeNodeRequest,
+        fasti_contracts::IntegrationObservationRequest,
+        fasti_contracts::IntegrationStatusDto,
+        fasti_contracts::IntegrationStatusListResponse,
         fasti_contracts::ListRecordsResponse,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::ObservationIdentifierInput,
@@ -74,18 +84,27 @@ pub async fn health_check() -> Json<HealthResponse> {
 )]
 struct ApiDoc;
 
-/// Builds the OpenAPI 3.1 contract for routes actually mounted by [`api_router`].
+/// Builds the OpenAPI 3.1 contract for routes actually mounted by [`api_router`]
+/// and the dedicated integration listener.
 pub fn openapi() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
 }
 
-/// Constructs the health-only router used by every non-loopback listener.
-///
-/// This router is intentionally separate from the local application router so a
-/// future local capability cannot become remotely reachable through container or
-/// operator listener configuration by accident.
+/// Constructs the health-only router used by every non-loopback general
+/// listener. Integration ingress uses [`integration_router`] instead of widening
+/// this surface.
 pub fn health_router() -> Router {
     Router::new().route("/api/v1/health", get(health_check))
+}
+
+/// Constructs the dedicated integration ingress surface.
+///
+/// It intentionally exposes only health, integration status, and authenticated
+/// provider adapters. Node bootstrap, generic record mutation, and the generic
+/// observation endpoint are never mounted here.
+pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
+    let state = local::LocalApiState { kernel };
+    health_router().merge(integrations::router().with_state(state))
 }
 
 /// Constructs the durable loopback API router for fastid.
@@ -98,8 +117,8 @@ pub fn health_router() -> Router {
 ///
 /// These validations enforce the durable route security model: local capability
 /// routes must never be exposed on non-loopback listeners, and must always have
-/// an explicit data root. Non-loopback listeners or missing data roots must use
-/// [`health_router`] instead.
+/// an explicit data root. Non-loopback general listeners or missing data roots
+/// must use [`health_router`] instead.
 ///
 /// # Panics
 ///
@@ -113,7 +132,12 @@ pub fn api_router(kernel: Arc<dyn LocalKernel>, bind_addr: SocketAddr, data_root
         !data_root.as_os_str().is_empty(),
         "api_router requires non-empty data_root"
     );
-    health_router().merge(local::router(kernel))
+    let integration_state = local::LocalApiState {
+        kernel: Arc::clone(&kernel),
+    };
+    health_router()
+        .merge(local::router(kernel))
+        .merge(integrations::router().with_state(integration_state))
 }
 
 #[cfg(test)]
@@ -143,7 +167,7 @@ mod tests {
     }
 
     #[test]
-    fn openapi_is_3_1_and_documents_the_real_local_routes() {
+    fn openapi_is_3_1_and_documents_the_real_routes() {
         let document = openapi();
 
         assert!(matches!(document.openapi, OpenApiVersion::Version31));
@@ -155,10 +179,16 @@ mod tests {
             "/api/v1/records",
             "/api/v1/records/identifiers",
             "/api/v1/namespaces",
+            "/api/v1/integrations",
+            "/api/v1/integrations/nuvio/webhook",
+            "/api/v1/integrations/tautulli/webhook",
+            "/api/v1/integrations/jellyfin/webhook",
+            "/api/v1/integrations/emby/webhook",
+            "/api/v1/integrations/plex/webhook",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 7);
+        assert_eq!(document.paths.paths.len(), 13);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -172,6 +202,9 @@ mod tests {
             "ObservationIngressKind",
             "SubmitObservationRequest",
             "SubmitObservationResponse",
+            "IntegrationObservationRequest",
+            "IntegrationStatusDto",
+            "IntegrationStatusListResponse",
             "AttachIdentifierRequest",
             "AttachIdentifierResponse",
             "CreateRecordRequest",
@@ -485,6 +518,37 @@ mod tests {
             .await
             .expect("router response");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn integration_router_exposes_adapters_but_not_bootstrap_or_generic_mutation() {
+        let (_root, kernel) = test_kernel();
+        let app = integration_router(kernel);
+
+        let status = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/integrations")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(status.status(), StatusCode::OK);
+
+        for path in ["/api/v1/node/initialization", "/api/v1/records", "/api/v1/observations"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post(path)
+                        .body(Body::empty())
+                        .expect("valid request"),
+                )
+                .await
+                .expect("router response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[cfg(target_os = "linux")]
