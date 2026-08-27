@@ -30,7 +30,10 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
       .map(({ message, path }) => `${path?.join(".") ?? "$"}: ${message}`)
       .join("\n")}`,
   );
-  assert.ok(result.document, "integration AsyncAPI parser returned no document");
+  assert.ok(
+    result.document,
+    "integration AsyncAPI parser returned no document",
+  );
   assert.equal(value.asyncapi, "3.1.0");
 
   const openapi = await readStrictJson(openApiPath);
@@ -42,8 +45,15 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
     ["plexObservation", "/api/v1/integrations/plex/webhook"],
   ]);
   for (const [channel, address] of expectedChannels) {
-    assert.equal(value.channels[channel]?.address, address, `${channel} address drifted`);
-    assert.ok(openapi.paths[address]?.post, `${address} is missing from generated OpenAPI`);
+    assert.equal(
+      value.channels[channel]?.address,
+      address,
+      `${channel} address drifted`,
+    );
+    assert.ok(
+      openapi.paths[address]?.post,
+      `${address} is missing from generated OpenAPI`,
+    );
   }
   assert.ok(
     openapi.paths["/api/v1/integrations"]?.get,
@@ -51,16 +61,30 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
   );
 
   for (const [operationName, operation] of Object.entries(value.operations)) {
-    assert.equal(operation.action, "receive", `${operationName} must be provider-to-Fasti receive`);
-    assert.equal(operation.bindings?.http?.method, "POST", `${operationName} must use POST`);
+    assert.equal(
+      operation.action,
+      "receive",
+      `${operationName} must be provider-to-Fasti receive`,
+    );
+    assert.equal(
+      operation.bindings?.http?.method,
+      "POST",
+      `${operationName} must use POST`,
+    );
     assert.equal(operation["x-fasti-capability-id"], "observation.accept");
-    assert.deepEqual(operation["x-fasti-required-scopes"], ["observation_accept"]);
+    assert.deepEqual(operation["x-fasti-required-scopes"], [
+      "observation_accept",
+    ]);
     assert.equal(operation["x-fasti-runtime-availability"], "implemented");
   }
 
   const asyncSchema = value.components.schemas.integrationObservationRequest;
-  const openApiSchema = openapi.components.schemas.IntegrationObservationRequest;
-  assert.ok(openApiSchema, "generated OpenAPI lacks IntegrationObservationRequest");
+  const openApiSchema =
+    openapi.components.schemas.IntegrationObservationRequest;
+  assert.ok(
+    openApiSchema,
+    "generated OpenAPI lacks IntegrationObservationRequest",
+  );
   assert.deepEqual(
     [...Object.keys(asyncSchema.properties)].sort(),
     [...Object.keys(openApiSchema.properties)].sort(),
@@ -90,7 +114,9 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const requestedRoot = process.argv[2] ? resolve(process.argv[2]) : repositoryRoot;
+  const requestedRoot = process.argv[2]
+    ? resolve(process.argv[2])
+    : repositoryRoot;
   await validateIntegrationContracts(requestedRoot);
   console.log(
     "PASS: production integration AsyncAPI matches generated OpenAPI and the scoped observation boundary",

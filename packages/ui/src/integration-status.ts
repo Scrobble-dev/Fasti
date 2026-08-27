@@ -32,8 +32,8 @@ export function hasIntegrationStatusHost(
 ): host is WorkbenchHost & IntegrationStatusHost {
   return Boolean(
     host &&
-      "listIntegrations" in host &&
-      typeof (host as Partial<IntegrationStatusHost>).listIntegrations ===
-        "function",
+    "listIntegrations" in host &&
+    typeof (host as Partial<IntegrationStatusHost>).listIntegrations ===
+      "function",
   );
 }

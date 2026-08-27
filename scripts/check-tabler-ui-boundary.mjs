@@ -78,7 +78,11 @@ async function checkManifests() {
   ];
   for (const manifest of manifests) {
     const value = JSON.parse(await readFile(join(ROOT, manifest), "utf8"));
-    for (const group of ["dependencies", "devDependencies", "peerDependencies"]) {
+    for (const group of [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+    ]) {
       for (const name of Object.keys(value[group] ?? {})) {
         const denied = deniedPackage(name);
         if (denied) {

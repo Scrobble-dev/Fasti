@@ -33,7 +33,8 @@
   ).env;
   const buildApiUrl = buildEnvironment.VITE_FASTI_API_URL?.trim();
   const buildPublicUrl = buildEnvironment.VITE_FASTI_PUBLIC_URL?.trim();
-  const configuredFallback = buildEnvironment.VITE_FASTI_PORT_FALLBACK ?? "fail";
+  const configuredFallback =
+    buildEnvironment.VITE_FASTI_PORT_FALLBACK ?? "fail";
   if (configuredFallback !== "auto" && configuredFallback !== "fail") {
     throw new TypeError("VITE_FASTI_PORT_FALLBACK must be auto or fail");
   }
@@ -46,7 +47,8 @@
     ? connectionEndpoint(buildPublicUrl, "build")
     : undefined;
 
-  const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  const isTauri =
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const client = new FastiClient({
     baseUrl:
       buildApiUrl ||
@@ -71,7 +73,8 @@
     if (typeof window === "undefined") return "status";
     const path = window.location.pathname;
     if (path === "/status") return "status";
-    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records")) return "workbench";
+    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records"))
+      return "workbench";
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("surface") === "workbench") return "workbench";
     if (urlParams.get("surface") === "status") return "status";
@@ -103,14 +106,16 @@
     if (error instanceof FastiProtocolError) {
       return {
         title: "The local service returned an invalid response",
-        detail: "Fasti rejected the response because it did not match the generated health contract.",
+        detail:
+          "Fasti rejected the response because it did not match the generated health contract.",
         recovery: "Stop the local service, rebuild it, and start it again.",
       };
     }
     return {
       title: "The local service is unavailable",
       detail: "Fasti did not answer on the configured service URL.",
-      recovery: "Check the network settings, start the service, then try again.",
+      recovery:
+        "Check the network settings, start the service, then try again.",
     };
   }
 
@@ -142,12 +147,19 @@
   }
 
   function applySetupProblem(error: unknown): void {
-    const candidate = error !== null && typeof error === "object" ? (error as Partial<DesktopProblem>) : {};
+    const candidate =
+      error !== null && typeof error === "object"
+        ? (error as Partial<DesktopProblem>)
+        : {};
     setupProblem = {
       code: candidate.code ?? "desktop_host_unavailable",
       title: candidate.title ?? "Fasti desktop host is unavailable",
-      detail: candidate.detail ?? "This interface must run inside the trusted Fasti desktop host.",
-      next_action: candidate.next_action ?? "Open the Fasti desktop application and try again.",
+      detail:
+        candidate.detail ??
+        "This interface must run inside the trusted Fasti desktop host.",
+      next_action:
+        candidate.next_action ??
+        "Open the Fasti desktop application and try again.",
     };
     setupState = "blocked";
   }
@@ -157,15 +169,26 @@
       const { invoke } = await import("@tauri-apps/api/core");
       host = {
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
-        saveNetworkConfiguration: (input) => invoke("save_network_configuration", { input }),
-        testEndpointConnection: (endpoint) => invoke("test_endpoint_connection", { input: { endpoint } }),
+        saveNetworkConfiguration: (input) =>
+          invoke("save_network_configuration", { input }),
+        testEndpointConnection: (endpoint) =>
+          invoke("test_endpoint_connection", { input: { endpoint } }),
         providerCredentialStatus: () => invoke("provider_credential_status"),
-        saveProviderCredential: (provider, credential) => invoke("save_provider_credential", { input: { provider, credential } }),
-        deleteProviderCredential: (provider) => invoke("delete_provider_credential", { input: { provider } }),
-        searchProvider: (provider, query) => invoke("search_provider", { input: { provider, query } }),
+        saveProviderCredential: (provider, credential) =>
+          invoke("save_provider_credential", {
+            input: { provider, credential },
+          }),
+        deleteProviderCredential: (provider) =>
+          invoke("delete_provider_credential", { input: { provider } }),
+        searchProvider: (provider, query) =>
+          invoke("search_provider", { input: { provider, query } }),
         listApiClients: () => invoke("list_api_clients"),
-        createApiClient: (scopes) => invoke("create_api_client", { input: { scopes } }),
-        revokeApiClient: (credentialId) => invoke("revoke_api_client", { input: { credential_id: credentialId } }),
+        createApiClient: (scopes) =>
+          invoke("create_api_client", { input: { scopes } }),
+        revokeApiClient: (credentialId) =>
+          invoke("revoke_api_client", {
+            input: { credential_id: credentialId },
+          }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
         listRecords: () => invoke("list_records"),
@@ -173,7 +196,9 @@
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),
         listIntegrations: async () => {
-          const network = await invoke<NetworkConfiguration>("load_network_configuration");
+          const network = await invoke<NetworkConfiguration>(
+            "load_network_configuration",
+          );
           return fetchIntegrationStatus(network.connection.service_url.value);
         },
       } as WorkbenchHost;
@@ -188,7 +213,9 @@
     if (typeof window !== "undefined" && window.location.hash) {
       window.history.replaceState(null, "", window.location.pathname);
     }
-    try { localStorage.setItem("fasti-surface", "workbench"); } catch {}
+    try {
+      localStorage.setItem("fasti-surface", "workbench");
+    } catch {}
   }
 
   async function setup(): Promise<void> {
@@ -200,7 +227,9 @@
     }
   }
 
-  function retryHealth(): void { void inspectHealth(true); }
+  function retryHealth(): void {
+    void inspectHealth(true);
+  }
   function toggleTheme(): void {
     theme = theme === "dark" ? "light" : "dark";
     applyTheme(theme);
@@ -222,7 +251,12 @@
   {#if setupState === "ready" && host}
     <FastiWorkbench {host} />
   {:else}
-    <SetupPanel state={setupState} problem={setupProblem} {cleanupPending} onSetup={setup} />
+    <SetupPanel
+      state={setupState}
+      problem={setupProblem}
+      {cleanupPending}
+      onSetup={setup}
+    />
   {/if}
 {:else}
   {#if activeSurface === "workbench" && host}
