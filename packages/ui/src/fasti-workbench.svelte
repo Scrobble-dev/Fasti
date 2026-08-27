@@ -431,7 +431,12 @@
       {#if activeSection === "connections"}
         <ConnectionsView {host} />
       {:else if activeSection === "settings"}
-        <RuntimeSettingsView {host} />
+        <RuntimeSettingsView
+          {host}
+          {workbenchPreferences}
+          onUpdateWorkbenchPreferences={(patch) =>
+            (workbenchPreferences = { ...workbenchPreferences, ...patch })}
+        />
       {:else if activeSection === "discover"}
         <DiscoverView
           providerCredentials={discoverProviders}
