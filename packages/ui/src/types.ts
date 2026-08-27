@@ -401,9 +401,29 @@ export interface ContextMenuItemConfig {
   order: number;
 }
 
+export type TvMetadataProvider = "tmdb" | "tvdb_v4";
+export type AnimeMetadataProvider = "mal" | "anilist" | "kitsu";
+export type TitleLanguagePreference = "romaji" | "english" | "native";
+export type HideCompletedMode = "disabled" | "home_only" | "everywhere";
+export type GameLoggingMode = "repeats" | "sessions";
+export type ProgressFormat = "percentage" | "time_remaining" | "episodes";
+
 export interface WorkbenchPreferences {
   sidebarCollapsed: boolean;
   sidebarHidden: boolean;
   navItems: NavItemConfig[];
   contextMenuItems: ContextMenuItemConfig[];
+  /** ISO 3166-1 alpha-2 region used to bias provider search/availability. */
+  providerRegion: string;
+  /** BCP 47 language tag used to request localized metadata. */
+  metadataLanguage: string;
+  tvProvider: TvMetadataProvider;
+  animeProvider: AnimeMetadataProvider;
+  titleLanguage: TitleLanguagePreference;
+  hideCompleted: HideCompletedMode;
+  hideZeroRatings: boolean;
+  gameLogging: GameLoggingMode;
+  progressFormat: ProgressFormat;
+  /** Minutes of inactivity before a session is considered stale. */
+  sessionDuration: number;
 }

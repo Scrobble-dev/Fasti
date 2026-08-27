@@ -121,5 +121,15 @@ export function createDefaultWorkbenchPreferences(): WorkbenchPreferences {
     sidebarHidden: false,
     navItems: DEFAULT_NAV_ITEMS.map((item) => ({ ...item })),
     contextMenuItems: DEFAULT_CONTEXT_MENU_ITEMS.map((item) => ({ ...item })),
+    providerRegion: "US",
+    metadataLanguage: "en-US",
+    tvProvider: "tmdb",
+    animeProvider: "anilist",
+    titleLanguage: "romaji",
+    hideCompleted: "disabled",
+    hideZeroRatings: false,
+    gameLogging: "sessions",
+    progressFormat: "percentage",
+    sessionDuration: 60,
   };
 }

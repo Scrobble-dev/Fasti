@@ -36,6 +36,7 @@
     IconDeviceTv,
     IconExternalLink,
     IconSettings,
+    IconWorld,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -97,6 +98,7 @@
   let activeSettingsSection:
     | "appearance"
     | "navigation"
+    | "preferences"
     | "providers"
     | "connectors"
     | "tokens"
@@ -293,6 +295,16 @@
         onclick={() => (activeSettingsSection = "navigation")}
       >
         <IconLayoutSidebar size={18} /> Navigation & Menus
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "preferences"}
+        aria-pressed={activeSettingsSection === "preferences"}
+        onclick={() => (activeSettingsSection = "preferences")}
+      >
+        <IconWorld size={18} /> Preferences & Metadata
       </button>
 
       <button
@@ -749,7 +761,189 @@
           </div>
         </section>
 
-        <!-- 3. Metadata Providers & Keys -->
+        <!-- 3. Preferences & Metadata -->
+      {:else if activeSettingsSection === "preferences"}
+        <section class="section-pane">
+          <h2 class="pane-title">Preferences & Metadata</h2>
+          <p class="pane-desc">
+            Defaults used when searching providers, projecting metadata, and
+            displaying progress across the library.
+          </p>
+
+          <div class="prefs-grid">
+            <div class="form-field">
+              <label for="pref-provider-region">Provider Region</label>
+              <select
+                id="pref-provider-region"
+                class="form-input"
+                value={workbenchPreferences.providerRegion}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    providerRegion: e.currentTarget.value,
+                  })}
+              >
+                {#each [{ id: "US", name: "United States" }, { id: "GB", name: "United Kingdom" }, { id: "CA", name: "Canada" }, { id: "AU", name: "Australia" }, { id: "DE", name: "Germany" }, { id: "FR", name: "France" }, { id: "JP", name: "Japan" }, { id: "IE", name: "Ireland" }] as region}
+                  <option value={region.id}>{region.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-metadata-language">Metadata Language</label>
+              <select
+                id="pref-metadata-language"
+                class="form-input"
+                value={workbenchPreferences.metadataLanguage}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    metadataLanguage: e.currentTarget.value,
+                  })}
+              >
+                {#each [{ id: "en-US", name: "English (US)" }, { id: "en-GB", name: "English (UK)" }, { id: "ja-JP", name: "Japanese" }, { id: "de-DE", name: "German" }, { id: "fr-FR", name: "French" }, { id: "es-ES", name: "Spanish" }] as lang}
+                  <option value={lang.id}>{lang.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-tv-provider">TV Provider</label>
+              <select
+                id="pref-tv-provider"
+                class="form-input"
+                value={workbenchPreferences.tvProvider}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    tvProvider: e.currentTarget.value as "tmdb" | "tvdb_v4",
+                  })}
+              >
+                <option value="tmdb">TMDB</option>
+                <option value="tvdb_v4">TheTVDB (v4)</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-anime-provider">Anime Provider</label>
+              <select
+                id="pref-anime-provider"
+                class="form-input"
+                value={workbenchPreferences.animeProvider}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    animeProvider: e.currentTarget.value as
+                      "mal" | "anilist" | "kitsu",
+                  })}
+              >
+                <option value="mal">MyAnimeList</option>
+                <option value="anilist">AniList</option>
+                <option value="kitsu">Kitsu</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-title-language">Title Language Preference</label>
+              <select
+                id="pref-title-language"
+                class="form-input"
+                value={workbenchPreferences.titleLanguage}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    titleLanguage: e.currentTarget.value as
+                      "romaji" | "english" | "native",
+                  })}
+              >
+                <option value="romaji">Romaji</option>
+                <option value="english">English</option>
+                <option value="native">Native</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-hide-completed">Hide Completed</label>
+              <select
+                id="pref-hide-completed"
+                class="form-input"
+                value={workbenchPreferences.hideCompleted}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    hideCompleted: e.currentTarget.value as
+                      "disabled" | "home_only" | "everywhere",
+                  })}
+              >
+                <option value="disabled">Disabled</option>
+                <option value="home_only">Home Only</option>
+                <option value="everywhere">Everywhere</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-game-logging">Game Logging</label>
+              <select
+                id="pref-game-logging"
+                class="form-input"
+                value={workbenchPreferences.gameLogging}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    gameLogging: e.currentTarget.value as
+                      "repeats" | "sessions",
+                  })}
+              >
+                <option value="sessions">Sessions</option>
+                <option value="repeats">Repeats</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-progress-format">Progress Format</label>
+              <select
+                id="pref-progress-format"
+                class="form-input"
+                value={workbenchPreferences.progressFormat}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    progressFormat: e.currentTarget.value as
+                      "percentage" | "time_remaining" | "episodes",
+                  })}
+              >
+                <option value="percentage">Percentage</option>
+                <option value="time_remaining">Time Remaining</option>
+                <option value="episodes">Episode Count</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-session-duration">Session Duration</label>
+              <select
+                id="pref-session-duration"
+                class="form-input"
+                value={workbenchPreferences.sessionDuration}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    sessionDuration: Number(e.currentTarget.value),
+                  })}
+              >
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={240}>4 hours</option>
+                <option value={480}>8 hours</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="chk-label mt-3">
+            <input
+              type="checkbox"
+              checked={workbenchPreferences.hideZeroRatings}
+              onchange={(e) =>
+                onUpdateWorkbenchPreferences?.({
+                  hideZeroRatings: e.currentTarget.checked,
+                })}
+            />
+            <span>Hide Zero Ratings</span>
+          </label>
+        </section>
+
+        <!-- 4. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
           <h2 id="provider-settings-title" class="pane-title" tabindex="-1">
@@ -1367,6 +1561,12 @@
     height: 14px;
     border-radius: 50%;
     background: var(--accent-hex);
+  }
+
+  .prefs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
   }
 
   .providers-list {
