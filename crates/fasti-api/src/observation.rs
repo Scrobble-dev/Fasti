@@ -174,8 +174,8 @@ pub(crate) async fn submit_observation(
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
-    validate_request(&request, correlation_id)?;
     let secret = bearer_secret(&headers, correlation_id)?;
+    validate_request(&request, correlation_id)?;
 
     let observed_at = ObservedAt::parse(&request.observed_at, ClaimedTrust::DeviceObserved)
         .map_err(|_| {
@@ -271,10 +271,19 @@ pub(crate) async fn submit_observation(
                 CapabilityKey::AcceptObservation,
                 secret,
             ))?;
-            let operation_id = derive_deterministic_operation_id(&format!(
-                "observation:{}:{source}:{source_event_id}",
-                access.client_id()
-            ));
+            let operation_material = serde_json::to_string(&(
+                "observation",
+                access.client_id().to_string(),
+                &source,
+                &source_event_id,
+            ))
+            .map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(
+                    CapabilityKey::AcceptObservation,
+                    correlation_id,
+                ))
+            })?;
+            let operation_id = derive_deterministic_operation_id(&operation_material);
             let mut upload = kernel.begin_evidence_upload(EvidenceUploadRequest::new(
                 correlation_id,
                 access,
