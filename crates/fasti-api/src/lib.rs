@@ -79,37 +79,35 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
 }
 
-/// Constructs a router that exposes only the health endpoint.
+/// Constructs the health-only router used by every non-loopback listener.
 ///
-/// # Examples
-///
-/// ```
-/// let router = health_router();
-/// ```
-///
-/// # Returns
-///
-/// A router serving `GET /api/v1/health`.
+/// This router is intentionally separate from the local application router so a
+/// future local capability cannot become remotely reachable through container or
+/// operator listener configuration by accident.
 pub fn health_router() -> Router {
     Router::new().route("/api/v1/health", get(health_check))
 }
 
 /// Constructs the durable local API router for fastid.
 ///
-/// The router requires a loopback client exposure address and a non-empty data
-/// root. It prepares the bootstrap secret before serving requests and merges
-/// the health routes with durable local capability routes.
+/// # Contract
+///
+/// This function merges health and durable local routes and validates that:
+/// - `local_exposure_addr` is the effective loopback address clients use
+///   directly or through a trusted loopback-only port forward (panics if not)
+/// - `data_root` is non-empty (panics if empty)
+///
+/// These validations enforce the durable route security model: local capability
+/// routes must never be exposed to non-loopback clients, and must always have an
+/// explicit data root. Remotely exposed listeners or missing data roots must
+/// use [`health_router`] instead.
 ///
 /// # Panics
 ///
-/// Panics if `local_exposure_addr` is not loopback, `data_root` is empty, or
-/// the bootstrap secret cannot be prepared.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// let router = api_router(kernel, "127.0.0.1:8080".parse()?, data_root);
-/// ```
+/// Panics if `local_exposure_addr` is not a loopback address, if `data_root` is
+/// empty, or if the bootstrap secret cannot be prepared (durable state is
+/// unavailable at startup either way; failing fast here matches every other
+/// durable precondition this function already enforces).
 pub fn api_router(
     kernel: Arc<dyn LocalKernel>,
     local_exposure_addr: SocketAddr,

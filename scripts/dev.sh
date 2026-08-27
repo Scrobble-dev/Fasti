@@ -434,7 +434,6 @@ _container_port() {
   printf '%s\n' "${mapping##*:}"
 }
 
-# _run_container starts Fasti in a scoped container with the configured memory limit and host port.
 _run_container() {
   local ceiling_mib=""
   local user_id=""
@@ -461,7 +460,6 @@ _run_container() {
     "$FASTI_IMAGE"
 }
 
-# _start_container launches the configured Fasti container, verifies its API and durable routes, and records its bound address.
 _start_container() {
   local publish="127.0.0.1:$FASTI_PORT:8420"
   local used_fallback=0
@@ -518,7 +516,6 @@ _start_container() {
   fi
 }
 
-# _start_native builds and starts the native Fasti daemon, verifies its health and durable routes, optionally starts the web workbench, and waits for the daemon to exit.
 _start_native() {
   trap _cleanup EXIT
   trap '_cleanup; exit 130' INT
@@ -595,7 +592,6 @@ _start_native() {
   wait "$daemon_pid"
 }
 
-# _self_test runs the launcher's internal checks for process cleanup, configuration validation, listener fallback, container restrictions, URL validation, and native resource limits.
 _self_test() {
   # Nested self-invocations ("$0" --status) must not inherit this shell's
   # already-resolved FASTI_API_URL/FASTI_PUBLIC_URL -- each assertion sets

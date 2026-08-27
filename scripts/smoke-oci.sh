@@ -28,7 +28,7 @@ durable_id=""
 durable_volume=""
 cli_stdout=""
 cli_stderr=""
-# cleanup removes temporary CLI output files, test containers, and the durable test volume.
+# cleanup removes temporary CLI output files and force-removes the test containers.
 cleanup() {
   if [[ -n "$cli_stdout" ]]; then
     rm -f "$cli_stdout"
