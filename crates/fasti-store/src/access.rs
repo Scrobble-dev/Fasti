@@ -37,6 +37,7 @@ const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::CorrectionWrite,
     ScopeKey::WorkspaceExport,
     ScopeKey::WorkspaceVerify,
+    ScopeKey::BrowserUserManage,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

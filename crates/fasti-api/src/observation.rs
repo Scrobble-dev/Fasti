@@ -1,5 +1,5 @@
 use crate::{
-    local::{bearer_secret, run_kernel, LocalApiState},
+    local::{authenticate_request, request_authentication, run_kernel, LocalApiState},
     problem::{application_problem, json_rejection, HttpProblem},
 };
 use axum::{
@@ -9,8 +9,8 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    derive_deterministic_operation_id, AcceptObservationCommand, AuthenticateCredentialQuery,
-    CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel, Violation,
+    derive_deterministic_operation_id, AcceptObservationCommand, CapabilityKey,
+    EvidenceUploadRequest, FastiProblem, LocalKernel, Violation,
 };
 use fasti_contracts::{ProblemDetails, SubmitObservationRequest, SubmitObservationResponse};
 use fasti_domain::{
@@ -127,12 +127,13 @@ fn resolution_name(value: ObservationResolution) -> &'static str {
     post,
     path = "/api/v1/observations",
     tag = "observations",
+    security(("bearer_credential" = []), ("browser_session" = [])),
     request_body = SubmitObservationRequest,
     responses(
         (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Source event identity was reused with different evidence", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request or evidence exceeds a bounded limit", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
@@ -151,7 +152,12 @@ pub(crate) async fn submit_observation(
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
-    let secret = bearer_secret(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
+    let authentication = request_authentication(
+        &headers,
+        CapabilityKey::AcceptObservation,
+        correlation_id,
+        true,
+    )?;
     validate_request(&request, correlation_id)?;
 
     let observed_at = ObservedAt::parse(&request.observed_at, ClaimedTrust::DeviceObserved)
@@ -243,11 +249,13 @@ pub(crate) async fn submit_observation(
         CapabilityKey::AcceptObservation,
         correlation_id,
         move || {
-            let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-                correlation_id,
+            let access = authenticate_request(
+                kernel.as_ref(),
+                authentication,
                 CapabilityKey::AcceptObservation,
-                secret,
-            ))?;
+                correlation_id,
+                true,
+            )?;
             let operation_material = serde_json::to_string(&(
                 "observation",
                 access.client_id().to_string(),

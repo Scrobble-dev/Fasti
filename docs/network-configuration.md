@@ -3,15 +3,18 @@
 Fasti keeps the listener, client URL, and public URL separate. This prevents a
 reverse-proxy address from changing the daemon bind address.
 
-| Variable                  | Owner                    | Purpose                                                                                              |
-| ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `FASTI_LISTEN`            | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                |
-| `FASTI_PORT`              | launcher                 | Native or container host port. Default: `8420`.                                                      |
-| `FASTI_PORT_FALLBACK`     | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.  |
-| `FASTI_API_URL`           | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
-| `FASTI_PUBLIC_URL`        | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                     |
-| `FASTI_CONTAINER_RUNTIME` | launcher                 | `podman` or `docker`. Default: `podman`.                                                             |
-| `FASTI_BOUND_ADDR_FILE`   | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                           |
+| Variable                         | Owner                    | Purpose                                                                                                                           |
+| -------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `FASTI_LISTEN`                   | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                                             |
+| `FASTI_PORT`                     | launcher                 | Native or container host port. Default: `8420`.                                                                                   |
+| `FASTI_PORT_FALLBACK`            | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.                               |
+| `FASTI_DATA_ROOT`                | `fastid`                 | Required private directory for every durable router. It is never inferred.                                                        |
+| `FASTI_API_URL`                  | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment.                              |
+| `FASTI_PUBLIC_URL`               | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
+| `FASTI_REMOTE_TRUSTED_PROXY`     | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
+| `FASTI_DEVELOPMENT_TEST_ACCOUNT` | `fastid`                 | Exact `true` seeds the one-time `testadmin` development account. Debug default: `true`; release default: `false`.                 |
+| `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
+| `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
 `127.0.0.1` are interchangeable when local name resolution uses IPv4. `[::1]`
@@ -60,10 +63,33 @@ HTTPS port. Set the external address separately:
 FASTI_PUBLIC_URL=https://fasti.internal ./scripts/dev.sh
 ```
 
-This variable does not create DNS, TLS, or a reverse proxy. Fasti does not yet
-publish a remote-exposure recipe. A reverse proxy can erase the daemon's
-loopback trust boundary, so public routing remains blocked until authenticated
-inbound access and its threat-model gate are active.
+This variable does not create DNS, TLS, or a reverse proxy. A development
+Remote instance can mount authenticated durable routes only when all of these
+conditions are true:
+
+```bash
+FASTI_LISTEN=0.0.0.0:8420 \
+FASTI_DATA_ROOT=/path/to/private/fasti-data \
+FASTI_REMOTE_TRUSTED_PROXY=true \
+FASTI_PUBLIC_URL=https://fasti.internal \
+FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
+cargo run --locked -p fastid
+```
+
+The trusted proxy must terminate HTTPS and must not expose the cleartext
+upstream directly. The remote router omits node initialization and first-client
+enrollment. It accepts browser sessions or existing scoped bearer credentials
+for durable data routes. Remote session cookies are `Secure`, `HttpOnly`, and
+`SameSite=Strict`; the readable strict CSRF cookie is required as an exact
+`X-Fasti-CSRF` proof for browser mutations.
+
+`FASTI_DEVELOPMENT_TEST_ACCOUNT=true` creates `testadmin` with password
+`testadmin` once per fresh data root and marks it explicitly as a test account.
+The account can be renamed, have its password changed, be deactivated, or be
+deleted. Its durable seed marker prevents recreation after rename or deletion.
+Debug builds enable this seed by default. Release builds disable it unless the
+operator explicitly opts in. Change or delete the account before sharing any
+development instance; this is not a supported production provisioning path.
 
 `.internal` needs working name resolution and a certificate whose subject
 includes that host. Fasti uses the platform trust store. It does not issue a
@@ -81,9 +107,9 @@ FASTI_PUBLIC_URL=https://fasti.internal \
 cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-The browser health harness deliberately ignores these values and remains on
-its fixed QA proxy. Listener and collision variables belong to `fastid`, not to
-the embedded Tauri or APK kernel.
+The browser Workbench development server deliberately uses its configured Vite
+proxy. Listener and collision variables belong to `fastid`, not to the browser,
+embedded Tauri, or APK kernel.
 
 ## Edit desktop settings
 

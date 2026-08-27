@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 7;
+pub(crate) const SCHEMA_VERSION: i64 = 8;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -37,6 +37,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 6 {
         migrate_v7(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 7 {
+        migrate_v8(connection)?;
     }
     Ok(())
 }
@@ -673,6 +678,59 @@ fn migrate_v7(connection: &Connection) -> Result<()> {
     connection.execute_batch(&sql)
 }
 
+fn migrate_v8(connection: &Connection) -> Result<()> {
+    connection.execute_batch(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE browser_users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            client_id TEXT NOT NULL REFERENCES clients(client_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            is_admin INTEGER NOT NULL CHECK (is_admin IN (0, 1)),
+            is_test_account INTEGER NOT NULL CHECK (is_test_account IN (0, 1)),
+            active INTEGER NOT NULL CHECK (active IN (0, 1)),
+            failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_count >= 0),
+            locked_until TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE browser_sessions (
+            session_digest TEXT PRIMARY KEY,
+            csrf_digest TEXT NOT NULL,
+            user_id TEXT NOT NULL REFERENCES browser_users(user_id) ON DELETE CASCADE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX browser_sessions_user_idx
+            ON browser_sessions(user_id, expires_at);
+
+        -- This marker intentionally survives deletion or renaming of the
+        -- development account so startup never recreates a deleted user.
+        CREATE TABLE browser_auth_bootstrap (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            seeded_at TEXT NOT NULL
+        ) STRICT;
+
+        INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
+        SELECT pg.grant_id, 'browser_user_manage'
+        FROM profile_grants pg
+        JOIN node_state ns
+          ON ns.singleton = 1
+         AND ns.client_id = pg.client_id
+         AND ns.profile_id = pg.profile_id
+        WHERE pg.status = 'active';
+
+        PRAGMA user_version = 8;
+        COMMIT;
+        "#,
+    )
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -1018,7 +1076,7 @@ mod tests {
     }
 
     #[test]
-    fn version_four_upgrade_adds_only_the_nullable_recovery_attempt_marker() {
+    fn version_four_upgrade_preserves_existing_schema_and_adds_later_tables() {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
         connection
             .pragma_update(None, "foreign_keys", "ON")
@@ -1067,7 +1125,8 @@ mod tests {
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
         // column, migrate_v6's two metadata tables, and migrate_v7's profile
-        // tracking table -- all additive, so every v4 table and column remains.
+        // tracking table, and migrate_v8's browser authentication tables --
+        // all additive, so every v4 table and column remains.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
@@ -1075,6 +1134,9 @@ mod tests {
                 "metadata_field_claims".to_owned(),
                 "metadata_field_overrides".to_owned(),
                 "profile_record_tracking_dispositions".to_owned(),
+                "browser_auth_bootstrap".to_owned(),
+                "browser_sessions".to_owned(),
+                "browser_users".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

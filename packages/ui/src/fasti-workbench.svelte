@@ -29,6 +29,7 @@
   import { hostProblemText } from "./host-problem.js";
   import { projectRecordSummary } from "./record-projection.js";
   import type {
+    BrowserSession,
     MediaRecord,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
@@ -160,6 +161,8 @@
   );
   let themeDrawerOpen = $state(false);
   let authModalOpen = $state(false);
+  let browserSession = $state<BrowserSession | null>(null);
+  let browserSessionChecked = $state(false);
 
   $effect(() => {
     try {
@@ -398,6 +401,8 @@
         activeSection === "library" ||
         activeSection === "calendar" ||
         activeSection === "detail") &&
+      (!host.currentBrowserSession ||
+        (browserSessionChecked && browserSession !== null)) &&
       !recordsLoaded
     ) {
       recordsLoaded = true;
@@ -422,6 +427,15 @@
     const syncViewport = () => (isNarrowViewport = media.matches);
     syncViewport();
     media.addEventListener("change", syncViewport);
+    if (host.currentBrowserSession) {
+      void host
+        .currentBrowserSession()
+        .then((session) => (browserSession = session))
+        .catch(() => (browserSession = null))
+        .finally(() => (browserSessionChecked = true));
+    } else {
+      browserSessionChecked = true;
+    }
     return () => {
       window.removeEventListener("popstate", sync);
       media.removeEventListener("change", syncViewport);
@@ -519,8 +533,12 @@
         type="button"
         class="icon-btn"
         onclick={() => (authModalOpen = true)}
-        title="Sign in"
-        aria-label="Sign in"
+        title={browserSession
+          ? `Account: ${browserSession.user.username}`
+          : "Sign in"}
+        aria-label={browserSession
+          ? `Manage account ${browserSession.user.username}`
+          : "Sign in"}
       >
         <IconUserCircle size={18} />
       </button>
@@ -746,7 +764,20 @@
   onUpdateTheme={updateTheme}
 />
 
-<AuthModal show={authModalOpen} onClose={() => (authModalOpen = false)} />
+<AuthModal
+  show={authModalOpen}
+  {host}
+  session={browserSession}
+  onClose={() => (authModalOpen = false)}
+  onSessionChange={(session) => {
+    browserSession = session;
+    if (!session) {
+      mediaRecords = [];
+      recordsLoaded = false;
+      recordsProblem = undefined;
+    }
+  }}
+/>
 
 <style>
   .workbench-shell {

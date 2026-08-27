@@ -31,7 +31,7 @@
   let copied = $state(false);
   let revealCredential = $state(false);
   let pendingRevoke = $state<string>();
-  let secretNotice: HTMLDivElement | undefined;
+  let secretNotice = $state<HTMLDivElement>();
 
   const canManage = $derived(
     Boolean(

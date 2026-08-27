@@ -95,6 +95,117 @@ async function mockTrustedHost(page: Page) {
   });
 }
 
+test("the development browser user can sign in, edit, and delete itself", async ({
+  page,
+}) => {
+  const userId = "usr_01991f58-8e00-7000-8000-000000000001";
+  let user = {
+    active: true,
+    created_at: "2026-08-28T00:00:00Z",
+    is_admin: true,
+    is_test_account: true,
+    updated_at: "2026-08-28T00:00:00Z",
+    user_id: userId,
+    username: "testadmin",
+  };
+  let deleted = false;
+
+  await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/problem+json",
+        body: JSON.stringify({ detail: "Sign in to continue." }),
+      });
+      return;
+    }
+    const body = request.postDataJSON();
+    expect(body).toMatchObject({
+      username: user.username,
+      password: user.username,
+      session_timeout_minutes: 60,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "set-cookie": "fasti_csrf=csrf-test; Path=/; SameSite=Strict",
+      },
+      body: JSON.stringify({
+        expires_at: "2026-08-28T01:00:00Z",
+        user,
+      }),
+    });
+  });
+  await page.route(/\/api\/v1\/browser\/users(?:\/[^/]+)?$/, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ users: deleted ? [] : [user] }),
+      });
+      return;
+    }
+    expect(request.headers()["x-fasti-csrf"]).toBe("csrf-test");
+    const body = request.postDataJSON();
+    if (request.method() === "PATCH") {
+      expect(body.current_password).toBe(user.username);
+      user = {
+        ...user,
+        username: body.username,
+        updated_at: "2026-08-28T00:05:00Z",
+      };
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(user),
+      });
+      return;
+    }
+    expect(body).toEqual({ current_password: "editedadmin" });
+    deleted = true;
+    await route.fulfill({ status: 204 });
+  });
+  await page.route(/\/api\/v1\/records$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ records: [] }),
+    }),
+  );
+
+  await page.goto("/?surface=workbench");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Password").fill("testadmin");
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("button", { name: "Manage account testadmin" }),
+  ).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Edit" }).click();
+  await dialog.getByLabel("Username").fill("editedadmin");
+  await dialog.getByLabel(/New password/).fill("editedadmin");
+  await dialog.getByLabel("Your current password").fill("testadmin");
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog.getByRole("status")).toContainText("Sign in again");
+  await expect(dialog.getByLabel("Username")).toHaveValue("editedadmin");
+
+  await dialog.getByLabel("Password").fill("editedadmin");
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+  await dialog.getByRole("button", { name: "Edit" }).click();
+  await dialog.getByLabel("Your current password").fill("editedadmin");
+  await dialog.getByRole("checkbox", { name: /cannot be undone/ }).check();
+  await dialog.getByRole("button", { name: "Delete user" }).click();
+
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Account deleted. The development seed will not recreate it.",
+  );
+  await expect(page.getByLabel("Sign in", { exact: true })).toBeVisible();
+  expect(deleted).toBe(true);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
     test(`${theme} theme at ${viewport.width}px is truthful, reflowable, and accessible`, async ({

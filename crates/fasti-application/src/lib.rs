@@ -4,6 +4,7 @@
 //! semantics. It does not import Axum, rusqlite, Tokio, provider, or UI types.
 
 pub mod authorization;
+pub mod browser_auth;
 pub mod capabilities;
 pub mod client_credentials;
 #[cfg(feature = "conformance-fixture")]
@@ -24,6 +25,7 @@ pub mod requests;
 pub mod scopes;
 
 pub use authorization::*;
+pub use browser_auth::*;
 pub use capabilities::*;
 pub use client_credentials::*;
 pub use corrections::*;

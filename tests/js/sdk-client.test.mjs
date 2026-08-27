@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   FastiAbortError,
   FastiClient,
+  FastiContractParseError,
   FastiProblemError,
   FastiProtocolError,
   FastiTimeoutError,
@@ -16,6 +17,7 @@ import {
   connectionEndpoint,
   normalizeBaseUrl,
   parseAcceptObservationRequest,
+  parseBrowserSessionResponse,
   parseHealthResponse,
   parseReceiptCommittedEvent,
   PUBLIC_CAPABILITY_REGISTRY,
@@ -46,6 +48,31 @@ const contractIds = {
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
 };
+
+test("browser session DTOs enforce generated boolean schemas", () => {
+  const session = {
+    expires_at: "2026-08-28T12:00:00Z",
+    user: {
+      active: true,
+      created_at: "2026-08-28T10:00:00Z",
+      is_admin: true,
+      is_test_account: true,
+      updated_at: "2026-08-28T10:00:00Z",
+      user_id: "usr_01991f58-8e00-7000-8000-000000000001",
+      username: "testadmin",
+    },
+  };
+
+  assert.deepEqual(parseBrowserSessionResponse(session), session);
+  assert.throws(
+    () =>
+      parseBrowserSessionResponse({
+        ...session,
+        user: { ...session.user, active: "true" },
+      }),
+    FastiContractParseError,
+  );
+});
 
 test("health omits credentials and returns the exact public contract", async () => {
   const credential = "local-secret-that-must-not-leak";
@@ -656,10 +683,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 26);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 32);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    10,
+    11,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1016,7 +1043,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 26);
+    assert.equal(discovery.capabilities.length, 32);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

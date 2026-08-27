@@ -239,7 +239,30 @@ export interface ProviderSearchCandidate {
   readonly external_ids?: ExternalId[];
 }
 
+export interface BrowserUser {
+  readonly user_id: string;
+  readonly username: string;
+  readonly is_admin: boolean;
+  readonly is_test_account: boolean;
+  readonly active: boolean;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface BrowserSession {
+  readonly user: BrowserUser;
+  readonly expires_at: string;
+}
+
+export interface BrowserUserUpdate {
+  readonly current_password: string;
+  readonly username?: string;
+  readonly password?: string;
+  readonly active?: boolean;
+}
+
 export interface WorkbenchHost {
+  readonly developmentTestAccountHint?: string;
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
@@ -272,6 +295,19 @@ export interface WorkbenchHost {
   registerNamespace?(
     input: RegisterNamespaceInput,
   ): Promise<RegisterNamespaceResult>;
+  createBrowserSession?(
+    username: string,
+    password: string,
+    sessionTimeoutMinutes: number,
+  ): Promise<BrowserSession>;
+  currentBrowserSession?(): Promise<BrowserSession>;
+  endBrowserSession?(): Promise<void>;
+  listBrowserUsers?(): Promise<BrowserUser[]>;
+  updateBrowserUser?(
+    userId: string,
+    input: BrowserUserUpdate,
+  ): Promise<BrowserUser>;
+  deleteBrowserUser?(userId: string, currentPassword: string): Promise<void>;
 }
 
 /** Wire shape of the desktop host's `create_record` command output. */

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use fasti_api::{api_router, health_router};
+use fasti_api::{api_router, ensure_development_test_account, health_router, remote_api_router};
 use fasti_store::SqliteKernel;
 use std::env;
 use std::ffi::OsString;
@@ -91,7 +91,7 @@ fn publish_bound_addr(addr: SocketAddr) -> Result<()> {
     write_bound_addr(Path::new(&path), addr)
 }
 
-fn uses_remote_health_surface(addr: SocketAddr) -> bool {
+fn is_remote_listener(addr: SocketAddr) -> bool {
     !addr.ip().is_loopback()
 }
 
@@ -110,34 +110,91 @@ fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
 }
 
+fn parse_boolean(name: &str, value: Option<String>, default: bool) -> Result<bool> {
+    match value.as_deref() {
+        None => Ok(default),
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        Some(value) => anyhow::bail!("{name} must be true or false, got {value:?}"),
+    }
+}
+
+fn remote_proxy_is_trusted() -> Result<bool> {
+    parse_boolean(
+        "FASTI_REMOTE_TRUSTED_PROXY",
+        env::var("FASTI_REMOTE_TRUSTED_PROXY").ok(),
+        false,
+    )
+}
+
+fn development_test_account_enabled() -> Result<bool> {
+    parse_boolean(
+        "FASTI_DEVELOPMENT_TEST_ACCOUNT",
+        env::var("FASTI_DEVELOPMENT_TEST_ACCOUNT").ok(),
+        cfg!(debug_assertions),
+    )
+}
+
+fn require_https_public_url() -> Result<()> {
+    let value = env::var("FASTI_PUBLIC_URL")
+        .context("FASTI_PUBLIC_URL is required for a remote durable listener")?;
+    let uri = value
+        .parse::<axum::http::Uri>()
+        .context("FASTI_PUBLIC_URL must be an absolute HTTPS URL")?;
+    anyhow::ensure!(
+        uri.scheme_str() == Some("https") && uri.authority().is_some(),
+        "FASTI_PUBLIC_URL must be an absolute HTTPS URL"
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let requested_addr = listen_addr()?;
-    let remote_health_only = uses_remote_health_surface(requested_addr);
+    let remote_listener = is_remote_listener(requested_addr);
     let (listener, used_fallback) = bind_listener(requested_addr, port_fallback()?).await?;
     let addr = listener.local_addr()?;
 
-    let configured_data_root = if remote_health_only {
-        None
-    } else {
-        data_root()?
-    };
+    let configured_data_root = data_root()?;
     let app = match configured_data_root {
         Some(data_root) => {
+            if remote_listener {
+                anyhow::ensure!(
+                    remote_proxy_is_trusted()?,
+                    "remote durable routes require FASTI_REMOTE_TRUSTED_PROXY=true"
+                );
+                require_https_public_url()?;
+            }
             let kernel = Arc::new(
                 SqliteKernel::open(&data_root)
                     .with_context(|| format!("failed to open Fasti data root {data_root:?}"))?,
             );
-            info!(
-                "Fasti durable local listener starting on http://{} with data root {:?}",
-                addr, data_root
-            );
-            api_router(kernel, addr, &data_root)
+            if development_test_account_enabled()? {
+                ensure_development_test_account(kernel.as_ref()).map_err(|problem| {
+                    anyhow::anyhow!(
+                        "failed to seed the one-time development browser account: {}",
+                        problem.message()
+                    )
+                })?;
+            }
+            if remote_listener {
+                info!(
+                    "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
+                    addr, data_root
+                );
+                remote_api_router(kernel, addr, &data_root)
+            } else {
+                info!(
+                    "Fasti durable local listener starting on http://{} with data root {:?}",
+                    addr, data_root
+                );
+                api_router(kernel, addr, &data_root)
+            }
         }
         None => {
-            if remote_health_only {
+            if remote_listener {
                 info!("Fasti health-only listener starting on http://{}", addr);
             } else {
                 warn!(
@@ -172,19 +229,16 @@ mod tests {
     }
 
     #[test]
-    fn selects_the_health_only_surface_for_non_loopback_listeners() {
-        assert!(!uses_remote_health_surface(SocketAddr::from((
+    fn identifies_non_loopback_listeners() {
+        assert!(!is_remote_listener(SocketAddr::from((
             [127, 0, 0, 1],
             8420
         ))));
-        assert!(!uses_remote_health_surface(
+        assert!(!is_remote_listener(
             "[::1]:8420".parse().expect("IPv6 loopback")
         ));
-        assert!(uses_remote_health_surface(SocketAddr::from((
-            [0, 0, 0, 0],
-            8420
-        ))));
-        assert!(uses_remote_health_surface(SocketAddr::from((
+        assert!(is_remote_listener(SocketAddr::from(([0, 0, 0, 0], 8420))));
+        assert!(is_remote_listener(SocketAddr::from((
             [192, 0, 2, 10],
             8420
         ))));
@@ -203,6 +257,13 @@ mod tests {
             parse_data_root(Some(OsString::from("/tmp/fasti-data"))).expect("data root"),
             Some(PathBuf::from("/tmp/fasti-data"))
         );
+    }
+
+    #[test]
+    fn remote_security_flags_are_strict_booleans() {
+        assert!(parse_boolean("TEST", None, true).expect("default"));
+        assert!(!parse_boolean("TEST", Some("false".to_owned()), true).expect("false"));
+        assert!(parse_boolean("TEST", Some("yes".to_owned()), false).is_err());
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 mod access;
 pub mod archive;
+mod browser_auth;
 mod client_credentials;
 mod correction;
 mod crypto;

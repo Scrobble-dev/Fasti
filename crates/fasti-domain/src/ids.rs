@@ -196,6 +196,7 @@ define_fasti_ids!(
     (Client, ClientId, "cli_", Executable),
     (Credential, CredentialId, "crd_", Executable),
     (ProfileGrant, ProfileGrantId, "grt_", Executable),
+    (BrowserUser, BrowserUserId, "usr_", Executable),
     (Record, RecordId, "rec_", Executable),
     (ExternalIdentifier, ExternalIdentifierId, "xid_", Executable),
     (IdentityAssertion, IdentityAssertionId, "asr_", Reserved),
@@ -220,7 +221,7 @@ mod tests {
 
     #[test]
     fn registry_has_one_unique_prefix_per_kind() {
-        assert_eq!(ID_PREFIX_REGISTRY.len(), 19);
+        assert_eq!(ID_PREFIX_REGISTRY.len(), 20);
         let prefixes: HashSet<_> = ID_PREFIX_REGISTRY
             .iter()
             .map(|entry| entry.prefix)
@@ -251,8 +252,8 @@ mod tests {
         assert_eq!(
             executable,
             HashSet::from([
-                "wsp_", "prf_", "cli_", "crd_", "grt_", "rec_", "xid_", "evd_", "obs_", "occ_",
-                "int_", "rev_", "op_", "rcp_", "req_",
+                "wsp_", "prf_", "cli_", "crd_", "grt_", "usr_", "rec_", "xid_", "evd_", "obs_",
+                "occ_", "int_", "rev_", "op_", "rcp_", "req_",
             ])
         );
         assert_eq!(reserved, HashSet::from(["asr_", "cor_", "rst_", "fld_"]));

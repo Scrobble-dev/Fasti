@@ -82,6 +82,8 @@ export type CredentialProvider = string | (() => string | Promise<string>);
 export interface FastiClientOptions {
   readonly baseUrl: string;
   readonly credential?: CredentialProvider;
+  readonly useBrowserSession?: boolean;
+  readonly csrfToken?: CredentialProvider;
   readonly timeoutMs?: number;
   readonly retryPolicy?: Partial<RetryPolicy>;
   readonly fetch?: typeof globalThis.fetch;
@@ -223,6 +225,8 @@ const HEALTH_PROBLEM_CONTRACT = {
 export class FastiClient {
   readonly #baseUrl: URL;
   readonly #credential?: CredentialProvider;
+  readonly #useBrowserSession: boolean;
+  readonly #csrfToken?: CredentialProvider;
   readonly #timeoutMs: number;
   readonly #retryPolicy: RetryPolicy;
   readonly #fetch: typeof globalThis.fetch;
@@ -230,6 +234,8 @@ export class FastiClient {
   constructor(options: FastiClientOptions) {
     this.#baseUrl = normalizeBaseUrl(options.baseUrl);
     this.#credential = options.credential;
+    this.#useBrowserSession = options.useBrowserSession ?? false;
+    this.#csrfToken = options.csrfToken;
     this.#timeoutMs = positiveInteger(
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       "timeoutMs",
@@ -647,7 +653,12 @@ export class FastiClient {
         try {
           response = await this.#fetch(
             this.#url(RECEIPT_STREAM_CONTRACT.path),
-            { method: "GET", headers, signal: scope.signal },
+            {
+              method: "GET",
+              headers,
+              signal: scope.signal,
+              credentials: this.#useBrowserSession ? "include" : "same-origin",
+            },
           );
         } catch {
           throw new NetworkRequestError();
@@ -809,6 +820,7 @@ export class FastiClient {
           "application/json",
           input.authenticated,
           scope.signal,
+          input.method !== "GET",
         );
         if (serializedBody !== undefined) {
           headers.set("Content-Type", "application/json");
@@ -821,6 +833,7 @@ export class FastiClient {
             headers,
             body: serializedBody,
             signal: scope.signal,
+            credentials: this.#useBrowserSession ? "include" : "same-origin",
           });
         } catch {
           throw new NetworkRequestError();
@@ -888,6 +901,7 @@ export class FastiClient {
     accept: string,
     authenticated: boolean,
     signal: AbortSignal,
+    mutation = false,
   ): Promise<Headers> {
     const headers = new Headers({ Accept: accept });
     if (authenticated && this.#credential !== undefined) {
@@ -898,6 +912,19 @@ export class FastiClient {
         );
       }
       headers.set("Authorization", `Bearer ${credential}`);
+    } else if (authenticated && this.#useBrowserSession && mutation) {
+      if (this.#csrfToken === undefined) {
+        throw new CredentialProviderError(
+          "Browser-session mutations require a CSRF token provider",
+        );
+      }
+      const csrf = await resolveCredential(this.#csrfToken, signal);
+      if (!/^[0-9a-f]{64}$/.test(csrf)) {
+        throw new CredentialProviderError(
+          "Browser-session CSRF token must be 64 lowercase hexadecimal characters",
+        );
+      }
+      headers.set("X-Fasti-CSRF", csrf);
     }
     return headers;
   }

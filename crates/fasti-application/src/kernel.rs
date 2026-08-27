@@ -1206,6 +1206,7 @@ pub trait IdentitySeedPort: Send + Sync {
 
 pub trait LocalKernel:
     AccessAdministrationPort
+    + crate::BrowserAccountPort
     + EvidenceUploadPort
     + IdentityPort
     + IdentitySeedPort
@@ -1220,6 +1221,7 @@ pub trait LocalKernel:
 
 impl<T> LocalKernel for T where
     T: AccessAdministrationPort
+        + crate::BrowserAccountPort
         + EvidenceUploadPort
         + IdentityPort
         + IdentitySeedPort

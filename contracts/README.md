@@ -4,31 +4,31 @@ The authored registry at [`registry/v1/capabilities.yaml`](registry/v1/capabilit
 
 ## Ownership map
 
-| Location                              | Owner and role                                                                                     |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `registry/v1/capabilities.yaml`       | Authored capability and surface ownership                                                          |
-| `../crates/fasti-domain/`             | Domain identifiers, time values, vocabulary, and invariants                                        |
-| `../crates/fasti-application/`        | Use cases, authorization, ports, capability ownership, and typed problems                          |
-| `../crates/fasti-contracts/`          | Shared public Rust DTOs and generated capability identifiers                                       |
-| `../crates/fasti-api/`                | Real Utoipa operations: production health/setup plus a separately feature-gated conformance router |
-| `asyncapi/v1/transport.yaml`          | Authored `receipt.stream` SSE channel and message flow                                             |
-| `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                        |
-| `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                              |
-| `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                        |
-| `portability/v1/`                     | Frozen internal archive-v1 schema and example; retained for restore compatibility                  |
-| `portability/v2/`                     | Generated archive-v2 schema and example; adds metadata and profile tracking state                  |
-| `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas          |
-| `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                             |
-| `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                           |
-| `../tests/conformance/uat-matrix.csv` | Acceptance inventory and explicit body relationships                                               |
+| Location                              | Owner and role                                                                                                       |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `registry/v1/capabilities.yaml`       | Authored capability and surface ownership                                                                            |
+| `../crates/fasti-domain/`             | Domain identifiers, time values, vocabulary, and invariants                                                          |
+| `../crates/fasti-application/`        | Use cases, authorization, ports, capability ownership, and typed problems                                            |
+| `../crates/fasti-contracts/`          | Shared public Rust DTOs and generated capability identifiers                                                         |
+| `../crates/fasti-api/`                | Real Utoipa operations: production bootstrap/authenticated routes plus a separately feature-gated conformance router |
+| `asyncapi/v1/transport.yaml`          | Authored `receipt.stream` SSE channel and message flow                                                               |
+| `jsonld/v1/`                          | Authored JSON-LD 1.1 context and vocabulary                                                                          |
+| `okf/v1/`                             | Authored operational knowledge for capabilities, scopes, and problems                                                |
+| `examples/v1/`                        | Registry-owned semantic examples, validated against their contract surfaces                                          |
+| `portability/v1/`                     | Frozen internal archive-v1 schema and example; retained for restore compatibility                                    |
+| `portability/v2/`                     | Generated archive-v2 schema and example; adds metadata and profile tracking state                                    |
+| `generated/v1/`                       | Deterministic projections: production and conformance OpenAPI, registry, and JSON Schemas                            |
+| `../packages/sdk/`                    | Generated typed TypeScript HTTP/SSE client and parsers                                                               |
+| `../crates/fasti-cli/`                | Local `capability list/show` projection of the generated public registry                                             |
+| `../tests/conformance/uat-matrix.csv` | Acceptance inventory and explicit body relationships                                                                 |
 
-The production OpenAPI document contains health plus durable node initialization and first-client enrollment. `fastid` mounts the two setup routes only for a loopback bind with an explicit `FASTI_DATA_ROOT`. The separate B1 conformance OpenAPI and router are compiled only with `conformance-fixture`; its server binds only to IPv4 loopback, keeps bounded state in memory, and declares fixture-only, no-durability success. The SSE receipt channel belongs to AsyncAPI rather than being smuggled into the finite OpenAPI document. Fixture behavior does not authorize other B2 runtime behavior.
+The production OpenAPI document contains health, loopback bootstrap, browser account, observation, identity-record, and profile-state operations. It declares the opaque bearer and browser-session cookie schemes and the allowed alternative for each authenticated data route. `fastid` mounts bootstrap only on loopback with an explicit `FASTI_DATA_ROOT`; the authenticated subset can also mount behind the explicit trusted HTTPS proxy boundary. The separate B1 conformance OpenAPI and router are compiled only with `conformance-fixture`; its server binds only to IPv4 loopback, keeps bounded state in memory, and declares fixture-only, no-durability success. The SSE receipt channel belongs to AsyncAPI rather than being added to the finite OpenAPI document. Browser authentication is finite request/response state, so its registry-owned AsyncAPI surface is explicitly not applicable.
 
 JSON Schema uses draft 2020-12. JSON-LD and OKF remain separate governed surfaces: operational access or administration can be reasoned `N/A` for linked data while still requiring recovery knowledge. The SDK, CLI discovery, examples, and documentation consume the same registry instead of re-declaring capability meaning.
 
 Run `cargo xtask contract generate` to regenerate checked-in projections. Run `cargo xtask contract verify --locked` to prove deterministic bytes, checked-in drift, semantic examples, standards validation, Rust/TypeScript parity, package truth, and other B1 software gates. The [local TypeScript SDK guide](../packages/sdk/README.md) provides a copy-paste health check and focused black-box contract test. A verifier receipt proves only the software contract spine. B1 remains open until the current aggregate milestone manifest, including Tauri and both low-hardware envelope architectures, passes. B2 is not authorized.
 
-Provider seeds and manifest examples remain future adapter inputs, not working integrations. Durable setup does not make the staged observation, identity, review, or portability paths public. The local health QA harness consumes the generated SDK and adds no contract surface. There is no supported install, release, product web interface, desktop package, or player.
+Provider seeds and manifest examples remain future adapter inputs, not working integrations. Durable observation, browser authentication, identity-record, and profile tracking paths are production HTTP operations; identity review and portability remain staged. The pre-production Workbench consumes the generated contract without owning a second API shape. There is no supported install, release, deployed web application, desktop package, or player.
 
 The [archive-v1 schema](portability/v1/workspace-manifest.schema.json) and
 [example](portability/v1/workspace-manifest.example.json) keep the original 16

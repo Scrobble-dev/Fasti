@@ -178,7 +178,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 7] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 13] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -255,6 +255,72 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 7] = [
         request: Some("SetTrackingDispositionRequest"),
         response: Some("TrackingDispositionStateDto"),
         retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "createBrowserSession",
+        operation_id: "create_session",
+        method: "post",
+        path: "/api/v1/browser/session",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("CreateBrowserSessionRequest"),
+        response: Some("BrowserSessionResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readBrowserSession",
+        operation_id: "read_session",
+        method: "get",
+        path: "/api/v1/browser/session",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("BrowserSessionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "endBrowserSession",
+        operation_id: "end_session",
+        method: "delete",
+        path: "/api/v1/browser/session",
+        capability_id: "browser.session.end",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listBrowserUsers",
+        operation_id: "list_users",
+        method: "get",
+        path: "/api/v1/browser/users",
+        capability_id: "browser.user.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListBrowserUsersResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "updateBrowserUser",
+        operation_id: "update_user",
+        method: "patch",
+        path: "/api/v1/browser/users/{user_id}",
+        capability_id: "browser.user.update",
+        authenticated: true,
+        request: Some("UpdateBrowserUserRequest"),
+        response: Some("BrowserUserDto"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "deleteBrowserUser",
+        operation_id: "delete_user",
+        method: "delete",
+        path: "/api/v1/browser/users/{user_id}",
+        capability_id: "browser.user.delete",
+        authenticated: true,
+        request: Some("DeleteBrowserUserRequest"),
+        response: None,
+        retry: "never",
     },
 ];
 
@@ -1983,6 +2049,12 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "SetTrackingDispositionRequest",
         "TrackingDispositionStateDto",
         "ListTrackingDispositionsResponse",
+        "CreateBrowserSessionRequest",
+        "BrowserUserDto",
+        "BrowserSessionResponse",
+        "ListBrowserUsersResponse",
+        "UpdateBrowserUserRequest",
+        "DeleteBrowserUserRequest",
     ] {
         let schema = schemas
             .get(name)
@@ -2054,14 +2126,17 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             None => None,
         };
 
-        // The production OpenAPI document does not populate the standard
-        // `security` field for any route today (a pre-existing gap separate
-        // from this SDK-emission fix -- `x-fasti-authorization` is the
-        // contract's actual authenticated/unauthenticated signal until that's
-        // addressed), so unlike the conformance and bootstrap renderers this
-        // one does not cross-check `security` against `expected.authenticated`.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
+        let has_security = operation
+            .get("security")
+            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
+        ensure!(
+            has_security == authenticated,
+            "production security declaration changed for {} {}",
+            expected.method,
+            expected.path
+        );
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
@@ -2122,6 +2197,15 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "parseListTrackingDispositionsResponse",
             "ListTrackingDispositionsResponse",
         ),
+        (
+            "parseCreateBrowserSessionRequest",
+            "CreateBrowserSessionRequest",
+        ),
+        ("parseBrowserUserDto", "BrowserUserDto"),
+        ("parseBrowserSessionResponse", "BrowserSessionResponse"),
+        ("parseListBrowserUsersResponse", "ListBrowserUsersResponse"),
+        ("parseUpdateBrowserUserRequest", "UpdateBrowserUserRequest"),
+        ("parseDeleteBrowserUserRequest", "DeleteBrowserUserRequest"),
     ] {
         writeln!(
             output,
@@ -2942,6 +3026,24 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     if (typeof schema.maximum === "number" && value > schema.maximum) {
       throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("number")) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new FastiContractParseError(`${path} must be a finite number`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new FastiContractParseError(`${path} is below its minimum`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("boolean")) {
+    if (typeof value !== "boolean") {
+      throw new FastiContractParseError(`${path} must be a boolean`);
     }
     return;
   }

@@ -80,6 +80,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     SwaggerParser.validate(conformanceOpenapi),
   ]);
   assert.deepEqual(Object.keys(openapi.paths), [
+    "/api/v1/browser/session",
+    "/api/v1/browser/users",
+    "/api/v1/browser/users/{user_id}",
     "/api/v1/client-enrollments",
     "/api/v1/health",
     "/api/v1/namespaces",
@@ -89,6 +92,17 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/profile/record-tracking-dispositions/{record_id}",
     "/api/v1/records",
     "/api/v1/records/identifiers",
+  ]);
+  assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
+    "bearer_credential",
+    "browser_session",
+  ]);
+  assert.deepEqual(openapi.paths["/api/v1/browser/session"].get.security, [
+    { browser_session: [] },
+  ]);
+  assert.deepEqual(openapi.paths["/api/v1/records"].get.security, [
+    { bearer_credential: [] },
+    { browser_session: [] },
   ]);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
@@ -138,7 +152,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 26);
+  assert.equal(registry.capabilities.length, 32);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -156,6 +170,12 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     if (capability.id === "observation.accept") return "b1_observation_accept";
     if (capability.id === "receipt.replay") return "b1_receipt_replay";
     if (capability.id === "receipt.stream") return "b1_receipt_stream";
+    if (
+      capability.id.startsWith("browser.session.") ||
+      capability.id.startsWith("browser.user.")
+    ) {
+      return "b2_browser_auth";
+    }
     if (capability.id.startsWith("profile.record.tracking_disposition.")) {
       return "b2_profile_state";
     }

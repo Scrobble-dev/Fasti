@@ -1,4 +1,4 @@
-use crate::local::{bearer_secret, run_kernel, LocalApiState};
+use crate::local::{authenticate_request, request_authentication, run_kernel, LocalApiState};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use axum::{
     extract::{rejection::JsonRejection, Path, State},
@@ -7,8 +7,7 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    AuthenticateCredentialQuery, CapabilityKey, FastiProblem, ListTrackingDispositionsQuery,
-    SetTrackingDispositionCommand,
+    CapabilityKey, FastiProblem, ListTrackingDispositionsQuery, SetTrackingDispositionCommand,
 };
 use fasti_contracts::{
     ListTrackingDispositionsResponse, ProblemDetails, SetTrackingDispositionRequest,
@@ -39,10 +38,11 @@ fn requested_disposition(disposition: TrackingDispositionUpdateDto) -> Option<Tr
     get,
     path = "/api/v1/profile/record-tracking-dispositions",
     tag = "profile",
+    security(("bearer_credential" = []), ("browser_session" = [])),
     responses(
         (status = 200, description = "The authenticated profile's explicit record tracking dispositions", body = ListTrackingDispositionsResponse),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks profile-state read scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks profile-state read scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "Capability is unavailable in this runtime", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
@@ -54,14 +54,16 @@ pub(crate) async fn list_tracking_dispositions(
 ) -> HttpResult<ListTrackingDispositionsResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListTrackingDispositions;
-    let secret = bearer_secret(&headers, capability, correlation_id)?;
+    let authentication = request_authentication(&headers, capability, correlation_id, false)?;
     let kernel = state.kernel;
     let states = run_kernel(capability, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
+        let access = authenticate_request(
+            kernel.as_ref(),
+            authentication,
             capability,
-            secret,
-        ))?;
+            correlation_id,
+            false,
+        )?;
         kernel
             .list_tracking_dispositions(ListTrackingDispositionsQuery::new(correlation_id, access))
     })
@@ -82,13 +84,14 @@ pub(crate) async fn list_tracking_dispositions(
     put,
     path = "/api/v1/profile/record-tracking-dispositions/{record_id}",
     tag = "profile",
+    security(("bearer_credential" = []), ("browser_session" = [])),
     params(("record_id" = String, Path, description = "Fasti Record identifier")),
     request_body = SetTrackingDispositionRequest,
     responses(
         (status = 200, description = "The authenticated profile's resulting explicit tracking disposition", body = TrackingDispositionStateDto),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks profile-state write scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks profile-state write scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "Record does not exist", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request body exceeds the bounded transport limit", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
@@ -108,7 +111,7 @@ pub(crate) async fn set_tracking_disposition(
     let capability = CapabilityKey::SetTrackingDisposition;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let secret = bearer_secret(&headers, capability, correlation_id)?;
+    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
     let record_id = record_id.parse::<RecordId>().map_err(|_| {
         application_problem(Box::new(FastiProblem::record_not_found(
             capability,
@@ -118,11 +121,13 @@ pub(crate) async fn set_tracking_disposition(
     let requested = requested_disposition(request.disposition);
     let kernel = state.kernel;
     let state = run_kernel(capability, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
+        let access = authenticate_request(
+            kernel.as_ref(),
+            authentication,
             capability,
-            secret,
-        ))?;
+            correlation_id,
+            true,
+        )?;
         kernel.set_tracking_disposition(SetTrackingDispositionCommand::new(
             correlation_id,
             access,

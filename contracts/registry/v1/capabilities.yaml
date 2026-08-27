@@ -235,6 +235,41 @@ surface_profiles:
       }
     ui: { state: required, binding: "ui:{capability_id}" }
 
+  b2_browser_auth:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Browser authentication uses finite requests and has no event stream.,
+      }
+    cli:
+      {
+        state: not_applicable,
+        reason: Browser accounts are administered through the first-party web surface.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private browser authentication state is not linked data.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: b3,
+        reason: The authenticated HTTP contract is proven by API integration tests in B2.,
+      }
+    ui: { state: required, binding: "ui:{capability_id}" }
+
   later_b2:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -446,6 +481,146 @@ capabilities:
     scopes: [profile_select]
     problems: [capability_unavailable, forbidden]
     examples: [profile.select.capability_unavailable]
+    uat: []
+
+  - application_key: create_browser_session
+    id: browser.session.create
+    bounded_context: browser.authentication
+    contract_body: b2
+    runtime_body: b2
+    authorization: unauthenticated
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_browser_auth
+    scopes: []
+    problems:
+      [
+        authentication_failed,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: read_browser_session
+    id: browser.session.read
+    bounded_context: browser.authentication
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_browser_auth
+    scopes: []
+    problems:
+      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
+    examples: []
+    uat: []
+
+  - application_key: end_browser_session
+    id: browser.session.end
+    bounded_context: browser.authentication
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_browser_auth
+    scopes: []
+    problems:
+      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
+    examples: []
+    uat: []
+
+  - application_key: list_browser_users
+    id: browser.user.list
+    bounded_context: browser.authentication
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_browser_auth
+    scopes: [browser_user_manage]
+    problems:
+      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
+    examples: []
+    uat: []
+
+  - application_key: update_browser_user
+    id: browser.user.update
+    bounded_context: browser.authentication
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_browser_auth
+    scopes: [browser_user_manage]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: delete_browser_user
+    id: browser.user.delete
+    bounded_context: browser.authentication
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_browser_auth
+    scopes: [browser_user_manage]
+    problems:
+      [
+        authentication_failed,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
     uat: []
 
   - application_key: rotate_credential

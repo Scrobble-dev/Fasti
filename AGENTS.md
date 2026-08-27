@@ -65,7 +65,7 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
-- Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
+- Mount durable routes only with an explicit `FASTI_DATA_ROOT`; keep bootstrap routes on loopback, and require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
 - Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
@@ -153,6 +153,7 @@ setting, or desktop surface.
 Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision.
 
 ### UI Invariants & Requirements:
+
 - **Tabler-First Policy**: Always use upstream Tabler (`@tabler/core` and `@tabler/icons`) layout, grid, typography, cards, tables, forms, modals, and badge classes first.
 - **Component Decision Hierarchy**:
   1. Tabler Core Component (direct usage)
