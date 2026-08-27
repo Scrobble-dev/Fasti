@@ -205,12 +205,16 @@ Endpoint readiness is not the same as an active source. `setup_required` means t
 
 | Result | Meaning | Action |
 |---|---|---|
+| `400` | Malformed JSON | Fix the sender's request encoding. |
 | `401` | Missing, invalid, or revoked Fasti credential | Create or rotate the scoped API client. |
 | `403` | Credential does not have `observation_accept` | Use the intended scoped client. Do not widen unrelated credentials. |
 | `409` | Same provider event identity arrived with different evidence | Keep the prior event. Fix the sender's event identity policy. |
 | `413` | Body exceeded a documented bound | Reduce the webhook payload. Do not send artwork or raw library objects. |
 | `415` | Wrong media type | Use the provider-specific content type. |
 | `422` | Event is incomplete, ambiguous, or unsupported | Send an explicit completed occurrence; use the progress capability for partial state. |
+| `500` | Durable state failed an integrity check | Retry is not safe to automate; investigate server-side storage integrity. |
+| `503` | Local storage is unavailable | Retry once storage recovers. |
+| `507` | Bounded evidence or observation capacity is exhausted | Wait for capacity to free up before retrying. |
 
 ## Security checklist
 
