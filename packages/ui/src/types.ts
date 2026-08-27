@@ -94,6 +94,8 @@ export interface MediaRecord {
   readonly cast?: CastMember[];
   readonly crew?: CrewMember[];
   readonly collectionName?: string;
+  /** User-defined key/value metadata registered in Settings → Custom Fields. */
+  readonly customFields?: Record<string, string>;
 }
 
 export interface ChronicleOccurrence {

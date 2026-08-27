@@ -434,6 +434,25 @@
           {/each}
         </div>
       </div>
+
+      <!-- Custom Fields -->
+      <div class="sidebar-section">
+        <h4 class="sidebar-subheading">Custom Fields</h4>
+        {#if record.customFields && Object.keys(record.customFields).length > 0}
+          <dl class="sidebar-meta-list">
+            {#each Object.entries(record.customFields) as [key, value]}
+              <div class="meta-pair">
+                <dt>{key}</dt>
+                <dd>{value}</dd>
+              </div>
+            {/each}
+          </dl>
+        {:else}
+          <p class="empty-custom-fields-hint">
+            No custom fields. Add some in Settings → Custom Fields.
+          </p>
+        {/if}
+      </div>
     </aside>
 
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
@@ -1194,6 +1213,11 @@
   }
   .xid-link:hover {
     color: var(--fasti-action-primary);
+  }
+  .empty-custom-fields-hint {
+    font-size: 0.82rem;
+    color: var(--fasti-text-muted);
+    margin: 0;
   }
 
   .main-content-pane {
