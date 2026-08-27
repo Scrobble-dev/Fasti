@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use fasti_api::{api_router, health_router};
+use fasti_api::{api_router, health_router, integration_router};
 use fasti_store::SqliteKernel;
 use std::env;
 use std::ffi::OsString;
@@ -24,12 +24,41 @@ enum PortFallback {
 fn parse_listen_addr(value: &str) -> Result<SocketAddr> {
     value
         .parse()
-        .with_context(|| format!("FASTI_LISTEN must be an IP:PORT socket address, got {value:?}"))
+        .with_context(|| format!("listener must be an IP:PORT socket address, got {value:?}"))
 }
 
 fn listen_addr() -> Result<SocketAddr> {
     let value = env::var("FASTI_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
+    parse_listen_addr(&value).context("FASTI_LISTEN is invalid")
+}
+
+fn integration_listen_addr() -> Result<Option<SocketAddr>> {
+    let Ok(value) = env::var("FASTI_INTEGRATION_LISTEN") else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        !value.trim().is_empty(),
+        "FASTI_INTEGRATION_LISTEN must not be empty when it is set"
+    );
     parse_listen_addr(&value)
+        .context("FASTI_INTEGRATION_LISTEN is invalid")
+        .map(Some)
+}
+
+fn integration_transport_allowed(addr: SocketAddr, tls_terminated: bool) -> bool {
+    addr.ip().is_loopback() || tls_terminated
+}
+
+fn integration_tls_terminated() -> Result<bool> {
+    match env::var("FASTI_INTEGRATION_TLS_TERMINATED") {
+        Err(env::VarError::NotPresent) => Ok(false),
+        Ok(value) if value == "1" || value.eq_ignore_ascii_case("true") => Ok(true),
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => Ok(false),
+        Ok(value) => anyhow::bail!(
+            "FASTI_INTEGRATION_TLS_TERMINATED must be true/false or 1/0, got {value:?}"
+        ),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn parse_port_fallback(value: &str) -> Result<PortFallback> {
@@ -72,7 +101,7 @@ fn write_bound_addr(path: &Path, addr: SocketAddr) -> Result<()> {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .context("FASTI_BOUND_ADDR_FILE must name a file")?;
+        .context("bound-address file setting must name a file")?;
     let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", process::id()));
     fs::write(&temporary, format!("{addr}\n"))
         .with_context(|| format!("failed to write {}", temporary.display()))?;
@@ -81,12 +110,12 @@ fn write_bound_addr(path: &Path, addr: SocketAddr) -> Result<()> {
     Ok(())
 }
 
-fn publish_bound_addr(addr: SocketAddr) -> Result<()> {
-    let Ok(path) = env::var("FASTI_BOUND_ADDR_FILE") else {
+fn publish_bound_addr(variable: &str, addr: SocketAddr) -> Result<()> {
+    let Ok(path) = env::var(variable) else {
         return Ok(());
     };
     if path.trim().is_empty() {
-        anyhow::bail!("FASTI_BOUND_ADDR_FILE must not be empty");
+        anyhow::bail!("{variable} must not be empty");
     }
     write_bound_addr(Path::new(&path), addr)
 }
@@ -119,41 +148,68 @@ async fn main() -> Result<()> {
     let (listener, used_fallback) = bind_listener(requested_addr, port_fallback()?).await?;
     let addr = listener.local_addr()?;
 
-    let configured_data_root = if remote_health_only {
-        None
+    let configured_data_root = data_root()?;
+    let kernel = configured_data_root
+        .as_ref()
+        .map(|data_root| {
+            SqliteKernel::open(data_root)
+                .with_context(|| format!("failed to open Fasti data root {data_root:?}"))
+                .map(Arc::new)
+        })
+        .transpose()?;
+
+    let app = if remote_health_only {
+        info!("Fasti health-only listener starting on http://{}", addr);
+        health_router()
+    } else if let (Some(data_root), Some(kernel)) = (&configured_data_root, &kernel) {
+        info!(
+            "Fasti durable local listener starting on http://{} with data root {:?}",
+            addr, data_root
+        );
+        api_router(kernel.clone(), addr, data_root)
     } else {
-        data_root()?
-    };
-    let app = match configured_data_root {
-        Some(data_root) => {
-            let kernel = Arc::new(
-                SqliteKernel::open(&data_root)
-                    .with_context(|| format!("failed to open Fasti data root {data_root:?}"))?,
-            );
-            info!(
-                "Fasti durable local listener starting on http://{} with data root {:?}",
-                addr, data_root
-            );
-            api_router(kernel, addr, &data_root)
-        }
-        None => {
-            if remote_health_only {
-                info!("Fasti health-only listener starting on http://{}", addr);
-            } else {
-                warn!(
-                    "Fasti local capability routes are disabled because FASTI_DATA_ROOT is not set"
-                );
-            }
-            health_router()
-        }
+        warn!("Fasti local capability routes are disabled because FASTI_DATA_ROOT is not set");
+        health_router()
     };
 
-    publish_bound_addr(addr)?;
+    publish_bound_addr("FASTI_BOUND_ADDR_FILE", addr)?;
     if used_fallback {
         info!(requested = %requested_addr, actual = %addr, "preferred loopback port was occupied; Fasti selected an available port");
     }
-    axum::serve(listener, app).await?;
 
+    let integration_task = if let Some(requested) = integration_listen_addr()? {
+        let kernel = kernel
+            .as_ref()
+            .context("FASTI_INTEGRATION_LISTEN requires FASTI_DATA_ROOT")?
+            .clone();
+        let tls_terminated = integration_tls_terminated()?;
+        anyhow::ensure!(
+            integration_transport_allowed(requested, tls_terminated),
+            "non-loopback FASTI_INTEGRATION_LISTEN requires FASTI_INTEGRATION_TLS_TERMINATED=true and a trusted TLS reverse proxy"
+        );
+        let (integration_listener, used_integration_fallback) =
+            bind_listener(requested, PortFallback::Fail).await?;
+        debug_assert!(!used_integration_fallback);
+        let integration_addr = integration_listener.local_addr()?;
+        publish_bound_addr("FASTI_INTEGRATION_BOUND_ADDR_FILE", integration_addr)?;
+        info!(
+            address = %integration_addr,
+            tls_terminated,
+            "Fasti isolated integration listener starting"
+        );
+        let integration_app = integration_router(kernel);
+        Some(tokio::spawn(async move {
+            axum::serve(integration_listener, integration_app).await
+        }))
+    } else {
+        None
+    };
+
+    let primary_result = axum::serve(listener, app).await;
+    if let Some(task) = integration_task {
+        task.abort();
+    }
+    primary_result?;
     Ok(())
 }
 
@@ -191,10 +247,20 @@ mod tests {
     }
 
     #[test]
+    fn integration_listener_requires_a_protected_transport_off_loopback() {
+        let loopback = SocketAddr::from(([127, 0, 0, 1], 8421));
+        let private = SocketAddr::from(([192, 168, 1, 5], 8421));
+        assert!(integration_transport_allowed(loopback, false));
+        assert!(!integration_transport_allowed(private, false));
+        assert!(integration_transport_allowed(private, true));
+    }
+
+    #[test]
     fn rejects_a_bare_port() {
         let error = parse_listen_addr("8420").expect_err("bare ports are ambiguous");
         assert!(error.to_string().contains("IP:PORT"));
     }
+
     #[test]
     fn data_root_is_explicit_and_never_defaults_to_the_working_directory() {
         assert_eq!(parse_data_root(None).expect("absent data root"), None);
