@@ -245,6 +245,7 @@ export interface ProviderSearchCandidate {
 }
 
 export interface WorkbenchHost {
+  readonly networkConfigurationScope: "client" | "node";
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,

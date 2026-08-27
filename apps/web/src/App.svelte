@@ -157,6 +157,7 @@
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       host = {
+        networkConfigurationScope: "node",
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
         saveNetworkConfiguration: (input) =>
           invoke("save_network_configuration", { input }),

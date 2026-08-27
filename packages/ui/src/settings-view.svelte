@@ -1423,6 +1423,7 @@
       {:else if activeSettingsSection === "advanced"}
         {#if onSaveNetworkConfiguration && onTestEndpoint}
           <NetworkSettings
+            scope="node"
             configuration={networkConfiguration}
             loading={networkLoading}
             loadProblem={networkLoadProblem}

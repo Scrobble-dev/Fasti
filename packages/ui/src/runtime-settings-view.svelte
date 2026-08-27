@@ -313,6 +313,7 @@
     <div class="settings-panel">
       {#if active === "network"}
         <NetworkSettings
+          scope={host.networkConfigurationScope}
           configuration={network}
           loading={networkLoading}
           loadProblem={networkProblem}
@@ -793,7 +794,11 @@
           <dl class="status-list">
             <div>
               <dt>Network policy and endpoint</dt>
-              <dd>Active</dd>
+              <dd>
+                {host.networkConfigurationScope === "node"
+                  ? "Active"
+                  : "Service endpoint active; node policy unavailable"}
+              </dd>
             </div>
             <div>
               <dt>Protected metadata credentials</dt>

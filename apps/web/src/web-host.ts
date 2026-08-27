@@ -86,27 +86,65 @@ const PROVIDERS: ReadonlyArray<{
 
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
+  source: "default" | "saved" = "default",
 ): NetworkConfiguration {
   return {
     connection: {
       service_url: {
         value: defaultApiUrl || "http://127.0.0.1:8420",
-        source: "default",
+        source,
         managed: false,
       },
-      public_url: { value: null, source: "default", managed: false },
+      public_url: { value: null, source: "default", managed: true },
     },
     outbound_policy: {
-      allow_providers: ["*"],
+      allow_providers: [],
       deny_providers: [],
-      allow_capabilities: ["*"],
+      allow_capabilities: [],
       deny_capabilities: [],
-      allow_hosts: ["*"],
+      allow_hosts: [],
       deny_hosts: [],
-      allow_networks: ["public", "loopback", "private"],
+      allow_networks: [],
       deny_networks: [],
     },
   };
+}
+
+function unavailable(message: string): Error {
+  return new Error(message);
+}
+
+function validatedEndpoint(endpoint: string): {
+  normalized: string;
+  parsed: URL;
+} {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint.trim());
+  } catch {
+    throw unavailable("Enter a valid Fasti service URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
+  }
+  if (
+    parsed.protocol === "http:" &&
+    !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
+  ) {
+    throw unavailable("Cleartext HTTP is allowed only for loopback endpoints.");
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "" && parsed.pathname !== "/")
+  ) {
+    throw unavailable(
+      "The Fasti service URL must contain only a scheme, host, and optional port.",
+    );
+  }
+  return { normalized: parsed.origin, parsed };
 }
 
 function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
@@ -116,23 +154,23 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
   try {
     const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
-    const value = JSON.parse(raw) as Partial<NetworkConfiguration>;
-    if (
-      typeof value?.connection?.service_url?.value !== "string" ||
-      !value.outbound_policy ||
-      !Array.isArray(value.outbound_policy.allow_networks) ||
-      !Array.isArray(value.outbound_policy.deny_networks)
-    ) {
+    const value = JSON.parse(raw) as {
+      service_url?: unknown;
+      connection?: { service_url?: { value?: unknown } };
+    };
+    const candidate =
+      typeof value.service_url === "string"
+        ? value.service_url
+        : value.connection?.service_url?.value;
+    if (typeof candidate !== "string")
       return defaultNetworkConfiguration(defaultApiUrl);
-    }
-    return value as NetworkConfiguration;
+    return defaultNetworkConfiguration(
+      validatedEndpoint(candidate).normalized,
+      "saved",
+    );
   } catch {
     return defaultNetworkConfiguration(defaultApiUrl);
   }
-}
-
-function unavailable(message: string): Error {
-  return new Error(message);
 }
 
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
@@ -158,6 +196,8 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
   });
 
   return {
+    networkConfigurationScope: "client",
+
     setSessionCredential(credential: string): void {
       const normalized = credential.trim();
       if (!/^[0-9a-f]{64}$/i.test(normalized)) {
@@ -179,55 +219,35 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
-      const config: NetworkConfiguration = {
-        connection: {
-          service_url: {
-            value: input.service_url,
-            source: "saved",
-            managed: false,
-          },
-          public_url: {
-            value: input.public_url,
-            source: "saved",
-            managed: false,
-          },
-        },
-        outbound_policy: input.outbound_policy,
-      };
-      if (typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
-        } catch {
-          // Best-effort: a blocked or full localStorage should not fail a
-          // save the caller already validated -- the returned config is
-          // still correct, it just won't survive a reload.
-        }
+      const serviceUrl = validatedEndpoint(input.service_url).normalized;
+      const config = defaultNetworkConfiguration(serviceUrl, "saved");
+      const nextClient = new FastiClient({
+        baseUrl: serviceUrl,
+        credential: requireCredential,
+      });
+      if (typeof localStorage === "undefined") {
+        throw unavailable("Browser storage is unavailable.");
+      }
+      try {
+        localStorage.setItem(
+          NETWORK_STORAGE_KEY,
+          JSON.stringify({ service_url: serviceUrl }),
+        );
+      } catch {
+        throw unavailable(
+          "The browser could not save the Fasti service URL. Check site storage permissions and try again.",
+        );
       }
       // Recreate the client with the saved service URL so subsequent SDK
       // calls use the new endpoint rather than the original defaultApiUrl.
-      client = new FastiClient({
-        baseUrl: input.service_url,
-        credential: requireCredential,
-      });
+      client = nextClient;
       return config;
     },
 
     async testEndpointConnection(
       endpoint: string,
     ): Promise<EndpointConnectionStatus> {
-      const normalized = endpoint.replace(/\/+$/, "");
-      const parsed = new URL(normalized);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
-      }
-      if (
-        parsed.protocol === "http:" &&
-        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
-      ) {
-        throw unavailable(
-          "Cleartext HTTP is allowed only for loopback endpoints.",
-        );
-      }
+      const { normalized, parsed } = validatedEndpoint(endpoint);
       const response = await fetch(`${normalized}/api/v1/health`, {
         signal: AbortSignal.timeout(3_000),
       });
