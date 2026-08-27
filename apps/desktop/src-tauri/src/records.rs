@@ -1,8 +1,15 @@
 use crate::setup::{authenticate, DesktopProblem, SetupSecretStore};
-use fasti_application::{IdentityPort, ListRecordsQuery};
-use fasti_domain::{Grain, InterpretationState, OccurredAt, RecordStatus, ResolvedField};
+use fasti_application::{
+    AttachIdentifierCommand, CreateRecordCommand, IdentityPort, ListRecordsQuery,
+    RegisterNamespaceDefinitionCommand,
+};
+use fasti_domain::{
+    ExternalIdentifierClaim, Grain, InterpretationState, NamespaceDefinition,
+    NamespaceLicencePosture, OccurredAt, RecordId, RecordStatus, RequestCorrelationId,
+    ResolvedField,
+};
 use fasti_store::SqliteKernel;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Wire projection of [`fasti_domain::ResolvedField`]. Reuses the domain
 /// enum's own `Serialize` impl for `tier` rather than re-deriving the same
@@ -78,6 +85,120 @@ pub(crate) fn list_records(
         .collect())
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CreateRecordView {
+    record_id: String,
+    grain: Grain,
+}
+
+pub(crate) fn create_record(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    grain: Grain,
+) -> Result<CreateRecordView, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let outcome = kernel
+        .create_record(CreateRecordCommand::new(correlation_id, access, grain))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(CreateRecordView {
+        record_id: outcome.record_id().to_string(),
+        grain: outcome.grain(),
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct AttachIdentifierInput {
+    record_id: String,
+    namespace: String,
+    grain: Grain,
+    value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AttachIdentifierView {
+    external_identifier_id: String,
+    record_id: String,
+    created: bool,
+}
+
+pub(crate) fn attach_identifier(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    input: AttachIdentifierInput,
+) -> Result<AttachIdentifierView, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let record_id = input
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
+    let claim = ExternalIdentifierClaim::try_new(input.namespace, input.grain, input.value)
+        .map_err(|_| DesktopProblem::invalid_input("the identifier claim is invalid"))?;
+    let outcome = kernel
+        .attach_identifier(AttachIdentifierCommand::new(
+            correlation_id,
+            access,
+            record_id,
+            claim,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(AttachIdentifierView {
+        external_identifier_id: outcome.external_identifier_id().to_string(),
+        record_id: outcome.record_id().to_string(),
+        created: outcome.created(),
+    })
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RegisterNamespaceInput {
+    namespace: String,
+    label: String,
+    grains: Vec<Grain>,
+    id_pattern: String,
+    normalization: String,
+    licence_posture: NamespaceLicencePosture,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RegisterNamespaceView {
+    namespace: String,
+    created: bool,
+}
+
+/// Declares a namespace's supported grains and ID shape so
+/// [`attach_identifier`] can accept claims under it -- `attach_identifier_tx`
+/// (crates/fasti-store/src/identity.rs) rejects any claim whose namespace
+/// has no matching `namespace_definitions` row for the workspace.
+pub(crate) fn register_namespace(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    input: RegisterNamespaceInput,
+) -> Result<RegisterNamespaceView, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let definition = NamespaceDefinition::try_new(
+        input.namespace,
+        input.label,
+        input.grains,
+        input.id_pattern,
+        input.normalization,
+        input.licence_posture,
+    )
+    .map_err(|_| DesktopProblem::invalid_input("the namespace definition is invalid"))?;
+    let outcome = kernel
+        .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+            correlation_id,
+            access,
+            definition,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(RegisterNamespaceView {
+        namespace: outcome.namespace().to_string(),
+        created: outcome.created(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,5 +224,142 @@ mod tests {
 
         let records = list_records(&kernel, &store).expect("list records");
         assert!(records.is_empty());
+    }
+
+    #[test]
+    fn create_record_refuses_before_setup_completes() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+
+        assert!(matches!(
+            create_record(&kernel, &store, Grain::Film),
+            Err(problem) if problem.code() == "not_authenticated"
+        ));
+    }
+
+    #[test]
+    fn create_record_makes_the_new_record_listable() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+
+        let created = create_record(&kernel, &store, Grain::Film).expect("create record");
+        assert_eq!(created.grain, Grain::Film);
+
+        let records = list_records(&kernel, &store).expect("list records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record_id, created.record_id);
+    }
+
+    #[test]
+    fn attach_identifier_refuses_before_setup_completes() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+
+        let input = AttachIdentifierInput {
+            record_id: fasti_domain::RecordId::new_v7().to_string(),
+            namespace: "google_books".to_owned(),
+            grain: Grain::Work,
+            value: "abc123".to_owned(),
+        };
+
+        assert!(matches!(
+            attach_identifier(&kernel, &store, input),
+            Err(problem) if problem.code() == "not_authenticated"
+        ));
+    }
+
+    #[test]
+    fn attach_identifier_rejects_a_record_id_that_does_not_parse() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+
+        let input = AttachIdentifierInput {
+            record_id: "not-a-record-id".to_owned(),
+            namespace: "google_books".to_owned(),
+            grain: Grain::Work,
+            value: "abc123".to_owned(),
+        };
+
+        assert!(matches!(
+            attach_identifier(&kernel, &store, input),
+            Err(problem) if problem.code() == "invalid_input"
+        ));
+    }
+
+    #[test]
+    fn attach_identifier_refuses_an_unregistered_namespace() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+
+        let created = create_record(&kernel, &store, Grain::Work).expect("create record");
+        let input = AttachIdentifierInput {
+            record_id: created.record_id,
+            namespace: "google_books".to_owned(),
+            grain: Grain::Work,
+            value: "abc123".to_owned(),
+        };
+
+        assert!(matches!(
+            attach_identifier(&kernel, &store, input),
+            Err(problem) if problem.code() == "invalid_identifier"
+        ));
+    }
+
+    #[test]
+    fn attach_identifier_attaches_a_claim_once_the_namespace_is_registered() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+
+        register_namespace(
+            &kernel,
+            &store,
+            RegisterNamespaceInput {
+                namespace: "google_books".to_owned(),
+                label: "Google Books".to_owned(),
+                grains: vec![Grain::Work],
+                id_pattern: ".+".to_owned(),
+                normalization: "identity".to_owned(),
+                licence_posture: NamespaceLicencePosture::IdentifiersOnly,
+            },
+        )
+        .expect("register namespace");
+
+        let created = create_record(&kernel, &store, Grain::Work).expect("create record");
+        let input = AttachIdentifierInput {
+            record_id: created.record_id.clone(),
+            namespace: "google_books".to_owned(),
+            grain: Grain::Work,
+            value: "abc123".to_owned(),
+        };
+
+        let attached = attach_identifier(&kernel, &store, input).expect("attach identifier");
+        assert_eq!(attached.record_id, created.record_id);
+        assert!(attached.created);
+    }
+
+    #[test]
+    fn register_namespace_is_idempotent() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+
+        let input = || RegisterNamespaceInput {
+            namespace: "google_books".to_owned(),
+            label: "Google Books".to_owned(),
+            grains: vec![Grain::Work],
+            id_pattern: ".+".to_owned(),
+            normalization: "identity".to_owned(),
+            licence_posture: NamespaceLicencePosture::IdentifiersOnly,
+        };
+
+        let first = register_namespace(&kernel, &store, input()).expect("register namespace");
+        assert!(first.created);
+
+        let second = register_namespace(&kernel, &store, input()).expect("register namespace again");
+        assert!(!second.created);
     }
 }

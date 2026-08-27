@@ -208,6 +208,48 @@ fn list_records(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
+fn create_record(
+    state: tauri::State<'_, DesktopState>,
+    grain: fasti_domain::Grain,
+) -> Result<records::CreateRecordView, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::create_record(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        grain,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn attach_identifier(
+    state: tauri::State<'_, DesktopState>,
+    input: records::AttachIdentifierInput,
+) -> Result<records::AttachIdentifierView, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::attach_identifier(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn register_namespace(
+    state: tauri::State<'_, DesktopState>,
+    input: records::RegisterNamespaceInput,
+) -> Result<records::RegisterNamespaceView, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::register_namespace(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
 fn list_reviews(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Vec<reviews::ReviewItem>, DesktopProblem> {
@@ -314,6 +356,9 @@ pub fn run() {
             delete_provider_credential,
             search_provider,
             list_records,
+            create_record,
+            attach_identifier,
+            register_namespace,
             list_reviews,
             resolve_review
         ])
