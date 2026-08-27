@@ -465,18 +465,26 @@
   }
 </script>
 
-{#snippet recordProblemState()}
-  <section class="state-message" aria-labelledby="record-problem-title">
-    <h1 id="record-problem-title">{formatSectionTitle(activeSection)}</h1>
-    <p class="problem" role="alert">{recordsProblem}</p>
-    {#if host.setSessionCredential}
-      <button
-        type="button"
-        class="link-btn"
-        onclick={() => (authModalOpen = true)}>Connect records</button
-      >
-    {/if}
-  </section>
+{#snippet recordStatus()}
+  {#if recordsLoading}
+    <p class="record-load-status alert alert-info" role="status">
+      Loading records…
+    </p>
+  {:else if recordsProblem}
+    <section class="record-access-alert alert alert-warning" role="alert">
+      <div>
+        <strong class="record-access-title">Records are unavailable</strong>
+        <p>{recordsProblem}</p>
+      </div>
+      {#if host.setSessionCredential}
+        <button
+          type="button"
+          class="btn btn-primary"
+          onclick={() => (authModalOpen = true)}>Connect records</button
+        >
+      {/if}
+    </section>
+  {/if}
 {/snippet}
 
 <div class="workbench-shell">
@@ -636,31 +644,21 @@
           />
         {/if}
       {:else if activeSection === "library"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          {@render recordProblemState()}
-        {:else}
-          <LibraryView
-            records={mediaRecords}
-            availableCollections={[]}
-            onSelectRecord={openRecord}
-          />
-        {/if}
+        {@render recordStatus()}
+        <LibraryView
+          records={recordsProblem ? [] : mediaRecords}
+          availableCollections={[]}
+          onSelectRecord={openRecord}
+        />
       {:else if activeSection === "calendar"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          {@render recordProblemState()}
-        {:else}
-          <CalendarView {watchingRecords} onSelectRecord={openRecord} />
-        {/if}
+        {@render recordStatus()}
+        <CalendarView
+          watchingRecords={recordsProblem ? [] : watchingRecords}
+          onSelectRecord={openRecord}
+        />
       {:else if activeSection === "detail"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          {@render recordProblemState()}
-        {:else if selectedRecord}
+        {@render recordStatus()}
+        {#if selectedRecord && !recordsProblem}
           <MediaDetailView
             record={selectedRecord}
             availableCollections={[]}
@@ -677,17 +675,12 @@
           </div>
         {/if}
       {:else if activeSection === "home"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          {@render recordProblemState()}
-        {:else}
-          <HomeView
-            records={mediaRecords}
-            availableCollections={[]}
-            onSelectRecord={openRecord}
-          />
-        {/if}
+        {@render recordStatus()}
+        <HomeView
+          records={recordsProblem ? [] : mediaRecords}
+          availableCollections={[]}
+          onSelectRecord={openRecord}
+        />
       {:else}
         <div class="overview">
           <header class="overview-header">
@@ -918,14 +911,30 @@
     color: var(--fasti-text-muted);
   }
 
-  .state-message .problem {
-    color: var(--fasti-state-error, #b42318);
+  .record-load-status,
+  .record-access-alert {
+    max-width: 1080px;
+    margin: 24px auto 0;
   }
 
-  .state-message h1 {
-    margin-bottom: 8px;
+  .record-access-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .record-access-alert p {
+    margin: 4px 0 0;
+  }
+
+  .record-access-title {
     color: var(--fasti-text-primary);
-    font-family: var(--fasti-font-display);
+  }
+
+  .record-access-alert .btn {
+    min-width: max-content;
+    min-height: 44px;
   }
 
   .link-btn {
@@ -1048,6 +1057,16 @@
   }
 
   @media (max-width: 56rem) {
+    .record-load-status,
+    .record-access-alert {
+      margin-inline: 20px;
+    }
+
+    .record-access-alert {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
     .overview {
       padding: 32px 20px 56px;
     }
