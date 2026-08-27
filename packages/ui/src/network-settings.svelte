@@ -464,7 +464,7 @@
     color: var(--fasti-state-error, #b42318);
   }
 
-  @media (max-width: 47.99rem) {
+  @media (max-width: 48rem) {
     .two-columns,
     .policy-grid,
     .network-grid {

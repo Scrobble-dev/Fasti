@@ -1242,7 +1242,7 @@
     color: var(--fasti-text-muted);
   }
 
-  @media (max-width: 47.99rem) {
+  @media (max-width: 64rem) {
     .settings-container {
       padding: 24px 16px 48px;
     }
