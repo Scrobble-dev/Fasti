@@ -12,7 +12,7 @@
   "scripts": {
     "dev:web": "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/web dev",
     "build": "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/ui build && pnpm --filter @fasti/web build",
-    "contracts:validate-authored": "node scripts/validate-authored-contracts.mjs",
+    "contracts:validate-authored": "node scripts/validate-authored-contracts.mjs && node scripts/validate-integration-contracts.mjs",
     "contracts:validate-examples": "node scripts/validate-examples.mjs",
     "contracts:validate-generated": "node scripts/validate-generated-contracts.mjs",
     "contracts:validate-okf": "node scripts/validate-okf-uat.mjs",
