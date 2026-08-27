@@ -12,6 +12,7 @@
     IconUserCircle,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
+  import HomeView from "./home-view.svelte";
   import ConnectionsView from "./connections-view.svelte";
   import RuntimeSettingsView from "./runtime-settings-view.svelte";
   import DiscoverView from "./discover-view.svelte";
@@ -110,10 +111,41 @@
   let activeSection = $state<Section>("home");
   let selectedRecordId = $state<string | null>(null);
 
+  // A prior session's localStorage predates nav items or context-menu items
+  // added since (e.g. "settings", "connections") -- without this, those
+  // items silently never appear for that browser profile because the
+  // persisted array replaces the defaults wholesale instead of extending
+  // them. Reconciled by id: keep the stored entry where one exists, append
+  // any default entry that's missing.
+  function mergeWithNewDefaults(
+    stored: WorkbenchPreferences,
+  ): WorkbenchPreferences {
+    const defaults = createDefaultWorkbenchPreferences();
+    const mergeById = <T extends { id: string }>(
+      storedItems: T[],
+      defaultItems: T[],
+    ): T[] => [
+      ...storedItems,
+      ...defaultItems.filter(
+        (d) => !storedItems.some((s) => s.id === d.id),
+      ),
+    ];
+    return {
+      ...stored,
+      navItems: mergeById(stored.navItems, defaults.navItems),
+      contextMenuItems: mergeById(
+        stored.contextMenuItems,
+        defaults.contextMenuItems,
+      ),
+    };
+  }
+
   let workbenchPreferences = $state<WorkbenchPreferences>(
-    loadPersisted(
-      "fasti-workbench-preferences",
-      createDefaultWorkbenchPreferences(),
+    mergeWithNewDefaults(
+      loadPersisted(
+        "fasti-workbench-preferences",
+        createDefaultWorkbenchPreferences(),
+      ),
     ),
   );
   let themeSettings = $state<ThemeSettings>(
@@ -296,7 +328,8 @@
       void loadReviews();
     }
     if (
-      (activeSection === "library" ||
+      (activeSection === "home" ||
+        activeSection === "library" ||
         activeSection === "calendar" ||
         activeSection === "detail") &&
       !recordsLoaded
@@ -512,6 +545,18 @@
               onclick={() => select("library")}>Choose one from Library</button
             >
           </div>
+        {/if}
+      {:else if activeSection === "home"}
+        {#if recordsLoading}
+          <p class="state-message" role="status">Loading records…</p>
+        {:else if recordsProblem}
+          <p class="state-message problem" role="alert">{recordsProblem}</p>
+        {:else}
+          <HomeView
+            records={mediaRecords}
+            availableCollections={[]}
+            onSelectRecord={openRecord}
+          />
         {/if}
       {:else}
         <div class="overview">
