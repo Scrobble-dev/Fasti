@@ -11,7 +11,9 @@ use axum::{
     Json, Router,
 };
 use chrono::{TimeZone, Utc};
-use fasti_application::{derive_deterministic_operation_id, CapabilityKey, FastiProblem, Violation};
+use fasti_application::{
+    derive_deterministic_operation_id, CapabilityKey, FastiProblem, ProblemCode, Violation,
+};
 use fasti_contracts::{
     IntegrationObservationRequest, IntegrationStatusDto, IntegrationStatusListResponse,
     ObservationIdentifierInput, ObservationIngressKind, ProblemDetails, SubmitObservationRequest,
@@ -36,6 +38,14 @@ fn invalid_integration(
     let problem = FastiProblem::invalid_observation(correlation_id, vec![violation])
         .expect("one integration violation is within bounds");
     application_problem(Box::new(problem))
+}
+
+fn representation_problem(code: ProblemCode, correlation_id: RequestCorrelationId) -> HttpProblem {
+    application_problem(Box::new(FastiProblem::from_code(
+        code,
+        CapabilityKey::AcceptObservation,
+        correlation_id,
+    )))
 }
 
 fn content_type_is_json(headers: &HeaderMap) -> bool {
@@ -187,9 +197,10 @@ async fn template_webhook(
     let correlation_id = RequestCorrelationId::new_v7();
     let secret = bearer_secret(&headers, correlation_id)?;
     if !content_type_is_json(&headers) {
-        return Err(application_problem(Box::new(
-            FastiProblem::unsupported_media_type(CapabilityKey::AcceptObservation, correlation_id),
-        )));
+        return Err(representation_problem(
+            ProblemCode::UnsupportedMediaType,
+            correlation_id,
+        ));
     }
     if body.len() > MAX_PROVIDER_JSON_BYTES {
         return Err(application_problem(Box::new(
@@ -207,12 +218,8 @@ async fn template_webhook(
             .expect("one violation is within bounds"),
         )));
     }
-    let request: IntegrationObservationRequest = serde_json::from_slice(&body).map_err(|_| {
-        application_problem(Box::new(FastiProblem::validation_failed(
-            CapabilityKey::AcceptObservation,
-            correlation_id,
-        )))
-    })?;
+    let request: IntegrationObservationRequest = serde_json::from_slice(&body)
+        .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
     let normalized = normalize_template_request(source, request, correlation_id)?;
     accept_observation_request(state, secret, normalized, body.to_vec(), correlation_id).await
 }
@@ -296,7 +303,11 @@ fn ticks_to_seconds(value: Option<u64>) -> Option<u64> {
     value.map(|ticks| ticks / 10_000_000)
 }
 
-fn emby_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId) -> Result<SubmitObservationRequest, HttpProblem> {
+fn emby_request(
+    value: &Value,
+    raw: &[u8],
+    correlation_id: RequestCorrelationId,
+) -> Result<SubmitObservationRequest, HttpProblem> {
     let event = emby_string(value, &["/Event", "/NotificationType", "/notificationType"])
         .unwrap_or_default();
     let normalized_event = event.to_ascii_lowercase();
@@ -304,7 +315,9 @@ fn emby_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
         .pointer("/PlayedToCompletion")
         .and_then(Value::as_bool)
         .or_else(|| value.pointer("/Item/UserData/Played").and_then(Value::as_bool))
-        .unwrap_or_else(|| normalized_event == "item.markplayed" || normalized_event == "itemmarkedplayed");
+        .unwrap_or_else(|| {
+            normalized_event == "item.markplayed" || normalized_event == "itemmarkedplayed"
+        });
     if !complete {
         return Err(invalid_integration(
             correlation_id,
@@ -369,7 +382,8 @@ fn emby_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
         ));
     }
 
-    let digest_identity = derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
+    let digest_identity =
+        derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
     let observed_at = emby_string(value, &["/UtcTimestamp", "/Timestamp"])
         .map(str::to_owned)
         .unwrap_or_else(|| Utc::now().to_rfc3339());
@@ -399,7 +413,6 @@ fn emby_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
     post,
     path = "/api/v1/integrations/emby/webhook",
     tag = "integrations",
-    request_body(content = Object, content_type = "application/json"),
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
         (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails),
@@ -418,9 +431,10 @@ pub(crate) async fn emby_webhook(
     let correlation_id = RequestCorrelationId::new_v7();
     let secret = bearer_secret(&headers, correlation_id)?;
     if !content_type_is_json(&headers) {
-        return Err(application_problem(Box::new(
-            FastiProblem::unsupported_media_type(CapabilityKey::AcceptObservation, correlation_id),
-        )));
+        return Err(representation_problem(
+            ProblemCode::UnsupportedMediaType,
+            correlation_id,
+        ));
     }
     if body.len() > MAX_PROVIDER_JSON_BYTES {
         return Err(invalid_integration(
@@ -430,12 +444,8 @@ pub(crate) async fn emby_webhook(
             "at most 65536 bytes",
         ));
     }
-    let value: Value = serde_json::from_slice(&body).map_err(|_| {
-        application_problem(Box::new(FastiProblem::validation_failed(
-            CapabilityKey::AcceptObservation,
-            correlation_id,
-        )))
-    })?;
+    let value: Value = serde_json::from_slice(&body)
+        .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
     let normalized = emby_request(&value, &body, correlation_id)?;
     accept_observation_request(state, secret, normalized, body.to_vec(), correlation_id).await
 }
@@ -450,23 +460,55 @@ fn multipart_boundary(content_type: &str) -> Option<&str> {
     })
 }
 
+fn find_bytes(haystack: &[u8], needle: &[u8], start: usize) -> Option<usize> {
+    if needle.is_empty() || start > haystack.len() {
+        return None;
+    }
+    haystack[start..]
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .map(|offset| start + offset)
+}
+
 fn plex_payload_part<'a>(body: &'a [u8], boundary: &str) -> Option<&'a [u8]> {
     if boundary.is_empty() || boundary.len() > MAX_MULTIPART_BOUNDARY_BYTES {
         return None;
     }
-    let marker = format!("--{boundary}");
-    let text = std::str::from_utf8(body).ok()?;
-    for part in text.split(&marker) {
-        let (headers, content) = part.split_once("\r\n\r\n")?;
+    let marker = format!("--{boundary}").into_bytes();
+    let separator = b"\r\n\r\n";
+    let mut cursor = 0;
+    while let Some(marker_start) = find_bytes(body, &marker, cursor) {
+        let part_start = marker_start + marker.len();
+        let next_marker = find_bytes(body, &marker, part_start).unwrap_or(body.len());
+        let part = &body[part_start..next_marker];
+        let Some(header_end) = find_bytes(part, separator, 0) else {
+            cursor = next_marker;
+            if cursor >= body.len() {
+                break;
+            }
+            continue;
+        };
+        let headers = std::str::from_utf8(&part[..header_end]).ok()?;
         if headers.contains("name=\"payload\"") || headers.contains("name=payload") {
-            let content = content.trim_end_matches("\r\n").trim_end_matches("--");
-            return Some(content.as_bytes());
+            let mut content = &part[header_end + separator.len()..];
+            while content.ends_with(b"\r\n") {
+                content = &content[..content.len() - 2];
+            }
+            return Some(content);
+        }
+        cursor = next_marker;
+        if cursor >= body.len() {
+            break;
         }
     }
     None
 }
 
-fn plex_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId) -> Result<SubmitObservationRequest, HttpProblem> {
+fn plex_request(
+    value: &Value,
+    raw: &[u8],
+    correlation_id: RequestCorrelationId,
+) -> Result<SubmitObservationRequest, HttpProblem> {
     let event = value.get("event").and_then(Value::as_str).unwrap_or_default();
     if event != "media.scrobble" {
         return Err(invalid_integration(
@@ -476,7 +518,10 @@ fn plex_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
             "media.scrobble",
         ));
     }
-    let media_type = value.pointer("/Metadata/type").and_then(Value::as_str).unwrap_or("custom");
+    let media_type = value
+        .pointer("/Metadata/type")
+        .and_then(Value::as_str)
+        .unwrap_or("custom");
     let grain = grain_for_item_type(media_type).ok_or_else(|| {
         invalid_integration(
             correlation_id,
@@ -507,9 +552,15 @@ fn plex_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
     }
     if let Some(guids) = value.pointer("/Metadata/Guid").and_then(Value::as_array) {
         for guid in guids.iter().take(12) {
-            let Some(id) = guid.get("id").and_then(Value::as_str) else { continue };
-            let Some((provider, provider_id)) = id.split_once("://") else { continue };
-            let Some(namespace) = namespace_for(provider, grain) else { continue };
+            let Some(id) = guid.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some((provider, provider_id)) = id.split_once("://") else {
+                continue;
+            };
+            let Some(namespace) = namespace_for(provider, grain) else {
+                continue;
+            };
             identifiers.push(ObservationIdentifierInput {
                 namespace,
                 grain: grain.to_owned(),
@@ -521,7 +572,8 @@ fn plex_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
         }
     }
 
-    let source_event_id = derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
+    let source_event_id =
+        derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
     let duration_ms = value.pointer("/Metadata/duration").and_then(Value::as_u64);
     let view_offset_ms = value.pointer("/Metadata/viewOffset").and_then(Value::as_u64);
     let occurred_at = value
@@ -538,10 +590,17 @@ fn plex_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
         occurred_at,
         target_grain: Some(grain.to_owned()),
         identifiers,
-        title: value.pointer("/Metadata/title").and_then(Value::as_str).map(str::to_owned),
+        title: value
+            .pointer("/Metadata/title")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         progress_percent: Some(100.0),
-        position_seconds: view_offset_ms.map(|value| value / 1000).or_else(|| duration_ms.map(|value| value / 1000)),
-        duration_seconds: duration_ms.map(|value| value / 1000).filter(|value| *value > 0),
+        position_seconds: view_offset_ms
+            .map(|value| value / 1000)
+            .or_else(|| duration_ms.map(|value| value / 1000)),
+        duration_seconds: duration_ms
+            .map(|value| value / 1000)
+            .filter(|value| *value > 0),
     })
 }
 
@@ -549,7 +608,6 @@ fn plex_request(value: &Value, raw: &[u8], correlation_id: RequestCorrelationId)
     post,
     path = "/api/v1/integrations/plex/webhook",
     tag = "integrations",
-    request_body(content = String, content_type = "multipart/form-data"),
     responses(
         (status = 200, description = "Durable Plex scrobble receipt", body = SubmitObservationResponse),
         (status = 401, description = "A trusted proxy did not inject the scoped Fasti bearer credential", body = ProblemDetails),
@@ -578,16 +636,15 @@ pub(crate) async fn plex_webhook(
     let content_type = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| {
-            application_problem(Box::new(FastiProblem::unsupported_media_type(
-                CapabilityKey::AcceptObservation,
-                correlation_id,
-            )))
-        })?;
-    if !content_type.to_ascii_lowercase().starts_with("multipart/form-data") {
-        return Err(application_problem(Box::new(
-            FastiProblem::unsupported_media_type(CapabilityKey::AcceptObservation, correlation_id),
-        )));
+        .ok_or_else(|| representation_problem(ProblemCode::UnsupportedMediaType, correlation_id))?;
+    if !content_type
+        .to_ascii_lowercase()
+        .starts_with("multipart/form-data")
+    {
+        return Err(representation_problem(
+            ProblemCode::UnsupportedMediaType,
+            correlation_id,
+        ));
     }
     let boundary = multipart_boundary(content_type).ok_or_else(|| {
         invalid_integration(
@@ -613,12 +670,8 @@ pub(crate) async fn plex_webhook(
             "at most 65536 bytes",
         ));
     }
-    let value: Value = serde_json::from_slice(payload).map_err(|_| {
-        application_problem(Box::new(FastiProblem::validation_failed(
-            CapabilityKey::AcceptObservation,
-            correlation_id,
-        )))
-    })?;
+    let value: Value = serde_json::from_slice(payload)
+        .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
     let normalized = plex_request(&value, payload, correlation_id)?;
     accept_observation_request(state, secret, normalized, payload.to_vec(), correlation_id).await
 }
@@ -638,8 +691,10 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
                 state: "setup_required".to_owned(),
                 available: true,
                 endpoint_ready: true,
-                setup_action: "Create an observation client and configure the Nuvio Fasti provider.".to_owned(),
-                detail: "Authenticated occurrence ingress is mounted. Nuvio must keep its own durable retry outbox.".to_owned(),
+                setup_action: "Create an observation client and configure the Nuvio Fasti provider."
+                    .to_owned(),
+                detail: "Authenticated occurrence ingress is mounted. Nuvio must keep its own durable retry outbox."
+                    .to_owned(),
             },
             IntegrationStatusDto {
                 id: "plex".to_owned(),
@@ -647,8 +702,10 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
                 state: "setup_required".to_owned(),
                 available: true,
                 endpoint_ready: true,
-                setup_action: "Use Tautulli, or place the Plex webhook behind a trusted proxy that injects a scoped Fasti bearer header.".to_owned(),
-                detail: "Plex webhooks do not carry a Fasti credential. Fasti never places bearer secrets in webhook URLs.".to_owned(),
+                setup_action: "Use Tautulli, or place the Plex webhook behind a trusted proxy that injects a scoped Fasti bearer header."
+                    .to_owned(),
+                detail: "Plex webhooks do not carry a Fasti credential. Fasti never places bearer secrets in webhook URLs."
+                    .to_owned(),
             },
             IntegrationStatusDto {
                 id: "tautulli".to_owned(),
@@ -656,8 +713,10 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
                 state: "setup_required".to_owned(),
                 available: true,
                 endpoint_ready: true,
-                setup_action: "Configure the documented JSON template and Authorization header.".to_owned(),
-                detail: "Tautulli can submit watched events through a bounded authenticated webhook.".to_owned(),
+                setup_action: "Configure the documented JSON template and Authorization header."
+                    .to_owned(),
+                detail: "Tautulli can submit watched events through a bounded authenticated webhook."
+                    .to_owned(),
             },
             IntegrationStatusDto {
                 id: "jellyfin".to_owned(),
@@ -665,8 +724,10 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
                 state: "setup_required".to_owned(),
                 available: true,
                 endpoint_ready: true,
-                setup_action: "Configure the Jellyfin Webhook plugin with the Fasti template and Authorization header.".to_owned(),
-                detail: "Completed playback notifications are normalized into durable Fasti occurrences.".to_owned(),
+                setup_action: "Configure the Jellyfin Webhook plugin with the Fasti template and Authorization header."
+                    .to_owned(),
+                detail: "Completed playback notifications are normalized into durable Fasti occurrences."
+                    .to_owned(),
             },
             IntegrationStatusDto {
                 id: "emby".to_owned(),
@@ -674,17 +735,30 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
                 state: "setup_required".to_owned(),
                 available: true,
                 endpoint_ready: true,
-                setup_action: "Configure Emby playback-stop/mark-played webhooks with a scoped Authorization header.".to_owned(),
-                detail: "Native Emby event payloads are accepted only when completion is explicit.".to_owned(),
+                setup_action: "Configure Emby playback-stop/mark-played webhooks with a scoped Authorization header."
+                    .to_owned(),
+                detail: "Native Emby event payloads are accepted only when completion is explicit."
+                    .to_owned(),
             },
             IntegrationStatusDto {
                 id: "mpris".to_owned(),
                 label: "Desktop MPRIS observer".to_owned(),
-                state: if cfg!(target_os = "linux") { "setup_required" } else { "unsupported" }.to_owned(),
+                state: if cfg!(target_os = "linux") {
+                    "setup_required"
+                } else {
+                    "unsupported"
+                }
+                .to_owned(),
                 available: cfg!(target_os = "linux"),
                 endpoint_ready: false,
-                setup_action: if cfg!(target_os = "linux") { "Enable the desktop MPRIS observer." } else { "Use a supported Linux desktop or another observation adapter." }.to_owned(),
-                detail: "MPRIS support is platform-scoped and never claimed on unsupported operating systems.".to_owned(),
+                setup_action: if cfg!(target_os = "linux") {
+                    "Enable the desktop MPRIS observer."
+                } else {
+                    "Use a supported Linux desktop or another observation adapter."
+                }
+                .to_owned(),
+                detail: "MPRIS support is platform-scoped and never claimed on unsupported operating systems."
+                    .to_owned(),
             },
         ],
     })
@@ -693,9 +767,24 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
 pub(crate) fn router() -> Router<LocalApiState> {
     Router::new()
         .route("/api/v1/integrations", get(integration_status))
-        .route("/api/v1/integrations/nuvio/webhook", post(nuvio_webhook))
-        .route("/api/v1/integrations/tautulli/webhook", post(tautulli_webhook))
-        .route("/api/v1/integrations/jellyfin/webhook", post(jellyfin_webhook))
-        .route("/api/v1/integrations/emby/webhook", post(emby_webhook))
-        .route("/api/v1/integrations/plex/webhook", post(plex_webhook))
+        .route(
+            "/api/v1/integrations/nuvio/webhook",
+            post(nuvio_webhook),
+        )
+        .route(
+            "/api/v1/integrations/tautulli/webhook",
+            post(tautulli_webhook),
+        )
+        .route(
+            "/api/v1/integrations/jellyfin/webhook",
+            post(jellyfin_webhook),
+        )
+        .route(
+            "/api/v1/integrations/emby/webhook",
+            post(emby_webhook),
+        )
+        .route(
+            "/api/v1/integrations/plex/webhook",
+            post(plex_webhook),
+        )
 }
