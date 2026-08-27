@@ -131,5 +131,7 @@ export function createDefaultWorkbenchPreferences(): WorkbenchPreferences {
     gameLogging: "sessions",
     progressFormat: "percentage",
     sessionDuration: 60,
+    customFields: [],
+    customMediaTypes: [],
   };
 }

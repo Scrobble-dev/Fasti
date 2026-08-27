@@ -1,6 +1,8 @@
 <script lang="ts">
   import type {
     CustomFieldDefinition,
+    CustomMediaTypeDefinition,
+    MediaKind,
     ScopedApiToken,
     ProviderCredentialStatus,
     NetworkConfiguration,
@@ -37,6 +39,7 @@
     IconExternalLink,
     IconSettings,
     IconWorld,
+    IconTags,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -99,6 +102,7 @@
     | "appearance"
     | "navigation"
     | "preferences"
+    | "custom_fields"
     | "providers"
     | "connectors"
     | "tokens"
@@ -106,6 +110,105 @@
     | "notifications"
     | "importers"
     | "advanced" = $state("appearance");
+
+  // Local state for the custom field / custom media type creators
+  let newFieldName = $state("");
+  let newFieldKey = $state("");
+  let newFieldType = $state<CustomFieldDefinition["valueType"]>("string");
+  let newFieldTarget = $state<MediaKind | "all">("all");
+  let newFieldOptions = $state("");
+
+  let newTypeName = $state("");
+  let newTypeSingular = $state("");
+  let newTypePlural = $state("");
+  let newTypeIcon = $state("");
+  let newTypeProgress =
+    $state<CustomMediaTypeDefinition["progressTrackingType"]>("none");
+
+  const MEDIA_KIND_OPTIONS: Array<MediaKind | "all"> = [
+    "all",
+    "movie",
+    "show",
+    "anime",
+    "manga",
+    "book",
+    "comic",
+    "game",
+    "music",
+    "podcast",
+    "custom",
+  ];
+
+  function handleAddCustomField(e: Event): void {
+    e.preventDefault();
+    const name = newFieldName.trim();
+    const key = newFieldKey.trim();
+    if (!name || !key || !workbenchPreferences) return;
+    const field: CustomFieldDefinition = {
+      key,
+      label: name,
+      targetType: newFieldTarget,
+      valueType: newFieldType,
+      isFilterable: false,
+      options:
+        newFieldType === "select"
+          ? newFieldOptions
+              .split(",")
+              .map((o) => o.trim())
+              .filter((o) => o.length > 0)
+          : undefined,
+    };
+    onUpdateWorkbenchPreferences?.({
+      customFields: [...workbenchPreferences.customFields, field],
+    });
+    newFieldName = "";
+    newFieldKey = "";
+    newFieldOptions = "";
+    newFieldType = "string";
+    newFieldTarget = "all";
+  }
+
+  function handleDeleteCustomField(key: string): void {
+    if (!workbenchPreferences) return;
+    onUpdateWorkbenchPreferences?.({
+      customFields: workbenchPreferences.customFields.filter(
+        (f) => f.key !== key,
+      ),
+    });
+  }
+
+  function handleAddCustomMediaType(e: Event): void {
+    e.preventDefault();
+    const name = newTypeName.trim();
+    const singular = newTypeSingular.trim();
+    const plural = newTypePlural.trim();
+    if (!name || !singular || !plural || !workbenchPreferences) return;
+    const mediaType: CustomMediaTypeDefinition = {
+      id: crypto.randomUUID(),
+      name,
+      singular,
+      plural,
+      icon: newTypeIcon.trim() || "🎬",
+      progressTrackingType: newTypeProgress,
+    };
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: [...workbenchPreferences.customMediaTypes, mediaType],
+    });
+    newTypeName = "";
+    newTypeSingular = "";
+    newTypePlural = "";
+    newTypeIcon = "";
+    newTypeProgress = "none";
+  }
+
+  function handleDeleteCustomMediaType(id: string): void {
+    if (!workbenchPreferences) return;
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: workbenchPreferences.customMediaTypes.filter(
+        (t) => t.id !== id,
+      ),
+    });
+  }
 
   // Local state for token generator
   let newTokenName = $state("");
@@ -305,6 +408,16 @@
         onclick={() => (activeSettingsSection = "preferences")}
       >
         <IconWorld size={18} /> Preferences & Metadata
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "custom_fields"}
+        aria-pressed={activeSettingsSection === "custom_fields"}
+        onclick={() => (activeSettingsSection = "custom_fields")}
+      >
+        <IconTags size={18} /> Custom Types & Fields
       </button>
 
       <button
@@ -943,7 +1056,207 @@
           </label>
         </section>
 
-        <!-- 4. Metadata Providers & Keys -->
+        <!-- 4. Custom Types & Fields -->
+      {:else if activeSettingsSection === "custom_fields"}
+        <section class="section-pane">
+          <h2 class="pane-title">Custom Types & Fields</h2>
+          <p class="pane-desc">
+            Register custom metadata fields and custom media types for this
+            Fasti node. Both are stored in your local workbench preferences.
+          </p>
+
+          <div class="setting-group">
+            <h3 class="group-title">Custom Metadata Fields</h3>
+            <form onsubmit={handleAddCustomField} class="custom-field-form">
+              <div class="prefs-grid">
+                <div class="form-field">
+                  <label for="cf-name">Name</label>
+                  <input
+                    id="cf-name"
+                    type="text"
+                    class="form-input"
+                    bind:value={newFieldName}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cf-key">Key</label>
+                  <input
+                    id="cf-key"
+                    type="text"
+                    class="form-input mono"
+                    placeholder="e.g. rewatch_count"
+                    bind:value={newFieldKey}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cf-type">Type</label>
+                  <select
+                    id="cf-type"
+                    class="form-input"
+                    bind:value={newFieldType}
+                  >
+                    <option value="string">Text</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="date">Date</option>
+                    <option value="url">URL</option>
+                    <option value="identifier">Identifier</option>
+                    <option value="select">Select</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="cf-target">Target Media Kind</label>
+                  <select
+                    id="cf-target"
+                    class="form-input"
+                    bind:value={newFieldTarget}
+                  >
+                    {#each MEDIA_KIND_OPTIONS as kind}
+                      <option value={kind}>{kind}</option>
+                    {/each}
+                  </select>
+                </div>
+                {#if newFieldType === "select"}
+                  <div class="form-field">
+                    <label for="cf-options">Options (comma-separated)</label>
+                    <input
+                      id="cf-options"
+                      type="text"
+                      class="form-input"
+                      placeholder="e.g. Physical, Digital, Both"
+                      bind:value={newFieldOptions}
+                    />
+                  </div>
+                {/if}
+              </div>
+              <button type="submit" class="btn-secondary mt-2">
+                <IconPlus size={16} /> Add Custom Field
+              </button>
+            </form>
+
+            {#if workbenchPreferences.customFields.length > 0}
+              <ul class="custom-entry-list">
+                {#each workbenchPreferences.customFields as field (field.key)}
+                  <li class="custom-entry-row">
+                    <div>
+                      <strong>{field.label}</strong>
+                      <span class="entry-meta">
+                        <code>{field.key}</code> · {field.valueType} · {field.targetType}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="delete-entry-btn"
+                      onclick={() => handleDeleteCustomField(field.key)}
+                      aria-label="Delete custom field {field.label}"
+                    >
+                      <IconTrash size={14} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="wb-help">No custom metadata fields registered yet.</p>
+            {/if}
+          </div>
+
+          <div class="setting-group">
+            <h3 class="group-title">Custom Media Types</h3>
+            <form onsubmit={handleAddCustomMediaType} class="custom-field-form">
+              <div class="prefs-grid">
+                <div class="form-field">
+                  <label for="cmt-name">Name</label>
+                  <input
+                    id="cmt-name"
+                    type="text"
+                    class="form-input"
+                    bind:value={newTypeName}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-singular">Singular</label>
+                  <input
+                    id="cmt-singular"
+                    type="text"
+                    class="form-input"
+                    placeholder="e.g. Board Game"
+                    bind:value={newTypeSingular}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-plural">Plural</label>
+                  <input
+                    id="cmt-plural"
+                    type="text"
+                    class="form-input"
+                    placeholder="e.g. Board Games"
+                    bind:value={newTypePlural}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-icon">Icon</label>
+                  <input
+                    id="cmt-icon"
+                    type="text"
+                    class="form-input"
+                    placeholder="🎲"
+                    bind:value={newTypeIcon}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-progress">Progress Tracking</label>
+                  <select
+                    id="cmt-progress"
+                    class="form-input"
+                    bind:value={newTypeProgress}
+                  >
+                    <option value="none">None</option>
+                    <option value="episodes">Episodes</option>
+                    <option value="percentage">Percentage</option>
+                    <option value="pages">Pages</option>
+                    <option value="sessions">Sessions</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" class="btn-secondary mt-2">
+                <IconPlus size={16} /> Add Custom Media Type
+              </button>
+            </form>
+
+            {#if workbenchPreferences.customMediaTypes.length > 0}
+              <ul class="custom-entry-list">
+                {#each workbenchPreferences.customMediaTypes as mediaType (mediaType.id)}
+                  <li class="custom-entry-row">
+                    <div>
+                      <span class="entry-icon">{mediaType.icon}</span>
+                      <strong>{mediaType.name}</strong>
+                      <span class="entry-meta">
+                        {mediaType.singular} / {mediaType.plural} · {mediaType.progressTrackingType}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="delete-entry-btn"
+                      onclick={() => handleDeleteCustomMediaType(mediaType.id)}
+                      aria-label="Delete custom media type {mediaType.name}"
+                    >
+                      <IconTrash size={14} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="wb-help">No custom media types registered yet.</p>
+            {/if}
+          </div>
+        </section>
+
+        <!-- 5. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
           <h2 id="provider-settings-title" class="pane-title" tabindex="-1">
@@ -1567,6 +1880,51 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
+  }
+
+  .custom-field-form {
+    padding: 16px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+  .custom-entry-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .custom-entry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--fasti-surface-archive);
+    border-radius: 4px;
+    font-size: 0.88rem;
+  }
+  .entry-meta {
+    display: block;
+    font-size: 0.76rem;
+    color: var(--fasti-text-muted);
+    margin-top: 2px;
+  }
+  .entry-icon {
+    margin-right: 6px;
+  }
+  .delete-entry-btn {
+    background: transparent;
+    border: none;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+    padding: 4px;
+    flex-shrink: 0;
+  }
+  .delete-entry-btn:hover {
+    color: #e11d48;
   }
 
   .providers-list {

@@ -121,9 +121,21 @@ export interface CustomFieldDefinition {
   readonly label: string;
   readonly targetType: MediaKind | "all";
   readonly valueType:
-    "string" | "number" | "boolean" | "date" | "url" | "identifier";
+    "string" | "number" | "boolean" | "date" | "url" | "identifier" | "select";
   readonly registeredNamespace?: string;
   readonly isFilterable: boolean;
+  /** Choices for the field when `valueType` is `"select"`. */
+  readonly options?: string[];
+}
+
+export interface CustomMediaTypeDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly singular: string;
+  readonly plural: string;
+  readonly icon: string;
+  readonly progressTrackingType:
+    "episodes" | "percentage" | "pages" | "sessions" | "none";
 }
 
 /** Legacy type retained for compatibility with prototype-only components. */
@@ -426,4 +438,6 @@ export interface WorkbenchPreferences {
   progressFormat: ProgressFormat;
   /** Minutes of inactivity before a session is considered stale. */
   sessionDuration: number;
+  customFields: CustomFieldDefinition[];
+  customMediaTypes: CustomMediaTypeDefinition[];
 }
