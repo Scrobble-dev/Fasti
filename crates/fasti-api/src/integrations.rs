@@ -314,7 +314,11 @@ fn emby_request(
     let complete = value
         .pointer("/PlayedToCompletion")
         .and_then(Value::as_bool)
-        .or_else(|| value.pointer("/Item/UserData/Played").and_then(Value::as_bool))
+        .or_else(|| {
+            value
+                .pointer("/Item/UserData/Played")
+                .and_then(Value::as_bool)
+        })
         .unwrap_or_else(|| {
             normalized_event == "item.markplayed" || normalized_event == "itemmarkedplayed"
         });
@@ -355,7 +359,10 @@ fn emby_request(
             value: item_id.to_owned(),
         });
     }
-    if let Some(provider_ids) = value.pointer("/Item/ProviderIds").and_then(Value::as_object) {
+    if let Some(provider_ids) = value
+        .pointer("/Item/ProviderIds")
+        .and_then(Value::as_object)
+    {
         let mut ids = BTreeMap::new();
         for (provider, id) in provider_ids {
             if let Some(id) = id.as_str() {
@@ -392,7 +399,11 @@ fn emby_request(
     let position_ticks = value
         .pointer("/Session/PlayState/PositionTicks")
         .and_then(Value::as_u64)
-        .or_else(|| value.pointer("/PlaybackPositionTicks").and_then(Value::as_u64));
+        .or_else(|| {
+            value
+                .pointer("/PlaybackPositionTicks")
+                .and_then(Value::as_u64)
+        });
 
     Ok(SubmitObservationRequest {
         kind: ObservationIngressKind::ConsumptionOccurrence,
@@ -404,7 +415,8 @@ fn emby_request(
         identifiers,
         title,
         progress_percent: Some(100.0),
-        position_seconds: ticks_to_seconds(position_ticks).or_else(|| ticks_to_seconds(runtime_ticks)),
+        position_seconds: ticks_to_seconds(position_ticks)
+            .or_else(|| ticks_to_seconds(runtime_ticks)),
         duration_seconds: ticks_to_seconds(runtime_ticks).filter(|seconds| *seconds > 0),
     })
 }
@@ -509,7 +521,10 @@ fn plex_request(
     raw: &[u8],
     correlation_id: RequestCorrelationId,
 ) -> Result<SubmitObservationRequest, HttpProblem> {
-    let event = value.get("event").and_then(Value::as_str).unwrap_or_default();
+    let event = value
+        .get("event")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if event != "media.scrobble" {
         return Err(invalid_integration(
             correlation_id,
@@ -575,7 +590,9 @@ fn plex_request(
     let source_event_id =
         derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
     let duration_ms = value.pointer("/Metadata/duration").and_then(Value::as_u64);
-    let view_offset_ms = value.pointer("/Metadata/viewOffset").and_then(Value::as_u64);
+    let view_offset_ms = value
+        .pointer("/Metadata/viewOffset")
+        .and_then(Value::as_u64);
     let occurred_at = value
         .pointer("/Metadata/lastViewedAt")
         .and_then(Value::as_i64)
@@ -767,10 +784,7 @@ pub async fn integration_status() -> Json<IntegrationStatusListResponse> {
 pub(crate) fn router() -> Router<LocalApiState> {
     Router::new()
         .route("/api/v1/integrations", get(integration_status))
-        .route(
-            "/api/v1/integrations/nuvio/webhook",
-            post(nuvio_webhook),
-        )
+        .route("/api/v1/integrations/nuvio/webhook", post(nuvio_webhook))
         .route(
             "/api/v1/integrations/tautulli/webhook",
             post(tautulli_webhook),
@@ -779,12 +793,6 @@ pub(crate) fn router() -> Router<LocalApiState> {
             "/api/v1/integrations/jellyfin/webhook",
             post(jellyfin_webhook),
         )
-        .route(
-            "/api/v1/integrations/emby/webhook",
-            post(emby_webhook),
-        )
-        .route(
-            "/api/v1/integrations/plex/webhook",
-            post(plex_webhook),
-        )
+        .route("/api/v1/integrations/emby/webhook", post(emby_webhook))
+        .route("/api/v1/integrations/plex/webhook", post(plex_webhook))
 }

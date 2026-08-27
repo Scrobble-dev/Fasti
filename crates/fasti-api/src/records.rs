@@ -281,7 +281,9 @@ pub(crate) async fn register_namespace(
 
     let mut grains = Vec::with_capacity(request.grains.len());
     for grain in &request.grains {
-        grains.push(Grain::from_str(grain).map_err(|_| validation_failed(capability, correlation_id))?);
+        grains.push(
+            Grain::from_str(grain).map_err(|_| validation_failed(capability, correlation_id))?,
+        );
     }
     let licence_posture = match request.licence_posture.as_str() {
         "open" => NamespaceLicencePosture::Open,

@@ -6,7 +6,9 @@ use axum::{
     Router,
 };
 use fasti_api::{api_router, integration_router};
-use fasti_contracts::{ClientEnrollmentResponse, NodeInitializationResponse, SubmitObservationResponse};
+use fasti_contracts::{
+    ClientEnrollmentResponse, NodeInitializationResponse, SubmitObservationResponse,
+};
 use fasti_store::SqliteKernel;
 use std::path::Path;
 use std::sync::Arc;
