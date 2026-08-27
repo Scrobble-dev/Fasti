@@ -364,59 +364,75 @@ impl AccessAdministrationPort for SqliteKernel {
                 .read_to_string(&mut contents)?;
             Ok(contents)
         };
+        let is_valid = |contents: &str| !contents.trim().is_empty();
 
         let stored_hex = match read_existing() {
-            Ok(contents) if !contents.trim().is_empty() => contents,
+            Ok(contents) if is_valid(&contents) => contents,
             // Absent, unreadable, or empty (including a file left
             // zero-length by a prior write that never reached disk before a
             // crash) -- (re)publish through a unique temporary file in the
-            // target's directory so concurrent callers don't collide, and
-            // publish with no-replace semantics so only the first write wins.
-            // fsync before the rename so a crash after this point still
-            // leaves either the old complete file or the new one, never a
-            // truncated one that would wedge every future startup.
+            // target's directory so concurrent callers don't collide, fsync
+            // before publishing so a crash after this point still leaves
+            // either a complete file or none, and use no-replace semantics
+            // (hard link, not rename, which silently overwrites) so a
+            // concurrent legitimate publish is never clobbered. Bounded to
+            // two attempts: a hard link can only fail because the
+            // destination already exists, and that existing file is either
+            // a winning concurrent publish (read and use it) or the exact
+            // stale/invalid file that put us in this branch to begin with
+            // (remove it and retry once, so this can't loop forever
+            // refusing to replace it).
             _ => {
                 let parent = path.parent().ok_or_else(unavailable)?;
-                let unique_suffix = correlation_id.to_string();
-                let temporary = parent.join(format!("bootstrap.secret.tmp.{}", unique_suffix));
                 let secret = random_secret(capability, correlation_id)?;
                 let hex = secret.expose_hex();
-                let published = (|| -> std::io::Result<()> {
-                    let mut file = OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(&temporary)?;
-                    harden_private_regular_file(&temporary)
-                        .map_err(|_| std::io::Error::other("hardening the secret file failed"))?;
-                    file.write_all(hex.as_bytes())?;
-                    file.sync_all()?;
-                    drop(file);
-                    // Use create_new semantics via hard link + unlink to ensure
-                    // no-replace behavior: if the target exists, link fails.
-                    #[cfg(unix)]
-                    {
-                        std::fs::hard_link(&temporary, &path)?;
-                        std::fs::remove_file(&temporary)?;
-                        Ok(())
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        // On Windows, try rename; if it fails, the target likely exists
-                        std::fs::rename(&temporary, &path)
-                    }
-                })();
-                match published {
-                    Ok(()) => hex,
-                    // Another caller may have won the rename race (e.g.
-                    // concurrent startup priming) -- clean up our temporary
-                    // file and read what the winner published rather than
-                    // returning a value nobody can match.
-                    Err(_) => {
-                        let _ = std::fs::remove_file(&temporary);
-                        read_existing().map_err(|_| unavailable())?
+                let mut published_hex = None;
+                for attempt in 0..2 {
+                    let temporary =
+                        parent.join(format!("bootstrap.secret.tmp.{correlation_id}.{attempt}"));
+                    let published = (|| -> std::io::Result<()> {
+                        let mut file = OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&temporary)?;
+                        harden_private_regular_file(&temporary).map_err(|_| {
+                            std::io::Error::other("hardening the secret file failed")
+                        })?;
+                        file.write_all(hex.as_bytes())?;
+                        file.sync_all()?;
+                        drop(file);
+                        #[cfg(unix)]
+                        {
+                            std::fs::hard_link(&temporary, &path)
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            std::fs::rename(&temporary, &path)
+                        }
+                    })();
+                    let _ = std::fs::remove_file(&temporary);
+
+                    match published {
+                        Ok(()) => {
+                            published_hex = Some(hex.clone());
+                            break;
+                        }
+                        Err(_) => match read_existing() {
+                            Ok(contents) if is_valid(&contents) => {
+                                published_hex = Some(contents);
+                                break;
+                            }
+                            _ => {
+                                // Still invalid: a stale leftover, not a
+                                // concurrent legitimate publish. Clear it and
+                                // let the loop retry the hard link.
+                                let _ = std::fs::remove_file(&path);
+                            }
+                        },
                     }
                 }
+                published_hex.ok_or_else(unavailable)?
             }
         };
 

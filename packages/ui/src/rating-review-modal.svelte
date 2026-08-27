@@ -212,7 +212,7 @@
     font-size: 1.5rem;
     color: color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     cursor: pointer;
-    min-width: 36px;
+    min-width: 44px;
     min-height: 44px;
     padding: 0 2px;
     transition:
