@@ -6,7 +6,6 @@
 pub mod authorization;
 pub mod capabilities;
 pub mod client_credentials;
-pub mod clock;
 #[cfg(feature = "conformance-fixture")]
 pub mod conformance;
 pub mod corrections;
