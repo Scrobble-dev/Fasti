@@ -30,6 +30,7 @@ const DENIED_PACKAGE_PREFIXES = [
   "react-bootstrap",
   "semantic-ui",
   "tailwindcss",
+  "@tailwindcss/",
 ];
 
 const IMPORT_PATTERN = /(?:from\s+|import\s*\(|import\s+)["']([^"']+)["']/g;

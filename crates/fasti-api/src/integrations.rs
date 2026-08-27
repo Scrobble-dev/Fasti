@@ -417,6 +417,17 @@ fn emby_request(
                 .and_then(Value::as_u64)
         });
 
+    let duration_seconds = ticks_to_seconds(runtime_ticks).filter(|seconds| *seconds > 0);
+    // Clamp to duration rather than passing raw ticks through: Emby's session
+    // and item metadata can disagree slightly (rounding, a still-buffering
+    // duration), and an unclamped position past duration would make
+    // validate_request reject an otherwise-genuine completion.
+    let position_seconds = match (ticks_to_seconds(position_ticks), duration_seconds) {
+        (Some(position), Some(duration)) => Some(position.min(duration)),
+        (Some(position), None) => Some(position),
+        (None, duration) => duration,
+    };
+
     Ok(SubmitObservationRequest {
         kind: ObservationIngressKind::ConsumptionOccurrence,
         source: "emby".to_owned(),
@@ -427,9 +438,8 @@ fn emby_request(
         identifiers,
         title,
         progress_percent: Some(100.0),
-        position_seconds: ticks_to_seconds(position_ticks)
-            .or_else(|| ticks_to_seconds(runtime_ticks)),
-        duration_seconds: ticks_to_seconds(runtime_ticks).filter(|seconds| *seconds > 0),
+        position_seconds,
+        duration_seconds,
     })
 }
 
@@ -516,7 +526,7 @@ fn plex_payload_part<'a>(body: &'a [u8], boundary: &str) -> Option<&'a [u8]> {
             }
             continue;
         };
-        let headers = std::str::from_utf8(&part[..header_end]).ok()?;
+        let headers = std::str::from_utf8(&part[..header_end]).unwrap_or_default();
         if headers.contains("name=\"payload\"") || headers.contains("name=payload") {
             let mut content = &part[header_end + separator.len()..];
             while content.ends_with(b"\r\n") {
@@ -615,6 +625,19 @@ fn plex_request(
         .and_then(|seconds| Utc.timestamp_opt(seconds, 0).single())
         .map(|value| value.to_rfc3339());
 
+    let duration_seconds = duration_ms
+        .map(|value| value / 1000)
+        .filter(|value| *value > 0);
+    // Clamp to duration rather than passing the raw viewOffset through: Plex's
+    // duration and viewOffset can disagree slightly, and an unclamped position
+    // past duration would make validate_request reject an otherwise-genuine
+    // completion.
+    let position_seconds = match (view_offset_ms.map(|value| value / 1000), duration_seconds) {
+        (Some(position), Some(duration)) => Some(position.min(duration)),
+        (Some(position), None) => Some(position),
+        (None, duration) => duration,
+    };
+
     Ok(SubmitObservationRequest {
         kind: ObservationIngressKind::ConsumptionOccurrence,
         source: "plex".to_owned(),
@@ -628,12 +651,8 @@ fn plex_request(
             .and_then(Value::as_str)
             .map(str::to_owned),
         progress_percent: Some(100.0),
-        position_seconds: view_offset_ms
-            .map(|value| value / 1000)
-            .or_else(|| duration_ms.map(|value| value / 1000)),
-        duration_seconds: duration_ms
-            .map(|value| value / 1000)
-            .filter(|value| *value > 0),
+        position_seconds,
+        duration_seconds,
     })
 }
 

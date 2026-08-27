@@ -146,8 +146,11 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
     const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
     const value = JSON.parse(raw) as Partial<NetworkConfiguration>;
+    const publicUrlValue = value?.connection?.public_url?.value;
     if (
       typeof value?.connection?.service_url?.value !== "string" ||
+      !value.connection.public_url ||
+      (typeof publicUrlValue !== "string" && publicUrlValue !== null) ||
       !value.outbound_policy ||
       !Array.isArray(value.outbound_policy.allow_networks) ||
       !Array.isArray(value.outbound_policy.deny_networks)

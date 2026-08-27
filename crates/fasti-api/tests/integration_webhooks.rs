@@ -168,7 +168,9 @@ async fn template_webhook_requires_auth_and_replays_stable_event_identity() {
 async fn template_webhook_rejects_partial_progress_without_history_mutation() {
     let (root, local, integrations) = routers().await;
     let credential = enroll_admin(&local, root.path()).await;
+    let event_id = "fixture-session:progress:1";
     let response = integrations
+        .clone()
         .oneshot(
             bearer(
                 Request::post("/api/v1/integrations/jellyfin/webhook"),
@@ -176,13 +178,40 @@ async fn template_webhook_rejects_partial_progress_without_history_mutation() {
             )
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                template_event("fixture-session:progress:1", false, "Episode title").to_string(),
+                template_event(event_id, false, "Episode title").to_string(),
             ))
             .expect("request"),
         )
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The rejected partial-progress request must not have persisted a
+    // history record under this event identity: a genuinely completed event
+    // with the same source_event_id must still commit fresh, not replay a
+    // phantom prior receipt.
+    let completed = integrations
+        .oneshot(
+            bearer(
+                Request::post("/api/v1/integrations/jellyfin/webhook"),
+                &credential,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                template_event(event_id, true, "Episode title").to_string(),
+            ))
+            .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(completed.status(), StatusCode::OK);
+    let completed: SubmitObservationResponse = serde_json::from_slice(
+        &to_bytes(completed.into_body(), 16 * 1024)
+            .await
+            .expect("bounded body"),
+    )
+    .expect("commit receipt");
+    assert_eq!(completed.disposition, "committed");
 }
 
 #[tokio::test]
