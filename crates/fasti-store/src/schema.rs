@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 7;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -32,6 +32,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 5 {
         migrate_v6(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 6 {
+        migrate_v7(connection)?;
     }
     Ok(())
 }
@@ -608,6 +613,66 @@ fn migrate_v6(connection: &Connection) -> Result<()> {
     connection.execute_batch(&sql)
 }
 
+fn migrate_v7(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE profile_record_tracking_dispositions (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            disposition TEXT NOT NULL CHECK (disposition IN ('watching', 'on_hold', 'dropped')),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id, record_id)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX profile_record_tracking_dispositions_profile_idx
+            ON profile_record_tracking_dispositions(workspace_id, profile_id, record_id);
+
+        CREATE TRIGGER profile_record_tracking_dispositions_scope_insert
+        BEFORE INSERT ON profile_record_tracking_dispositions
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'profile tracking disposition crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER profile_record_tracking_dispositions_scope_update
+        BEFORE UPDATE ON profile_record_tracking_dispositions
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'profile tracking disposition crosses a workspace boundary');
+        END;
+        "#,
+    );
+    append_revision_triggers(
+        &mut sql,
+        &RevisionSource {
+            table: "profile_record_tracking_dispositions",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 7;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -754,10 +819,14 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count revision triggers");
-        // +3 for namespace_definitions (migrate_v4) and +6 for the two
-        // metadata field tables (migrate_v6), none of which are in the
+        // +3 for namespace_definitions (migrate_v4), +6 for the two metadata
+        // field tables (migrate_v6), and +3 for profile tracking disposition
+        // (migrate_v7), none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
-        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3 + 3 + 6) as i64);
+        assert_eq!(
+            trigger_count,
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3) as i64
+        );
     }
 
     #[test]
@@ -997,14 +1066,15 @@ mod tests {
             .collect::<Result<_, _>>()
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
-        // column and migrate_v6's two new metadata field tables -- both
-        // additive, so every v4 table and column is still present unchanged.
+        // column, migrate_v6's two metadata tables, and migrate_v7's profile
+        // tracking table -- all additive, so every v4 table and column remains.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
             .chain([
                 "metadata_field_claims".to_owned(),
                 "metadata_field_overrides".to_owned(),
+                "profile_record_tracking_dispositions".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

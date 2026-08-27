@@ -40,10 +40,10 @@ const mutateJson = async (root, relativePath, mutate) => {
 
 test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
-    capabilityCount: 24,
+    capabilityCount: 26,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 7,
-    problemCount: 100,
+    openApiPathCount: 9,
+    problemCount: 115,
     schemaCount: 2,
   });
 });

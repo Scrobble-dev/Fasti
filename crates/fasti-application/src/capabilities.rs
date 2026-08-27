@@ -347,6 +347,45 @@ define_capabilities!(
         []
     ),
     (
+        ListTrackingDispositions,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        SetTrackingDisposition,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            RecordNotFound,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
         InspectReview,
         B2,
         B2,

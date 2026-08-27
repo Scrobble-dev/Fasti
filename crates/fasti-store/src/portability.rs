@@ -1027,11 +1027,13 @@ mod tests {
             .iter()
             .position(|line| line.get("section") == Some(&serde_json::json!("operations")))
             .expect("operations marker");
-        let trailer = lines
+        let next_section = lines
             .iter()
-            .position(|line| line.get("section") == Some(&serde_json::json!("trailer")))
-            .expect("trailer marker");
-        assert_eq!(trailer - operations - 1, operation_count);
+            .enumerate()
+            .skip(operations + 1)
+            .find_map(|(index, line)| line.get("section").map(|_| index))
+            .expect("section after operations");
+        assert_eq!(next_section - operations - 1, operation_count);
     }
 
     #[test]
@@ -1583,6 +1585,40 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
               WHERE workspace_id = ?1 AND (client_id, operation_id) > (?2, ?3) \
               ORDER BY client_id, operation_id LIMIT ?4",
         count_sql: "SELECT COUNT(*) FROM operations WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataFieldClaims,
+        sql: "SELECT workspace_id, record_id, field_key, source, value, locale, \
+                     fetched_at, expires_at, created_at \
+              FROM metadata_field_claims \
+              WHERE workspace_id = ?1 \
+                AND (record_id, field_key, source, fetched_at) > (?2, ?3, ?4, ?5) \
+              ORDER BY record_id, field_key, source, fetched_at LIMIT ?6",
+        count_sql: "SELECT COUNT(*) FROM metadata_field_claims WHERE workspace_id = ?1",
+        cursor_columns: &[
+            CursorColumn::Text(1),
+            CursorColumn::Text(2),
+            CursorColumn::Text(3),
+            CursorColumn::Text(6),
+        ],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataFieldOverrides,
+        sql: "SELECT workspace_id, record_id, field_key, value, created_at \
+              FROM metadata_field_overrides \
+              WHERE workspace_id = ?1 AND (record_id, field_key) > (?2, ?3) \
+              ORDER BY record_id, field_key LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_field_overrides WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
+    },
+    ExportSection {
+        entity: WorkspaceExportEntity::ProfileRecordTrackingDispositions,
+        sql: "SELECT workspace_id, profile_id, record_id, disposition, updated_at \
+              FROM profile_record_tracking_dispositions \
+              WHERE workspace_id = ?1 AND (profile_id, record_id) > (?2, ?3) \
+              ORDER BY profile_id, record_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM profile_record_tracking_dispositions WHERE workspace_id = ?1",
         cursor_columns: &[CursorColumn::Text(1), CursorColumn::Text(2)],
     },
 ];

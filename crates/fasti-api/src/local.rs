@@ -201,9 +201,12 @@ pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
         crate::observation::router().layer(DefaultBodyLimit::max(MAX_OBSERVATION_JSON_BODY_BYTES));
     let records =
         crate::records::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
+    let profile_state =
+        crate::profile_state::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
 
     bootstrap
         .merge(observation)
         .merge(records)
+        .merge(profile_state)
         .with_state(state)
 }

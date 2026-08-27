@@ -44,6 +44,7 @@ const contractIds = {
   client: v7("cli", "5"),
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
+  record: v7("rec", "8"),
 };
 
 test("health omits credentials and returns the exact public contract", async () => {
@@ -486,12 +487,14 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "initializeDurableNode",
           "initializeNode",
           "listRecords",
+          "listTrackingDispositions",
           "receiptEvents",
           "registerNamespace",
           "replayReceipt",
           "revokeCredential",
           "rotateCredential",
           "selectProfile",
+          "setTrackingDisposition",
           "submitObservation",
         ]);
       },
@@ -653,10 +656,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 24);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 26);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    9,
+    10,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -687,6 +690,67 @@ test("generated public metadata preserves complete registry and surface disposit
   assert.equal(
     RECEIPT_STREAM_CONTRACT.sseIdPointer,
     "$message.payload#/receipt_id",
+  );
+  assert.deepEqual(
+    PUBLIC_CAPABILITY_REGISTRY.surface_profiles.b2_profile_state.ui,
+    {
+      binding: "ui:{capability_id}",
+      binding_visibility: "public",
+      state: "required",
+    },
+  );
+});
+
+test("profile tracking disposition SDK is authenticated, exact, and record-bound", async () => {
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "profile-state-secret",
+    fetch: async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      const body = String(url).endsWith(
+        "/api/v1/profile/record-tracking-dispositions",
+      )
+        ? { states: [] }
+        : { record_id: contractIds.record, disposition: "watching" };
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await client.listTrackingDispositions(), { states: [] });
+  assert.deepEqual(
+    await client.setTrackingDisposition(contractIds.record, {
+      disposition: "watching",
+    }),
+    { record_id: contractIds.record, disposition: "watching" },
+  );
+  assert.deepEqual(calls, [
+    {
+      url: "http://127.0.0.1:8420/api/v1/profile/record-tracking-dispositions",
+      method: "GET",
+      authorization: "Bearer profile-state-secret",
+      body: undefined,
+    },
+    {
+      url: `http://127.0.0.1:8420/api/v1/profile/record-tracking-dispositions/${contractIds.record}`,
+      method: "PUT",
+      authorization: "Bearer profile-state-secret",
+      body: { disposition: "watching" },
+    },
+  ]);
+  assert.throws(
+    () =>
+      client.setTrackingDisposition("not-a-record", {
+        disposition: "dropped",
+      }),
+    /recordId does not match the generated contract/,
   );
 });
 
@@ -952,7 +1016,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 24);
+    assert.equal(discovery.capabilities.length, 26);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

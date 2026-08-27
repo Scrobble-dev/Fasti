@@ -11,6 +11,7 @@ use utoipa::OpenApi;
 mod local;
 mod observation;
 mod problem;
+mod profile_state;
 mod records;
 
 #[cfg(feature = "conformance-fixture")]
@@ -41,6 +42,8 @@ pub async fn health_check() -> Json<HealthResponse> {
         local::initialize_node,
         local::enroll_first_client,
         observation::submit_observation,
+        profile_state::list_tracking_dispositions,
+        profile_state::set_tracking_disposition,
         records::create_record,
         records::attach_identifier,
         records::list_records,
@@ -57,6 +60,7 @@ pub async fn health_check() -> Json<HealthResponse> {
         fasti_contracts::EnrollFirstClientRequest,
         fasti_contracts::InitializeNodeRequest,
         fasti_contracts::ListRecordsResponse,
+        fasti_contracts::ListTrackingDispositionsResponse,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::ObservationIdentifierInput,
         fasti_contracts::ObservationIngressKind,
@@ -65,8 +69,12 @@ pub async fn health_check() -> Json<HealthResponse> {
         fasti_contracts::RegisterNamespaceRequest,
         fasti_contracts::RegisterNamespaceResponse,
         fasti_contracts::ResolvedFieldDto,
+        fasti_contracts::SetTrackingDispositionRequest,
         fasti_contracts::SubmitObservationRequest,
         fasti_contracts::SubmitObservationResponse,
+        fasti_contracts::TrackingDispositionDto,
+        fasti_contracts::TrackingDispositionStateDto,
+        fasti_contracts::TrackingDispositionUpdateDto,
         ProblemActionDto,
         ProblemDetails,
         ViolationDto
@@ -165,10 +173,12 @@ mod tests {
             "/api/v1/records",
             "/api/v1/records/identifiers",
             "/api/v1/namespaces",
+            "/api/v1/profile/record-tracking-dispositions",
+            "/api/v1/profile/record-tracking-dispositions/{record_id}",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 7);
+        assert_eq!(document.paths.paths.len(), 9);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -187,11 +197,16 @@ mod tests {
             "CreateRecordRequest",
             "CreateRecordResponse",
             "ListRecordsResponse",
+            "ListTrackingDispositionsResponse",
             "RecordActivityDto",
             "RecordSummaryDto",
             "RegisterNamespaceRequest",
             "RegisterNamespaceResponse",
             "ResolvedFieldDto",
+            "SetTrackingDispositionRequest",
+            "TrackingDispositionDto",
+            "TrackingDispositionStateDto",
+            "TrackingDispositionUpdateDto",
             "ProblemActionDto",
             "ProblemDetails",
             "ViolationDto",
@@ -779,5 +794,106 @@ mod tests {
         .expect("list response");
         assert_eq!(populated_list.records.len(), 1);
         assert_eq!(populated_list.records[0].record_id, created.record_id);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn profile_tracking_disposition_is_authenticated_set_list_and_unset() {
+        let (root, kernel) = test_kernel();
+        let app = api_router(kernel, test_bind_addr(), root.path());
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/profile/record-tracking-dispositions")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        let credential = enroll_admin(&app, root.path()).await.credential;
+        let auth = |builder: axum::http::request::Builder| {
+            builder.header(header::AUTHORIZATION, format!("Bearer {credential}"))
+        };
+
+        let created = app
+            .clone()
+            .oneshot(
+                auth(Request::post("/api/v1/records"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"grain":"work"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(created.status(), StatusCode::OK);
+        let created: fasti_contracts::CreateRecordResponse = serde_json::from_slice(
+            &to_bytes(created.into_body(), 4096)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("create-record response");
+        let state_path = format!(
+            "/api/v1/profile/record-tracking-dispositions/{}",
+            created.record_id
+        );
+
+        let set = app
+            .clone()
+            .oneshot(
+                auth(Request::put(&state_path))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"disposition":"watching"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(set.status(), StatusCode::OK);
+        let set: fasti_contracts::TrackingDispositionStateDto =
+            serde_json::from_slice(&to_bytes(set.into_body(), 4096).await.expect("bounded body"))
+                .expect("set tracking response");
+        assert_eq!(set.record_id, created.record_id);
+        assert_eq!(
+            set.disposition,
+            Some(fasti_contracts::TrackingDispositionDto::Watching)
+        );
+
+        let listed = app
+            .clone()
+            .oneshot(
+                auth(Request::get("/api/v1/profile/record-tracking-dispositions"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(listed.status(), StatusCode::OK);
+        let listed: fasti_contracts::ListTrackingDispositionsResponse = serde_json::from_slice(
+            &to_bytes(listed.into_body(), 4096)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("list tracking response");
+        assert_eq!(listed.states, vec![set]);
+
+        let unset = app
+            .clone()
+            .oneshot(
+                auth(Request::put(&state_path))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"disposition":"unset"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unset.status(), StatusCode::OK);
+        let unset: fasti_contracts::TrackingDispositionStateDto = serde_json::from_slice(
+            &to_bytes(unset.into_body(), 4096)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("unset tracking response");
+        assert_eq!(unset.record_id, created.record_id);
+        assert_eq!(unset.disposition, None);
     }
 }

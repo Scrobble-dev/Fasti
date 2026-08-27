@@ -1209,6 +1209,7 @@ pub trait LocalKernel:
     + EvidenceUploadPort
     + IdentityPort
     + IdentitySeedPort
+    + crate::ProfileRecordStatePort
     + crate::ObservationAcceptancePort
     + crate::ReceiptStreamPort
     + ReviewPort
@@ -1222,6 +1223,7 @@ impl<T> LocalKernel for T where
         + EvidenceUploadPort
         + IdentityPort
         + IdentitySeedPort
+        + crate::ProfileRecordStatePort
         + crate::ObservationAcceptancePort
         + crate::ReceiptStreamPort
         + ReviewPort

@@ -1677,6 +1677,276 @@
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
     },
     {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "profile.record.tracking_disposition.set",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
       "capability_id": "profile.select",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",

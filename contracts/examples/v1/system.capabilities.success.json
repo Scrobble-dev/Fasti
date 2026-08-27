@@ -524,6 +524,65 @@
     },
     {
       "authorization": "scoped",
+      "bounded_context": "profile.tracking",
+      "contract_body": "b2",
+      "examples": [
+        "profile.record.tracking_disposition.list.forbidden"
+      ],
+      "id": "profile.record.tracking_disposition.list",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "profile.tracking",
+      "contract_body": "b2",
+      "examples": [
+        "profile.record.tracking_disposition.set.validation_failed"
+      ],
+      "id": "profile.record.tracking_disposition.set",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "record_not_found",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
       "bounded_context": "profile.preferences",
       "contract_body": "b1",
       "examples": [
@@ -991,6 +1050,60 @@
       "ui": {
         "reason": "Fasti is headless through B3.",
         "state": "not_applicable"
+      }
+    },
+    "b2_profile_state": {
+      "cli": {
+        "body": "b3",
+        "reason": "A profile-state CLI is not required for the B2 product workflow.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Private profile tracking state is not public linked-data identity.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b3",
+        "reason": "The authenticated loopback contract is proven by API integration tests in B2.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Profile tracking disposition is finite request state with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
       }
     },
     "health": {

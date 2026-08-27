@@ -17,11 +17,14 @@ import {
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListTrackingDispositionsResponse,
   parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
   parseReceiptCommittedEvent,
   parseRegisterNamespaceRequest,
   parseRegisterNamespaceResponse,
+  parseSetTrackingDispositionRequest,
+  parseTrackingDispositionStateDto,
   parseReplayReceiptResponse,
   parseSubmitObservationRequest,
   parseSubmitObservationResponse,
@@ -41,15 +44,18 @@ import {
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListTrackingDispositionsResponse,
   type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
   type ReceiptCommittedEnvelope,
   type RegisterNamespaceRequest,
   type RegisterNamespaceResponse,
+  type SetTrackingDispositionRequest,
   type ReplayReceiptResponse,
   type SubmitObservationRequest,
   type SubmitObservationResponse,
+  type TrackingDispositionStateDto,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -208,6 +214,7 @@ const MAX_SSE_EVENT_BYTES = 256 * 1_024;
 const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -550,6 +557,62 @@ export class FastiClient {
       body,
       responseParser: parseRegisterNamespaceResponse,
       responseLabel: "Register-namespace response",
+      options,
+    });
+  }
+
+  listTrackingDispositions(
+    options: CallOptions = {},
+  ): Promise<ListTrackingDispositionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listTrackingDispositions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListTrackingDispositionsResponse,
+      responseLabel: "List tracking dispositions response",
+      options,
+    });
+  }
+
+  setTrackingDisposition(
+    recordId: string,
+    request: SetTrackingDispositionRequest,
+    options: CallOptions = {},
+  ): Promise<TrackingDispositionStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.setTrackingDisposition;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    const body = parseOutgoing(
+      parseSetTrackingDispositionRequest,
+      request,
+      "Set tracking disposition request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{record_id}",
+        encodeURIComponent(safeRecordId),
+      ),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: (value) => {
+        const response = parseTrackingDispositionStateDto(value);
+        if (response.record_id !== safeRecordId) {
+          throw new FastiContractParseError(
+            "Tracking disposition response does not match the requested record id",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Set tracking disposition response",
       options,
     });
   }

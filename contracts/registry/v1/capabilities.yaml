@@ -199,6 +199,42 @@ surface_profiles:
       }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
+  b2_profile_state:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Profile tracking disposition is finite request state with no event channel.,
+      }
+    cli:
+      {
+        state: later_body,
+        body: b3,
+        reason: A profile-state CLI is not required for the B2 product workflow.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: Private profile tracking state is not public linked-data identity.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: b3,
+        reason: The authenticated loopback contract is proven by API integration tests in B2.,
+      }
+    ui: { state: required, binding: "ui:{capability_id}" }
+
   later_b2:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -694,6 +730,61 @@ capabilities:
         validation_failed,
       ]
     examples: [identity.namespace.register.validation_failed]
+    uat: []
+
+  - application_key: list_tracking_dispositions
+    id: profile.record.tracking_disposition.list
+    bounded_context: profile.tracking
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_profile_state
+    scopes: [profile_state_read]
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        storage_unavailable,
+      ]
+    examples: [profile.record.tracking_disposition.list.forbidden]
+    uat: []
+
+  - application_key: set_tracking_disposition
+    id: profile.record.tracking_disposition.set
+    bounded_context: profile.tracking
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_profile_state
+    scopes: [profile_state_write]
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        record_not_found,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [profile.record.tracking_disposition.set.validation_failed]
     uat: []
 
   - application_key: inspect_review

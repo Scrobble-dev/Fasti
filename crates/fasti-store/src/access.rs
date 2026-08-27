@@ -29,6 +29,8 @@ const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::ReceiptRead,
     ScopeKey::IdentityWrite,
     ScopeKey::IdentityRead,
+    ScopeKey::ProfileStateRead,
+    ScopeKey::ProfileStateWrite,
     ScopeKey::ReviewRead,
     ScopeKey::ReviewWrite,
     ScopeKey::CorrectionRead,

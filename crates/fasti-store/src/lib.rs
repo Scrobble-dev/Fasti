@@ -12,6 +12,7 @@ mod metadata;
 mod observation;
 mod online_archive;
 mod portability;
+mod profile_state;
 mod recovery_coordinator;
 mod restore;
 mod restore_activation;

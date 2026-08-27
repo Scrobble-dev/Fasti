@@ -1,8 +1,9 @@
 use anyhow::{ensure, Context};
 use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy};
-use fasti_contracts::{HealthResponse, ProblemDetails};
+use fasti_contracts::{ChecksummedWorkspaceManifestDto, HealthResponse, ProblemDetails};
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
@@ -20,6 +21,11 @@ const CAPABILITY_DISCOVERY_EXAMPLE_PATH: &str =
     "contracts/examples/v1/system.capabilities.success.json";
 const HEALTH_SCHEMA_PATH: &str = "packages/schemas/schemas/health-response.json";
 const PROBLEM_SCHEMA_PATH: &str = "packages/schemas/schemas/problem-details.json";
+const PORTABILITY_V2_SCHEMA_PATH: &str = "contracts/portability/v2/workspace-manifest.schema.json";
+const PORTABILITY_V1_EXAMPLE_PATH: &str =
+    "contracts/portability/v1/workspace-manifest.example.json";
+const PORTABILITY_V2_EXAMPLE_PATH: &str =
+    "contracts/portability/v2/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const ASYNCAPI_PATH: &str = "contracts/asyncapi/v1/transport.yaml";
@@ -172,7 +178,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 5] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 7] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -226,6 +232,28 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 5] = [
         authenticated: true,
         request: Some("RegisterNamespaceRequest"),
         response: Some("RegisterNamespaceResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "listTrackingDispositions",
+        operation_id: "list_tracking_dispositions",
+        method: "get",
+        path: "/api/v1/profile/record-tracking-dispositions",
+        capability_id: "profile.record.tracking_disposition.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListTrackingDispositionsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "setTrackingDisposition",
+        operation_id: "set_tracking_disposition",
+        method: "put",
+        path: "/api/v1/profile/record-tracking-dispositions/{record_id}",
+        capability_id: "profile.record.tracking_disposition.set",
+        authenticated: true,
+        request: Some("SetTrackingDispositionRequest"),
+        response: Some("TrackingDispositionStateDto"),
         retry: "safe",
     },
 ];
@@ -311,6 +339,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let capability_discovery_example = capability_discovery_example(&public_registry)?;
     let health_schema = draft_2020_12_schema::<HealthResponse>()?;
     let problem_schema = draft_2020_12_schema::<ProblemDetails>()?;
+    let portability_v2_schema = portability_v2_schema()?;
+    let portability_v2_example = portability_v2_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -372,6 +402,16 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     )?;
     insert(&mut artifacts, HEALTH_SCHEMA_PATH, health_schema.clone())?;
     insert(&mut artifacts, PROBLEM_SCHEMA_PATH, problem_schema.clone())?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V2_SCHEMA_PATH,
+        portability_v2_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V2_EXAMPLE_PATH,
+        portability_v2_example,
+    )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
         &mut artifacts,
@@ -415,6 +455,113 @@ fn draft_2020_12_schema<T: JsonSchema>() -> anyhow::Result<Value> {
         "generated JSON Schema is not explicitly Draft 2020-12"
     );
     Ok(value)
+}
+
+fn portability_v2_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v2/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV2".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v2. It extends the frozen v1 stream prefix with metadata and profile tracking state."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v2".to_owned()),
+    );
+
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 2
+    });
+    let entities = [
+        "workspaces",
+        "profiles",
+        "clients",
+        "records",
+        "namespaces",
+        "external_identifiers",
+        "evidence",
+        "observations",
+        "observation_clues",
+        "occurrences",
+        "interpretations",
+        "review_items",
+        "review_candidates",
+        "corrections",
+        "receipts",
+        "operations",
+        "metadata_field_claims",
+        "metadata_field_overrides",
+        "profile_record_tracking_dispositions",
+    ];
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V1_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v1 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v1 example omits format_version")? = serde_json::json!(2);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v1 example omits streams")?;
+    let empty_digest = format!("sha256:{:x}", Sha256::digest([]));
+    for entity in [
+        "metadata_field_claims",
+        "metadata_field_overrides",
+        "profile_record_tracking_dispositions",
+    ] {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v1 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v2 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!("sha256:{:x}", Sha256::digest(canonical)));
+    Ok(example)
 }
 
 fn pretty_json(value: Value) -> anyhow::Result<Vec<u8>> {
@@ -1805,15 +1952,20 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
 
     let schemas = object_at(openapi, "/components/schemas")?;
     let mut output = String::new();
-    let name = "ObservationIngressKind";
-    let schema = schemas
-        .get(name)
-        .with_context(|| format!("production OpenAPI omits {name}"))?;
-    writeln!(
-        output,
-        "// prettier-ignore\nexport type {name} = {};\n",
-        typescript_type(schema)?
-    )?;
+    for name in [
+        "ObservationIngressKind",
+        "TrackingDispositionDto",
+        "TrackingDispositionUpdateDto",
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        writeln!(
+            output,
+            "// prettier-ignore\nexport type {name} = {};\n",
+            typescript_type(schema)?
+        )?;
+    }
     for name in [
         "ObservationIdentifierInput",
         "SubmitObservationRequest",
@@ -1828,6 +1980,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "AttachIdentifierResponse",
         "RegisterNamespaceRequest",
         "RegisterNamespaceResponse",
+        "SetTrackingDispositionRequest",
+        "TrackingDispositionStateDto",
+        "ListTrackingDispositionsResponse",
     ] {
         let schema = schemas
             .get(name)
@@ -1954,6 +2109,18 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         (
             "parseRegisterNamespaceResponse",
             "RegisterNamespaceResponse",
+        ),
+        (
+            "parseSetTrackingDispositionRequest",
+            "SetTrackingDispositionRequest",
+        ),
+        (
+            "parseTrackingDispositionStateDto",
+            "TrackingDispositionStateDto",
+        ),
+        (
+            "parseListTrackingDispositionsResponse",
+            "ListTrackingDispositionsResponse",
         ),
     ] {
         writeln!(
@@ -3183,6 +3350,8 @@ mod tests {
             Path::new(CAPABILITY_DISCOVERY_EXAMPLE_PATH),
             Path::new(HEALTH_SCHEMA_PATH),
             Path::new(PROBLEM_SCHEMA_PATH),
+            Path::new(PORTABILITY_V2_SCHEMA_PATH),
+            Path::new(PORTABILITY_V2_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]

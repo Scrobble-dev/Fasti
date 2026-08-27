@@ -181,6 +181,21 @@
         ],
         "type": "object"
       },
+      "ListTrackingDispositionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "states": {
+            "items": {
+              "$ref": "#/components/schemas/TrackingDispositionStateDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "states"
+        ],
+        "type": "object"
+      },
       "NodeInitializationResponse": {
         "additionalProperties": false,
         "description": "One-time proof returned by durable node initialization.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
@@ -496,6 +511,18 @@
         ],
         "type": "object"
       },
+      "SetTrackingDispositionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/TrackingDispositionUpdateDto"
+          }
+        },
+        "required": [
+          "disposition"
+        ],
+        "type": "object"
+      },
       "SubmitObservationRequest": {
         "additionalProperties": false,
         "description": "Durable provider-neutral occurrence ingress envelope.\n\n`source_event_id` is source-owned and must remain stable when the same\ndelivery is retried. Fasti derives the operation ID from the authenticated\nclient, source, and event identity. The complete normalized request is\nstored as immutable evidence before observation acceptance.",
@@ -661,6 +688,45 @@
           "committed_at"
         ],
         "type": "object"
+      },
+      "TrackingDispositionDto": {
+        "enum": [
+          "watching",
+          "on_hold",
+          "dropped"
+        ],
+        "type": "string"
+      },
+      "TrackingDispositionStateDto": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrackingDispositionDto"
+              }
+            ]
+          },
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id"
+        ],
+        "type": "object"
+      },
+      "TrackingDispositionUpdateDto": {
+        "enum": [
+          "watching",
+          "on_hold",
+          "dropped",
+          "unset"
+        ],
+        "type": "string"
       },
       "ViolationDto": {
         "additionalProperties": false,
@@ -1433,6 +1499,310 @@
         ],
         "x-fasti-required-scopes": [
           "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/profile/record-tracking-dispositions": {
+      "get": {
+        "operationId": "list_tracking_dispositions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTrackingDispositionsResponse"
+                }
+              }
+            },
+            "description": "The authenticated profile's explicit record tracking dispositions"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "profile.record.tracking_disposition.list.forbidden": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "profile.record.tracking_disposition.list",
+                      "code": "forbidden",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000024",
+                      "detail": "request is not authorized for this capability",
+                      "next_actions": [
+                        {
+                          "id": "verify_request_authorization",
+                          "label": "Verify the request context and local grant"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks profile-state read scope"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.record.tracking_disposition.list",
+        "x-fasti-example-ids": [
+          "profile.record.tracking_disposition.list.forbidden"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/profile/record-tracking-dispositions/{record_id}": {
+      "put": {
+        "operationId": "set_tracking_disposition",
+        "parameters": [
+          {
+            "description": "Fasti Record identifier",
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTrackingDispositionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingDispositionStateDto"
+                }
+              }
+            },
+            "description": "The authenticated profile's resulting explicit tracking disposition"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks profile-state write scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record does not exist"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "profile.record.tracking_disposition.set.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "profile.record.tracking_disposition.set",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000025",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record ID or disposition does not satisfy the domain contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.record.tracking_disposition.set",
+        "x-fasti-example-ids": [
+          "profile.record.tracking_disposition.set.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "record_not_found",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_write"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

@@ -20,6 +20,7 @@ mod conformance;
 mod generated_capability_ids;
 mod observation;
 mod portability;
+mod profile_state;
 mod records;
 
 pub use bootstrap::*;
@@ -27,6 +28,7 @@ pub use conformance::*;
 pub use generated_capability_ids::public_capability_id;
 pub use observation::*;
 pub use portability::*;
+pub use profile_state::*;
 pub use records::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]

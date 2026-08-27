@@ -31,6 +31,8 @@ define_scope_keys!(
     (ReceiptRead, "receipt_read"),
     (IdentityWrite, "identity_write"),
     (IdentityRead, "identity_read"),
+    (ProfileStateRead, "profile_state_read"),
+    (ProfileStateWrite, "profile_state_write"),
     (ReviewRead, "review_read"),
     (ReviewWrite, "review_write"),
     (CorrectionRead, "correction_read"),
