@@ -20,11 +20,10 @@ Run this command from the repository root:
 This command builds and starts `fastid`, the production daemon. It waits
 until `fastid` answers its health check. Then it prints the API URL.
 
-`fastid` prefers `http://127.0.0.1:8420`. By default, if that port is
-already taken by something else, startup fails rather than picking a
-different port -- set `FASTI_PORT_FALLBACK=auto` to have `fastid` ask the
-operating system for a free port instead, in which case the script prints
-the port it actually got. Automatic fallback is unavailable when
+`fastid` prefers `http://127.0.0.1:8420`. By default, startup fails if that
+port is already taken. Set `FASTI_PORT_FALLBACK=auto` to have `fastid` ask
+the operating system for a free port instead. In that case, the script
+prints the port it actually got. Automatic fallback is unavailable when
 `FASTI_API_URL` or `FASTI_PUBLIC_URL` is configured, since those settings
 pin the URL other tooling should use. Run `./scripts/dev.sh --status` at
 any time to see the live URL.
