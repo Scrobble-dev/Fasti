@@ -163,6 +163,13 @@ where
 }
 
 pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
+    // Prime the host-only bootstrap secret before any local bootstrap route can
+    // be called. This makes possession of the data-root file, not loopback
+    // reachability, the first-client authorization proof.
+    kernel
+        .ensure_bootstrap_secret()
+        .expect("bootstrap secret must be preparable before serving local routes");
+
     let state = LocalApiState { kernel };
     let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))
