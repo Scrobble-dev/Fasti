@@ -32,7 +32,7 @@ type HttpResult<T> = Result<Json<T>, HttpProblem>;
 /// reach this port, and without this check a second process could race the
 /// legitimate first client for the one-time bootstrap credential. Presenting
 /// this value proves the caller can read a file this data root's OS user
-/// owns -- see `AccessAdministrationPort::verify_bootstrap_secret`.
+/// owns -- see `AccessAdministrationPort::ensure_bootstrap_secret`.
 /// Bearer-credential extraction shared by every capability-scoped route
 /// (records, observations). Returns `AuthenticationFailed`, distinct from
 /// `bootstrap_secret`'s `Forbidden` below -- a missing/malformed application

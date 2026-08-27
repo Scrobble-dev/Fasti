@@ -355,29 +355,54 @@ impl AccessAdministrationPort for SqliteKernel {
             ))
         };
 
-        let stored_hex = match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
+        // The stored value is always exactly 64 hex characters -- bounded so
+        // a corrupted or hostile file can't make this read unbounded.
+        let read_existing = || -> std::io::Result<String> {
+            let mut contents = String::new();
+            std::fs::File::open(&path)?
+                .take(128)
+                .read_to_string(&mut contents)?;
+            Ok(contents)
+        };
+
+        let stored_hex = match read_existing() {
+            Ok(contents) if !contents.trim().is_empty() => contents,
+            // Absent, unreadable, or empty (including a file left
+            // zero-length by a prior write that never reached disk before a
+            // crash) -- (re)publish through a temporary file in the same
+            // directory so no reader can ever observe a partial write, and
+            // fsync before the rename so a crash after this point still
+            // leaves either the old complete file or the new one, never a
+            // truncated one that would wedge every future startup.
+            _ => {
+                let temporary = path.with_extension("secret.tmp");
                 let secret = random_secret(capability, correlation_id)?;
                 let hex = secret.expose_hex();
-                if harden_private_regular_file(&path).is_err() {
+                let published = (|| -> std::io::Result<()> {
+                    let mut file = OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(&temporary)?;
+                    harden_private_regular_file(&temporary)
+                        .map_err(|_| std::io::Error::other("hardening the secret file failed"))?;
+                    file.write_all(hex.as_bytes())?;
+                    file.sync_all()?;
                     drop(file);
-                    let _ = std::fs::remove_file(&path);
-                    return Err(unavailable());
+                    std::fs::rename(&temporary, &path)
+                })();
+                match published {
+                    Ok(()) => hex,
+                    // Another caller may have won the rename race (e.g.
+                    // concurrent startup priming) -- read what it published
+                    // rather than discarding our own and returning a value
+                    // nobody can match.
+                    Err(_) => {
+                        let _ = std::fs::remove_file(&temporary);
+                        read_existing().map_err(|_| unavailable())?
+                    }
                 }
-                file.write_all(hex.as_bytes()).map_err(|_| unavailable())?;
-                hex
             }
-            // Another caller won the create_new race (e.g. concurrent
-            // startup priming) -- read the secret it wrote rather than
-            // discarding our own and returning a value nobody can match.
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let mut contents = String::new();
-                std::fs::File::open(&path)
-                    .and_then(|mut file| file.read_to_string(&mut contents))
-                    .map_err(|_| unavailable())?;
-                contents
-            }
-            Err(_) => return Err(unavailable()),
         };
 
         SecretMaterial::try_from_hex(stored_hex.trim()).map_err(|_| unavailable())
@@ -2498,6 +2523,45 @@ mod tests {
         node.insert_profile_and_grant(node.workspace_id, ProfileId::new_v7());
 
         assert!(node.authenticate().is_err());
+    }
+
+    #[test]
+    fn bootstrap_secret_recovers_from_a_zero_length_file_left_by_a_crashed_write() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        // A write that reached open()/create_new() but crashed before
+        // write_all() completed -- exactly what the old non-atomic
+        // create-then-write left behind, and what would have permanently
+        // wedged every future startup without an atomic publish.
+        std::fs::write(root.path().join("bootstrap.secret"), b"")
+            .expect("seed a zero-length secret file");
+
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("a zero-length prior file must not be treated as durably published");
+
+        let republished = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after recovery");
+        assert_eq!(republished.trim(), secret.expose_hex());
+        assert!(
+            !root.path().join("bootstrap.secret.tmp").exists(),
+            "the temporary publish file must not linger after a successful rename"
+        );
+    }
+
+    #[test]
+    fn bootstrap_secret_is_stable_across_repeated_calls() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+
+        let first = kernel
+            .ensure_bootstrap_secret()
+            .expect("first bootstrap secret");
+        let second = kernel
+            .ensure_bootstrap_secret()
+            .expect("second bootstrap secret");
+
+        assert_eq!(first.expose_hex(), second.expose_hex());
     }
 
     #[test]
