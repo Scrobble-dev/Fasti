@@ -10,6 +10,7 @@ description = "HTTP REST API routes, handlers, and JSON contracts for Fasti"
 
 [dependencies]
 axum = { workspace = true }
+chrono = { workspace = true }
 fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }
