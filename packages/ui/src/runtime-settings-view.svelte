@@ -1,0 +1,1273 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import {
+    IconBug,
+    IconDatabase,
+    IconExternalLink,
+    IconFileDownload,
+    IconKey,
+    IconPlus,
+    IconRefresh,
+    IconTags,
+    IconTrash,
+    IconWorld,
+  } from "@tabler/icons-svelte";
+  import NetworkSettings from "./network-settings.svelte";
+  import { hostProblemText } from "./host-problem.js";
+  import type {
+    CustomFieldDefinition,
+    CustomMediaTypeDefinition,
+    MediaKind,
+    NetworkConfiguration,
+    ProviderCredentialStatus,
+    SaveNetworkConfigurationRequest,
+    WorkbenchHost,
+    WorkbenchPreferences,
+  } from "./types.js";
+
+  interface Props {
+    host: WorkbenchHost;
+    workbenchPreferences: WorkbenchPreferences;
+    onUpdateWorkbenchPreferences?: (
+      patch: Partial<WorkbenchPreferences>,
+    ) => void;
+    onClearCache?: (
+      cache: "search" | "history" | "statistics" | "discover" | "all",
+    ) => void;
+  }
+
+  let {
+    host,
+    workbenchPreferences,
+    onUpdateWorkbenchPreferences,
+    onClearCache,
+  }: Props = $props();
+
+  let active:
+    "network" | "providers" | "preferences" | "custom_fields" | "system" =
+    $state("network");
+  let network = $state<NetworkConfiguration>();
+  let networkLoading = $state(false);
+  let networkProblem = $state<string>();
+  let providers = $state<ProviderCredentialStatus[]>([]);
+  let providerLoading = $state(false);
+  let providerProblem = $state<string>();
+  let providerNotice = $state<string>();
+  let editing = $state<Record<string, string>>({});
+  let busyProvider = $state<string>();
+
+  async function loadNetwork(): Promise<void> {
+    if (networkLoading) return;
+    networkLoading = true;
+    networkProblem = undefined;
+    try {
+      network = await host.loadNetworkConfiguration();
+    } catch (error) {
+      networkProblem = hostProblemText(
+        error,
+        "Fasti could not load network configuration.",
+      );
+    } finally {
+      networkLoading = false;
+    }
+  }
+
+  async function saveNetwork(
+    input: SaveNetworkConfigurationRequest,
+  ): Promise<NetworkConfiguration> {
+    const saved = await host.saveNetworkConfiguration(input);
+    network = saved;
+    return saved;
+  }
+
+  async function loadProviders(): Promise<void> {
+    if (providerLoading) return;
+    providerLoading = true;
+    providerProblem = undefined;
+    try {
+      providers = await host.providerCredentialStatus();
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "Fasti could not load provider status.",
+      );
+    } finally {
+      providerLoading = false;
+    }
+  }
+
+  async function saveProvider(provider: string): Promise<void> {
+    const credential = editing[provider]?.trim();
+    if (!credential || busyProvider) return;
+    busyProvider = provider;
+    providerProblem = undefined;
+    providerNotice = undefined;
+    try {
+      providers = await host.saveProviderCredential(provider, credential);
+      providerNotice = "Credential saved in the platform credential store.";
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "Fasti rejected the provider credential.",
+      );
+    } finally {
+      editing = { ...editing, [provider]: "" };
+      busyProvider = undefined;
+    }
+  }
+
+  async function deleteProvider(provider: string): Promise<void> {
+    if (busyProvider) return;
+    busyProvider = provider;
+    providerProblem = undefined;
+    providerNotice = undefined;
+    try {
+      providers = await host.deleteProviderCredential(provider);
+      providerNotice = "Credential removed from the platform credential store.";
+    } catch (error) {
+      providerProblem = hostProblemText(
+        error,
+        "Fasti could not remove the provider credential.",
+      );
+    } finally {
+      busyProvider = undefined;
+    }
+  }
+
+  onMount(() => {
+    void Promise.all([loadNetwork(), loadProviders()]);
+  });
+
+  let newFieldName = $state("");
+  let newFieldKey = $state("");
+  let newFieldType = $state<CustomFieldDefinition["valueType"]>("string");
+  let newFieldTarget = $state<MediaKind | "all">("all");
+  let newFieldOptions = $state("");
+
+  let newTypeName = $state("");
+  let newTypeSingular = $state("");
+  let newTypePlural = $state("");
+  let newTypeIcon = $state("");
+  let newTypeProgress =
+    $state<CustomMediaTypeDefinition["progressTrackingType"]>("none");
+
+  const MEDIA_KIND_OPTIONS: Array<MediaKind | "all"> = [
+    "all",
+    "movie",
+    "show",
+    "anime",
+    "manga",
+    "book",
+    "comic",
+    "game",
+    "music",
+    "podcast",
+    "custom",
+  ];
+
+  function handleAddCustomField(e: Event): void {
+    e.preventDefault();
+    const name = newFieldName.trim();
+    const key = newFieldKey.trim();
+    if (!name || !key) return;
+    const field: CustomFieldDefinition = {
+      key,
+      label: name,
+      targetType: newFieldTarget,
+      valueType: newFieldType,
+      isFilterable: false,
+      options:
+        newFieldType === "select"
+          ? newFieldOptions
+              .split(",")
+              .map((o) => o.trim())
+              .filter((o) => o.length > 0)
+          : undefined,
+    };
+    onUpdateWorkbenchPreferences?.({
+      customFields: [...workbenchPreferences.customFields, field],
+    });
+    newFieldName = "";
+    newFieldKey = "";
+    newFieldOptions = "";
+    newFieldType = "string";
+    newFieldTarget = "all";
+  }
+
+  function handleDeleteCustomField(key: string): void {
+    onUpdateWorkbenchPreferences?.({
+      customFields: workbenchPreferences.customFields.filter(
+        (f) => f.key !== key,
+      ),
+    });
+  }
+
+  function handleAddCustomMediaType(e: Event): void {
+    e.preventDefault();
+    const name = newTypeName.trim();
+    const singular = newTypeSingular.trim();
+    const plural = newTypePlural.trim();
+    if (!name || !singular || !plural) return;
+    const mediaType: CustomMediaTypeDefinition = {
+      id: crypto.randomUUID(),
+      name,
+      singular,
+      plural,
+      icon: newTypeIcon.trim() || "🎬",
+      progressTrackingType: newTypeProgress,
+    };
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: [...workbenchPreferences.customMediaTypes, mediaType],
+    });
+    newTypeName = "";
+    newTypeSingular = "";
+    newTypePlural = "";
+    newTypeIcon = "";
+    newTypeProgress = "none";
+  }
+
+  function handleDeleteCustomMediaType(id: string): void {
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: workbenchPreferences.customMediaTypes.filter(
+        (t) => t.id !== id,
+      ),
+    });
+  }
+
+  /** Builds a diagnostics bundle from state already loaded client-side and
+   * triggers a browser download. Provider credential values are never held
+   * in this component's state (host.providerCredentialStatus never returns
+   * secrets), so there is nothing to redact — only configured-ness and
+   * metadata are included. */
+  function handleDownloadLogs(): void {
+    const bundle = {
+      generatedAt: new Date().toISOString(),
+      workbenchPreferences: {
+        providerRegion: workbenchPreferences.providerRegion,
+        metadataLanguage: workbenchPreferences.metadataLanguage,
+        tvProvider: workbenchPreferences.tvProvider,
+        animeProvider: workbenchPreferences.animeProvider,
+        customFieldCount: workbenchPreferences.customFields.length,
+        customMediaTypeCount: workbenchPreferences.customMediaTypes.length,
+      },
+      network: network
+        ? { outboundPolicy: network.outbound_policy }
+        : undefined,
+      providers: providers.map((p) => ({
+        provider: p.provider,
+        configured: p.configured,
+        source: p.source,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fasti-diagnostics-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+</script>
+
+<div class="settings-container">
+  <header>
+    <h1>Settings</h1>
+    <p>Only settings with an active host capability are editable here.</p>
+  </header>
+
+  <div class="settings-layout">
+    <nav aria-label="Settings sections">
+      <button
+        type="button"
+        class:active={active === "network"}
+        onclick={() => (active = "network")}>Network</button
+      >
+      <button
+        type="button"
+        class:active={active === "providers"}
+        onclick={() => (active = "providers")}>Metadata credentials</button
+      >
+      <button
+        type="button"
+        class:active={active === "preferences"}
+        onclick={() => (active = "preferences")}
+        ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</button
+      >
+      <button
+        type="button"
+        class:active={active === "custom_fields"}
+        onclick={() => (active = "custom_fields")}
+        ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
+      >
+      <button
+        type="button"
+        class:active={active === "system"}
+        onclick={() => (active = "system")}>Capability status</button
+      >
+    </nav>
+
+    <div class="settings-panel">
+      {#if active === "network"}
+        <NetworkSettings
+          configuration={network}
+          loading={networkLoading}
+          loadProblem={networkProblem}
+          onSave={saveNetwork}
+          onTest={(endpoint) => host.testEndpointConnection(endpoint)}
+          onRetry={() => void loadNetwork()}
+        />
+      {:else if active === "providers"}
+        <section aria-labelledby="provider-settings-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="provider-settings-title">Metadata credentials</h2>
+              <p>
+                Fasti never reads a stored secret back into this interface.
+                Credential entry is available only when the host can write to a
+                protected credential store.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="secondary"
+              onclick={() => void loadProviders()}
+              disabled={providerLoading}
+            >
+              <IconRefresh size={18} aria-hidden="true" />
+              {providerLoading ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+
+          <div class="provider-list">
+            {#each providers as provider (provider.provider)}
+              <article class="provider-card">
+                <div class="provider-heading">
+                  <div>
+                    <h3>{provider.label}</h3>
+                    <p>
+                      {provider.configured
+                        ? `Configured from ${provider.source.replace("_", " ")}.`
+                        : "No credential is configured."}
+                    </p>
+                  </div>
+                  <a
+                    href={provider.docs_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Documentation <IconExternalLink
+                      size={14}
+                      aria-hidden="true"
+                    />
+                  </a>
+                </div>
+
+                {#if provider.writable}
+                  <form
+                    class="credential-form"
+                    onsubmit={(event) => {
+                      event.preventDefault();
+                      void saveProvider(provider.provider);
+                    }}
+                  >
+                    <label for={`provider-${provider.provider}`}
+                      >New credential</label
+                    >
+                    <div>
+                      <input
+                        id={`provider-${provider.provider}`}
+                        type="password"
+                        autocomplete="off"
+                        value={editing[provider.provider] ?? ""}
+                        oninput={(event) =>
+                          (editing = {
+                            ...editing,
+                            [provider.provider]: event.currentTarget.value,
+                          })}
+                        disabled={busyProvider === provider.provider}
+                      />
+                      <button
+                        type="submit"
+                        class="primary"
+                        disabled={!editing[provider.provider]?.trim() ||
+                          Boolean(busyProvider)}
+                      >
+                        <IconKey size={18} aria-hidden="true" /> Save
+                      </button>
+                      {#if provider.configured}
+                        <button
+                          type="button"
+                          class="danger"
+                          onclick={() => void deleteProvider(provider.provider)}
+                          disabled={Boolean(busyProvider)}
+                        >
+                          Remove
+                        </button>
+                      {/if}
+                    </div>
+                  </form>
+                {:else}
+                  <p class="managed-note">
+                    This distribution does not accept a secret for this
+                    provider. Use the native or server host when the provider
+                    requires protected credentials.
+                  </p>
+                {/if}
+              </article>
+            {/each}
+          </div>
+
+          {#if providerNotice}<p class="notice" role="status">
+              {providerNotice}
+            </p>{/if}
+          {#if providerProblem}<p class="problem" role="alert">
+              {providerProblem}
+            </p>{/if}
+        </section>
+      {:else if active === "preferences"}
+        <section aria-labelledby="preferences-settings-title">
+          <h2 id="preferences-settings-title">Preferences & Metadata</h2>
+          <p>
+            Defaults used when searching providers, projecting metadata, and
+            displaying progress across the library.
+          </p>
+
+          <div class="prefs-grid">
+            <div class="form-field">
+              <label for="pref-provider-region">Provider Region</label>
+              <select
+                id="pref-provider-region"
+                value={workbenchPreferences.providerRegion}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    providerRegion: e.currentTarget.value,
+                  })}
+              >
+                {#each [{ id: "US", name: "United States" }, { id: "GB", name: "United Kingdom" }, { id: "CA", name: "Canada" }, { id: "AU", name: "Australia" }, { id: "DE", name: "Germany" }, { id: "FR", name: "France" }, { id: "JP", name: "Japan" }, { id: "IE", name: "Ireland" }] as region}
+                  <option value={region.id}>{region.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-metadata-language">Metadata Language</label>
+              <select
+                id="pref-metadata-language"
+                value={workbenchPreferences.metadataLanguage}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    metadataLanguage: e.currentTarget.value,
+                  })}
+              >
+                {#each [{ id: "en-US", name: "English (US)" }, { id: "en-GB", name: "English (UK)" }, { id: "ja-JP", name: "Japanese" }, { id: "de-DE", name: "German" }, { id: "fr-FR", name: "French" }, { id: "es-ES", name: "Spanish" }] as lang}
+                  <option value={lang.id}>{lang.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-tv-provider">TV Provider</label>
+              <select
+                id="pref-tv-provider"
+                value={workbenchPreferences.tvProvider}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    tvProvider: e.currentTarget.value as "tmdb" | "tvdb_v4",
+                  })}
+              >
+                <option value="tmdb">TMDB</option>
+                <option value="tvdb_v4">TheTVDB (v4)</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-anime-provider">Anime Provider</label>
+              <select
+                id="pref-anime-provider"
+                value={workbenchPreferences.animeProvider}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    animeProvider: e.currentTarget.value as
+                      "mal" | "anilist" | "kitsu",
+                  })}
+              >
+                <option value="mal">MyAnimeList</option>
+                <option value="anilist">AniList</option>
+                <option value="kitsu">Kitsu</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-title-language">Title Language Preference</label>
+              <select
+                id="pref-title-language"
+                value={workbenchPreferences.titleLanguage}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    titleLanguage: e.currentTarget.value as
+                      "romaji" | "english" | "native",
+                  })}
+              >
+                <option value="romaji">Romaji</option>
+                <option value="english">English</option>
+                <option value="native">Native</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-hide-completed">Hide Completed</label>
+              <select
+                id="pref-hide-completed"
+                value={workbenchPreferences.hideCompleted}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    hideCompleted: e.currentTarget.value as
+                      "disabled" | "home_only" | "everywhere",
+                  })}
+              >
+                <option value="disabled">Disabled</option>
+                <option value="home_only">Home Only</option>
+                <option value="everywhere">Everywhere</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-game-logging">Game Logging</label>
+              <select
+                id="pref-game-logging"
+                value={workbenchPreferences.gameLogging}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    gameLogging: e.currentTarget.value as
+                      "repeats" | "sessions",
+                  })}
+              >
+                <option value="sessions">Sessions</option>
+                <option value="repeats">Repeats</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-progress-format">Progress Format</label>
+              <select
+                id="pref-progress-format"
+                value={workbenchPreferences.progressFormat}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    progressFormat: e.currentTarget.value as
+                      "percentage" | "time_remaining" | "episodes",
+                  })}
+              >
+                <option value="percentage">Percentage</option>
+                <option value="time_remaining">Time Remaining</option>
+                <option value="episodes">Episode Count</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-session-duration">Session Duration</label>
+              <select
+                id="pref-session-duration"
+                value={workbenchPreferences.sessionDuration}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    sessionDuration: Number(e.currentTarget.value),
+                  })}
+              >
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={240}>4 hours</option>
+                <option value={480}>8 hours</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="checkbox-field">
+            <input
+              type="checkbox"
+              checked={workbenchPreferences.hideZeroRatings}
+              onchange={(e) =>
+                onUpdateWorkbenchPreferences?.({
+                  hideZeroRatings: e.currentTarget.checked,
+                })}
+            />
+            <span>Hide Zero Ratings</span>
+          </label>
+        </section>
+      {:else if active === "custom_fields"}
+        <section aria-labelledby="custom-fields-settings-title">
+          <h2 id="custom-fields-settings-title">Custom Types & Fields</h2>
+          <p>
+            Register custom metadata fields and custom media types for this
+            Fasti node. Both are stored in your local workbench preferences.
+          </p>
+
+          <div class="setting-group">
+            <h3>Custom Metadata Fields</h3>
+            <form onsubmit={handleAddCustomField} class="custom-field-form">
+              <div class="prefs-grid">
+                <div class="form-field">
+                  <label for="cf-name">Name</label>
+                  <input
+                    id="cf-name"
+                    type="text"
+                    bind:value={newFieldName}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cf-key">Key</label>
+                  <input
+                    id="cf-key"
+                    type="text"
+                    class="mono"
+                    placeholder="e.g. rewatch_count"
+                    bind:value={newFieldKey}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cf-type">Type</label>
+                  <select id="cf-type" bind:value={newFieldType}>
+                    <option value="string">Text</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="date">Date</option>
+                    <option value="url">URL</option>
+                    <option value="identifier">Identifier</option>
+                    <option value="select">Select</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="cf-target">Target Media Kind</label>
+                  <select id="cf-target" bind:value={newFieldTarget}>
+                    {#each MEDIA_KIND_OPTIONS as kind}
+                      <option value={kind}>{kind}</option>
+                    {/each}
+                  </select>
+                </div>
+                {#if newFieldType === "select"}
+                  <div class="form-field">
+                    <label for="cf-options">Options (comma-separated)</label>
+                    <input
+                      id="cf-options"
+                      type="text"
+                      placeholder="e.g. Physical, Digital, Both"
+                      bind:value={newFieldOptions}
+                    />
+                  </div>
+                {/if}
+              </div>
+              <button type="submit" class="secondary mt">
+                <IconPlus size={16} aria-hidden="true" /> Add Custom Field
+              </button>
+            </form>
+
+            {#if workbenchPreferences.customFields.length > 0}
+              <ul class="custom-entry-list">
+                {#each workbenchPreferences.customFields as field (field.key)}
+                  <li class="custom-entry-row">
+                    <div>
+                      <strong>{field.label}</strong>
+                      <span class="entry-meta">
+                        <code>{field.key}</code> · {field.valueType} · {field.targetType}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="danger icon-only"
+                      onclick={() => handleDeleteCustomField(field.key)}
+                      aria-label="Delete custom field {field.label}"
+                    >
+                      <IconTrash size={14} aria-hidden="true" />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="managed-note">
+                No custom metadata fields registered yet.
+              </p>
+            {/if}
+          </div>
+
+          <div class="setting-group">
+            <h3>Custom Media Types</h3>
+            <form onsubmit={handleAddCustomMediaType} class="custom-field-form">
+              <div class="prefs-grid">
+                <div class="form-field">
+                  <label for="cmt-name">Name</label>
+                  <input
+                    id="cmt-name"
+                    type="text"
+                    bind:value={newTypeName}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-singular">Singular</label>
+                  <input
+                    id="cmt-singular"
+                    type="text"
+                    placeholder="e.g. Board Game"
+                    bind:value={newTypeSingular}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-plural">Plural</label>
+                  <input
+                    id="cmt-plural"
+                    type="text"
+                    placeholder="e.g. Board Games"
+                    bind:value={newTypePlural}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-icon">Icon</label>
+                  <input
+                    id="cmt-icon"
+                    type="text"
+                    placeholder="🎲"
+                    bind:value={newTypeIcon}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-progress">Progress Tracking</label>
+                  <select id="cmt-progress" bind:value={newTypeProgress}>
+                    <option value="none">None</option>
+                    <option value="episodes">Episodes</option>
+                    <option value="percentage">Percentage</option>
+                    <option value="pages">Pages</option>
+                    <option value="sessions">Sessions</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" class="secondary mt">
+                <IconPlus size={16} aria-hidden="true" /> Add Custom Media Type
+              </button>
+            </form>
+
+            {#if workbenchPreferences.customMediaTypes.length > 0}
+              <ul class="custom-entry-list">
+                {#each workbenchPreferences.customMediaTypes as mediaType (mediaType.id)}
+                  <li class="custom-entry-row">
+                    <div>
+                      <span class="entry-icon">{mediaType.icon}</span>
+                      <strong>{mediaType.name}</strong>
+                      <span class="entry-meta">
+                        {mediaType.singular} / {mediaType.plural} · {mediaType.progressTrackingType}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="danger icon-only"
+                      onclick={() => handleDeleteCustomMediaType(mediaType.id)}
+                      aria-label="Delete custom media type {mediaType.name}"
+                    >
+                      <IconTrash size={14} aria-hidden="true" />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="managed-note">No custom media types registered yet.</p>
+            {/if}
+          </div>
+        </section>
+      {:else}
+        <section aria-labelledby="capability-settings-title">
+          <h2 id="capability-settings-title">
+            Configuration capability status
+          </h2>
+          <p>
+            Fasti does not render configuration forms before their host-side
+            validation and storage capability exists.
+          </p>
+          <dl class="status-list">
+            <div>
+              <dt>Network policy and endpoint</dt>
+              <dd>Active</dd>
+            </div>
+            <div>
+              <dt>Protected metadata credentials</dt>
+              <dd>Host-dependent</dd>
+            </div>
+            <div>
+              <dt>Scoped external API clients</dt>
+              <dd>Managed in Connections on the trusted packaged host</dd>
+            </div>
+            <div>
+              <dt>OIDC administration</dt>
+              <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Apprise notification administration</dt>
+              <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Source-specific importers</dt>
+              <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Native Nuvio pairing</dt>
+              <dd>Not active</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section aria-labelledby="cache-settings-title">
+          <h2 id="cache-settings-title">Cache Management</h2>
+          <p>Clear cached data per category, or everything at once.</p>
+          <div class="cache-cards-grid">
+            {#each [{ id: "search", label: "Search Cache" }, { id: "history", label: "History Cache" }, { id: "statistics", label: "Statistics Cache" }, { id: "discover", label: "Discover Cache" }] as cache}
+              <div class="cache-card">
+                <div class="cache-card-header">
+                  <IconDatabase size={18} aria-hidden="true" />
+                  <strong>{cache.label}</strong>
+                </div>
+                <button
+                  type="button"
+                  class="secondary"
+                  disabled={!onClearCache}
+                  title={onClearCache
+                    ? undefined
+                    : "Cache clearing is not available in this build"}
+                  onclick={() =>
+                    onClearCache?.(
+                      cache.id as
+                        "search" | "history" | "statistics" | "discover",
+                    )}
+                >
+                  Clear
+                </button>
+              </div>
+            {/each}
+          </div>
+          <button
+            type="button"
+            class="primary mt"
+            disabled={!onClearCache}
+            title={onClearCache
+              ? undefined
+              : "Cache clearing is not available in this build"}
+            onclick={() => onClearCache?.("all")}
+          >
+            Clear All Caches
+          </button>
+        </section>
+
+        <section aria-labelledby="diagnostics-settings-title">
+          <h2 id="diagnostics-settings-title">Diagnostics & Support</h2>
+          <div class="diagnostics-actions">
+            <button
+              type="button"
+              class="secondary"
+              onclick={handleDownloadLogs}
+            >
+              <IconFileDownload size={16} aria-hidden="true" /> Download Sanitized
+              Logs
+            </button>
+            <a
+              href="https://github.com/Scrobble-dev/Fasti/issues/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="secondary link-button"
+            >
+              <IconBug size={16} aria-hidden="true" /> File a Bug Report
+            </a>
+          </div>
+        </section>
+      {/if}
+    </div>
+  </div>
+</div>
+
+<style>
+  .settings-container {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+
+  header {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid
+      color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin-top: 0;
+  }
+
+  h1,
+  h2 {
+    font-family: var(--fasti-font-display);
+  }
+
+  h1 {
+    margin-bottom: 4px;
+    font-size: 2.4rem;
+  }
+
+  header p,
+  section > p,
+  .provider-card p {
+    color: var(--fasti-text-muted);
+  }
+
+  .settings-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  nav button {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 5px;
+    padding: 9px 12px;
+    text-align: left;
+    background: transparent;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+  }
+
+  nav button:hover,
+  nav button.active {
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
+  }
+
+  nav button.active {
+    font-weight: 700;
+    box-shadow: inset 3px 0 0 var(--fasti-action-primary);
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
+  }
+
+  .section-heading,
+  .provider-heading,
+  .credential-form > div {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .provider-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .provider-card {
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-radius: 7px;
+    padding: 16px;
+    background: var(--fasti-surface-paper);
+  }
+
+  .provider-card h3,
+  .provider-card p {
+    margin-bottom: 4px;
+  }
+
+  .provider-heading a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .credential-form {
+    margin-top: 14px;
+  }
+
+  .credential-form label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 650;
+  }
+
+  .credential-form > div {
+    align-items: center;
+  }
+
+  input,
+  select {
+    flex: 1;
+    min-width: 0;
+    min-height: 44px;
+    border: 1px solid var(--fasti-border, currentColor);
+    border-radius: 5px;
+    padding: 8px 10px;
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
+  }
+
+  .prefs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .form-field label {
+    font-weight: 650;
+  }
+
+  .form-field select,
+  .form-field input {
+    width: 100%;
+  }
+
+  .mono {
+    font-family: var(--fasti-font-mono, monospace);
+  }
+
+  .checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .checkbox-field input {
+    flex: none;
+    min-height: 0;
+    width: auto;
+  }
+
+  .mt {
+    margin-top: 16px;
+  }
+
+  .setting-group {
+    margin-top: 20px;
+  }
+
+  .setting-group h3 {
+    margin-bottom: 10px;
+  }
+
+  .custom-field-form {
+    padding: 16px;
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-radius: 7px;
+    margin-bottom: 12px;
+  }
+
+  .custom-entry-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .custom-entry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-radius: 5px;
+    font-size: 0.88rem;
+  }
+
+  .entry-meta {
+    display: block;
+    font-size: 0.76rem;
+    color: var(--fasti-text-muted);
+    margin-top: 2px;
+  }
+
+  .entry-icon {
+    margin-right: 6px;
+  }
+
+  .icon-only {
+    padding: 6px;
+    flex-shrink: 0;
+  }
+
+  .cache-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 20px 0 16px;
+  }
+
+  .cache-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-radius: 7px;
+    background: var(--fasti-surface-paper);
+  }
+
+  .cache-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+  }
+
+  .diagnostics-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .link-button {
+    text-decoration: none;
+  }
+
+  .primary,
+  .secondary,
+  .danger {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 5px;
+    padding: 8px 13px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+
+  .primary {
+    border: 1px solid var(--fasti-action-primary);
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast, white);
+  }
+
+  .secondary {
+    border: 1px solid var(--fasti-border, currentColor);
+    background: var(--fasti-surface-paper);
+    color: var(--fasti-text-primary);
+  }
+
+  .danger {
+    border: 1px solid var(--fasti-state-error, #b42318);
+    background: transparent;
+    color: var(--fasti-state-error, #b42318);
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+  }
+
+  .managed-note {
+    margin: 12px 0 0;
+  }
+
+  .notice {
+    color: var(--fasti-state-verified, #207a42);
+    font-weight: 600;
+  }
+
+  .problem {
+    color: var(--fasti-state-error, #b42318);
+    font-weight: 600;
+  }
+
+  .status-list {
+    display: grid;
+    gap: 1px;
+    margin: 20px 0 0;
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-radius: 7px;
+    overflow: hidden;
+  }
+
+  .status-list div {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr);
+    gap: 16px;
+    padding: 12px 14px;
+    background: var(--fasti-surface-paper);
+  }
+
+  .status-list dt {
+    font-weight: 650;
+  }
+
+  .status-list dd {
+    margin: 0;
+    color: var(--fasti-text-muted);
+  }
+
+  @media (max-width: 47.99rem) {
+    .settings-container {
+      padding: 24px 16px 48px;
+    }
+
+    .settings-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    nav {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .section-heading,
+    .provider-heading,
+    .credential-form > div,
+    .status-list div {
+      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+
+    .credential-form > div,
+    input,
+    .primary,
+    .secondary,
+    .danger {
+      width: 100%;
+    }
+  }
+</style>

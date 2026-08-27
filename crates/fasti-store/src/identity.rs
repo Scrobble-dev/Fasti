@@ -1,12 +1,25 @@
 use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
+use crate::metadata::{load_field_claims, load_field_override};
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
-    CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ProblemCode,
-    RegisterNamespaceDefinitionCommand, RegisterNamespaceDefinitionOutcome,
+    CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ListRecordsQuery,
+    ProblemCode, RecordActivity, RecordSummary, RegisterNamespaceDefinitionCommand,
+    RegisterNamespaceDefinitionOutcome,
 };
-use fasti_domain::{ExternalIdentifierClaim, ExternalIdentifierId, Grain, RecordId, WorkspaceId};
+use fasti_domain::{
+    resolve_field, ExternalIdentifierClaim, ExternalIdentifierId, FieldKey, Grain,
+    InterpretationState, OccurredAt, RecordId, RecordStatus, WorkspaceId, POSTER_FIELD_KEY,
+    TITLE_FIELD_KEY,
+};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::collections::BTreeSet;
+
+/// Bound on one `list_records` page. Mirrors `review.rs`'s `MAX_REVIEW_PAGE`
+/// pattern: no cursor yet, just a hard cap, matching the size a single local
+/// library realistically needs before real pagination earns its keep.
+///
+/// ponytail: no cursor pagination. Add one if a real library exceeds this.
+const MAX_RECORDS_PAGE: i64 = 500;
 
 impl IdentityPort for SqliteKernel {
     fn register_namespace_definition(
@@ -165,6 +178,217 @@ impl IdentityPort for SqliteKernel {
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(outcome)
     }
+
+    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<Vec<RecordSummary>> {
+        let capability = CapabilityKey::ListRecords;
+        let correlation_id = query.correlation_id();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Deferred),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
+
+        let workspace_id = query.access().workspace_id();
+        let mut statement = map_sql(
+            transaction.prepare(
+                r#"
+                SELECT record_id, grain FROM records
+                WHERE workspace_id = ?1 AND status = 'active'
+                ORDER BY record_id
+                LIMIT ?2
+                "#,
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let rows = map_sql(
+            statement.query_map(params![workspace_id.to_string(), MAX_RECORDS_PAGE], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }),
+            capability,
+            correlation_id,
+        )?;
+        let mut records = Vec::new();
+        for row in rows {
+            let (record_id, grain) = map_sql(row, capability, correlation_id)?;
+            let record_id = record_id.parse::<RecordId>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            let grain = grain.parse::<Grain>().map_err(|_| {
+                Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+            })?;
+            records.push((record_id, grain));
+        }
+        drop(statement);
+
+        let mut summaries = Vec::with_capacity(records.len());
+        for (record_id, grain) in records {
+            summaries.push(load_record_summary(
+                &transaction,
+                workspace_id,
+                record_id,
+                grain,
+                capability,
+                correlation_id,
+            )?);
+        }
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(summaries)
+    }
+}
+
+fn resolved_field(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    field_key: &FieldKey,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<fasti_domain::ResolvedField> {
+    let claims = load_field_claims(
+        connection,
+        workspace_id,
+        record_id,
+        field_key,
+        capability,
+        correlation_id,
+    )?;
+    let override_ = load_field_override(
+        connection,
+        workspace_id,
+        record_id,
+        field_key,
+        capability,
+        correlation_id,
+    )?;
+    // No preferred-provider configuration exists yet (that is a profile
+    // preference this task does not build); resolve_field degrades cleanly
+    // to fallback/last-known-good/empty tiers without one.
+    Ok(resolve_field(
+        override_.as_ref(),
+        &claims,
+        None,
+        None,
+        now(),
+    ))
+}
+
+fn load_latest_activity(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<Option<RecordActivity>> {
+    let occurrence = map_sql(
+        connection
+            .query_row(
+                r#"
+                SELECT occurrence_id, occurred_at_json FROM occurrences
+                WHERE workspace_id = ?1 AND record_id = ?2
+                ORDER BY created_at DESC, occurrence_id DESC
+                LIMIT 1
+                "#,
+                params![workspace_id.to_string(), record_id.to_string()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional(),
+        capability,
+        correlation_id,
+    )?;
+    let Some((occurrence_id, occurred_at_json)) = occurrence else {
+        return Ok(None);
+    };
+    let occurred_at = occurred_at_json
+        .map(|value| {
+            serde_json::from_str::<OccurredAt>(&value)
+                .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
+        })
+        .transpose()?;
+    let state = map_sql(
+        connection
+            .query_row(
+                r#"
+                SELECT state FROM interpretations
+                WHERE occurrence_id = ?1
+                ORDER BY created_at DESC, interpretation_id DESC
+                LIMIT 1
+                "#,
+                [occurrence_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional(),
+        capability,
+        correlation_id,
+    )?;
+    let interpretation_state = match state {
+        Some(value) => parse_interpretation_state(&value, capability, correlation_id)?,
+        None => return Ok(None),
+    };
+    Ok(Some(RecordActivity::new(occurred_at, interpretation_state)))
+}
+
+fn parse_interpretation_state(
+    value: &str,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<InterpretationState> {
+    match value {
+        "unresolved" => Ok(InterpretationState::Unresolved),
+        "resolved" => Ok(InterpretationState::Resolved),
+        "conflicted" => Ok(InterpretationState::Conflicted),
+        _ => Err(Box::new(FastiProblem::integrity_failed(
+            capability,
+            correlation_id,
+        ))),
+    }
+}
+
+fn load_record_summary(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    grain: Grain,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<RecordSummary> {
+    let title_key = FieldKey::try_new(TITLE_FIELD_KEY)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let poster_key = FieldKey::try_new(POSTER_FIELD_KEY)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let title = resolved_field(
+        connection,
+        workspace_id,
+        record_id,
+        &title_key,
+        capability,
+        correlation_id,
+    )?;
+    let poster = resolved_field(
+        connection,
+        workspace_id,
+        record_id,
+        &poster_key,
+        capability,
+        correlation_id,
+    )?;
+    let latest_activity = load_latest_activity(
+        connection,
+        workspace_id,
+        record_id,
+        capability,
+        correlation_id,
+    )?;
+    Ok(RecordSummary::new(
+        record_id,
+        grain,
+        RecordStatus::Active,
+        title,
+        poster,
+        latest_activity,
+    ))
 }
 
 pub(crate) fn insert_record(
@@ -395,9 +619,18 @@ pub(crate) fn matching_record_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metadata::write_field_claim;
     use crate::test_support::TestNode;
-    use fasti_application::{IdentityPort, RegisterNamespaceDefinitionCommand};
-    use fasti_domain::{NamespaceDefinition, NamespaceLicencePosture, RequestCorrelationId};
+    use chrono::{TimeZone, Utc};
+    use fasti_application::{
+        AcceptObservationCommand, IdentityPort, ListRecordsQuery, ObservationAcceptancePort,
+        RegisterNamespaceDefinitionCommand,
+    };
+    use fasti_domain::{
+        ClaimedTrust, FieldClaim, FieldResolutionTier, NamespaceDefinition, NamespaceKey,
+        NamespaceLicencePosture, ObservedAt, OperationId, ReceivedAt, RequestCorrelationId,
+        TITLE_FIELD_KEY,
+    };
 
     fn definition(namespace: &str, grains: impl IntoIterator<Item = Grain>) -> NamespaceDefinition {
         NamespaceDefinition::try_new(
@@ -510,5 +743,148 @@ mod tests {
             ))
             .expect_err("same key cannot change comparison space");
         assert_eq!(error.code(), ProblemCode::ValidationFailed);
+    }
+
+    fn list(node: &TestNode) -> Vec<RecordSummary> {
+        node.kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records")
+    }
+
+    fn ns(value: &str) -> NamespaceKey {
+        NamespaceKey::try_new(value).expect("valid namespace")
+    }
+
+    fn received(seconds: i64) -> ReceivedAt {
+        ReceivedAt::from_application_clock(Utc.timestamp_opt(seconds, 0).single().expect("instant"))
+    }
+
+    #[test]
+    fn a_local_only_record_with_no_claims_is_a_valid_empty_row() {
+        let node = TestNode::new();
+        let record_id = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Film,
+            ))
+            .expect("create record")
+            .record_id();
+
+        let summaries = list(&node);
+        assert_eq!(summaries.len(), 1);
+        let summary = &summaries[0];
+        assert_eq!(summary.record_id(), record_id);
+        assert_eq!(summary.grain(), Grain::Film);
+        assert_eq!(summary.title().tier(), FieldResolutionTier::Empty);
+        assert_eq!(summary.title().value(), None);
+        assert_eq!(summary.poster().tier(), FieldResolutionTier::Empty);
+        assert!(summary.latest_activity().is_none());
+    }
+
+    #[test]
+    fn claims_from_multiple_providers_resolve_to_the_freshest_tier() {
+        let node = TestNode::new();
+        let record_id = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Film,
+            ))
+            .expect("create record")
+            .record_id();
+        let key = FieldKey::try_new(TITLE_FIELD_KEY).expect("valid field key");
+        let older = FieldClaim::try_new(ns("tvdb"), "Older Title", None, received(100), None)
+            .expect("valid claim");
+        let newer = FieldClaim::try_new(ns("tmdb"), "Newer Title", None, received(200), None)
+            .expect("valid claim");
+
+        {
+            let connection = node.kernel.inner.connection.lock().expect("connection");
+            for claim in [&older, &newer] {
+                write_field_claim(
+                    &connection,
+                    node.access.workspace_id(),
+                    record_id,
+                    &key,
+                    claim,
+                    CapabilityKey::ListRecords,
+                    RequestCorrelationId::new_v7(),
+                )
+                .expect("write claim");
+            }
+        }
+
+        let summaries = list(&node);
+        assert_eq!(summaries.len(), 1);
+        let title = summaries[0].title();
+        // Neither claim declares an expiry, so both are fresh and the most
+        // recently fetched one wins the fallback tier -- exactly what
+        // `resolve_field` proves in fasti-domain; this proves the store
+        // wiring feeds it the real persisted claim set.
+        assert_eq!(title.tier(), FieldResolutionTier::FallbackProviderClaim);
+        assert_eq!(title.value(), Some("Newer Title"));
+    }
+
+    #[test]
+    fn a_record_with_a_resolved_occurrence_reports_its_latest_activity() {
+        let node = TestNode::new();
+        node.kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                definition("tmdb", [Grain::Film]),
+            ))
+            .expect("register namespace");
+        let record_id = node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Film,
+            ))
+            .expect("create record")
+            .record_id();
+        let claim = ExternalIdentifierClaim::try_new("tmdb", Grain::Film, "42")
+            .expect("valid claim syntax");
+        node.kernel
+            .attach_identifier(AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                record_id,
+                claim.clone(),
+            ))
+            .expect("attach identifier");
+
+        let evidence = node.upload(b"an observation touching the record above");
+        let observed_at = ObservedAt::parse("2026-08-23T10:30:00Z", ClaimedTrust::DeviceObserved)
+            .expect("observed_at");
+        let command = AcceptObservationCommand::new(
+            RequestCorrelationId::new_v7(),
+            node.access,
+            OperationId::new_v7(),
+            None,
+            observed_at,
+            evidence,
+        )
+        .with_identity_clues(vec![claim], Some(Grain::Film));
+        node.kernel
+            .authorize_and_accept(command)
+            .expect("accept observation resolving to the record");
+
+        let summaries = list(&node);
+        assert_eq!(summaries.len(), 1);
+        let activity = summaries[0]
+            .latest_activity()
+            .expect("occurrence produced activity");
+        assert_eq!(
+            activity.interpretation_state(),
+            InterpretationState::Resolved
+        );
     }
 }

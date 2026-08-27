@@ -87,5 +87,20 @@ export const cssVariables = `
   --fasti-attention: color-mix(in srgb, var(--fasti-state-attention) 45%, var(--fasti-surface-paper));
   --fasti-border: color-mix(in srgb, var(--fasti-surface-paper) 35%, transparent);
   --fasti-focus: color-mix(in srgb, var(--fasti-state-attention) 45%, var(--fasti-surface-paper));
+
+  /* The un-aliased tokens above (--fasti-background, --fasti-panel, etc.)
+   * are what the aliases resolve to, but most real components style
+   * against the un-aliased surface/text/action/state tokens directly.
+   * Without dark values here, those components stayed light-on-light in
+   * dark mode. */
+  --fasti-surface-archive: ${colors.surface.night};
+  --fasti-text-primary: ${colors.surface.paper};
+  --fasti-text-muted: color-mix(in srgb, ${colors.surface.paper} 72%, ${colors.surface.night});
+  --fasti-brand-mark: color-mix(in srgb, ${colors.brand.mark} 65%, white);
+  --fasti-brand-gold: color-mix(in srgb, ${colors.brand.gold} 80%, white);
+  --fasti-action-primary: color-mix(in srgb, ${colors.action.primary} 50%, ${colors.surface.paper});
+  --fasti-state-verified: color-mix(in srgb, ${colors.state.verified} 55%, ${colors.surface.paper});
+  --fasti-state-attention: color-mix(in srgb, ${colors.state.attention} 45%, ${colors.surface.paper});
+  --fasti-state-error: color-mix(in srgb, #b42318 55%, ${colors.surface.paper});
 }
 `;

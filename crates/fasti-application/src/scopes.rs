@@ -30,6 +30,7 @@ define_scope_keys!(
     (ObservationAccept, "observation_accept"),
     (ReceiptRead, "receipt_read"),
     (IdentityWrite, "identity_write"),
+    (IdentityRead, "identity_read"),
     (ReviewRead, "review_read"),
     (ReviewWrite, "review_write"),
     (CorrectionRead, "correction_read"),

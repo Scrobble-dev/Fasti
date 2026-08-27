@@ -168,6 +168,68 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
     },
 ];
 
+/// Production operations that run after bootstrap, on the durable authenticated
+/// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
+/// array also drives the bootstrap-only SDK slice in
+/// `render_production_bootstrap_contract`, which must not grow to include them.
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 5] = [
+    ConformanceOperation {
+        alias: "submitObservation",
+        operation_id: "submit_observation",
+        method: "post",
+        path: "/api/v1/observations",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("SubmitObservationRequest"),
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "createRecord",
+        operation_id: "create_record",
+        method: "post",
+        path: "/api/v1/records",
+        capability_id: "identity.record.create",
+        authenticated: true,
+        request: Some("CreateRecordRequest"),
+        response: Some("CreateRecordResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listRecords",
+        operation_id: "list_records",
+        method: "get",
+        path: "/api/v1/records",
+        capability_id: "identity.record.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListRecordsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "attachIdentifier",
+        operation_id: "attach_identifier",
+        method: "post",
+        path: "/api/v1/records/identifiers",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("AttachIdentifierRequest"),
+        response: Some("AttachIdentifierResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "registerNamespace",
+        operation_id: "register_namespace",
+        method: "post",
+        path: "/api/v1/namespaces",
+        capability_id: "identity.namespace.register",
+        authenticated: true,
+        request: Some("RegisterNamespaceRequest"),
+        response: Some("RegisterNamespaceResponse"),
+        retry: "safe",
+    },
+];
+
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     generate_to(workspace_root, workspace_root)
 }
@@ -801,7 +863,10 @@ fn enrich_production_openapi(
 ) -> anyhow::Result<()> {
     enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
     let capabilities = array_at(public_registry, "/capabilities")?;
-    for expected in PRODUCTION_BOOTSTRAP_OPERATIONS {
+    for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
+        .into_iter()
+        .chain(PRODUCTION_RUNTIME_OPERATIONS)
+    {
         let capability = capabilities
             .iter()
             .find(|capability| string_at(capability, "/id").ok() == Some(expected.capability_id))
@@ -1082,6 +1147,9 @@ fn resolve_required_binding(
                 capability_id == "system.health"
                     || capability_id == "receipt.stream"
                     || PRODUCTION_BOOTSTRAP_OPERATIONS
+                        .iter()
+                        .any(|operation| operation.capability_id == capability_id)
+                    || PRODUCTION_RUNTIME_OPERATIONS
                         .iter()
                         .any(|operation| operation.capability_id == capability_id)
                     || CONFORMANCE_OPERATIONS
@@ -1547,8 +1615,8 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
         .map(String::as_str)
         .collect();
     ensure!(
-        actual_paths == expected_paths,
-        "production OpenAPI route inventory changed: expected {expected_paths:?}, found {actual_paths:?}"
+        expected_paths.is_subset(&actual_paths),
+        "production OpenAPI is missing a bootstrap route: expected {expected_paths:?}, found {actual_paths:?}"
     );
 
     let schemas = object_at(openapi, "/components/schemas")?;

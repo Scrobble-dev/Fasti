@@ -376,6 +376,22 @@ export async function validateExamples(root = repositoryRoot) {
     operation: productionHealthOperation,
     path: "/api/v1/health",
   });
+  // Bootstrap and runtime operations with no conformance-fixture twin (e.g.
+  // the records capabilities) only exist in the production document -- index
+  // those too, skipping any capability already indexed from the conformance
+  // document above.
+  for (const [path, pathItem] of Object.entries(openapi.paths)) {
+    for (const [method, operation] of Object.entries(pathItem)) {
+      const capabilityId = operation["x-fasti-capability-id"];
+      if (
+        typeof capabilityId !== "string" ||
+        httpOperations.has(capabilityId)
+      ) {
+        continue;
+      }
+      httpOperations.set(capabilityId, { method, operation, path });
+    }
+  }
   const streamProblems =
     asyncApi.operations.sendReceiptCommitted["x-fasti-http-problems"];
   assert.equal(streamProblems.contentType, "application/problem+json");

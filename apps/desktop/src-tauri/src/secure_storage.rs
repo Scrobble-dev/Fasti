@@ -7,6 +7,8 @@ pub(crate) use keyring_core::{Entry, Error};
 use fasti_store::DataRootIdentity;
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
+#[cfg(target_os = "android")]
+use std::sync::Arc;
 
 pub(crate) fn account_scope(identity: DataRootIdentity) -> String {
     let digest = Sha256::digest(identity.as_bytes());
@@ -25,7 +27,7 @@ pub(crate) fn initialize() -> Result<(), ()> {
     #[cfg(target_os = "android")]
     {
         let store = android_native_keyring_store::Store::new().map_err(|_| ())?;
-        keyring_core::set_default_store(store);
+        keyring_core::set_default_store(Arc::new(store));
     }
 
     #[cfg(not(target_os = "android"))]

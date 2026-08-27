@@ -2,11 +2,13 @@
 
 mod access;
 pub mod archive;
+mod client_credentials;
 mod correction;
 mod crypto;
 mod evidence;
 mod identity;
 mod kernel;
+mod metadata;
 mod observation;
 mod online_archive;
 mod portability;

@@ -65,7 +65,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   assert.deepEqual(Object.keys(openapi.paths), [
     "/api/v1/client-enrollments",
     "/api/v1/health",
+    "/api/v1/namespaces",
     "/api/v1/node/initialization",
+    "/api/v1/observations",
+    "/api/v1/records",
+    "/api/v1/records/identifiers",
   ]);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
@@ -115,7 +119,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 22);
+  assert.equal(registry.capabilities.length, 24);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -133,6 +137,16 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     if (capability.id === "observation.accept") return "b1_observation_accept";
     if (capability.id === "receipt.replay") return "b1_receipt_replay";
     if (capability.id === "receipt.stream") return "b1_receipt_stream";
+    if (
+      [
+        "identity.record.create",
+        "identity.identifier.attach",
+        "identity.record.list",
+        "identity.namespace.register",
+      ].includes(capability.id)
+    ) {
+      return "b1_records";
+    }
     return "b1_http_fixture";
   };
   for (const capability of registry.capabilities) {
@@ -222,7 +236,14 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
       (capability) =>
         capability.contract_body === "b1" &&
         capability.lifecycle.contract_state === "finalized" &&
-        !["receipt.stream", "system.health"].includes(capability.id),
+        ![
+          "receipt.stream",
+          "system.health",
+          "identity.record.create",
+          "identity.identifier.attach",
+          "identity.record.list",
+          "identity.namespace.register",
+        ].includes(capability.id),
     )
     .map(({ id }) => id)
     .sort();

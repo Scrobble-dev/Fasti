@@ -3,7 +3,8 @@
 use crate::{ApplicationResult, RequestAccessContext};
 use fasti_domain::{
     EvidenceReference, ExternalIdentifierClaim, ExternalIdentifierId, Grain, InterpretationId,
-    ProfileId, RecordId, ReviewItemId, ReviewStatus, WorkspaceId,
+    InterpretationState, OccurredAt, ProfileId, RecordId, RecordStatus, ResolvedField,
+    ReviewItemId, ReviewStatus, WorkspaceId,
 };
 use std::fmt;
 
@@ -640,6 +641,126 @@ impl RegisterNamespaceDefinitionOutcome {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListRecordsQuery {
+    correlation_id: fasti_domain::RequestCorrelationId,
+    access: RequestAccessContext,
+}
+
+impl ListRecordsQuery {
+    pub const fn new(
+        correlation_id: fasti_domain::RequestCorrelationId,
+        access: RequestAccessContext,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> fasti_domain::RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+}
+
+/// The most recent Chronicle activity touching a Record, when any exists.
+///
+/// A Record with no Occurrence yet (created directly, or only ever the
+/// unresolved side of an ambiguous match) has no activity to report; that is
+/// a first-class, valid state, not an error -- callers see `None`, not a
+/// fabricated placeholder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordActivity {
+    occurred_at: Option<OccurredAt>,
+    interpretation_state: InterpretationState,
+}
+
+impl RecordActivity {
+    pub const fn new(
+        occurred_at: Option<OccurredAt>,
+        interpretation_state: InterpretationState,
+    ) -> Self {
+        Self {
+            occurred_at,
+            interpretation_state,
+        }
+    }
+
+    pub const fn occurred_at(&self) -> Option<&OccurredAt> {
+        self.occurred_at.as_ref()
+    }
+
+    pub const fn interpretation_state(&self) -> InterpretationState {
+        self.interpretation_state
+    }
+}
+
+/// One Record projected for display: its identity, its resolved display
+/// fields, and its most recent Chronicle activity.
+///
+/// `title` and `poster` are always present as a [`ResolvedField`], even when
+/// no provider has ever supplied a claim and no override exists -- that
+/// resolves to [`fasti_domain::FieldResolutionTier::Empty`], not an absent
+/// field. A local-only Record with zero metadata is a valid row, never a
+/// skipped one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordSummary {
+    record_id: RecordId,
+    grain: Grain,
+    status: RecordStatus,
+    title: ResolvedField,
+    poster: ResolvedField,
+    latest_activity: Option<RecordActivity>,
+}
+
+impl RecordSummary {
+    pub fn new(
+        record_id: RecordId,
+        grain: Grain,
+        status: RecordStatus,
+        title: ResolvedField,
+        poster: ResolvedField,
+        latest_activity: Option<RecordActivity>,
+    ) -> Self {
+        Self {
+            record_id,
+            grain,
+            status,
+            title,
+            poster,
+            latest_activity,
+        }
+    }
+
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn grain(&self) -> Grain {
+        self.grain
+    }
+
+    pub const fn status(&self) -> RecordStatus {
+        self.status
+    }
+
+    pub const fn title(&self) -> &ResolvedField {
+        &self.title
+    }
+
+    pub const fn poster(&self) -> &ResolvedField {
+        &self.poster
+    }
+
+    pub const fn latest_activity(&self) -> Option<&RecordActivity> {
+        self.latest_activity.as_ref()
+    }
+}
+
 pub trait IdentityPort: Send + Sync {
     fn register_namespace_definition(
         &self,
@@ -653,6 +774,8 @@ pub trait IdentityPort: Send + Sync {
         &self,
         command: AttachIdentifierCommand,
     ) -> ApplicationResult<AttachIdentifierOutcome>;
+
+    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<Vec<RecordSummary>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

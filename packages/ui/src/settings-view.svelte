@@ -1,6 +1,8 @@
 <script lang="ts">
   import type {
     CustomFieldDefinition,
+    CustomMediaTypeDefinition,
+    MediaKind,
     ScopedApiToken,
     ProviderCredentialStatus,
     NetworkConfiguration,
@@ -36,6 +38,11 @@
     IconDeviceTv,
     IconExternalLink,
     IconSettings,
+    IconWorld,
+    IconTags,
+    IconDatabase,
+    IconFileDownload,
+    IconBug,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -66,6 +73,9 @@
     onRetryNetworkState?: () => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
+    onClearCache?: (
+      cache: "search" | "history" | "statistics" | "discover" | "all",
+    ) => void;
   }
 
   let {
@@ -92,11 +102,14 @@
     onRetryNetworkState,
     onSaveOidc,
     onSaveApprise,
+    onClearCache,
   }: Props = $props();
 
   let activeSettingsSection:
     | "appearance"
     | "navigation"
+    | "preferences"
+    | "custom_fields"
     | "providers"
     | "connectors"
     | "tokens"
@@ -104,6 +117,105 @@
     | "notifications"
     | "importers"
     | "advanced" = $state("appearance");
+
+  // Local state for the custom field / custom media type creators
+  let newFieldName = $state("");
+  let newFieldKey = $state("");
+  let newFieldType = $state<CustomFieldDefinition["valueType"]>("string");
+  let newFieldTarget = $state<MediaKind | "all">("all");
+  let newFieldOptions = $state("");
+
+  let newTypeName = $state("");
+  let newTypeSingular = $state("");
+  let newTypePlural = $state("");
+  let newTypeIcon = $state("");
+  let newTypeProgress =
+    $state<CustomMediaTypeDefinition["progressTrackingType"]>("none");
+
+  const MEDIA_KIND_OPTIONS: Array<MediaKind | "all"> = [
+    "all",
+    "movie",
+    "show",
+    "anime",
+    "manga",
+    "book",
+    "comic",
+    "game",
+    "music",
+    "podcast",
+    "custom",
+  ];
+
+  function handleAddCustomField(e: Event): void {
+    e.preventDefault();
+    const name = newFieldName.trim();
+    const key = newFieldKey.trim();
+    if (!name || !key || !workbenchPreferences) return;
+    const field: CustomFieldDefinition = {
+      key,
+      label: name,
+      targetType: newFieldTarget,
+      valueType: newFieldType,
+      isFilterable: false,
+      options:
+        newFieldType === "select"
+          ? newFieldOptions
+              .split(",")
+              .map((o) => o.trim())
+              .filter((o) => o.length > 0)
+          : undefined,
+    };
+    onUpdateWorkbenchPreferences?.({
+      customFields: [...workbenchPreferences.customFields, field],
+    });
+    newFieldName = "";
+    newFieldKey = "";
+    newFieldOptions = "";
+    newFieldType = "string";
+    newFieldTarget = "all";
+  }
+
+  function handleDeleteCustomField(key: string): void {
+    if (!workbenchPreferences) return;
+    onUpdateWorkbenchPreferences?.({
+      customFields: workbenchPreferences.customFields.filter(
+        (f) => f.key !== key,
+      ),
+    });
+  }
+
+  function handleAddCustomMediaType(e: Event): void {
+    e.preventDefault();
+    const name = newTypeName.trim();
+    const singular = newTypeSingular.trim();
+    const plural = newTypePlural.trim();
+    if (!name || !singular || !plural || !workbenchPreferences) return;
+    const mediaType: CustomMediaTypeDefinition = {
+      id: crypto.randomUUID(),
+      name,
+      singular,
+      plural,
+      icon: newTypeIcon.trim() || "🎬",
+      progressTrackingType: newTypeProgress,
+    };
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: [...workbenchPreferences.customMediaTypes, mediaType],
+    });
+    newTypeName = "";
+    newTypeSingular = "";
+    newTypePlural = "";
+    newTypeIcon = "";
+    newTypeProgress = "none";
+  }
+
+  function handleDeleteCustomMediaType(id: string): void {
+    if (!workbenchPreferences) return;
+    onUpdateWorkbenchPreferences?.({
+      customMediaTypes: workbenchPreferences.customMediaTypes.filter(
+        (t) => t.id !== id,
+      ),
+    });
+  }
 
   // Local state for token generator
   let newTokenName = $state("");
@@ -259,6 +371,48 @@
       void deleteProviderKey(provider);
     }
   }
+
+  /** Builds a diagnostics bundle from whatever's already loaded client-side
+   * and triggers a browser download. Secrets (client secrets, token
+   * secrets, Apprise webhook URLs which often embed tokens) are
+   * deliberately excluded rather than redacted-in-place, so there's no risk
+   * of a redaction bug leaking one. */
+  function handleDownloadLogs(): void {
+    const bundle = {
+      generatedAt: new Date().toISOString(),
+      theme: themeSettings,
+      workbenchPreferences: workbenchPreferences
+        ? {
+            sidebarCollapsed: workbenchPreferences.sidebarCollapsed,
+            sidebarHidden: workbenchPreferences.sidebarHidden,
+            providerRegion: workbenchPreferences.providerRegion,
+            metadataLanguage: workbenchPreferences.metadataLanguage,
+            tvProvider: workbenchPreferences.tvProvider,
+            animeProvider: workbenchPreferences.animeProvider,
+          }
+        : undefined,
+      providerKeys: (providerKeys ?? []).map((p) => ({
+        provider: p.provider,
+        configured: p.configured,
+        source: p.source,
+      })),
+      oidcEnabled: oidcConfig?.enabled ?? false,
+      appriseEnabled: appriseConfig?.enabled ?? false,
+      appriseUrlCount: appriseConfig?.urls.length ?? 0,
+      tokenCount: tokens.length,
+      customFieldCount: workbenchPreferences?.customFields.length ?? 0,
+      customMediaTypeCount: workbenchPreferences?.customMediaTypes.length ?? 0,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fasti-diagnostics-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
 <div class="settings-container">
@@ -293,6 +447,26 @@
         onclick={() => (activeSettingsSection = "navigation")}
       >
         <IconLayoutSidebar size={18} /> Navigation & Menus
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "preferences"}
+        aria-pressed={activeSettingsSection === "preferences"}
+        onclick={() => (activeSettingsSection = "preferences")}
+      >
+        <IconWorld size={18} /> Preferences & Metadata
+      </button>
+
+      <button
+        type="button"
+        class="nav-tab-btn"
+        class:active={activeSettingsSection === "custom_fields"}
+        aria-pressed={activeSettingsSection === "custom_fields"}
+        onclick={() => (activeSettingsSection = "custom_fields")}
+      >
+        <IconTags size={18} /> Custom Types & Fields
       </button>
 
       <button
@@ -749,7 +923,389 @@
           </div>
         </section>
 
-        <!-- 3. Metadata Providers & Keys -->
+        <!-- 3. Preferences & Metadata -->
+      {:else if activeSettingsSection === "preferences"}
+        <section class="section-pane">
+          <h2 class="pane-title">Preferences & Metadata</h2>
+          <p class="pane-desc">
+            Defaults used when searching providers, projecting metadata, and
+            displaying progress across the library.
+          </p>
+
+          <div class="prefs-grid">
+            <div class="form-field">
+              <label for="pref-provider-region">Provider Region</label>
+              <select
+                id="pref-provider-region"
+                class="form-input"
+                value={workbenchPreferences.providerRegion}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    providerRegion: e.currentTarget.value,
+                  })}
+              >
+                {#each [{ id: "US", name: "United States" }, { id: "GB", name: "United Kingdom" }, { id: "CA", name: "Canada" }, { id: "AU", name: "Australia" }, { id: "DE", name: "Germany" }, { id: "FR", name: "France" }, { id: "JP", name: "Japan" }, { id: "IE", name: "Ireland" }] as region}
+                  <option value={region.id}>{region.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-metadata-language">Metadata Language</label>
+              <select
+                id="pref-metadata-language"
+                class="form-input"
+                value={workbenchPreferences.metadataLanguage}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    metadataLanguage: e.currentTarget.value,
+                  })}
+              >
+                {#each [{ id: "en-US", name: "English (US)" }, { id: "en-GB", name: "English (UK)" }, { id: "ja-JP", name: "Japanese" }, { id: "de-DE", name: "German" }, { id: "fr-FR", name: "French" }, { id: "es-ES", name: "Spanish" }] as lang}
+                  <option value={lang.id}>{lang.name}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-tv-provider">TV Provider</label>
+              <select
+                id="pref-tv-provider"
+                class="form-input"
+                value={workbenchPreferences.tvProvider}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    tvProvider: e.currentTarget.value as "tmdb" | "tvdb_v4",
+                  })}
+              >
+                <option value="tmdb">TMDB</option>
+                <option value="tvdb_v4">TheTVDB (v4)</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-anime-provider">Anime Provider</label>
+              <select
+                id="pref-anime-provider"
+                class="form-input"
+                value={workbenchPreferences.animeProvider}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    animeProvider: e.currentTarget.value as
+                      "mal" | "anilist" | "kitsu",
+                  })}
+              >
+                <option value="mal">MyAnimeList</option>
+                <option value="anilist">AniList</option>
+                <option value="kitsu">Kitsu</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-title-language">Title Language Preference</label>
+              <select
+                id="pref-title-language"
+                class="form-input"
+                value={workbenchPreferences.titleLanguage}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    titleLanguage: e.currentTarget.value as
+                      "romaji" | "english" | "native",
+                  })}
+              >
+                <option value="romaji">Romaji</option>
+                <option value="english">English</option>
+                <option value="native">Native</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-hide-completed">Hide Completed</label>
+              <select
+                id="pref-hide-completed"
+                class="form-input"
+                value={workbenchPreferences.hideCompleted}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    hideCompleted: e.currentTarget.value as
+                      "disabled" | "home_only" | "everywhere",
+                  })}
+              >
+                <option value="disabled">Disabled</option>
+                <option value="home_only">Home Only</option>
+                <option value="everywhere">Everywhere</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-game-logging">Game Logging</label>
+              <select
+                id="pref-game-logging"
+                class="form-input"
+                value={workbenchPreferences.gameLogging}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    gameLogging: e.currentTarget.value as
+                      "repeats" | "sessions",
+                  })}
+              >
+                <option value="sessions">Sessions</option>
+                <option value="repeats">Repeats</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-progress-format">Progress Format</label>
+              <select
+                id="pref-progress-format"
+                class="form-input"
+                value={workbenchPreferences.progressFormat}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    progressFormat: e.currentTarget.value as
+                      "percentage" | "time_remaining" | "episodes",
+                  })}
+              >
+                <option value="percentage">Percentage</option>
+                <option value="time_remaining">Time Remaining</option>
+                <option value="episodes">Episode Count</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="pref-session-duration">Session Duration</label>
+              <select
+                id="pref-session-duration"
+                class="form-input"
+                value={workbenchPreferences.sessionDuration}
+                onchange={(e) =>
+                  onUpdateWorkbenchPreferences?.({
+                    sessionDuration: Number(e.currentTarget.value),
+                  })}
+              >
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={240}>4 hours</option>
+                <option value={480}>8 hours</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="chk-label mt-3">
+            <input
+              type="checkbox"
+              checked={workbenchPreferences.hideZeroRatings}
+              onchange={(e) =>
+                onUpdateWorkbenchPreferences?.({
+                  hideZeroRatings: e.currentTarget.checked,
+                })}
+            />
+            <span>Hide Zero Ratings</span>
+          </label>
+        </section>
+
+        <!-- 4. Custom Types & Fields -->
+      {:else if activeSettingsSection === "custom_fields"}
+        <section class="section-pane">
+          <h2 class="pane-title">Custom Types & Fields</h2>
+          <p class="pane-desc">
+            Register custom metadata fields and custom media types for this
+            Fasti node. Both are stored in your local workbench preferences.
+          </p>
+
+          <div class="setting-group">
+            <h3 class="group-title">Custom Metadata Fields</h3>
+            <form onsubmit={handleAddCustomField} class="custom-field-form">
+              <div class="prefs-grid">
+                <div class="form-field">
+                  <label for="cf-name">Name</label>
+                  <input
+                    id="cf-name"
+                    type="text"
+                    class="form-input"
+                    bind:value={newFieldName}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cf-key">Key</label>
+                  <input
+                    id="cf-key"
+                    type="text"
+                    class="form-input mono"
+                    placeholder="e.g. rewatch_count"
+                    bind:value={newFieldKey}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cf-type">Type</label>
+                  <select
+                    id="cf-type"
+                    class="form-input"
+                    bind:value={newFieldType}
+                  >
+                    <option value="string">Text</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="date">Date</option>
+                    <option value="url">URL</option>
+                    <option value="identifier">Identifier</option>
+                    <option value="select">Select</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="cf-target">Target Media Kind</label>
+                  <select
+                    id="cf-target"
+                    class="form-input"
+                    bind:value={newFieldTarget}
+                  >
+                    {#each MEDIA_KIND_OPTIONS as kind}
+                      <option value={kind}>{kind}</option>
+                    {/each}
+                  </select>
+                </div>
+                {#if newFieldType === "select"}
+                  <div class="form-field">
+                    <label for="cf-options">Options (comma-separated)</label>
+                    <input
+                      id="cf-options"
+                      type="text"
+                      class="form-input"
+                      placeholder="e.g. Physical, Digital, Both"
+                      bind:value={newFieldOptions}
+                    />
+                  </div>
+                {/if}
+              </div>
+              <button type="submit" class="btn-secondary mt-2">
+                <IconPlus size={16} /> Add Custom Field
+              </button>
+            </form>
+
+            {#if workbenchPreferences.customFields.length > 0}
+              <ul class="custom-entry-list">
+                {#each workbenchPreferences.customFields as field (field.key)}
+                  <li class="custom-entry-row">
+                    <div>
+                      <strong>{field.label}</strong>
+                      <span class="entry-meta">
+                        <code>{field.key}</code> · {field.valueType} · {field.targetType}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="delete-entry-btn"
+                      onclick={() => handleDeleteCustomField(field.key)}
+                      aria-label="Delete custom field {field.label}"
+                    >
+                      <IconTrash size={14} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="wb-help">No custom metadata fields registered yet.</p>
+            {/if}
+          </div>
+
+          <div class="setting-group">
+            <h3 class="group-title">Custom Media Types</h3>
+            <form onsubmit={handleAddCustomMediaType} class="custom-field-form">
+              <div class="prefs-grid">
+                <div class="form-field">
+                  <label for="cmt-name">Name</label>
+                  <input
+                    id="cmt-name"
+                    type="text"
+                    class="form-input"
+                    bind:value={newTypeName}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-singular">Singular</label>
+                  <input
+                    id="cmt-singular"
+                    type="text"
+                    class="form-input"
+                    placeholder="e.g. Board Game"
+                    bind:value={newTypeSingular}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-plural">Plural</label>
+                  <input
+                    id="cmt-plural"
+                    type="text"
+                    class="form-input"
+                    placeholder="e.g. Board Games"
+                    bind:value={newTypePlural}
+                    required
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-icon">Icon</label>
+                  <input
+                    id="cmt-icon"
+                    type="text"
+                    class="form-input"
+                    placeholder="🎲"
+                    bind:value={newTypeIcon}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="cmt-progress">Progress Tracking</label>
+                  <select
+                    id="cmt-progress"
+                    class="form-input"
+                    bind:value={newTypeProgress}
+                  >
+                    <option value="none">None</option>
+                    <option value="episodes">Episodes</option>
+                    <option value="percentage">Percentage</option>
+                    <option value="pages">Pages</option>
+                    <option value="sessions">Sessions</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" class="btn-secondary mt-2">
+                <IconPlus size={16} /> Add Custom Media Type
+              </button>
+            </form>
+
+            {#if workbenchPreferences.customMediaTypes.length > 0}
+              <ul class="custom-entry-list">
+                {#each workbenchPreferences.customMediaTypes as mediaType (mediaType.id)}
+                  <li class="custom-entry-row">
+                    <div>
+                      <span class="entry-icon">{mediaType.icon}</span>
+                      <strong>{mediaType.name}</strong>
+                      <span class="entry-meta">
+                        {mediaType.singular} / {mediaType.plural} · {mediaType.progressTrackingType}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="delete-entry-btn"
+                      onclick={() => handleDeleteCustomMediaType(mediaType.id)}
+                      aria-label="Delete custom media type {mediaType.name}"
+                    >
+                      <IconTrash size={14} />
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="wb-help">No custom media types registered yet.</p>
+            {/if}
+          </div>
+        </section>
+
+        <!-- 5. Metadata Providers & Keys -->
       {:else if activeSettingsSection === "providers"}
         <section class="section-pane">
           <h2 id="provider-settings-title" class="pane-title" tabindex="-1">
@@ -882,6 +1438,70 @@
             </p>
           </section>
         {/if}
+
+        <section class="section-pane">
+          <h2 class="pane-title">Cache Management</h2>
+          <p class="pane-desc">
+            Clear cached data per category, or everything at once.
+          </p>
+          <div class="cache-cards-grid">
+            {#each [{ id: "search", label: "Search Cache" }, { id: "history", label: "History Cache" }, { id: "statistics", label: "Statistics Cache" }, { id: "discover", label: "Discover Cache" }] as cache}
+              <div class="cache-card">
+                <div class="cache-card-header">
+                  <IconDatabase size={18} />
+                  <strong>{cache.label}</strong>
+                </div>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  disabled={!onClearCache}
+                  title={onClearCache
+                    ? undefined
+                    : "Cache clearing is not available in this build"}
+                  onclick={() =>
+                    onClearCache?.(
+                      cache.id as
+                        "search" | "history" | "statistics" | "discover",
+                    )}
+                >
+                  Clear
+                </button>
+              </div>
+            {/each}
+          </div>
+          <button
+            type="button"
+            class="btn-save mt-3"
+            disabled={!onClearCache}
+            title={onClearCache
+              ? undefined
+              : "Cache clearing is not available in this build"}
+            onclick={() => onClearCache?.("all")}
+          >
+            Clear All Caches
+          </button>
+        </section>
+
+        <section class="section-pane">
+          <h2 class="pane-title">Diagnostics & Support</h2>
+          <div class="diagnostics-actions">
+            <button
+              type="button"
+              class="btn-secondary"
+              onclick={handleDownloadLogs}
+            >
+              <IconFileDownload size={16} /> Download Sanitized Logs
+            </button>
+            <a
+              href="https://github.com/Scrobble-dev/Fasti/issues/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-secondary"
+            >
+              <IconBug size={16} /> File a Bug Report
+            </a>
+          </div>
+        </section>
 
         <!-- 3. Nuvio & Media Server Connectors -->
       {:else if activeSettingsSection === "connectors"}
@@ -1367,6 +1987,90 @@
     height: 14px;
     border-radius: 50%;
     background: var(--accent-hex);
+  }
+
+  .prefs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .cache-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .cache-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+  }
+  .cache-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+  }
+
+  .diagnostics-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  a.btn-secondary {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .custom-field-form {
+    padding: 16px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+    margin-bottom: 12px;
+  }
+  .custom-entry-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .custom-entry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--fasti-surface-archive);
+    border-radius: 4px;
+    font-size: 0.88rem;
+  }
+  .entry-meta {
+    display: block;
+    font-size: 0.76rem;
+    color: var(--fasti-text-muted);
+    margin-top: 2px;
+  }
+  .entry-icon {
+    margin-right: 6px;
+  }
+  .delete-entry-btn {
+    background: transparent;
+    border: none;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+    padding: 4px;
+    flex-shrink: 0;
+  }
+  .delete-entry-btn:hover {
+    color: #e11d48;
   }
 
   .providers-list {

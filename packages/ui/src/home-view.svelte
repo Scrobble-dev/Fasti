@@ -28,15 +28,15 @@
     records: MediaRecord[];
     availableCollections: string[];
     onSelectRecord: (recordId: string) => void;
-    onUpdateStatus: (recordId: string, status: WatchStatus) => void;
-    onUpdateProgress: (
+    onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
+    onUpdateProgress?: (
       recordId: string,
       episodes: number,
       seconds: number,
       status: WatchStatus,
     ) => void;
-    onSaveReview: (recordId: string, rating: number, notes: string) => void;
-    onSaveCollection: (recordId: string, collections: string[]) => void;
+    onSaveReview?: (recordId: string, rating: number, notes: string) => void;
+    onSaveCollection?: (recordId: string, collections: string[]) => void;
     contextMenuConfigs?: ContextMenuItemConfig[];
     onViewAllSection?: (section: "in_progress" | "history" | "up_next") => void;
   }
@@ -124,13 +124,13 @@
   function handleToggleWatched(rec: MediaRecord) {
     const newStatus: WatchStatus =
       rec.status === "completed" ? "watching" : "completed";
-    onUpdateStatus(rec.id, newStatus);
+    onUpdateStatus?.(rec.id, newStatus);
   }
 
   function handleToggleWatchlist(rec: MediaRecord) {
     const newStatus: WatchStatus =
       rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
-    onUpdateStatus(rec.id, newStatus);
+    onUpdateStatus?.(rec.id, newStatus);
   }
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent) {
@@ -476,7 +476,7 @@
       record={activeProgressRecord}
       onClose={() => (activeProgressRecord = null)}
       onSaveProgress={(recId, ep, sec, st) => {
-        onUpdateProgress(recId, ep, sec, st);
+        onUpdateProgress?.(recId, ep, sec, st);
         activeProgressRecord = null;
       }}
     />
@@ -487,7 +487,7 @@
       record={activeRatingRecord}
       onClose={() => (activeRatingRecord = null)}
       onSaveReview={(recId, rating, notes) => {
-        onSaveReview(recId, rating, notes);
+        onSaveReview?.(recId, rating, notes);
         activeRatingRecord = null;
       }}
     />
@@ -499,7 +499,7 @@
       collections={availableCollections}
       onClose={() => (activeCollectionRecord = null)}
       onSaveCollection={(recId, collections) => {
-        onSaveCollection(recId, collections);
+        onSaveCollection?.(recId, collections);
         activeCollectionRecord = null;
       }}
     />

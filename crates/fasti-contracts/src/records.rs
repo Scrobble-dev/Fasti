@@ -1,0 +1,104 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateRecordRequest {
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub grain: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateRecordResponse {
+    pub record_id: String,
+    pub grain: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttachIdentifierRequest {
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub record_id: String,
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub namespace: String,
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub grain: String,
+    #[schemars(length(min = 1, max = 512))]
+    #[schema(min_length = 1, max_length = 512)]
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AttachIdentifierResponse {
+    pub external_identifier_id: String,
+    pub record_id: String,
+    pub created: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterNamespaceRequest {
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub namespace: String,
+    #[schemars(length(min = 1, max = 128))]
+    #[schema(min_length = 1, max_length = 128)]
+    pub label: String,
+    #[schemars(length(min = 1, max = 16))]
+    #[schema(min_length = 1, max_items = 16)]
+    pub grains: Vec<String>,
+    #[schemars(length(min = 1, max = 256))]
+    #[schema(min_length = 1, max_length = 256)]
+    pub id_pattern: String,
+    #[schemars(length(min = 1, max = 64))]
+    #[schema(min_length = 1, max_length = 64)]
+    pub normalization: String,
+    pub licence_posture: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterNamespaceResponse {
+    pub namespace: String,
+    pub created: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResolvedFieldDto {
+    pub tier: String,
+    pub value: Option<String>,
+    pub source: Option<String>,
+    pub is_stale: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordActivityDto {
+    pub occurred_at: Option<String>,
+    pub interpretation_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordSummaryDto {
+    pub record_id: String,
+    pub grain: String,
+    pub status: String,
+    pub title: ResolvedFieldDto,
+    pub poster: ResolvedFieldDto,
+    pub latest_activity: Option<RecordActivityDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListRecordsResponse {
+    pub records: Vec<RecordSummaryDto>,
+}
