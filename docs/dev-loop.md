@@ -24,8 +24,10 @@ until `fastid` answers its health check. Then it prints the API URL.
 already taken by something else, startup fails rather than picking a
 different port -- set `FASTI_PORT_FALLBACK=auto` to have `fastid` ask the
 operating system for a free port instead, in which case the script prints
-the port it actually got. Run `./scripts/dev.sh --status` at any time to see
-the live URL.
+the port it actually got. Automatic fallback is unavailable when
+`FASTI_API_URL` or `FASTI_PUBLIC_URL` is configured, since those settings
+pin the URL other tooling should use. Run `./scripts/dev.sh --status` at
+any time to see the live URL.
 
 Some worktrees also carry `apps/web`, a pre-production health and
 interface-quality harness (see the "Browser QA harness" row in the status
