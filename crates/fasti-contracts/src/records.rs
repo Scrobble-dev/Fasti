@@ -52,7 +52,7 @@ pub struct RegisterNamespaceRequest {
     #[schema(min_length = 1, max_length = 128)]
     pub label: String,
     #[schemars(length(min = 1, max = 16))]
-    #[schema(min_length = 1, max_items = 16)]
+    #[schema(min_items = 1, max_items = 16)]
     pub grains: Vec<String>,
     #[schemars(length(min = 1, max = 256))]
     #[schema(min_length = 1, max_length = 256)]
