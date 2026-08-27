@@ -140,8 +140,8 @@
 
   .fast-btn {
     flex: 1;
-    min-height: 28px;
-    height: 28px;
+    min-height: 44px;
+    height: 44px;
     display: grid;
     place-items: center;
     background: transparent;
@@ -151,6 +151,11 @@
     cursor: pointer;
     transition: all 100ms ease;
     padding: 2px;
+  }
+
+  .fast-btn:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
   }
 
   .fast-btn:hover {
@@ -173,5 +178,11 @@
 
   :global(.icon-bookmark-active) {
     color: var(--fasti-brand-mark);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fast-btn {
+      transition: none;
+    }
   }
 </style>
