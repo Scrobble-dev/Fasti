@@ -5,12 +5,17 @@
  * focus the first focusable control when the dialog becomes visible, and
  * restore focus to whatever was focused before it opened, once it closes.
  *
- * Reacts to the dialog's own `open` attribute rather than to when the host
- * component happens to call `showModal()`/`close()`, so it works regardless
- * of the surrounding component's effect ordering. Also restores focus on
- * `destroy()`, not just on the native `close` event -- a dialog whose host
- * component is conditionally mounted (`{#if show}<Modal .../>{/if}`) is
- * removed from the DOM directly and never fires `close` at all. */
+ * Wraps `showModal()` itself rather than reacting to the `open` attribute
+ * via MutationObserver: the browser's own "dialog focusing steps" run
+ * synchronously inside `showModal()`, before it returns, so a
+ * MutationObserver callback (always a microtask, queued after that
+ * synchronous call finishes) is already too late to capture the real
+ * opener -- `document.activeElement` at that point is already a dialog
+ * descendant. Capturing inside the wrapper, before calling the original
+ * `showModal()`, is the only timing that's actually before native focus
+ * moves. This also naturally handles a dialog that opens more than once
+ * (an always-mounted host, e.g. a settings drawer) as well as one that
+ * mounts fresh per open, since the wrapper re-captures on every call. */
 export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
   let previouslyFocused: HTMLElement | null = null;
 
@@ -30,15 +35,12 @@ export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
     (first ?? node).focus();
   }
 
-  function handleOpened(): void {
-    // Captured fresh on every open, not once at attachment time -- both
-    // current dialogs can mount once and open many times (e.g. the
-    // always-mounted theme drawer), so the "opener" is whatever was
-    // focused right before *this* open, not whatever had focus when the
-    // component first rendered.
+  const originalShowModal = node.showModal.bind(node);
+  node.showModal = () => {
     previouslyFocused = document.activeElement as HTMLElement | null;
+    originalShowModal();
     focusFirst();
-  }
+  };
 
   function handleClosed(): void {
     previouslyFocused?.focus();
@@ -47,22 +49,13 @@ export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
 
   node.addEventListener("close", handleClosed);
 
-  if (node.open) handleOpened();
-  const observer = new MutationObserver(() => {
-    if (node.open) handleOpened();
-  });
-  observer.observe(node, { attributes: true, attributeFilter: ["open"] });
-
   return {
     destroy() {
       node.removeEventListener("close", handleClosed);
-      observer.disconnect();
-      // Restore focus when destroyed without a close event (e.g. component
-      // unmounted), reusing the stored opener.
-      if (previouslyFocused) {
-        previouslyFocused.focus();
-        previouslyFocused = null;
-      }
+      node.showModal = originalShowModal;
+      // Restore focus when destroyed without a close event (e.g. the host
+      // component was conditionally mounted and got torn down directly).
+      handleClosed();
     },
   };
 }

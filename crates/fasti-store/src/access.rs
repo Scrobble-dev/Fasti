@@ -2596,6 +2596,54 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_bootstrap_secret_publishers_agree_on_one_value() {
+        // `SqliteKernel::open` takes an exclusive OS-level lock on the data
+        // root (StoreOpenError::DataRootLocked), so two *processes* (two
+        // separate `open()` calls) can never race to publish this file --
+        // only one can ever hold an open kernel against a given data root.
+        // The scenario worth guarding is concurrent *callers sharing one
+        // already-open kernel* (e.g. multiple threads before the code that
+        // primes this at startup is known to run exactly once) -- this
+        // exercises that instead of racing separate `open()` calls, which
+        // would just deadlock on the data-root lock rather than test
+        // anything about the publish logic itself.
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let barrier = Barrier::new(8);
+
+        let results: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let kernel = &kernel;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        kernel
+                            .ensure_bootstrap_secret()
+                            .expect("bootstrap secret")
+                            .expose_hex()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("publisher thread panicked"))
+                .collect()
+        });
+
+        let persisted = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after concurrent publishing");
+        for result in &results {
+            assert_eq!(
+                result,
+                persisted.trim(),
+                "every concurrent caller must return the value that was actually persisted, \
+                 never a value only it generated but lost the publish race for"
+            );
+        }
+    }
+
+    #[test]
     fn credential_authentication_rejects_a_cross_workspace_grant() {
         let node = TestNode::new();
         let foreign_workspace = WorkspaceId::new_v7();

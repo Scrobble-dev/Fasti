@@ -212,6 +212,7 @@
     font-size: 1.5rem;
     color: color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     cursor: pointer;
+    box-sizing: border-box;
     min-width: 44px;
     min-height: 44px;
     padding: 0 2px;
