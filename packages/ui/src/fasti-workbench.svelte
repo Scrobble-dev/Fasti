@@ -502,7 +502,11 @@
             <IconLayoutSidebar size={18} />
           </button>
         {/if}
-        <span class="section-title">{formatSectionTitle(activeSection)}</span>
+        {#if activeSection === "home"}
+          <h1 class="section-title">{formatSectionTitle(activeSection)}</h1>
+        {:else}
+          <span class="section-title">{formatSectionTitle(activeSection)}</span>
+        {/if}
       </div>
 
       <button
@@ -800,6 +804,7 @@
   }
 
   .section-title {
+    margin: 0;
     font-family: var(--fasti-font-display);
     font-weight: 700;
     font-size: 1.05rem;

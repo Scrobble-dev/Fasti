@@ -96,6 +96,7 @@ async function mockTrustedHost(page: Page) {
 }
 
 test("the root opens the recovered media workbench", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
   await mockHealth(page);
   await page.goto("/");
 
@@ -108,6 +109,33 @@ test("the root opens the recovered media workbench", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Local service status" }),
   ).toHaveCount(0);
+
+  await page.keyboard.press("Tab");
+  await expect(
+    page.getByRole("link", { name: "Skip to main content" }),
+  ).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("main")).toBeFocused();
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  const undersizedButtons = await page
+    .locator("button:visible")
+    .evaluateAll((buttons) =>
+      buttons.flatMap((button) => {
+        const box = button.getBoundingClientRect();
+        return box.width < 44 || box.height < 44
+          ? [button.getAttribute("aria-label") ?? button.textContent?.trim()]
+          : [];
+      }),
+    );
+  expect(undersizedButtons).toEqual([]);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });
 
 for (const theme of ["light", "dark"] as const) {
@@ -393,7 +421,9 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
         document.documentElement.clientWidth,
     ),
   ).toBeLessThanOrEqual(0);
-  await expect(page.getByText("Catalogue, review, playback")).toBeVisible();
+  await expect(
+    page.getByText("This check does not prove that every capability is ready."),
+  ).toBeVisible();
 });
 
 test("reduced motion stops the loading animation", async ({ page }) => {

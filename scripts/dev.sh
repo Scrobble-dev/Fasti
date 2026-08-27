@@ -436,10 +436,19 @@ _container_port() {
 
 _run_container() {
   local ceiling_mib=""
-  local user_args=(--user "$(id -u):$(id -g)")
+  local user_id=""
+  local group_id=""
+  local user_args=()
+  user_id="$(id -u)"
+  if [[ "$user_id" == 0 ]]; then
+    echo "Container mode refuses to run Fasti as root" >&2
+    return 1
+  fi
+  group_id="$(id -g)"
+  user_args=(--user "$user_id:$group_id")
   ceiling_mib="$(_memory_ceiling_mib)"
   if [[ "$FASTI_CONTAINER_RUNTIME" == podman ]]; then
-    user_args=(--userns keep-id --user "$(id -u):$(id -g)")
+    user_args=(--userns keep-id --user "$user_id:$group_id")
   fi
   "$FASTI_CONTAINER_RUNTIME" run -d --name "$CONTAINER_NAME" --rm \
     "${user_args[@]}" \
@@ -692,6 +701,12 @@ _self_test() {
     echo "self-test accepted an unsupported container listener" >&2
     return 1
   fi
+  id() { printf '0\n'; }
+  if FASTI_CONTAINER_RUNTIME=podman _run_container 127.0.0.1:18420:8420 >/dev/null 2>&1; then
+    echo "self-test accepted a root container process" >&2
+    return 1
+  fi
+  unset -f id
   podman() { return 1; }
   if FASTI_CONTAINER_RUNTIME=podman _require_container_image >/dev/null 2>&1; then
     echo "self-test accepted a missing container image" >&2
