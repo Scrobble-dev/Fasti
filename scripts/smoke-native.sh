@@ -129,26 +129,29 @@ if payload.get("status") != "healthy" or not payload.get("version"):
 PY
 
 # 4. Prove the shipped loopback daemon can perform durable one-time bootstrap.
-# Secrets stay inside this process and are never written to logs or URLs.
-python3 - <<'"'"'PY'"'"'
+# Secrets stay inside this process and are never written to logs or URLs. The
+# bootstrap secret proves the caller can read a file the daemon'"'"'s OS user
+# owns -- the same local-filesystem trust boundary the data root lock assumes.
+python3 - "${work_dir}/data/bootstrap.secret" <<'"'"'PY'"'"'
 import http.client
 import json
 import re
+import sys
 
-def post(path, payload):
+bootstrap_secret = open(sys.argv[1]).read().strip()
+
+def post(path, payload, bearer=None):
     connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
-    connection.request(
-        "POST",
-        path,
-        body=json.dumps(payload),
-        headers={"content-type": "application/json"},
-    )
+    headers = {"content-type": "application/json"}
+    if bearer is not None:
+        headers["authorization"] = f"Bearer {bearer}"
+    connection.request("POST", path, body=json.dumps(payload), headers=headers)
     response = connection.getresponse()
     body = json.loads(response.read())
     connection.close()
     return response.status, body
 
-status, initialized = post("/api/v1/node/initialization", {})
+status, initialized = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 200 or not re.fullmatch(r"[0-9a-f]{64}", initialized.get("initialization_proof", "")):
     raise SystemExit("Durable node initialization failed")
 
@@ -163,7 +166,7 @@ if (
 ):
     raise SystemExit("Durable first-client enrollment failed")
 
-status, problem = post("/api/v1/node/initialization", {})
+status, problem = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 409 or problem.get("code") != "already_initialized":
     raise SystemExit("One-time node initialization did not close after enrollment")
 PY

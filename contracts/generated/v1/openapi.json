@@ -1062,7 +1062,7 @@
                 }
               }
             },
-            "description": "Bootstrap authorization was denied"
+            "description": "Bootstrap authorization was denied -- the bootstrap secret header is missing, malformed, or does not match the secret at <data_root>/bootstrap.secret"
           },
           "409": {
             "content": {

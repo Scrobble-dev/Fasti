@@ -103,7 +103,10 @@ pub fn health_router() -> Router {
 ///
 /// # Panics
 ///
-/// Panics if `bind_addr` is not a loopback address or if `data_root` is empty.
+/// Panics if `bind_addr` is not a loopback address, if `data_root` is empty,
+/// or if the bootstrap secret cannot be prepared (durable state is
+/// unavailable at startup either way; failing fast here matches every other
+/// durable precondition this function already enforces).
 pub fn api_router(kernel: Arc<dyn LocalKernel>, bind_addr: SocketAddr, data_root: &Path) -> Router {
     assert!(
         bind_addr.ip().is_loopback(),
@@ -113,6 +116,13 @@ pub fn api_router(kernel: Arc<dyn LocalKernel>, bind_addr: SocketAddr, data_root
         !data_root.as_os_str().is_empty(),
         "api_router requires non-empty data_root"
     );
+    // Primed here, before the router serves anything, so a legitimate first
+    // client can read <data_root>/bootstrap.secret and present it back to
+    // /api/v1/node/initialization -- see
+    // AccessAdministrationPort::ensure_bootstrap_secret.
+    kernel
+        .ensure_bootstrap_secret()
+        .expect("bootstrap secret must be preparable before serving any route");
     health_router().merge(local::router(kernel))
 }
 
@@ -210,12 +220,25 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    async fn enroll_admin(app: &Router) -> fasti_contracts::ClientEnrollmentResponse {
+    async fn enroll_admin(
+        app: &Router,
+        data_root: &std::path::Path,
+    ) -> fasti_contracts::ClientEnrollmentResponse {
+        // The daemon primes this file at startup (api_router calling
+        // ensure_bootstrap_secret would double as priming, but tests build
+        // the router directly) -- read it the same way a legitimate first
+        // client would, proving local filesystem access to this data root.
+        let bootstrap_secret = std::fs::read_to_string(data_root.join("bootstrap.secret"))
+            .expect("bootstrap secret readable after api_router primes it");
         let initialized = app
             .clone()
             .oneshot(
                 Request::post("/api/v1/node/initialization")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", bootstrap_secret.trim()),
+                    )
                     .body(Body::from("{}"))
                     .expect("valid request"),
             )
@@ -253,15 +276,105 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn node_initialization_refuses_a_missing_or_wrong_bootstrap_secret() {
+        let (root, kernel) = test_kernel();
+        let app = api_router(kernel, test_bind_addr(), root.path());
+
+        let missing_header = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/node/initialization")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(missing_header.status(), StatusCode::FORBIDDEN);
+
+        let wrong_secret = SecretMaterial::from_bytes([7_u8; 32]).expose_hex();
+        let wrong_header = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/node/initialization")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {wrong_secret}"))
+                    .body(Body::from("{}"))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(wrong_header.status(), StatusCode::FORBIDDEN);
+
+        // A second process that can read the same data root -- exactly the
+        // legitimate-first-client scenario this whole mechanism exists for --
+        // is not blocked by a wrong attempt that came before it.
+        let bootstrap_secret = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret readable after api_router primes it");
+        let correct_header = app
+            .oneshot(
+                Request::post("/api/v1/node/initialization")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", bootstrap_secret.trim()),
+                    )
+                    .body(Body::from("{}"))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(correct_header.status(), StatusCode::OK);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn bootstrap_secret_survives_a_router_rebuild_and_has_owner_only_permissions() {
+        let (root, kernel) = test_kernel();
+        let _first_router = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let first_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret readable after first priming");
+
+        // Simulates a daemon restart against the same data root: a second
+        // api_router build must not regenerate (and thereby invalidate) the
+        // secret a legitimate client may have already read.
+        let _second_router = api_router(kernel, test_bind_addr(), root.path());
+        let second_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret readable after second priming");
+        assert_eq!(first_read, second_read);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(root.path().join("bootstrap.secret"))
+                .expect("bootstrap secret metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(
+                mode, 0o600,
+                "bootstrap secret must be owner-read-write only"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn durable_bootstrap_issues_one_credential_and_closes_initialization() {
         let (root, kernel) = test_kernel();
         let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let bootstrap_secret = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret readable after api_router primes it");
 
         let initialized = app
             .clone()
             .oneshot(
                 Request::post("/api/v1/node/initialization")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", bootstrap_secret.trim()),
+                    )
                     .body(Body::from("{}"))
                     .expect("valid request"),
             )
@@ -333,6 +446,10 @@ mod tests {
             .oneshot(
                 Request::post("/api/v1/node/initialization")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", bootstrap_secret.trim()),
+                    )
                     .body(Body::from("{}"))
                     .expect("valid request"),
             )
@@ -383,7 +500,7 @@ mod tests {
             .expect("router response");
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
-        let credential = enroll_admin(&app).await.credential;
+        let credential = enroll_admin(&app, root.path()).await.credential;
         let send = |body: serde_json::Value| {
             Request::post("/api/v1/observations")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -441,7 +558,7 @@ mod tests {
     async fn partial_progress_is_rejected_without_creating_false_history() {
         let (root, kernel) = test_kernel();
         let app = api_router(kernel, test_bind_addr(), root.path());
-        let credential = enroll_admin(&app).await.credential;
+        let credential = enroll_admin(&app, root.path()).await.credential;
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -546,7 +663,7 @@ mod tests {
             .expect("router response");
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
-        let credential = enroll_admin(&app).await.credential;
+        let credential = enroll_admin(&app, root.path()).await.credential;
         let auth = |builder: axum::http::request::Builder| {
             builder.header(header::AUTHORIZATION, format!("Bearer {credential}"))
         };

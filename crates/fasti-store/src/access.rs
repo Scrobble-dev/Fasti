@@ -1,6 +1,7 @@
 use crate::kernel::{
-    authorize_transaction, digest_secret, load_access_snapshot, map_sql, now, problem,
-    random_secret, scope_storage_key, timestamp, verify_digest, SqliteKernel,
+    authorize_transaction, digest_secret, harden_private_regular_file, load_access_snapshot,
+    map_sql, now, problem, random_secret, scope_storage_key, timestamp, verify_digest,
+    SqliteKernel,
 };
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
@@ -11,10 +12,12 @@ use fasti_application::{
     InitializeNodeOutcome, ListenerConfiguration, PortabilityFailureReceipt, PortabilityResult,
     PrepareRecoveryBootstrapOutcome, PrepareRecoveryBootstrapRequest, ProblemCode,
     ProfileSelectionOutcome, RequestAccessContext, RevokeCredentialCommand,
-    RotateCredentialCommand, RotateCredentialOutcome, ScopeKey,
+    RotateCredentialCommand, RotateCredentialOutcome, ScopeKey, SecretMaterial,
 };
 use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
+use std::fs::OpenOptions;
+use std::io::{Read, Write};
 
 const INITIALIZATION_LIFETIME_MINUTES: i64 = 10;
 const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
@@ -341,6 +344,45 @@ fn require_one_row(
 }
 
 impl AccessAdministrationPort for SqliteKernel {
+    fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial> {
+        let capability = CapabilityKey::InitializeNode;
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        let path = self.data_root().join("bootstrap.secret");
+        let unavailable = || {
+            Box::new(FastiProblem::storage_unavailable(
+                capability,
+                correlation_id,
+            ))
+        };
+
+        let stored_hex = match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                let secret = random_secret(capability, correlation_id)?;
+                let hex = secret.expose_hex();
+                if harden_private_regular_file(&path).is_err() {
+                    drop(file);
+                    let _ = std::fs::remove_file(&path);
+                    return Err(unavailable());
+                }
+                file.write_all(hex.as_bytes()).map_err(|_| unavailable())?;
+                hex
+            }
+            // Another caller won the create_new race (e.g. concurrent
+            // startup priming) -- read the secret it wrote rather than
+            // discarding our own and returning a value nobody can match.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let mut contents = String::new();
+                std::fs::File::open(&path)
+                    .and_then(|mut file| file.read_to_string(&mut contents))
+                    .map_err(|_| unavailable())?;
+                contents
+            }
+            Err(_) => return Err(unavailable()),
+        };
+
+        SecretMaterial::try_from_hex(stored_hex.trim()).map_err(|_| unavailable())
+    }
+
     fn initialize_node(
         &self,
         command: InitializeNodeCommand,

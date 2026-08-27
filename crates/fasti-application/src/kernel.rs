@@ -63,6 +63,17 @@ impl SecretMaterial {
     pub fn expose_bytes(&self) -> &[u8; SECRET_BYTES] {
         &self.bytes
     }
+
+    /// Constant-time equality. The derived `PartialEq` short-circuits on the
+    /// first differing byte; for a secret comparison that timing signal can
+    /// leak how many leading bytes an attacker's guess got right.
+    pub fn constant_time_eq(&self, other: &Self) -> bool {
+        let mut diff = 0_u8;
+        for (left, right) in self.bytes.iter().zip(other.bytes.iter()) {
+            diff |= left ^ right;
+        }
+        diff == 0
+    }
 }
 
 impl Drop for SecretMaterial {
@@ -373,6 +384,18 @@ impl ConfigureListenerCommand {
 }
 
 pub trait AccessAdministrationPort: Send + Sync {
+    /// Returns the bootstrap secret, generating and persisting it (with
+    /// owner-only file permissions) on first call. A legitimate client
+    /// proves it can read a file owned by this data root's OS user -- the
+    /// same trust boundary the data root's own exclusive lock already
+    /// assumes for the daemon process itself -- by presenting this value
+    /// back to [`AccessAdministrationPort::initialize_node`]. Loopback
+    /// reachability alone is not proof of authorization: without this,
+    /// a second local process could race the legitimate first client for
+    /// the one-time bootstrap credential. The daemon calls this once at
+    /// startup so the file exists before any HTTP request can arrive.
+    fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial>;
+
     fn initialize_node(
         &self,
         command: InitializeNodeCommand,
