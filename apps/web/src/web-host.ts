@@ -1,5 +1,8 @@
 import type {
   EndpointConnectionStatus,
+  IntegrationRuntimeStatus,
+  IntegrationStatusHost,
+  IntegrationStatusResponse,
   NetworkConfiguration,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
@@ -77,6 +80,16 @@ const PROVIDERS: ReadonlyArray<{
   },
 ];
 
+const INTEGRATION_STATES = new Set([
+  "available",
+  "setup_required",
+  "active",
+  "degraded",
+  "disabled",
+  "unsupported",
+  "error",
+]);
+
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
 ): NetworkConfiguration {
@@ -128,7 +141,28 @@ function unavailable(message: string): Error {
   return new Error(message);
 }
 
-export function createWebHost(defaultApiUrl: string): WorkbenchHost {
+function normalizedEndpoint(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function isIntegrationStatus(value: unknown): value is IntegrationRuntimeStatus {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<IntegrationRuntimeStatus>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.label === "string" &&
+    typeof candidate.state === "string" &&
+    INTEGRATION_STATES.has(candidate.state) &&
+    typeof candidate.available === "boolean" &&
+    typeof candidate.endpoint_ready === "boolean" &&
+    typeof candidate.setup_action === "string" &&
+    typeof candidate.detail === "string"
+  );
+}
+
+export function createWebHost(
+  defaultApiUrl: string,
+): WorkbenchHost & IntegrationStatusHost {
   return {
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return loadNetworkConfiguration(defaultApiUrl);
@@ -153,7 +187,13 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         outbound_policy: input.outbound_policy,
       };
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
+        try {
+          localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
+        } catch {
+          // Network preferences are non-secret and local persistence is best
+          // effort. A blocked/full storage area must not make a valid setting
+          // look rejected.
+        }
       }
       return config;
     },
@@ -161,14 +201,14 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     async testEndpointConnection(
       endpoint: string,
     ): Promise<EndpointConnectionStatus> {
-      const normalized = endpoint.replace(/\/+$/, "");
+      const normalized = normalizedEndpoint(endpoint);
       const parsed = new URL(normalized);
       if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
         throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
       }
       if (
         parsed.protocol === "http:" &&
-        !["127.0.0.1", "localhost", "::1"].includes(parsed.hostname)
+        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
       ) {
         throw unavailable(
           "Cleartext HTTP is allowed only for loopback endpoints.",
@@ -190,6 +230,33 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         status: data.status ?? "healthy",
         version: data.version ?? "unknown",
       };
+    },
+
+    async listIntegrations(): Promise<IntegrationRuntimeStatus[]> {
+      const configured = loadNetworkConfiguration(defaultApiUrl);
+      const endpoint = normalizedEndpoint(
+        configured.connection.service_url.value || defaultApiUrl,
+      );
+      const response = await fetch(`${endpoint}/api/v1/integrations`, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(3_000),
+      });
+      if (!response.ok) {
+        throw unavailable(
+          `Fasti integration status returned ${response.status}.`,
+        );
+      }
+      const value = (await response.json()) as Partial<IntegrationStatusResponse>;
+      if (
+        !Array.isArray(value.integrations) ||
+        !value.integrations.every(isIntegrationStatus)
+      ) {
+        throw unavailable(
+          "Fasti integration status did not match the supported contract.",
+        );
+      }
+      return value.integrations;
     },
 
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
