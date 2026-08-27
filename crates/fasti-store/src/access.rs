@@ -1,7 +1,8 @@
+#[cfg(not(target_os = "linux"))]
+use crate::kernel::harden_private_regular_file;
 use crate::kernel::{
-    authorize_transaction, digest_secret, harden_private_regular_file, load_access_snapshot,
-    map_sql, now, problem, random_secret, scope_storage_key, timestamp, verify_digest,
-    SqliteKernel,
+    authorize_transaction, digest_secret, load_access_snapshot, map_sql, now, problem,
+    random_secret, scope_storage_key, timestamp, verify_digest, SqliteKernel,
 };
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
@@ -343,11 +344,77 @@ fn require_one_row(
     }
 }
 
+const BOOTSTRAP_SECRET_FILENAME: &str = "bootstrap.secret";
+
+/// Creates `bootstrap.secret`, anchored to the already-opened data-root
+/// directory descriptor where available (Linux) rather than a joined path
+/// string, so the create cannot follow a symlink or resolve outside the
+/// data root -- the same `openat2`/`RESOLVE_BENEATH` guarantee
+/// `fasti.lock` and evidence files already use (see `kernel.rs`).
+#[cfg(target_os = "linux")]
+fn create_new_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
+    if let Some(directory) = kernel.inner.data_root.anchored_directory() {
+        let fd = rustix::fs::openat2(
+            directory,
+            BOOTSTRAP_SECRET_FILENAME,
+            rustix::fs::OFlags::WRONLY
+                | rustix::fs::OFlags::CREATE
+                | rustix::fs::OFlags::EXCL
+                | rustix::fs::OFlags::CLOEXEC
+                | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::from_raw_mode(0o600),
+            rustix::fs::ResolveFlags::BENEATH
+                | rustix::fs::ResolveFlags::NO_MAGICLINKS
+                | rustix::fs::ResolveFlags::NO_SYMLINKS
+                | rustix::fs::ResolveFlags::NO_XDEV,
+        )
+        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+        return Ok(std::fs::File::from(fd));
+    }
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn create_new_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+}
+
+/// Reads back `bootstrap.secret` after losing the create race, using the
+/// same anchored-directory `openat2` guarantee as creation.
+#[cfg(target_os = "linux")]
+fn open_existing_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
+    if let Some(directory) = kernel.inner.data_root.anchored_directory() {
+        let fd = rustix::fs::openat2(
+            directory,
+            BOOTSTRAP_SECRET_FILENAME,
+            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
+            rustix::fs::Mode::empty(),
+            rustix::fs::ResolveFlags::BENEATH
+                | rustix::fs::ResolveFlags::NO_MAGICLINKS
+                | rustix::fs::ResolveFlags::NO_SYMLINKS
+                | rustix::fs::ResolveFlags::NO_XDEV,
+        )
+        .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
+        return Ok(std::fs::File::from(fd));
+    }
+    std::fs::File::open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_existing_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+}
+
 impl AccessAdministrationPort for SqliteKernel {
     fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial> {
         let capability = CapabilityKey::InitializeNode;
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
-        let path = self.data_root().join("bootstrap.secret");
         let unavailable = || {
             Box::new(FastiProblem::storage_unavailable(
                 capability,
@@ -355,13 +422,20 @@ impl AccessAdministrationPort for SqliteKernel {
             ))
         };
 
-        let stored_hex = match OpenOptions::new().write(true).create_new(true).open(&path) {
+        let stored_hex = match create_new_bootstrap_secret_file(self) {
             Ok(mut file) => {
                 let secret = random_secret(capability, correlation_id)?;
                 let hex = secret.expose_hex();
-                if harden_private_regular_file(&path).is_err() {
+                // The anchored openat2 path already creates the file with
+                // owner-only (0o600) permissions atomically; this remaining
+                // path-based check only applies to the non-Linux fallback,
+                // where harden_private_regular_file is the sole guard.
+                #[cfg(not(target_os = "linux"))]
+                if harden_private_regular_file(&self.data_root().join(BOOTSTRAP_SECRET_FILENAME))
+                    .is_err()
+                {
                     drop(file);
-                    let _ = std::fs::remove_file(&path);
+                    let _ = std::fs::remove_file(self.data_root().join(BOOTSTRAP_SECRET_FILENAME));
                     return Err(unavailable());
                 }
                 file.write_all(hex.as_bytes()).map_err(|_| unavailable())?;
@@ -372,7 +446,7 @@ impl AccessAdministrationPort for SqliteKernel {
             // discarding our own and returning a value nobody can match.
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let mut contents = String::new();
-                std::fs::File::open(&path)
+                open_existing_bootstrap_secret_file(self)
                     .and_then(|mut file| file.read_to_string(&mut contents))
                     .map_err(|_| unavailable())?;
                 contents
