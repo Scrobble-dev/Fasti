@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-  <external-path name="my_images" path="." />
-  <cache-path name="my_cache_images" path="." />
+  <!-- Scoped subdirectories, not the whole external-files/cache root: a
+       content:// URI from this provider is only as private as the path it
+       grants, and root exposes everything the app has ever written there to
+       any holder of a leaked or exploited URI. Widen a specific path only
+       when a real feature needs it. -->
+  <external-path name="my_images" path="Pictures/" />
+  <cache-path name="my_cache_images" path="images/" />
 </paths>
