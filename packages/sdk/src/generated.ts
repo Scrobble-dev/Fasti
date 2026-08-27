@@ -67,6 +67,58 @@ export const LOCAL_BOOTSTRAP_OPERATIONS = {
 
 // prettier-ignore
 const PRODUCTION_BOOTSTRAP_SCHEMAS = {
+  "AttachIdentifierRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "namespace": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "record_id": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "value": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
+  "AttachIdentifierResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "created": {
+        "type": "boolean"
+      },
+      "external_identifier_id": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "external_identifier_id",
+      "record_id",
+      "created"
+    ],
+    "type": "object"
+  },
   "ClientEnrollmentResponse": {
     "additionalProperties": false,
     "description": "One-time credential returned by durable first-client enrollment.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
@@ -85,6 +137,36 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     "required": [
       "credential_scheme",
       "credential"
+    ],
+    "type": "object"
+  },
+  "CreateRecordRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "grain"
+    ],
+    "type": "object"
+  },
+  "CreateRecordResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "record_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "record_id",
+      "grain"
     ],
     "type": "object"
   },
@@ -129,6 +211,21 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
   },
   "InitializeNodeRequest": {
     "additionalProperties": false,
+    "type": "object"
+  },
+  "ListRecordsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "records": {
+        "items": {
+          "$ref": "#/components/schemas/RecordSummaryDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "records"
+    ],
     "type": "object"
   },
   "NodeInitializationResponse": {
@@ -269,6 +366,151 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
       "correlation_id",
       "actual",
       "violations"
+    ],
+    "type": "object"
+  },
+  "RecordActivityDto": {
+    "additionalProperties": false,
+    "properties": {
+      "interpretation_state": {
+        "type": "string"
+      },
+      "occurred_at": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "interpretation_state"
+    ],
+    "type": "object"
+  },
+  "RecordSummaryDto": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "latest_activity": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/RecordActivityDto"
+          }
+        ]
+      },
+      "poster": {
+        "$ref": "#/components/schemas/ResolvedFieldDto"
+      },
+      "record_id": {
+        "type": "string"
+      },
+      "status": {
+        "type": "string"
+      },
+      "title": {
+        "$ref": "#/components/schemas/ResolvedFieldDto"
+      }
+    },
+    "required": [
+      "record_id",
+      "grain",
+      "status",
+      "title",
+      "poster"
+    ],
+    "type": "object"
+  },
+  "RegisterNamespaceRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "grains": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "id_pattern": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "licence_posture": {
+        "type": "string"
+      },
+      "namespace": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "normalization": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "label",
+      "grains",
+      "id_pattern",
+      "normalization",
+      "licence_posture"
+    ],
+    "type": "object"
+  },
+  "RegisterNamespaceResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "created": {
+        "type": "boolean"
+      },
+      "namespace": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "created"
+    ],
+    "type": "object"
+  },
+  "ResolvedFieldDto": {
+    "additionalProperties": false,
+    "properties": {
+      "is_stale": {
+        "type": "boolean"
+      },
+      "source": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "tier": {
+        "type": "string"
+      },
+      "value": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "tier",
+      "is_stale"
     ],
     "type": "object"
   },
@@ -505,13 +747,13 @@ export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "local_operator" | "scoped" | "unauthenticated";
   readonly bounded_context: string;
   readonly contract_body: "b1" | "b2" | "b3";
-  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
+  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "record_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "health" | "later_b2" | "later_b3";
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "health" | "later_b2" | "later_b3";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -725,6 +967,10 @@ const B1_CONFORMANCE_SCHEMAS = {
             "client.enroll.forbidden",
             "credential.revoke.capability_unavailable",
             "credential.rotate.capability_unavailable",
+            "identity.identifier.attach.validation_failed",
+            "identity.namespace.register.validation_failed",
+            "identity.record.create.validation_failed",
+            "identity.record.list.forbidden",
             "listener.configure.capability_unavailable",
             "node.initialize.validation_failed",
             "observation.accept.capacity_exceeded",
@@ -751,6 +997,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "credential.revoke",
           "credential.rotate",
           "identity.identifier.attach",
+          "identity.namespace.register",
           "identity.record.create",
           "identity.record.list",
           "identity.review.defer",
@@ -785,12 +1032,14 @@ const B1_CONFORMANCE_SCHEMAS = {
             "capacity_exceeded",
             "forbidden",
             "idempotency_conflict",
+            "identity_conflict",
             "integrity_failed",
             "invalid_identifier",
             "invalid_observation",
             "malformed_json",
             "payload_too_large",
             "receipt_not_found",
+            "record_not_found",
             "storage_unavailable",
             "unsupported_media_type",
             "validation_failed"
@@ -840,6 +1089,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1_observation_accept",
           "b1_receipt_replay",
           "b1_receipt_stream",
+          "b1_records",
           "health",
           "later_b2",
           "later_b3"
@@ -875,8 +1125,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 23,
-        "minItems": 23,
+        "maxItems": 24,
+        "minItems": 24,
         "type": "array",
         "uniqueItems": true
       },
@@ -914,8 +1164,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 8,
-        "minProperties": 8,
+        "maxProperties": 9,
+        "minProperties": 9,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
@@ -923,6 +1173,7 @@ const B1_CONFORMANCE_SCHEMAS = {
             "b1_observation_accept",
             "b1_receipt_replay",
             "b1_receipt_stream",
+            "b1_records",
             "health",
             "later_b2",
             "later_b3"
@@ -1747,6 +1998,7 @@ export type CapabilityId =
   | "credential.revoke"
   | "credential.rotate"
   | "identity.identifier.attach"
+  | "identity.namespace.register"
   | "identity.record.create"
   | "identity.record.list"
   | "identity.review.defer"
@@ -1793,12 +2045,14 @@ export type ProblemCode =
   | "capacity_exceeded"
   | "forbidden"
   | "idempotency_conflict"
+  | "identity_conflict"
   | "integrity_failed"
   | "invalid_identifier"
   | "invalid_observation"
   | "malformed_json"
   | "payload_too_large"
   | "receipt_not_found"
+  | "record_not_found"
   | "storage_unavailable"
   | "unsupported_media_type"
   | "validation_failed";
@@ -1932,69 +2186,125 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
     {
       "authorization": "scoped",
       "bounded_context": "identity.identifiers",
-      "contract_body": "b2",
-      "examples": [],
+      "contract_body": "b1",
+      "examples": [
+        "identity.identifier.attach.validation_failed"
+      ],
       "id": "identity.identifier.attach",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
         "capability_unavailable",
+        "forbidden",
+        "identity_conflict",
+        "integrity_failed",
         "invalid_identifier",
+        "malformed_json",
+        "payload_too_large",
+        "record_not_found",
+        "storage_unavailable",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [
         "identity_write"
       ],
-      "surface_profile": "later_b2",
+      "surface_profile": "b1_records",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "identity.identifiers",
+      "contract_body": "b1",
+      "examples": [
+        "identity.namespace.register.validation_failed"
+      ],
+      "id": "identity.namespace.register",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "identity_write"
+      ],
+      "surface_profile": "b1_records",
       "uat": []
     },
     {
       "authorization": "scoped",
       "bounded_context": "identity.records",
-      "contract_body": "b2",
-      "examples": [],
+      "contract_body": "b1",
+      "examples": [
+        "identity.record.create.validation_failed"
+      ],
       "id": "identity.record.create",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "later_body"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
         "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
         "invalid_identifier",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "unsupported_media_type",
         "validation_failed"
       ],
       "runtime_body": "b2",
       "scopes": [
         "identity_write"
       ],
-      "surface_profile": "later_b2",
+      "surface_profile": "b1_records",
       "uat": []
     },
     {
       "authorization": "scoped",
       "bounded_context": "identity.records",
-      "contract_body": "b2",
-      "examples": [],
+      "contract_body": "b1",
+      "examples": [
+        "identity.record.list.forbidden"
+      ],
       "id": "identity.record.list",
       "lifecycle": {
-        "contract_state": "reserved",
+        "contract_state": "finalized",
         "introduced_in": "b1",
-        "runtime_availability": "fixture_only"
+        "runtime_availability": "implemented"
       },
       "problems": [
+        "authentication_failed",
         "capability_unavailable",
-        "forbidden"
+        "forbidden",
+        "integrity_failed",
+        "storage_unavailable"
       ],
       "runtime_body": "b2",
       "scopes": [
         "identity_read"
       ],
-      "surface_profile": "later_b2",
+      "surface_profile": "b1_records",
       "uat": []
     },
     {
@@ -2685,6 +2995,60 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "state": "not_applicable"
       }
     },
+    "b1_records": {
+      "cli": {
+        "body": "b2",
+        "reason": "A governed CLI surface for record identity is deferred to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "body": "b2",
+        "reason": "A governed linked-data context for record identity is deferred to B2.",
+        "state": "later_body"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "A network-isolated native package smoke for record identity is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Record identity mutations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
     "health": {
       "cli": {
         "reason": "Health is exposed as the process HTTP probe.",
@@ -3162,6 +3526,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "capability_unavailable",
       "detail": "requested capability is not available in this body; it is owned by b2",
       "next_actions": [
@@ -3177,6 +3559,60 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 501,
       "title": "Capability unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "identity_conflict",
+      "detail": "an exact external identifier is already attached to another active Record",
+      "next_actions": [
+        {
+          "id": "review_identity_conflict",
+          "label": "Review the existing Record before attaching the identifier"
+        }
+      ],
+      "param": "/identifier",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Identity conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/identity-conflict"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
     },
     {
       "capability_id": "identity.identifier.attach",
@@ -3198,6 +3634,96 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.identifier.attach",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "record_not_found",
+      "detail": "no active Record is available for the requested identifier",
+      "next_actions": [
+        {
+          "id": "verify_record_id",
+          "label": "Verify the Record ID or create a new Record"
+        }
+      ],
+      "param": "/record_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 404,
+      "title": "Record not found",
+      "type": "https://fasti.scrobble.dev/v1/problems/record-not-found"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.identifier.attach",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -3213,6 +3739,186 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "capability_unavailable",
+      "detail": "requested capability is not available in this body; it is owned by b2",
+      "next_actions": [
+        {
+          "id": "review_capability_status",
+          "label": "Review the local capability registry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 501,
+      "title": "Capability unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.namespace.register",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
     },
     {
       "capability_id": "identity.record.create",
@@ -3234,6 +3940,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.record.create",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "invalid_identifier",
       "detail": "identifier does not satisfy the governed format",
       "next_actions": [
@@ -3252,6 +3994,78 @@ export const PUBLIC_PROBLEM_CATALOG = {
     },
     {
       "capability_id": "identity.record.create",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "identity.record.create",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "identity.record.create",
       "code": "validation_failed",
       "detail": "request representation does not satisfy the governed contract",
       "next_actions": [
@@ -3267,6 +4081,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 422,
       "title": "Validation failed",
       "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
     },
     {
       "capability_id": "identity.record.list",
@@ -3303,6 +4135,42 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "identity.record.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
     },
     {
       "capability_id": "identity.review.defer",
@@ -4185,9 +5053,9 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "record_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

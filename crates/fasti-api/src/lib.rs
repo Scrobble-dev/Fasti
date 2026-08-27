@@ -11,6 +11,7 @@ use utoipa::OpenApi;
 mod local;
 mod observation;
 mod problem;
+mod records;
 
 #[cfg(feature = "conformance-fixture")]
 mod conformance;
@@ -39,17 +40,31 @@ pub async fn health_check() -> Json<HealthResponse> {
         health_check,
         local::initialize_node,
         local::enroll_first_client,
-        observation::submit_observation
+        observation::submit_observation,
+        records::create_record,
+        records::attach_identifier,
+        records::list_records,
+        records::register_namespace
     ),
     components(schemas(
         HealthResponse,
+        fasti_contracts::AttachIdentifierRequest,
+        fasti_contracts::AttachIdentifierResponse,
         fasti_contracts::ClientEnrollmentResponse,
+        fasti_contracts::CreateRecordRequest,
+        fasti_contracts::CreateRecordResponse,
         fasti_contracts::CredentialSchemeDto,
         fasti_contracts::EnrollFirstClientRequest,
         fasti_contracts::InitializeNodeRequest,
+        fasti_contracts::ListRecordsResponse,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::ObservationIdentifierInput,
         fasti_contracts::ObservationIngressKind,
+        fasti_contracts::RecordActivityDto,
+        fasti_contracts::RecordSummaryDto,
+        fasti_contracts::RegisterNamespaceRequest,
+        fasti_contracts::RegisterNamespaceResponse,
+        fasti_contracts::ResolvedFieldDto,
         fasti_contracts::SubmitObservationRequest,
         fasti_contracts::SubmitObservationResponse,
         ProblemActionDto,
@@ -137,10 +152,13 @@ mod tests {
             "/api/v1/node/initialization",
             "/api/v1/client-enrollments",
             "/api/v1/observations",
+            "/api/v1/records",
+            "/api/v1/records/identifiers",
+            "/api/v1/namespaces",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 4);
+        assert_eq!(document.paths.paths.len(), 7);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -154,6 +172,16 @@ mod tests {
             "ObservationIngressKind",
             "SubmitObservationRequest",
             "SubmitObservationResponse",
+            "AttachIdentifierRequest",
+            "AttachIdentifierResponse",
+            "CreateRecordRequest",
+            "CreateRecordResponse",
+            "ListRecordsResponse",
+            "RecordActivityDto",
+            "RecordSummaryDto",
+            "RegisterNamespaceRequest",
+            "RegisterNamespaceResponse",
+            "ResolvedFieldDto",
             "ProblemActionDto",
             "ProblemDetails",
             "ViolationDto",
@@ -499,5 +527,140 @@ mod tests {
                 .expect("router response");
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn records_require_bearer_and_support_create_list_attach_and_namespace_registration() {
+        let (root, kernel) = test_kernel();
+        let app = api_router(kernel, test_bind_addr(), root.path());
+
+        let unauthorized = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/records")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+
+        let credential = enroll_admin(&app).await.credential;
+        let auth = |builder: axum::http::request::Builder| {
+            builder.header(header::AUTHORIZATION, format!("Bearer {credential}"))
+        };
+
+        let empty_list = app
+            .clone()
+            .oneshot(
+                auth(Request::get("/api/v1/records"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(empty_list.status(), StatusCode::OK);
+        let empty_list: fasti_contracts::ListRecordsResponse = serde_json::from_slice(
+            &to_bytes(empty_list.into_body(), 16 * 1024)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("list response");
+        assert!(empty_list.records.is_empty());
+
+        let created = app
+            .clone()
+            .oneshot(
+                auth(Request::post("/api/v1/records"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"grain":"work"}"#))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(created.status(), StatusCode::OK);
+        let created: fasti_contracts::CreateRecordResponse = serde_json::from_slice(
+            &to_bytes(created.into_body(), 4096)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("create-record response");
+        assert_eq!(created.grain, "work");
+
+        let namespace = app
+            .clone()
+            .oneshot(
+                auth(Request::post("/api/v1/namespaces"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "namespace": "google-books",
+                            "label": "Google Books",
+                            "grains": ["work"],
+                            "id_pattern": ".+",
+                            "normalization": "identity",
+                            "licence_posture": "identifiers_only",
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(namespace.status(), StatusCode::OK);
+        let namespace: fasti_contracts::RegisterNamespaceResponse = serde_json::from_slice(
+            &to_bytes(namespace.into_body(), 4096)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("register-namespace response");
+        assert!(namespace.created);
+
+        let attached = app
+            .clone()
+            .oneshot(
+                auth(Request::post("/api/v1/records/identifiers"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "record_id": created.record_id,
+                            "namespace": "google-books",
+                            "grain": "work",
+                            "value": "abc123",
+                        })
+                        .to_string(),
+                    ))
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(attached.status(), StatusCode::OK);
+        let attached: fasti_contracts::AttachIdentifierResponse = serde_json::from_slice(
+            &to_bytes(attached.into_body(), 4096)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("attach-identifier response");
+        assert!(attached.created);
+
+        let populated_list = app
+            .clone()
+            .oneshot(
+                auth(Request::get("/api/v1/records"))
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(populated_list.status(), StatusCode::OK);
+        let populated_list: fasti_contracts::ListRecordsResponse = serde_json::from_slice(
+            &to_bytes(populated_list.into_body(), 16 * 1024)
+                .await
+                .expect("bounded body"),
+        )
+        .expect("list response");
+        assert_eq!(populated_list.records.len(), 1);
+        assert_eq!(populated_list.records[0].record_id, created.record_id);
     }
 }

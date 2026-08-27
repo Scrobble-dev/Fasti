@@ -9,6 +9,8 @@ identifiers:
   - capability_read
   - client_enroll
   - credential_manage
+  - identity_read
+  - identity_write
   - listener_configure
   - observation_accept
   - profile_select
@@ -33,6 +35,8 @@ does not authorize a request. `system.health` is `unauthenticated`, and
 | `capability_read`    | Discover the governed capability contract.                   |
 | `client_enroll`      | Enroll the first client through the governed bootstrap flow. |
 | `credential_manage`  | Rotate or revoke a credential.                               |
+| `identity_read`      | List records visible to the authenticated workspace.         |
+| `identity_write`     | Create records, attach identifier claims, register namespaces. |
 | `listener_configure` | Configure the observation listener.                          |
 | `observation_accept` | Submit an observation for governed acceptance.               |
 | `profile_select`     | Select a profile explicitly.                                 |

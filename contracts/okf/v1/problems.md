@@ -13,11 +13,14 @@ identifiers:
   - capability_unavailable
   - forbidden
   - idempotency_conflict
+  - identity_conflict
   - integrity_failed
+  - invalid_identifier
   - invalid_observation
   - malformed_json
   - payload_too_large
   - receipt_not_found
+  - record_not_found
   - storage_unavailable
   - unsupported_media_type
   - validation_failed
@@ -44,11 +47,14 @@ not claim a later-body failure path is executable.
 | `capability_unavailable` | The requested capability is owned by another runtime body.           |
 | `forbidden`              | The request context is not authorized for the capability.            |
 | `idempotency_conflict`   | An operation identifier was reused with different semantics.         |
+| `identity_conflict`      | An exact external identifier is already attached to another active record. |
 | `integrity_failed`       | Durable local state failed a recorded integrity invariant.           |
+| `invalid_identifier`     | An identifier or grain does not satisfy the governed format.         |
 | `invalid_observation`    | An observation violates the governed input contract.                 |
 | `malformed_json`         | The request body is not well-formed JSON; no mutation occurred.      |
 | `payload_too_large`      | The request exceeded its documented bounded body limit.              |
 | `receipt_not_found`      | No visible receipt matches the requested identifier and context.     |
+| `record_not_found`       | No active record is available for the requested identifier.          |
 | `storage_unavailable`    | The local durability boundary is temporarily unavailable.            |
 | `unsupported_media_type` | The request did not use the required JSON media type.                |
 | `validation_failed`      | One or more public fields fail contract validation.                  |

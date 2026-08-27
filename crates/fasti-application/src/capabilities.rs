@@ -264,48 +264,87 @@ define_capabilities!(
     ),
     (
         CreateRecord,
+        B1,
         B2,
-        B2,
-        Reserved,
-        LaterBody,
+        Finalized,
+        Implemented,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [
             AuthenticationFailed,
+            CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
-            StorageUnavailable
-        ]
+            InvalidIdentifier,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         AttachIdentifier,
+        B1,
         B2,
-        B2,
-        Reserved,
-        LaterBody,
+        Finalized,
+        Implemented,
         Scoped,
         [IdentityWrite],
-        [CapabilityUnavailable, InvalidIdentifier, ValidationFailed],
         [
             AuthenticationFailed,
+            CapabilityUnavailable,
             Forbidden,
             IdentityConflict,
             IntegrityFailed,
+            InvalidIdentifier,
+            MalformedJson,
+            PayloadTooLarge,
             RecordNotFound,
-            StorageUnavailable
-        ]
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         ListRecords,
+        B1,
         B2,
-        B2,
-        Reserved,
-        FixtureOnly,
+        Finalized,
+        Implemented,
         Scoped,
         [IdentityRead],
-        [CapabilityUnavailable, Forbidden],
-        [AuthenticationFailed, IntegrityFailed, StorageUnavailable]
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        RegisterNamespace,
+        B1,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [IdentityWrite],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
     ),
     (
         InspectReview,
@@ -476,15 +515,18 @@ mod tests {
             CapabilityKey::InitializeNode,
             CapabilityKey::EnrollFirstClient,
             CapabilityKey::AcceptObservation,
+            CapabilityKey::CreateRecord,
+            CapabilityKey::AttachIdentifier,
+            CapabilityKey::ListRecords,
+            CapabilityKey::RegisterNamespace,
         ] {
             assert_eq!(capability.runtime_body(), CapabilityBody::B2);
             assert!(capability.is_production_executable());
         }
 
-        for capability in [CapabilityKey::CreateRecord, CapabilityKey::ResolveReview] {
-            assert_eq!(capability.runtime_body(), CapabilityBody::B2);
-            assert!(!capability.is_production_executable());
-        }
+        let capability = CapabilityKey::ResolveReview;
+        assert_eq!(capability.runtime_body(), CapabilityBody::B2);
+        assert!(!capability.is_production_executable());
 
         assert_eq!(
             CapabilityKey::InitializeNode.runtime_availability(),
@@ -492,11 +534,11 @@ mod tests {
         );
         assert_eq!(
             CapabilityKey::CreateRecord.contract_state(),
-            ContractState::Reserved
+            ContractState::Finalized
         );
         assert_eq!(
             CapabilityKey::CreateRecord.runtime_availability(),
-            RuntimeAvailability::LaterBody
+            RuntimeAvailability::Implemented
         );
     }
 

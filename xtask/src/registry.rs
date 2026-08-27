@@ -9,12 +9,13 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 8] = [
+const EXPECTED_PROFILES: [&str; 9] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_observation_accept",
     "b1_receipt_replay",
     "b1_receipt_stream",
+    "b1_records",
     "health",
     "later_b2",
     "later_b3",
@@ -606,6 +607,10 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         CapabilityKey::AcceptObservation => "b1_observation_accept",
         CapabilityKey::ReplayReceipt => "b1_receipt_replay",
         CapabilityKey::StreamReceipts => "b1_receipt_stream",
+        CapabilityKey::CreateRecord
+        | CapabilityKey::AttachIdentifier
+        | CapabilityKey::ListRecords
+        | CapabilityKey::RegisterNamespace => "b1_records",
         _ => match key.contract_body() {
             CapabilityBody::B1 => "b1_http_fixture",
             CapabilityBody::B2 => "later_b2",
@@ -654,7 +659,7 @@ mod tests {
         );
         assert_eq!(
             expected_surface_profile(CapabilityKey::CreateRecord),
-            "later_b2"
+            "b1_records"
         );
         assert_eq!(
             expected_surface_profile(CapabilityKey::ExportWorkspace),
@@ -680,8 +685,8 @@ mod tests {
         reserved
             .capabilities
             .iter_mut()
-            .find(|capability| capability.application_key == CapabilityKey::CreateRecord)
-            .expect("create-record capability")
+            .find(|capability| capability.application_key == CapabilityKey::ResolveReview)
+            .expect("resolve-review capability")
             .surface_profile = "b1_http_fixture".to_owned();
         assert!(validate_capabilities(&reserved).is_err());
     }

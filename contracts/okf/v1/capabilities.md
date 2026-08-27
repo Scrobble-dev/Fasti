@@ -17,6 +17,10 @@ identifiers:
   - observation.accept
   - receipt.replay
   - receipt.stream
+  - identity.record.create
+  - identity.identifier.attach
+  - identity.record.list
+  - identity.namespace.register
 authorization_postures:
   - unauthenticated
   - bootstrap_only
@@ -33,6 +37,10 @@ authorization_assignments:
   observation.accept: scoped
   receipt.replay: scoped
   receipt.stream: scoped
+  identity.record.create: scoped
+  identity.identifier.attach: scoped
+  identity.record.list: scoped
+  identity.namespace.register: scoped
 sources:
   - id: fasti-capability-registry
     resource: ../../registry/v1/capabilities.yaml
@@ -59,6 +67,10 @@ not automatically an implemented runtime. Read each entry together with the
 | `observation.accept`           | `observation.ingress`       | `scoped`          | Fixture only; durable behavior belongs to B2 |
 | `receipt.replay`               | `observation.receipts`      | `scoped`          | Fixture only; durable behavior belongs to B2 |
 | `receipt.stream`               | `observation.receipts`      | `scoped`          | Fixture only; durable behavior belongs to B2 |
+| `identity.record.create`       | `identity.records`          | `scoped`          | Implemented                                  |
+| `identity.identifier.attach`   | `identity.identifiers`      | `scoped`          | Implemented                                  |
+| `identity.record.list`         | `identity.records`          | `scoped`          | Implemented                                  |
+| `identity.namespace.register`  | `identity.identifiers`      | `scoped`          | Implemented                                  |
 
 Only `scoped` capabilities use identifiers from the [scope catalogue](scopes.md).
 `unauthenticated` capabilities require no authorization facts, while

@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 const MAX_BOOTSTRAP_JSON_BODY_BYTES: usize = 4 * 1024;
 const MAX_OBSERVATION_JSON_BODY_BYTES: usize = 64 * 1024;
+const MAX_RECORDS_JSON_BODY_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct LocalApiState {
@@ -130,6 +131,11 @@ pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
         .layer(DefaultBodyLimit::max(MAX_BOOTSTRAP_JSON_BODY_BYTES));
     let observation =
         crate::observation::router().layer(DefaultBodyLimit::max(MAX_OBSERVATION_JSON_BODY_BYTES));
+    let records =
+        crate::records::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
 
-    bootstrap.merge(observation).with_state(state)
+    bootstrap
+        .merge(observation)
+        .merge(records)
+        .with_state(state)
 }

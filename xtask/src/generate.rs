@@ -172,17 +172,63 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 1] = [ConformanceOperation {
-    alias: "submitObservation",
-    operation_id: "submit_observation",
-    method: "post",
-    path: "/api/v1/observations",
-    capability_id: "observation.accept",
-    authenticated: true,
-    request: Some("SubmitObservationRequest"),
-    response: Some("SubmitObservationResponse"),
-    retry: "stable_body_operation_id",
-}];
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 5] = [
+    ConformanceOperation {
+        alias: "submitObservation",
+        operation_id: "submit_observation",
+        method: "post",
+        path: "/api/v1/observations",
+        capability_id: "observation.accept",
+        authenticated: true,
+        request: Some("SubmitObservationRequest"),
+        response: Some("SubmitObservationResponse"),
+        retry: "stable_body_operation_id",
+    },
+    ConformanceOperation {
+        alias: "createRecord",
+        operation_id: "create_record",
+        method: "post",
+        path: "/api/v1/records",
+        capability_id: "identity.record.create",
+        authenticated: true,
+        request: Some("CreateRecordRequest"),
+        response: Some("CreateRecordResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listRecords",
+        operation_id: "list_records",
+        method: "get",
+        path: "/api/v1/records",
+        capability_id: "identity.record.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListRecordsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "attachIdentifier",
+        operation_id: "attach_identifier",
+        method: "post",
+        path: "/api/v1/records/identifiers",
+        capability_id: "identity.identifier.attach",
+        authenticated: true,
+        request: Some("AttachIdentifierRequest"),
+        response: Some("AttachIdentifierResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "registerNamespace",
+        operation_id: "register_namespace",
+        method: "post",
+        path: "/api/v1/namespaces",
+        capability_id: "identity.namespace.register",
+        authenticated: true,
+        request: Some("RegisterNamespaceRequest"),
+        response: Some("RegisterNamespaceResponse"),
+        retry: "safe",
+    },
+];
 
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     generate_to(workspace_root, workspace_root)
@@ -1101,6 +1147,9 @@ fn resolve_required_binding(
                 capability_id == "system.health"
                     || capability_id == "receipt.stream"
                     || PRODUCTION_BOOTSTRAP_OPERATIONS
+                        .iter()
+                        .any(|operation| operation.capability_id == capability_id)
+                    || PRODUCTION_RUNTIME_OPERATIONS
                         .iter()
                         .any(|operation| operation.capability_id == capability_id)
                     || CONFORMANCE_OPERATIONS

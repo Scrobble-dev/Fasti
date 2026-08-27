@@ -162,6 +162,43 @@ surface_profiles:
       { state: required, binding: "package-smoke:b1-conformance-fixture" }
     ui: { state: not_applicable, reason: Fasti is headless through B3. }
 
+  b1_records:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Record identity mutations are finite requests with no event channel.,
+      }
+    cli:
+      {
+        state: later_body,
+        body: b2,
+        reason: A governed CLI surface for record identity is deferred to B2.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: later_body,
+        body: b2,
+        reason: A governed linked-data context for record identity is deferred to B2.,
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk: { state: required, binding: "sdk:{capability_id}" }
+    knowledge: { state: required, binding: "knowledge:problem-catalog" }
+    package_smoke:
+      {
+        state: later_body,
+        body: b2,
+        reason: A network-isolated native package smoke for record identity is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.,
+      }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
   later_b2:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -546,55 +583,117 @@ capabilities:
   - application_key: create_record
     id: identity.record.create
     bounded_context: identity.records
-    contract_body: b2
+    contract_body: b1
     runtime_body: b2
     authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
-        contract_state: reserved,
-        runtime_availability: later_body,
+        contract_state: finalized,
+        runtime_availability: implemented,
       }
-    surface_profile: later_b2
+    surface_profile: b1_records
     scopes: [identity_write]
-    problems: [capability_unavailable, invalid_identifier, validation_failed]
-    examples: []
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        invalid_identifier,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [identity.record.create.validation_failed]
     uat: []
 
   - application_key: attach_identifier
     id: identity.identifier.attach
     bounded_context: identity.identifiers
-    contract_body: b2
+    contract_body: b1
     runtime_body: b2
     authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
-        contract_state: reserved,
-        runtime_availability: later_body,
+        contract_state: finalized,
+        runtime_availability: implemented,
       }
-    surface_profile: later_b2
+    surface_profile: b1_records
     scopes: [identity_write]
-    problems: [capability_unavailable, invalid_identifier, validation_failed]
-    examples: []
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        identity_conflict,
+        integrity_failed,
+        invalid_identifier,
+        malformed_json,
+        payload_too_large,
+        record_not_found,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [identity.identifier.attach.validation_failed]
     uat: []
 
   - application_key: list_records
     id: identity.record.list
     bounded_context: identity.records
-    contract_body: b2
+    contract_body: b1
     runtime_body: b2
     authorization: scoped
     lifecycle:
       {
         introduced_in: b1,
-        contract_state: reserved,
-        runtime_availability: fixture_only,
+        contract_state: finalized,
+        runtime_availability: implemented,
       }
-    surface_profile: later_b2
+    surface_profile: b1_records
     scopes: [identity_read]
-    problems: [capability_unavailable, forbidden]
-    examples: []
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        storage_unavailable,
+      ]
+    examples: [identity.record.list.forbidden]
+    uat: []
+
+  - application_key: register_namespace
+    id: identity.namespace.register
+    bounded_context: identity.identifiers
+    contract_body: b1
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b1_records
+    scopes: [identity_write]
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: [identity.namespace.register.validation_failed]
     uat: []
 
   - application_key: inspect_review
