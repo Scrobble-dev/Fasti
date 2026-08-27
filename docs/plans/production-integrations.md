@@ -8,7 +8,9 @@ separate, not-yet-implemented work; see `docs/integrations/nuvio.md` and
 
 The existing Connections interface must remain. Mock or static states must be replaced with runtime-backed states; useful interface content must not be removed to hide unfinished behavior.
 
-The implementation must use the existing authenticated observation service, scoped client credentials, durable idempotency, profile isolation, bounded inputs and queues, redacted diagnostics, offline-safe delivery, generated OpenAPI and AsyncAPI contracts, and repository QA gates.
+Production integration adapters must treat provider identifiers (IMDb, TMDB, TVDB, etc.) only as typed evidence/claims attached to provider-neutral Fasti Records, must use the existing governed observation service, and must not create canonical identity, merge or split Records, or redefine domain/identity rules.
+
+The implementation must use the existing authenticated observation service, scoped client credentials, durable idempotency, profile isolation, bounded inputs and queues, redacted diagnostics, offline-safe delivery, generated contracts (OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD, SDK and CLI surfaces, permissions, typed problems, examples, and documentation), and repository QA gates. Authoritative schemas are the sources of truth; generated artifacts (SDKs, docs, etc.) are outputs derived from them.
 
 Tabler is the first-choice design system. CI must reject competing UI systems unless a narrow documented exception exists.
 
