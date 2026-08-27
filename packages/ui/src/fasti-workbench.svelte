@@ -691,7 +691,8 @@
           />
         {:else}
           <div class="state-message">
-            <p>No record selected.</p>
+            <h1>Media Detail</h1>
+            <p>No record is selected.</p>
             <button
               type="button"
               class="link-btn"
@@ -963,12 +964,13 @@
   }
 
   .link-btn {
-    border: 0;
-    background: transparent;
-    color: var(--fasti-action-primary);
+    border: 1px solid var(--fasti-action-primary);
+    border-radius: 4px;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
     font-weight: 700;
     cursor: pointer;
-    padding: 6px 0;
+    padding: 10px 16px;
   }
 
   .overview {

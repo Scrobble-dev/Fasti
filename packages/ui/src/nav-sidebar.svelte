@@ -105,6 +105,10 @@
   function getItemIcon(id: string) {
     return ICON_MAP[id] || IconDeviceTv;
   }
+
+  function isCurrent(item: NavItemConfig): boolean {
+    return activeSection === item.id;
+  }
 </script>
 
 {#if !hidden}
@@ -207,10 +211,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "home" &&
-                      (activeSection === "chronicle" ||
-                        activeSection === "library"))}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed
@@ -251,10 +253,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "home" &&
-                      (activeSection === "chronicle" ||
-                        activeSection === "library"))}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
@@ -290,7 +290,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
@@ -326,7 +327,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
@@ -362,8 +364,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "sources" && activeSection === "connections")}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed
