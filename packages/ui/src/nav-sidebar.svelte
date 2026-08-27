@@ -173,7 +173,7 @@
           {/if}
           <button
             type="button"
-            class="btn btn-icon btn-sm btn-ghost-secondary"
+            class="btn btn-icon btn-sm btn-ghost-secondary sidebar-collapse-toggle"
             onclick={onToggleCollapse}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -415,6 +415,12 @@
     width: 64px;
   }
 
+  .fasti-sidebar-vertical .navbar-collapse {
+    width: 100%;
+    flex-basis: auto;
+    align-self: stretch;
+  }
+
   .brand-button:hover .navbar-brand-title {
     color: var(--fasti-action-primary);
   }
@@ -479,12 +485,16 @@
     margin-right: 0 !important;
   }
 
-  @media (max-width: 47.99rem) {
+  @media (max-width: 61.99rem) {
     .fasti-sidebar-vertical {
       position: fixed !important;
       inset: 0 auto 0 0;
       z-index: 30;
       box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+    }
+
+    .sidebar-collapse-toggle {
+      display: none;
     }
   }
 </style>

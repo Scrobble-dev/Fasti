@@ -434,13 +434,16 @@
   // out from under the fixed rail. Force the icon-only (64px) width there
   // regardless of the persisted preference, matching a standard mobile
   // nav-rail pattern.
-  let isNarrowViewport = $state(false);
+  let isNarrowViewport = $state(
+    typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 61.99rem)").matches,
+  );
 
   onMount(() => {
     activeSection = sectionFromPath();
     const sync = () => (activeSection = sectionFromPath());
     window.addEventListener("popstate", sync);
-    const media = window.matchMedia("(max-width: 47.99rem)");
+    const media = window.matchMedia("(max-width: 61.99rem)");
     const syncViewport = () => (isNarrowViewport = media.matches);
     syncViewport();
     media.addEventListener("change", syncViewport);
@@ -532,16 +535,22 @@
             type="button"
             class="icon-btn"
             onclick={() =>
-              (workbenchPreferences = {
-                ...workbenchPreferences,
-                sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
-              })}
-            title={workbenchPreferences.sidebarCollapsed
-              ? "Expand sidebar"
-              : "Collapse sidebar"}
-            aria-label={workbenchPreferences.sidebarCollapsed
-              ? "Expand sidebar"
-              : "Collapse sidebar"}
+              (workbenchPreferences = isNarrowViewport
+                ? { ...workbenchPreferences, sidebarHidden: true }
+                : {
+                    ...workbenchPreferences,
+                    sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
+                  })}
+            title={isNarrowViewport
+              ? "Hide sidebar"
+              : workbenchPreferences.sidebarCollapsed
+                ? "Expand sidebar"
+                : "Collapse sidebar"}
+            aria-label={isNarrowViewport
+              ? "Hide sidebar"
+              : workbenchPreferences.sidebarCollapsed
+                ? "Expand sidebar"
+                : "Collapse sidebar"}
           >
             <IconLayoutSidebar size={18} />
           </button>
@@ -821,12 +830,12 @@
     flex-direction: column;
   }
 
-  /* Below 47.99rem, nav-sidebar.svelte switches itself to
+  /* Below Tabler's `lg` boundary, nav-sidebar.svelte switches itself to
    * `position: fixed`, removing it from flex flow so it stops claiming
    * layout space. Reserve that space here (matching its collapsed width,
    * which `isNarrowViewport` forces at this breakpoint) so the fixed rail
    * doesn't overlap and intercept clicks on the main content. */
-  @media (max-width: 47.99rem) {
+  @media (max-width: 61.99rem) {
     .workbench-main-shell {
       margin-left: 64px;
     }
