@@ -13,6 +13,8 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export async function validateIntegrationContracts(root = repositoryRoot) {
   const asyncApiPath = resolve(root, "contracts/asyncapi/v1/integrations.yaml");
   const openApiPath = resolve(root, "contracts/generated/v1/openapi.json");
+  // Both paths are fixed repository-local literals above, not external input.
+  /* eslint-disable-next-line security/detect-non-literal-fs-filename */
   const source = await readFile(asyncApiPath, "utf8");
   const document = parseYamlDocument(source, { uniqueKeys: true });
   assert.deepEqual(
@@ -45,6 +47,9 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
     ["plexObservation", "/api/v1/integrations/plex/webhook"],
   ]);
   for (const [channel, address] of expectedChannels) {
+    // channel and address iterate the fixed expectedChannels map above, not
+    // external input.
+    /* eslint-disable security/detect-object-injection */
     assert.equal(
       value.channels[channel]?.address,
       address,
@@ -54,6 +59,7 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
       openapi.paths[address]?.post,
       `${address} is missing from generated OpenAPI`,
     );
+    /* eslint-enable security/detect-object-injection */
   }
   assert.ok(
     openapi.paths["/api/v1/integrations"]?.get,

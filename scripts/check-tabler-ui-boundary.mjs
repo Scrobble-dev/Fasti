@@ -42,11 +42,15 @@ function deniedPackage(specifier) {
 
 async function walk(directory) {
   const output = [];
+  // directory is confined to the fixed SOURCE_ROOTS allowlist below; there is
+  // no external or user-controlled input into this repository-local walk.
+  /* eslint-disable security/detect-non-literal-fs-filename */
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) output.push(...(await walk(path)));
     else if (SOURCE_EXTENSIONS.has(extname(entry.name))) output.push(path);
   }
+  /* eslint-enable security/detect-non-literal-fs-filename */
   return output;
 }
 
@@ -54,6 +58,8 @@ async function checkSource() {
   const failures = [];
   for (const sourceRoot of SOURCE_ROOTS) {
     for (const file of await walk(join(ROOT, sourceRoot))) {
+      // file was discovered by walk() above, not supplied externally.
+      /* eslint-disable-next-line security/detect-non-literal-fs-filename */
       const content = await readFile(file, "utf8");
       for (const match of content.matchAll(IMPORT_PATTERN)) {
         const specifier = match[1];
@@ -77,12 +83,17 @@ async function checkManifests() {
     "packages/ui/package.json",
   ];
   for (const manifest of manifests) {
+    // manifest comes from the fixed list above, not external input.
+    /* eslint-disable-next-line security/detect-non-literal-fs-filename */
     const value = JSON.parse(await readFile(join(ROOT, manifest), "utf8"));
     for (const group of [
       "dependencies",
       "devDependencies",
       "peerDependencies",
     ]) {
+      // group iterates a fixed literal array immediately above, not
+      // user-controlled input.
+      /* eslint-disable-next-line security/detect-object-injection */
       for (const name of Object.keys(value[group] ?? {})) {
         const denied = deniedPackage(name);
         if (denied) {
