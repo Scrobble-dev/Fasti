@@ -10,9 +10,20 @@ import { readStrictJson } from "./lib/strict-json.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Reads and parses a strict JSON file from a repository path.
+ * @param {string} root - The repository root directory.
+ * @param {string} relativePath - The path relative to the repository root.
+ * @returns {Promise<*>} The parsed JSON content.
+ */
 const readJson = async (root, relativePath) =>
   readStrictJson(resolve(root, relativePath));
 
+/**
+ * Recursively visits all $ref references in a JSON Schema or OpenAPI document.
+ * @param {*} value - The value to traverse (object, array, or primitive).
+ * @param {Function} visit - Callback function invoked for each $ref value.
+ */
 const visitReferences = (value, visit) => {
   if (Array.isArray(value)) {
     value.forEach((item) => visitReferences(item, visit));
@@ -25,6 +36,12 @@ const visitReferences = (value, visit) => {
   }
 };
 
+/**
+ * Validates generated OpenAPI, JSON Schema, capability registry, and problem catalog contracts.
+ * @param {string} [root=repositoryRoot] - The repository root directory containing the generated contracts.
+ * @returns {Object} Validation counts for capabilities, OpenAPI paths, problems, and schemas.
+ * @throws {AssertionError} If a generated contract fails validation.
+ */
 export async function validateGeneratedContracts(root = repositoryRoot) {
   const [
     openapi,

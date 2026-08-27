@@ -396,10 +396,15 @@ _stop() {
 }
 
 _require_container_image() {
+  if ! command -v "$FASTI_CONTAINER_RUNTIME" >/dev/null 2>&1; then
+    echo "$FASTI_CONTAINER_RUNTIME is not installed or not on PATH" >&2
+    return 1
+  fi
   if "$FASTI_CONTAINER_RUNTIME" image inspect "$FASTI_IMAGE" >/dev/null 2>&1; then
     return 0
   fi
-  echo "Container image $FASTI_IMAGE is not available. Build it with: $FASTI_CONTAINER_RUNTIME build --tag $FASTI_IMAGE ." >&2
+  printf 'Container image %s is not available. Build it with: %q build --tag %q %q\n' \
+    "$FASTI_IMAGE" "$FASTI_CONTAINER_RUNTIME" "$FASTI_IMAGE" "$PROJECT_ROOT" >&2
   return 1
 }
 
@@ -479,7 +484,7 @@ _start_container() {
   _write_bound_addr "127.0.0.1:$actual_port"
 
   if _wait_for_health; then
-    echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy on $FASTI_API_URL"
+    echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy: $FASTI_API_URL/api/v1/health"
   else
     echo "Fasti $FASTI_CONTAINER_RUNTIME container failed its health probe; run: $FASTI_CONTAINER_RUNTIME logs $CONTAINER_NAME" >&2
     "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
@@ -526,7 +531,7 @@ _start_native() {
 
   echo "Waiting for daemon health probe..."
   if _wait_for_health "$daemon_pid"; then
-    echo "Fasti daemon is healthy on $FASTI_API_URL"
+    echo "Fasti daemon is healthy: $FASTI_API_URL/api/v1/health"
   else
     echo "Fasti daemon failed to start; see .dev-logs/fastid.log" >&2
     return 1
