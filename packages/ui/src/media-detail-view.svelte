@@ -127,6 +127,35 @@
     }
   }
 
+  function handleMarkSeasonWatched(seasonIndex: number): void {
+    const season = record.seasons?.[seasonIndex];
+    if (!season) return;
+    for (const ep of season.episodes ?? []) {
+      if (!ep.watched) onToggleEpisode?.(record.id, ep.id);
+    }
+  }
+
+  function handleMarkSeasonUnwatched(seasonIndex: number): void {
+    const season = record.seasons?.[seasonIndex];
+    if (!season) return;
+    for (const ep of season.episodes ?? []) {
+      if (ep.watched) onToggleEpisode?.(record.id, ep.id);
+    }
+  }
+
+  function handleMarkPreviousEpisodesWatched(
+    seasonIndex: number,
+    upToEpisodeNumber: number,
+  ): void {
+    const season = record.seasons?.[seasonIndex];
+    if (!season) return;
+    for (const ep of season.episodes ?? []) {
+      if (ep.number < upToEpisodeNumber && !ep.watched) {
+        onToggleEpisode?.(record.id, ep.id);
+      }
+    }
+  }
+
   function handleOpenContextMenu(e: MouseEvent): void {
     e.preventDefault();
     contextMenuState = {
@@ -487,9 +516,29 @@
             <!-- Episode Checklist -->
             {#if record.seasons[selectedSeasonIndex]}
               <div class="episodes-deck">
-                <h3 class="deck-title">
-                  Episodes — {record.seasons[selectedSeasonIndex].title}
-                </h3>
+                <div class="deck-header-row">
+                  <h3 class="deck-title">
+                    Episodes — {record.seasons[selectedSeasonIndex].title}
+                  </h3>
+                  <div class="season-bulk-actions">
+                    <button
+                      type="button"
+                      class="btn-secondary-sm"
+                      onclick={() =>
+                        handleMarkSeasonWatched(selectedSeasonIndex)}
+                    >
+                      Mark Watched
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary-sm"
+                      onclick={() =>
+                        handleMarkSeasonUnwatched(selectedSeasonIndex)}
+                    >
+                      Mark Unwatched
+                    </button>
+                  </div>
+                </div>
                 <div class="episodes-table-wrap">
                   {#each record.seasons[selectedSeasonIndex].episodes ?? [] as ep (ep.id)}
                     <div class="episode-item-row" class:watched={ep.watched}>
@@ -531,6 +580,20 @@
                             { month: "short", day: "numeric" },
                           )}
                         </div>
+                      {/if}
+
+                      {#if ep.number > 1 && !ep.watched}
+                        <button
+                          type="button"
+                          class="mark-prev-btn"
+                          onclick={() =>
+                            handleMarkPreviousEpisodesWatched(
+                              selectedSeasonIndex,
+                              ep.number,
+                            )}
+                        >
+                          Mark 1–{ep.number - 1} Seen
+                        </button>
                       {/if}
                     </div>
                   {/each}
@@ -1336,6 +1399,29 @@
     color: var(--fasti-text-muted);
   }
 
+  .deck-header-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .season-bulk-actions {
+    display: flex;
+    gap: 8px;
+  }
+  .btn-secondary-sm {
+    padding: 6px 12px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
   .episodes-table-wrap {
     display: flex;
     flex-direction: column;
@@ -1395,6 +1481,23 @@
     font-size: 0.82rem;
     color: var(--fasti-text-muted);
     margin: 4px 0 0;
+  }
+  .mark-prev-btn {
+    flex-shrink: 0;
+    padding: 5px 10px;
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .mark-prev-btn:hover {
+    color: var(--fasti-action-primary);
+    border-color: var(--fasti-action-primary);
   }
 
   .cast-grid {
