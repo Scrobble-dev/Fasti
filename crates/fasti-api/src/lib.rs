@@ -243,12 +243,20 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    async fn enroll_admin(app: &Router) -> fasti_contracts::ClientEnrollmentResponse {
+    async fn enroll_admin(
+        app: &Router,
+        kernel: &fasti_store::SqliteKernel,
+    ) -> fasti_contracts::ClientEnrollmentResponse {
+        let bootstrap_secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("bootstrap secret")
+            .expose_hex();
         let initialized = app
             .clone()
             .oneshot(
                 Request::post("/api/v1/node/initialization")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {bootstrap_secret}"))
                     .body(Body::from("{}"))
                     .expect("valid request"),
             )
@@ -289,12 +297,17 @@ mod tests {
     async fn durable_bootstrap_issues_one_credential_and_closes_initialization() {
         let (root, kernel) = test_kernel();
         let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let bootstrap_secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("bootstrap secret")
+            .expose_hex();
 
         let initialized = app
             .clone()
             .oneshot(
                 Request::post("/api/v1/node/initialization")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {bootstrap_secret}"))
                     .body(Body::from("{}"))
                     .expect("valid request"),
             )
@@ -366,6 +379,7 @@ mod tests {
             .oneshot(
                 Request::post("/api/v1/node/initialization")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {bootstrap_secret}"))
                     .body(Body::from("{}"))
                     .expect("valid request"),
             )
@@ -386,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn observation_requires_bearer_and_replays_one_source_event_exactly_once() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -416,7 +430,7 @@ mod tests {
             .expect("router response");
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
-        let credential = enroll_admin(&app).await.credential;
+        let credential = enroll_admin(&app, &kernel).await.credential;
         let send = |body: serde_json::Value| {
             Request::post("/api/v1/observations")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -473,8 +487,8 @@ mod tests {
     #[tokio::test]
     async fn partial_progress_is_rejected_without_creating_false_history() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
-        let credential = enroll_admin(&app).await.credential;
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let credential = enroll_admin(&app, &kernel).await.credential;
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -537,7 +551,11 @@ mod tests {
             .expect("router response");
         assert_eq!(status.status(), StatusCode::OK);
 
-        for path in ["/api/v1/node/initialization", "/api/v1/records", "/api/v1/observations"] {
+        for path in [
+            "/api/v1/node/initialization",
+            "/api/v1/records",
+            "/api/v1/observations",
+        ] {
             let response = app
                 .clone()
                 .oneshot(
@@ -597,7 +615,7 @@ mod tests {
     #[tokio::test]
     async fn records_require_bearer_and_support_create_list_attach_and_namespace_registration() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
 
         let unauthorized = app
             .clone()
@@ -610,7 +628,7 @@ mod tests {
             .expect("router response");
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
 
-        let credential = enroll_admin(&app).await.credential;
+        let credential = enroll_admin(&app, &kernel).await.credential;
         let auth = |builder: axum::http::request::Builder| {
             builder.header(header::AUTHORIZATION, format!("Bearer {credential}"))
         };
