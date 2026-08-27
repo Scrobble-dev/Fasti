@@ -8,6 +8,7 @@ use axum::{
 use fasti_api::{api_router, integration_router};
 use fasti_contracts::{ClientEnrollmentResponse, NodeInitializationResponse, SubmitObservationResponse};
 use fasti_store::SqliteKernel;
+use std::path::Path;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -23,12 +24,18 @@ async fn routers() -> (tempfile::TempDir, Router, Router) {
     (root, local, integrations)
 }
 
-async fn enroll_admin(app: &Router) -> String {
+async fn enroll_admin(app: &Router, data_root: &Path) -> String {
+    let bootstrap_secret = std::fs::read_to_string(data_root.join("bootstrap.secret"))
+        .expect("host bootstrap secret must be created before local routes are served");
     let initialized = app
         .clone()
         .oneshot(
             Request::post("/api/v1/node/initialization")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", bootstrap_secret.trim()),
+                )
                 .body(Body::from("{}"))
                 .expect("request"),
         )
@@ -94,8 +101,8 @@ fn template_event(event_id: &str, completed: bool, title: &str) -> serde_json::V
 
 #[tokio::test]
 async fn template_webhook_requires_auth_and_replays_stable_event_identity() {
-    let (_root, local, integrations) = routers().await;
-    let credential = enroll_admin(&local).await;
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
     let body = template_event("fixture-session:complete:1", true, "Episode title");
 
     let unauthorized = integrations
@@ -157,8 +164,8 @@ async fn template_webhook_requires_auth_and_replays_stable_event_identity() {
 
 #[tokio::test]
 async fn template_webhook_rejects_partial_progress_without_history_mutation() {
-    let (_root, local, integrations) = routers().await;
-    let credential = enroll_admin(&local).await;
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
     let response = integrations
         .oneshot(
             bearer(
@@ -178,8 +185,8 @@ async fn template_webhook_rejects_partial_progress_without_history_mutation() {
 
 #[tokio::test]
 async fn emby_native_completion_is_normalized_through_the_shared_boundary() {
-    let (_root, local, integrations) = routers().await;
-    let credential = enroll_admin(&local).await;
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
     let body = serde_json::json!({
         "Event": "playback.stop",
         "PlayedToCompletion": true,
@@ -210,8 +217,8 @@ async fn emby_native_completion_is_normalized_through_the_shared_boundary() {
 
 #[tokio::test]
 async fn plex_multipart_accepts_payload_with_binary_image_without_parsing_the_image() {
-    let (_root, local, integrations) = routers().await;
-    let credential = enroll_admin(&local).await;
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
     let boundary = "fasti-fixture-boundary";
     let payload = serde_json::json!({
         "event": "media.scrobble",
