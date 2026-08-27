@@ -61,7 +61,7 @@ This runs `fastid`, the Fasti daemon, on your machine. It takes about 2 minutes 
 
 **If step 2 fails with "Address already in use":** something else already holds port 8420. Fix it one of two ways:
 
-- Set `FASTI_PORT_FALLBACK=auto` and run step 2 again. `fastid` then picks a free port instead of failing.
+- Set `FASTI_PORT_FALLBACK=auto` and run step 2 again. `fastid` then picks a free port (check logs for the port number to use in step 3).
 - Find and stop the other process: `ss -ltn 'sport = :8420'` shows it; `kill <pid>` stops it.
 
 For the full day-to-day dev loop -- hot rebuilds, Podman/Docker, and the web QA harness -- see [docs/dev-loop.md](docs/dev-loop.md).
