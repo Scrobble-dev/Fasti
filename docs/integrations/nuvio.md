@@ -1,198 +1,116 @@
 # Nuvio and Fasti integration status
 
-Fasti and Nuvio do not have a complete production integration yet.
+## Current Fasti-side status
 
-Fasti now has one real integration primitive: an authenticated local endpoint that can accept a complete consumption occurrence and return a durable receipt.
-
-Current upstream Nuvio still needs a Fasti tracking provider before it can call that endpoint directly. Its tracking provider registry currently contains Trakt and SIMKL.
-
-## What Fasti implements now
-
-The local Fasti API exposes:
+Fasti now mounts a dedicated Nuvio occurrence-ingress route:
 
 ```text
-POST /api/v1/observations
+POST /api/v1/integrations/nuvio/webhook
 ```
 
-The route:
+It is part of the isolated production integration router and uses the same authenticated, durable observation service as the local observation API. The route does not bypass Fasti identity, authorization, evidence, receipt, or idempotency rules.
 
-- requires a scoped bearer credential;
-- accepts only on the local loopback API;
-- stores the normalized request as immutable content-addressed evidence;
-- authenticates and authorizes the client before mutation;
-- derives the Fasti operation identity from the authenticated client, source, and source event identity;
-- returns the same durable receipt when the same source event is retried with the same evidence;
-- rejects reuse of the same source event identity with different evidence;
-- keeps unresolved identity as a valid durable state.
+Current upstream Nuvio still needs a Fasti tracking provider before it can submit events directly. Fasti therefore reports this integration as `setup_required`, not `active`, until a compatible Nuvio client is configured and has successfully delivered an event.
 
-An external observer credential can be created from **Connections → API clients** in the trusted packaged Fasti host. Create one credential per client or device so it can be revoked independently.
+## Fasti contract
 
-The current observer credential grants only:
-
-```text
-observation_accept
-```
-
-The browser workbench cannot create these credentials.
-
-## Request example
-
-Use a stable `source_event_id` for the source event. Reuse it when delivery is retried.
+A Nuvio client sends the provider template below as JSON and supplies one scoped Fasti bearer credential in the `Authorization` header.
 
 ```http
-POST /api/v1/observations HTTP/1.1
-Host: 127.0.0.1:8420
+POST /api/v1/integrations/nuvio/webhook HTTP/1.1
+Host: fasti.example.test
 Authorization: Bearer <one-time-issued-client-credential>
 Content-Type: application/json
 
 {
-  "kind": "consumption_occurrence",
-  "source": "nuvio",
-  "source_event_id": "session-42:stop:episode-7",
-  "observed_at": "2026-08-26T18:10:00Z",
-  "occurred_at": "2026-08-26T18:09:58Z",
-  "target_grain": "episode",
-  "identifiers": [
-    {
-      "namespace": "imdb.title",
-      "grain": "series",
-      "value": "tt1234567"
-    },
-    {
-      "namespace": "kitsu.anime",
-      "grain": "release",
-      "value": "7442"
-    }
-  ],
+  "event_id": "nuvio-session-42-completed-episode-7",
+  "observed_at": "2026-08-27T12:30:00Z",
+  "occurred_at": "2026-08-27T12:29:58Z",
+  "media_type": "Episode",
   "title": "Example episode",
-  "progress_percent": 100,
-  "position_seconds": 1440,
-  "duration_seconds": 1440
+  "identifiers": {
+    "imdb": "tt1234567",
+    "kitsu": "7442"
+  }
 }
 ```
 
-The complete normalized request is evidence. Do not place the bearer credential in the body, URL, query string, logs, screenshots, fixtures, or export files.
+Required behavior:
 
-## Retry behavior
+- authenticate before parsing provider-specific content;
+- reject bodies larger than the configured bounded ingress limit;
+- reject unknown or incomplete media identities instead of guessing;
+- derive operation identity from the authenticated client and stable source event identity;
+- store immutable evidence before a successful receipt can reference it;
+- replay the original durable receipt for the same event and evidence;
+- return `409 idempotency_conflict` when the same event identity is reused with changed evidence;
+- keep unresolved identity as valid durable state;
+- never put the bearer credential in the body, URL, query string, logs, screenshots, fixtures, or exports.
 
-A source retry must keep these values stable:
+Create one scoped API client per Nuvio installation or device through **Connections → API clients** in a trusted packaged Fasti host. Independent credentials make revocation and audit boundaries explicit.
 
-```text
-authenticated client
-source
-source_event_id
-```
+## Event identity and retry
 
-Fasti derives its operation identity from that tuple.
+Create the Nuvio `event_id` before the first send and keep it stable until the event is acknowledged.
 
-Expected results:
-
-| Delivery | Result |
+| Delivery | Fasti result |
 |---|---|
-| First valid delivery | `committed` and a durable receipt |
-| Same source event and same evidence | `replayed` with the original receipt |
-| Same source event and different evidence | `409 idempotency_conflict`; prior state remains |
+| First valid delivery | `committed` plus a durable receipt |
+| Same event and same evidence | `replayed` with the original receipt |
+| Same event ID with different evidence | `409 idempotency_conflict`; previous state remains |
 
-A retry is not a rewatch.
+A transport retry does not create another Chronicle occurrence. A genuinely separate consumption occurrence needs a new source event identity.
 
-A real repeat consumption needs a new source event identity.
+## Supported semantic boundary
 
-## Progress is not implemented by this route
-
-`POST /api/v1/observations` currently represents a durable consumption occurrence. It is not a progress-heartbeat endpoint.
-
-A request with `progress_percent` below 100 is rejected. Fasti does this deliberately so a playback heartbeat cannot become false Chronicle history.
-
-Partial progress needs a separate progress capability and persistence contract before Nuvio can synchronize resume state safely.
+This route records complete consumption occurrences. It does not treat transient position updates as Chronicle events. State such as progress, saved membership, or current watched/completed projection remains a separate capability and must not be invented inside this adapter.
 
 ## Network boundary
 
-The durable local API is loopback-only today.
+The general non-loopback listener remains health-only. Production integrations use the dedicated `integration_router`, which exposes only:
 
-```text
-127.0.0.1 / ::1
-        │
-        ▼
-production local Fasti API
-```
+- health;
+- integration status;
+- authenticated production provider adapters.
 
-A non-loopback Fasti listener exposes the health surface only. The occurrence route is not available to another device on the LAN.
+It does **not** expose bootstrap, generic Record mutation, or the generic observation endpoint. Deployments that publish the integration listener must still provide the repository-required protected transport, origin/network policy, secret handling, and reverse-proxy controls. Do not widen the general local application router to obtain remote access.
 
-Do not work around this by binding the local mutation router to `0.0.0.0` or a LAN address.
+## Nuvio client work
 
-Remote Nuvio support requires its own secure listener and pairing work: authenticated node identity, explicit user approval, device-bound grants, TLS or an equivalent protected transport, revocation, replay tests, and network-policy evidence.
+A compatible Nuvio implementation must use Nuvio's normal tracking-provider abstraction rather than a parallel Fasti-only state machine. It needs:
 
-## Current upstream Nuvio boundary
+1. a Fasti provider entry in the tracking registry;
+2. protected storage for the Fasti node address and scoped credential;
+3. a durable local outbox;
+4. stable event identity assigned before enqueue;
+5. bounded retry with backoff and jitter;
+6. retirement of an outbox item only after a durable Fasti receipt;
+7. visible pending, delivered, blocked, and rejected status;
+8. secret-safe logs and diagnostics.
 
-The current `NuvioMedia/NuvioTV` `dev` branch defines these tracking providers:
-
-```text
-Trakt
-Simkl
-```
-
-The current scrobble coordinator fans playback updates to enabled providers in that registry. There is no Fasti provider in the current upstream registry.
-
-Source files checked during this implementation:
-
-- `app/src/main/java/com/nuvio/tv/core/tracking/TrackingProvider.kt`
-- `app/src/main/java/com/nuvio/tv/core/tracking/TrackingScrobbleCoordinator.kt`
-
-Repository:
-
-```text
-https://github.com/NuvioMedia/NuvioTV
-```
-
-## What a first Nuvio client integration still needs
-
-The first useful Nuvio slice is one-way and durable:
-
-1. Add a Fasti tracking provider through the normal Nuvio tracking abstraction.
-2. Store Fasti node identity and the device credential in Nuvio's protected credential mechanism.
-3. Keep a durable Nuvio-side outbox.
-4. Create a stable source event identity before the first send.
-5. Submit a completed occurrence to the Fasti observation contract.
-6. Keep the same source event identity across timeout and reconnect retries.
-7. Retire the outbox item only after Fasti returns its durable receipt.
-8. Show pending, delivered, blocked, and rejected state to the user.
-9. Keep playback independent of Fasti availability.
-
-This slice must not invent partial progress support. It can submit complete occurrences only until Fasti has a separate progress capability.
-
-## Later work
-
-These are separate implementation gates, not properties of the current route:
-
-- secure LAN discovery and pairing;
-- partial progress and resume-state synchronization;
-- exact watched-state synchronization;
-- saved/watchlist state;
-- deletion tombstones;
-- snapshot and ordered delta recovery;
-- reconciliation and diagnostics;
-- catalogues and Collections;
-- metadata projections;
-- two-way synchronization.
-
-The application remains useful without any of these integrations.
+Client work belongs in the Nuvio repository and must use its own release and review authority. The Fasti repository must not claim the client as active until that compatible build exists and a real event has been verified.
 
 ## Verification
 
-For the current Fasti-side ingress, verify at least:
+Fasti-side conformance must cover at least:
 
 ```text
 missing bearer -> 401
-valid scoped bearer -> durable commit
-same source event + same evidence -> original receipt replay
-same source event + changed evidence -> 409 with no mutation
-partial progress -> 422 with no occurrence
-non-loopback health router -> observation route absent
-revoked API client -> authentication fails
+wrong/revoked bearer -> authentication fails
+valid scoped bearer + valid template -> durable commit
+same event + same evidence -> original receipt replay
+same event + changed evidence -> 409 with no second mutation
+invalid media type or identifier -> 422 with no occurrence
+oversized body -> bounded rejection
+integration router -> Nuvio route present
+integration router -> bootstrap/records/generic observation absent
 ```
 
-Run the repository gate on the exact head before changing this document from implementation status to a release claim:
+Run the repository gate on the exact head before publishing a production compatibility claim:
 
 ```bash
 cargo xtask test pr
+pnpm test:ui
 ```
+
+OpenAPI documents the HTTP route. AsyncAPI documents event/receipt transport semantics and must not duplicate this synchronous HTTP ingress as a fictitious message channel.
