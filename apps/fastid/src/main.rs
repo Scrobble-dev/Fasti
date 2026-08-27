@@ -91,10 +91,28 @@ fn publish_bound_addr(addr: SocketAddr) -> Result<()> {
     write_bound_addr(Path::new(&path), addr)
 }
 
+/// Determines whether an address should expose only remote health endpoints.
+///
+/// # Examples
+///
+/// ```
+/// let address: std::net::SocketAddr = "192.0.2.1:8420".parse().unwrap();
+/// assert!(uses_remote_health_surface(address));
+/// ```
+///
+/// Returns `true` for non-loopback addresses and `false` for loopback addresses.
 fn uses_remote_health_surface(addr: SocketAddr) -> bool {
     !addr.ip().is_loopback()
 }
 
+/// Parses an optional external bind address.
+///
+/// # Examples
+///
+/// ```
+/// let address = parse_external_bind_ip(Some("127.0.0.1")).unwrap();
+/// assert_eq!(address, Some("127.0.0.1".parse().unwrap()));
+/// ```
 fn parse_external_bind_ip(value: Option<&str>) -> Result<Option<IpAddr>> {
     let Some(value) = value else {
         return Ok(None);
@@ -109,10 +127,46 @@ fn parse_external_bind_ip(value: Option<&str>) -> Result<Option<IpAddr>> {
         .with_context(|| format!("FASTI_EXTERNAL_BIND_IP must be an IP address, got {value:?}"))
 }
 
+/// Reads the optional local API bind address from `FASTI_EXTERNAL_BIND_IP`.
+///
+/// # Examples
+///
+/// ```
+/// let bind_ip = external_bind_ip()?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 fn external_bind_ip() -> Result<Option<IpAddr>> {
     parse_external_bind_ip(env::var("FASTI_EXTERNAL_BIND_IP").ok().as_deref())
 }
 
+/// Determines the address used to expose local API routes.
+///
+/// A loopback listener uses its own address. A wildcard listener requires a
+/// loopback external address; without one, it exposes only remote health
+/// endpoints.
+///
+/// # Errors
+///
+/// Returns an error if an external bind address is provided for a non-wildcard
+/// listener or if that address is not loopback.
+///
+/// # Examples
+///
+/// ```
+/// use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+///
+/// let listen_addr = SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 8420);
+/// let exposed = local_api_exposure_addr(
+///     listen_addr,
+///     Some(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+/// )?;
+///
+/// assert_eq!(
+///     exposed,
+///     Some(SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 8420))
+/// );
+/// # Ok::<(), anyhow::Error>(())
+/// ```
 fn local_api_exposure_addr(
     listen_addr: SocketAddr,
     external_bind_ip: Option<IpAddr>,
@@ -131,6 +185,23 @@ fn local_api_exposure_addr(
     Ok(Some(SocketAddr::new(external_bind_ip, listen_addr.port())))
 }
 
+/// Parses the optional data-root configuration value.
+///
+/// An unset value produces `None`. An empty value produces an error.
+///
+/// # Examples
+///
+/// ```
+/// use std::ffi::OsString;
+/// use std::path::PathBuf;
+///
+/// let root = parse_data_root(Some(OsString::from("/var/lib/fasti"))).unwrap();
+/// assert_eq!(root, Some(PathBuf::from("/var/lib/fasti")));
+/// ```
+///
+/// # Errors
+///
+/// Returns an error when the value is set but empty.
 fn parse_data_root(value: Option<OsString>) -> Result<Option<PathBuf>> {
     let Some(value) = value else {
         return Ok(None);
@@ -146,7 +217,21 @@ fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
 }
 
-#[tokio::main]
+/// Starts the Fasti HTTP server using environment-based configuration.
+///
+/// The server exposes durable local API routes when a data root and local API
+/// address are configured; otherwise, it serves health endpoints only.
+///
+/// # Errors
+///
+/// Returns an error if configuration, listener setup, data-root initialization,
+/// address publication, or HTTP serving fails.
+///
+/// # Examples
+///
+/// ```text
+/// FASTI_LISTEN=127.0.0.1:8420 cargo run
+/// ```
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 

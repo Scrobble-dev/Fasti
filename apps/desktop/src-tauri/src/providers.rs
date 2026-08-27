@@ -408,6 +408,29 @@ fn validate_credential_bytes(value: &[u8]) -> Result<(), DesktopProblem> {
     Ok(())
 }
 
+/// Parses a Google Books response into validated book candidates, omitting incomplete, unsafe, duplicate, and excess entries.
+///
+/// # Errors
+///
+/// Returns an error when the response body is not valid JSON.
+///
+/// # Examples
+///
+/// ```
+/// let body = br#"{
+///     "items": [{
+///         "id": "volume-1",
+///         "volumeInfo": {
+///             "title": "Example Book",
+///             "authors": ["Example Author"]
+///         }
+///     }]
+/// }"#;
+///
+/// let candidates = parse_candidates(body).unwrap();
+/// assert_eq!(candidates.len(), 1);
+/// assert_eq!(candidates[0].title, "Example Book");
+/// ```
 fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
     let response: GoogleVolumesResponse = serde_json::from_slice(body)
         .map_err(|_| DesktopProblem::provider("Google Books returned invalid JSON."))?;
