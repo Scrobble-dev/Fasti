@@ -316,7 +316,9 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
                       ON pg.workspace_id = cr.workspace_id AND pg.client_id = cr.client_id
                     WHERE cr.credential_id = ?1
                       AND cr.workspace_id = ?2
+                      AND cr.status = 'active'
                       AND pg.profile_id = ?3
+                      AND pg.status = 'active'
                     "#,
                     params![
                         command.credential_id().to_string(),
@@ -331,6 +333,13 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
         )?
         .ok_or_else(|| Box::new(FastiProblem::forbidden(capability, correlation_id)))?;
 
+        if target.0 == command.access().client_id().to_string() {
+            return Err(Box::new(FastiProblem::forbidden(
+                capability,
+                correlation_id,
+            )));
+        }
+
         let credential_changed = map_sql(
             transaction.execute(
                 "UPDATE credentials SET status = 'revoked', revoked_at = ?1 WHERE credential_id = ?2 AND status = 'active'",
@@ -339,7 +348,7 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        if credential_changed > 1 {
+        if credential_changed != 1 {
             return Err(Box::new(FastiProblem::integrity_failed(
                 capability,
                 correlation_id,
