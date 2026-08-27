@@ -239,7 +239,7 @@
    * in this component's state (host.providerCredentialStatus never returns
    * secrets), so there is nothing to redact — only configured-ness and
    * metadata are included. */
-  function handleDownloadLogs(): void {
+  function handleDownloadDiagnostics(): void {
     const bundle = {
       generatedAt: new Date().toISOString(),
       workbenchPreferences: {
@@ -265,7 +265,7 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `fasti-diagnostics-${Date.now()}.json`;
+    link.download = `fasti-diagnostic-summary-${Date.now()}.json`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -910,10 +910,10 @@
             <button
               type="button"
               class="secondary"
-              onclick={handleDownloadLogs}
+              onclick={handleDownloadDiagnostics}
             >
-              <IconFileDownload size={16} aria-hidden="true" /> Download Sanitized
-              Logs
+              <IconFileDownload size={16} aria-hidden="true" /> Download diagnostic
+              summary
             </button>
             <a
               href="https://github.com/Scrobble-dev/Fasti/issues/new"

@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 test("inactive settings stay visible without reporting false success", async ({
   page,
@@ -34,6 +35,22 @@ test("inactive settings stay visible without reporting false success", async ({
     .all()) {
     await expect(control).toBeDisabled();
   }
+
+  await page.getByRole("button", { name: "Capability status" }).click();
+  const downloadStarted = page.waitForEvent("download");
+  await page
+    .getByRole("button", { name: "Download diagnostic summary" })
+    .click();
+  const download = await downloadStarted;
+  expect(download.suggestedFilename()).toMatch(
+    /^fasti-diagnostic-summary-\d+\.json$/,
+  );
+  const summaryPath = await download.path();
+  expect(summaryPath).not.toBeNull();
+  const summary = JSON.parse(await readFile(summaryPath!, "utf8"));
+  expect(summary).toHaveProperty("generatedAt");
+  expect(summary).toHaveProperty("network");
+  expect(summary).toHaveProperty("providers");
 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
