@@ -20,10 +20,12 @@ Run this command from the repository root:
 This command builds and starts `fastid`, the production daemon. It waits
 until `fastid` answers its health check. Then it prints the API URL.
 
-`fastid` prefers `http://127.0.0.1:8420`. If that port is already taken by
-something else, `fastid` itself asks the operating system for a free port
-instead, and the script prints the port it actually got. Run
-`./scripts/dev.sh --status` at any time to see the live URL.
+`fastid` prefers `http://127.0.0.1:8420`. By default, if that port is
+already taken by something else, startup fails rather than picking a
+different port -- set `FASTI_PORT_FALLBACK=auto` to have `fastid` ask the
+operating system for a free port instead, in which case the script prints
+the port it actually got. Run `./scripts/dev.sh --status` at any time to see
+the live URL.
 
 Some worktrees also carry `apps/web`, a pre-production health and
 interface-quality harness (see the "Browser QA harness" row in the status
