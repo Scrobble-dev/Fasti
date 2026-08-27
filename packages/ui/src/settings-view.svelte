@@ -40,6 +40,9 @@
     IconSettings,
     IconWorld,
     IconTags,
+    IconDatabase,
+    IconFileDownload,
+    IconBug,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -70,6 +73,9 @@
     onRetryNetworkState?: () => void;
     onSaveOidc?: (config: OidcConfiguration) => void;
     onSaveApprise?: (config: AppriseNotificationConfig) => void;
+    onClearCache?: (
+      cache: "search" | "history" | "statistics" | "discover" | "all",
+    ) => void;
   }
 
   let {
@@ -96,6 +102,7 @@
     onRetryNetworkState,
     onSaveOidc,
     onSaveApprise,
+    onClearCache,
   }: Props = $props();
 
   let activeSettingsSection:
@@ -363,6 +370,48 @@
     if (window.confirm("Remove this provider key from the credential store?")) {
       void deleteProviderKey(provider);
     }
+  }
+
+  /** Builds a diagnostics bundle from whatever's already loaded client-side
+   * and triggers a browser download. Secrets (client secrets, token
+   * secrets, Apprise webhook URLs which often embed tokens) are
+   * deliberately excluded rather than redacted-in-place, so there's no risk
+   * of a redaction bug leaking one. */
+  function handleDownloadLogs(): void {
+    const bundle = {
+      generatedAt: new Date().toISOString(),
+      theme: themeSettings,
+      workbenchPreferences: workbenchPreferences
+        ? {
+            sidebarCollapsed: workbenchPreferences.sidebarCollapsed,
+            sidebarHidden: workbenchPreferences.sidebarHidden,
+            providerRegion: workbenchPreferences.providerRegion,
+            metadataLanguage: workbenchPreferences.metadataLanguage,
+            tvProvider: workbenchPreferences.tvProvider,
+            animeProvider: workbenchPreferences.animeProvider,
+          }
+        : undefined,
+      providerKeys: (providerKeys ?? []).map((p) => ({
+        provider: p.provider,
+        configured: p.configured,
+        source: p.source,
+      })),
+      oidcEnabled: oidcConfig?.enabled ?? false,
+      appriseEnabled: appriseConfig?.enabled ?? false,
+      appriseUrlCount: appriseConfig?.urls.length ?? 0,
+      tokenCount: tokens.length,
+      customFieldCount: workbenchPreferences?.customFields.length ?? 0,
+      customMediaTypeCount: workbenchPreferences?.customMediaTypes.length ?? 0,
+    };
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fasti-diagnostics-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 </script>
 
@@ -1390,6 +1439,70 @@
           </section>
         {/if}
 
+        <section class="section-pane">
+          <h2 class="pane-title">Cache Management</h2>
+          <p class="pane-desc">
+            Clear cached data per category, or everything at once.
+          </p>
+          <div class="cache-cards-grid">
+            {#each [{ id: "search", label: "Search Cache" }, { id: "history", label: "History Cache" }, { id: "statistics", label: "Statistics Cache" }, { id: "discover", label: "Discover Cache" }] as cache}
+              <div class="cache-card">
+                <div class="cache-card-header">
+                  <IconDatabase size={18} />
+                  <strong>{cache.label}</strong>
+                </div>
+                <button
+                  type="button"
+                  class="btn-secondary"
+                  disabled={!onClearCache}
+                  title={onClearCache
+                    ? undefined
+                    : "Cache clearing is not available in this build"}
+                  onclick={() =>
+                    onClearCache?.(
+                      cache.id as
+                        "search" | "history" | "statistics" | "discover",
+                    )}
+                >
+                  Clear
+                </button>
+              </div>
+            {/each}
+          </div>
+          <button
+            type="button"
+            class="btn-save mt-3"
+            disabled={!onClearCache}
+            title={onClearCache
+              ? undefined
+              : "Cache clearing is not available in this build"}
+            onclick={() => onClearCache?.("all")}
+          >
+            Clear All Caches
+          </button>
+        </section>
+
+        <section class="section-pane">
+          <h2 class="pane-title">Diagnostics & Support</h2>
+          <div class="diagnostics-actions">
+            <button
+              type="button"
+              class="btn-secondary"
+              onclick={handleDownloadLogs}
+            >
+              <IconFileDownload size={16} /> Download Sanitized Logs
+            </button>
+            <a
+              href="https://github.com/Scrobble-dev/Fasti/issues/new"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-secondary"
+            >
+              <IconBug size={16} /> File a Bug Report
+            </a>
+          </div>
+        </section>
+
         <!-- 3. Nuvio & Media Server Connectors -->
       {:else if activeSettingsSection === "connectors"}
         <section class="section-pane">
@@ -1880,6 +1993,39 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
+  }
+
+  .cache-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .cache-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: var(--fasti-surface-archive);
+    border-radius: 6px;
+  }
+  .cache-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+  }
+
+  .diagnostics-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  a.btn-secondary {
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .custom-field-form {
