@@ -25,11 +25,30 @@
     IconEdit,
     IconClock,
     IconDeviceTv,
+    IconPhoto,
   } from "@tabler/icons-svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
+  import ArtworkModal, { type ArtworkCandidate } from "./artwork-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+
+  /** Namespaces whose external ID value is a real key an image CDN can
+   * resolve directly, and the resolver for that namespace. Providers whose
+   * poster lives behind an opaque image path/hash (TMDB, TVDB, AniList, MAL,
+   * Kitsu, IGDB, ...) are deliberately absent: there's no live provider
+   * search wired here to fetch that path, so fabricating a guessed URL would
+   * be dishonest. Add a resolver here once a provider integration can supply
+   * the real path. */
+  const ARTWORK_URL_RESOLVERS: Record<
+    string,
+    (value: string) => string | null
+  > = {
+    openlibrary: (value) =>
+      /^OL\d+[MW]$/i.test(value)
+        ? `https://covers.openlibrary.org/b/olid/${value}-L.jpg`
+        : null,
+  };
 
   interface Props {
     record: MediaRecord;
@@ -50,6 +69,11 @@
     onUpdateNotes?: (recordId: string, notes: string) => void;
     onAddTag?: (recordId: string, tag: string) => void;
     onRemoveTag?: (recordId: string, tag: string) => void;
+    onUpdatePoster?: (
+      recordId: string,
+      posterUrl: string,
+      backdropUrl?: string,
+    ) => void;
   }
 
   let {
@@ -66,6 +90,7 @@
     onUpdateNotes,
     onAddTag,
     onRemoveTag,
+    onUpdatePoster,
   }: Props = $props();
 
   let activeTab: "overview" | "actions" | "history" | "sources" | "reviews" =
@@ -80,6 +105,7 @@
   let showProgressModal = $state(false);
   let showReviewModal = $state(false);
   let showCollectionModal = $state(false);
+  let showArtworkModal = $state(false);
 
   // Context Menu State
   let contextMenuState = $state<{
@@ -104,6 +130,22 @@
 
   const recordOccurrences = $derived(
     occurrences.filter((occ) => occ.recordId === record.id),
+  );
+
+  const candidatePosters = $derived(
+    record.externalIds
+      .map((xid): ArtworkCandidate | null => {
+        const resolver = ARTWORK_URL_RESOLVERS[xid.namespace.toLowerCase()];
+        const url = resolver?.(xid.value) ?? null;
+        return url
+          ? {
+              id: `${xid.namespace}:${xid.value}`,
+              namespace: xid.namespace,
+              url,
+            }
+          : null;
+      })
+      .filter((c): c is ArtworkCandidate => c !== null),
   );
 
   const statusOptions: Array<{ id: WatchStatus; label: string }> = [
@@ -310,6 +352,15 @@
           title="Add to Collection"
         >
           <IconBookmark size={18} />
+        </button>
+
+        <button
+          type="button"
+          class="icon-action-btn"
+          onclick={() => (showArtworkModal = true)}
+          title="Edit Artwork"
+        >
+          <IconPhoto size={18} />
         </button>
 
         <button
@@ -925,6 +976,15 @@
     collections={availableCollections}
     onClose={() => (showCollectionModal = false)}
     onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+  />
+{/if}
+
+{#if showArtworkModal}
+  <ArtworkModal
+    {record}
+    candidates={candidatePosters}
+    onClose={() => (showArtworkModal = false)}
+    onSave={onUpdatePoster}
   />
 {/if}
 
