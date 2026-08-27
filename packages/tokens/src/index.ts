@@ -79,14 +79,19 @@ export const cssVariables = `
 [data-bs-theme="dark"] {
   --fasti-background: var(--fasti-surface-night);
   --fasti-panel: color-mix(in srgb, var(--fasti-surface-night) 88%, var(--fasti-surface-paper));
-  --fasti-foreground: var(--fasti-surface-paper);
-  --fasti-muted: color-mix(in srgb, var(--fasti-surface-paper) 72%, var(--fasti-surface-night));
-  --fasti-action: color-mix(in srgb, var(--fasti-action-primary) 50%, var(--fasti-surface-paper));
+  /* These aliases mix toward the literal near-white paper hex, not
+   * var(--fasti-surface-paper) -- that variable is redefined below to a DARK
+   * card-background tone for this theme, and since these declarations share
+   * its rule, a var() reference to it here would resolve to that same dark
+   * value instead of the near-white one every alias below actually wants. */
+  --fasti-foreground: var(--fasti-text-primary);
+  --fasti-muted: color-mix(in srgb, ${colors.surface.paper} 72%, var(--fasti-surface-night));
+  --fasti-action: color-mix(in srgb, var(--fasti-action-primary) 50%, ${colors.surface.paper});
   --fasti-action-contrast: var(--fasti-surface-night);
-  --fasti-verified: color-mix(in srgb, var(--fasti-state-verified) 55%, var(--fasti-surface-paper));
-  --fasti-attention: color-mix(in srgb, var(--fasti-state-attention) 45%, var(--fasti-surface-paper));
-  --fasti-border: color-mix(in srgb, var(--fasti-surface-paper) 35%, transparent);
-  --fasti-focus: color-mix(in srgb, var(--fasti-state-attention) 45%, var(--fasti-surface-paper));
+  --fasti-verified: color-mix(in srgb, var(--fasti-state-verified) 55%, ${colors.surface.paper});
+  --fasti-attention: color-mix(in srgb, var(--fasti-state-attention) 45%, ${colors.surface.paper});
+  --fasti-border: color-mix(in srgb, ${colors.surface.paper} 35%, transparent);
+  --fasti-focus: color-mix(in srgb, var(--fasti-state-attention) 45%, ${colors.surface.paper});
 
   /* The un-aliased tokens above (--fasti-background, --fasti-panel, etc.)
    * are what the aliases resolve to, but most real components style
@@ -94,6 +99,7 @@ export const cssVariables = `
    * Without dark values here, those components stayed light-on-light in
    * dark mode. */
   --fasti-surface-archive: ${colors.surface.night};
+  --fasti-surface-paper: color-mix(in srgb, ${colors.surface.night} 88%, ${colors.surface.paper});
   --fasti-text-primary: ${colors.surface.paper};
   --fasti-text-muted: color-mix(in srgb, ${colors.surface.paper} 72%, ${colors.surface.night});
   --fasti-brand-mark: color-mix(in srgb, ${colors.brand.mark} 65%, white);

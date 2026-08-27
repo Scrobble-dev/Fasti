@@ -82,7 +82,10 @@ pub struct ResolvedFieldDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RecordActivityDto {
-    pub occurred_at: Option<String>,
+    /// The full claimed-time structure (original text, precision, trust), not
+    /// a collapsed string -- matches the desktop host's `RecordActivityView`
+    /// so both surfaces expose the same field shape for the same data.
+    pub occurred_at: Option<crate::OccurredTimeDto>,
     pub interpretation_state: String,
 }
 

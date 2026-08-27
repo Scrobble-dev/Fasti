@@ -1,6 +1,6 @@
 use crate::{
-    local::LocalApiState,
-    observation::{accept_observation_request, bearer_secret},
+    local::{bearer_secret, LocalApiState},
+    observation::accept_observation_request,
     problem::{application_problem, HttpProblem},
 };
 use axum::{
@@ -195,7 +195,7 @@ async fn template_webhook(
     body: Bytes,
 ) -> Result<Json<SubmitObservationResponse>, HttpProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
-    let secret = bearer_secret(&headers, correlation_id)?;
+    let secret = bearer_secret(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     if !content_type_is_json(&headers) {
         return Err(representation_problem(
             ProblemCode::UnsupportedMediaType,
@@ -457,7 +457,7 @@ pub(crate) async fn emby_webhook(
     body: Bytes,
 ) -> Result<Json<SubmitObservationResponse>, HttpProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
-    let secret = bearer_secret(&headers, correlation_id)?;
+    let secret = bearer_secret(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     if !content_type_is_json(&headers) {
         return Err(representation_problem(
             ProblemCode::UnsupportedMediaType,
@@ -661,7 +661,7 @@ pub(crate) async fn plex_webhook(
     body: Bytes,
 ) -> Result<Json<SubmitObservationResponse>, HttpProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
-    let secret = bearer_secret(&headers, correlation_id)?;
+    let secret = bearer_secret(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     if body.len() > MAX_PLEX_MULTIPART_BYTES {
         return Err(invalid_integration(
             correlation_id,

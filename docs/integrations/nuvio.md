@@ -90,6 +90,59 @@ A compatible Nuvio implementation must use Nuvio's normal tracking-provider abst
 
 Client work belongs in the Nuvio repository and must use its own release and review authority. The Fasti repository must not claim the client as active until that compatible build exists and a real event has been verified.
 
+The current `NuvioMedia/NuvioTV` `dev` branch defines these tracking providers:
+
+```text
+Trakt
+Simkl
+```
+
+The current scrobble coordinator fans occurrence updates to enabled providers in that registry. There is no Fasti provider in the current upstream registry.
+
+Source files checked during this implementation:
+
+- `app/src/main/java/com/nuvio/tv/core/tracking/TrackingProvider.kt`
+- `app/src/main/java/com/nuvio/tv/core/tracking/TrackingScrobbleCoordinator.kt`
+
+Repository:
+
+```text
+https://github.com/NuvioMedia/NuvioTV
+```
+
+## What a first Nuvio client integration still needs
+
+The first useful Nuvio slice is one-way and durable:
+
+1. Add a Fasti tracking provider through the normal Nuvio tracking abstraction.
+2. Store Fasti node identity and the device credential in Nuvio's protected credential mechanism.
+3. Keep a durable Nuvio-side outbox.
+4. Create a stable source event identity before the first send.
+5. Submit a completed occurrence to the Fasti observation contract.
+6. Keep the same source event identity across timeout and reconnect retries.
+7. Retire the outbox item only after Fasti returns its durable receipt.
+8. Show pending, delivered, blocked, and rejected state to the user.
+9. Keep Nuvio's own operation independent of Fasti availability.
+
+This slice must not invent partial progress support. It can submit complete occurrences only until Fasti has a separate progress capability.
+
+## Later work
+
+These are separate implementation gates, not properties of the current route:
+
+- secure LAN discovery and pairing;
+- partial progress and resume-state synchronization;
+- exact watched-state synchronization;
+- saved/watchlist state;
+- deletion tombstones;
+- snapshot and ordered delta recovery;
+- reconciliation and diagnostics;
+- catalogues and Collections;
+- metadata projections;
+- two-way synchronization.
+
+The application remains useful without any of these integrations.
+
 ## Verification
 
 Fasti-side conformance must cover at least:

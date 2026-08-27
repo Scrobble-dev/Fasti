@@ -102,7 +102,15 @@
   const PIN_TTL_MS = 10 * 60 * 1000;
 
   function generatePairingCode(): string {
-    return String(Math.floor(100000 + Math.random() * 900000));
+    // ponytail: still client-only and never registered with a host, so no
+    // device can actually validate this code -- same placeholder status as
+    // the WebAuthn challenge above. Real issuance needs a host command with
+    // a server-tracked expiry. This only fixes the randomness: a predictable
+    // Math.random() PIN would make guessing collisions dramatically easier
+    // once real validation exists.
+    const buffer = new Uint32Array(1);
+    crypto.getRandomValues(buffer);
+    return String(100000 + (buffer[0] % 900000));
   }
 
   let pairingCode = $state(generatePairingCode());
@@ -152,6 +160,10 @@
       password: passwordValue,
       sessionTimeoutMinutes,
     });
+    // Clear the secret out of this component's own state immediately after
+    // handing it off -- it should not keep sitting in memory once onSignIn
+    // has it, and a caller that re-opens this modal must not find it prefilled.
+    passwordValue = "";
   }
 
   // --- Personal Access Token ---
@@ -162,6 +174,9 @@
     e.preventDefault();
     if (!patValid) return;
     onSignIn?.("pat", { token: patValue.trim() });
+    // Same reasoning as handlePasswordSubmit: don't keep the token sitting
+    // in this component's state once it's been handed off.
+    patValue = "";
   }
 </script>
 
@@ -418,10 +433,20 @@
     margin: 0;
   }
   .close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     background: transparent;
     border: none;
     cursor: pointer;
     color: var(--fasti-text-muted);
+  }
+
+  .modal-card :is(button, input, select):focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
   }
 
   .method-tabs {
@@ -438,6 +463,7 @@
     align-items: center;
     gap: 6px;
     padding: 10px 12px;
+    min-height: 44px;
     background: transparent;
     border: none;
     border-bottom: 2px solid transparent;
@@ -479,7 +505,8 @@
     color: var(--fasti-text-muted);
   }
   .form-input {
-    height: 38px;
+    height: 44px;
+    min-height: 44px;
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -515,6 +542,7 @@
     align-items: center;
     gap: 6px;
     padding: 8px 14px;
+    min-height: 44px;
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);

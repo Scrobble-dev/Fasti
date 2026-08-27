@@ -6,7 +6,6 @@ use fasti_application::{
 use fasti_domain::{CredentialId, RequestCorrelationId};
 use fasti_store::SqliteKernel;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,13 +32,8 @@ pub(crate) struct ApiClientSummary {
 
 #[derive(Serialize)]
 pub(crate) struct CreatedApiClient {
-    pub client_id: String,
-    pub credential_id: String,
-    pub profile_id: String,
-    pub scopes: Vec<String>,
-    pub active: bool,
-    pub created_at: String,
-    pub revoked_at: Option<String>,
+    #[serde(flatten)]
+    pub summary: ApiClientSummary,
     pub credential: String,
 }
 
@@ -69,14 +63,6 @@ fn parse_scopes(values: Vec<String>) -> Result<Vec<ScopeKey>, DesktopProblem> {
         scopes.push(scope);
     }
     Ok(scopes)
-}
-
-fn encode_secret(bytes: &[u8; 32]) -> String {
-    let mut encoded = String::with_capacity(64);
-    for byte in bytes {
-        write!(encoded, "{byte:02x}").expect("writing to a String cannot fail");
-    }
-    encoded
 }
 
 fn summary(value: ClientCredentialSummary) -> ApiClientSummary {
@@ -124,18 +110,20 @@ pub(crate) fn create(
         ))
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(CreatedApiClient {
-        client_id: outcome.client_id().to_string(),
-        credential_id: outcome.credential_id().to_string(),
-        profile_id: outcome.profile_id().to_string(),
-        scopes: outcome
-            .scopes()
-            .iter()
-            .map(|scope| scope.as_str().to_owned())
-            .collect(),
-        active: true,
-        created_at: outcome.created_at().to_rfc3339(),
-        revoked_at: None,
-        credential: encode_secret(outcome.credential().expose_bytes()),
+        summary: ApiClientSummary {
+            client_id: outcome.client_id().to_string(),
+            credential_id: outcome.credential_id().to_string(),
+            profile_id: outcome.profile_id().to_string(),
+            scopes: outcome
+                .scopes()
+                .iter()
+                .map(|scope| scope.as_str().to_owned())
+                .collect(),
+            active: true,
+            created_at: outcome.created_at().to_rfc3339(),
+            revoked_at: None,
+        },
+        credential: outcome.credential().expose_hex(),
     })
 }
 

@@ -1,8 +1,7 @@
-#[cfg(not(target_os = "linux"))]
-use crate::kernel::harden_private_regular_file;
 use crate::kernel::{
-    authorize_transaction, digest_secret, load_access_snapshot, map_sql, now, problem,
-    random_secret, scope_storage_key, timestamp, verify_digest, SqliteKernel,
+    authorize_transaction, digest_secret, harden_private_regular_file, load_access_snapshot,
+    map_sql, now, problem, random_secret, scope_storage_key, timestamp, verify_digest,
+    SqliteKernel,
 };
 use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
@@ -17,7 +16,6 @@ use fasti_application::{
 };
 use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, OptionalExtension, Transaction, TransactionBehavior};
-#[cfg(not(target_os = "linux"))]
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
@@ -345,83 +343,11 @@ fn require_one_row(
     }
 }
 
-const BOOTSTRAP_SECRET_FILENAME: &str = "bootstrap.secret";
-
-/// Creates `bootstrap.secret`, anchored to the already-opened data-root
-/// directory descriptor where available (Linux) rather than a joined path
-/// string, so the create cannot follow a symlink or resolve outside the
-/// data root -- the same `openat2`/`RESOLVE_BENEATH` guarantee
-/// `fasti.lock` and evidence files already use (see `kernel.rs`).
-#[cfg(target_os = "linux")]
-fn create_new_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
-    // anchored_directory() is Some on every target_os = "linux" build (see
-    // its own identically-gated impl in kernel.rs); there is no path-string
-    // fallback to keep this function's only sink anchored to the fd.
-    let directory = kernel
-        .inner
-        .data_root
-        .anchored_directory()
-        .expect("anchored directory is always present on linux");
-    let fd = rustix::fs::openat2(
-        directory,
-        BOOTSTRAP_SECRET_FILENAME,
-        rustix::fs::OFlags::WRONLY
-            | rustix::fs::OFlags::CREATE
-            | rustix::fs::OFlags::EXCL
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NOFOLLOW,
-        rustix::fs::Mode::from_raw_mode(0o600),
-        rustix::fs::ResolveFlags::BENEATH
-            | rustix::fs::ResolveFlags::NO_MAGICLINKS
-            | rustix::fs::ResolveFlags::NO_SYMLINKS
-            | rustix::fs::ResolveFlags::NO_XDEV,
-    )
-    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
-    Ok(std::fs::File::from(fd))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn create_new_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
-}
-
-/// Reads back `bootstrap.secret` after losing the create race, using the
-/// same anchored-directory `openat2` guarantee as creation.
-#[cfg(target_os = "linux")]
-fn open_existing_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
-    // See create_new_bootstrap_secret_file: anchored_directory() is always
-    // Some here, so this stays fd-anchored with no path-string fallback.
-    let directory = kernel
-        .inner
-        .data_root
-        .anchored_directory()
-        .expect("anchored directory is always present on linux");
-    let fd = rustix::fs::openat2(
-        directory,
-        BOOTSTRAP_SECRET_FILENAME,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::NOFOLLOW,
-        rustix::fs::Mode::empty(),
-        rustix::fs::ResolveFlags::BENEATH
-            | rustix::fs::ResolveFlags::NO_MAGICLINKS
-            | rustix::fs::ResolveFlags::NO_SYMLINKS
-            | rustix::fs::ResolveFlags::NO_XDEV,
-    )
-    .map_err(|error| std::io::Error::from_raw_os_error(error.raw_os_error()))?;
-    Ok(std::fs::File::from(fd))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn open_existing_bootstrap_secret_file(kernel: &SqliteKernel) -> std::io::Result<std::fs::File> {
-    std::fs::File::open(kernel.data_root().join(BOOTSTRAP_SECRET_FILENAME))
-}
-
 impl AccessAdministrationPort for SqliteKernel {
     fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial> {
         let capability = CapabilityKey::InitializeNode;
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        let path = self.data_root().join("bootstrap.secret");
         let unavailable = || {
             Box::new(FastiProblem::storage_unavailable(
                 capability,
@@ -429,36 +355,85 @@ impl AccessAdministrationPort for SqliteKernel {
             ))
         };
 
-        let stored_hex = match create_new_bootstrap_secret_file(self) {
-            Ok(mut file) => {
+        // The stored value is always exactly 64 hex characters -- bounded so
+        // a corrupted or hostile file can't make this read unbounded.
+        let read_existing = || -> std::io::Result<String> {
+            let mut contents = String::new();
+            std::fs::File::open(&path)?
+                .take(128)
+                .read_to_string(&mut contents)?;
+            Ok(contents)
+        };
+        let is_valid = |contents: &str| !contents.trim().is_empty();
+
+        let stored_hex = match read_existing() {
+            Ok(contents) if is_valid(&contents) => contents,
+            // Absent, unreadable, or empty (including a file left
+            // zero-length by a prior write that never reached disk before a
+            // crash) -- (re)publish through a unique temporary file in the
+            // target's directory so concurrent callers don't collide, fsync
+            // before publishing so a crash after this point still leaves
+            // either a complete file or none, and use no-replace semantics
+            // (hard link, not rename, which silently overwrites) so a
+            // concurrent legitimate publish is never clobbered. Bounded to
+            // two attempts: a hard link can only fail because the
+            // destination already exists, and that existing file is either
+            // a winning concurrent publish (read and use it) or the exact
+            // stale/invalid file that put us in this branch to begin with
+            // (remove it and retry once, so this can't loop forever
+            // refusing to replace it).
+            _ => {
+                let parent = path.parent().ok_or_else(unavailable)?;
                 let secret = random_secret(capability, correlation_id)?;
                 let hex = secret.expose_hex();
-                // The anchored openat2 path already creates the file with
-                // owner-only (0o600) permissions atomically; this remaining
-                // path-based check only applies to the non-Linux fallback,
-                // where harden_private_regular_file is the sole guard.
-                #[cfg(not(target_os = "linux"))]
-                if harden_private_regular_file(&self.data_root().join(BOOTSTRAP_SECRET_FILENAME))
-                    .is_err()
-                {
-                    drop(file);
-                    let _ = std::fs::remove_file(self.data_root().join(BOOTSTRAP_SECRET_FILENAME));
-                    return Err(unavailable());
+                let mut published_hex = None;
+                for attempt in 0..2 {
+                    let temporary =
+                        parent.join(format!("bootstrap.secret.tmp.{correlation_id}.{attempt}"));
+                    let published = (|| -> std::io::Result<()> {
+                        let mut file = OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&temporary)?;
+                        harden_private_regular_file(&temporary).map_err(|_| {
+                            std::io::Error::other("hardening the secret file failed")
+                        })?;
+                        file.write_all(hex.as_bytes())?;
+                        file.sync_all()?;
+                        drop(file);
+                        #[cfg(unix)]
+                        {
+                            std::fs::hard_link(&temporary, &path)
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            std::fs::rename(&temporary, &path)
+                        }
+                    })();
+                    let _ = std::fs::remove_file(&temporary);
+
+                    match published {
+                        Ok(()) => {
+                            published_hex = Some(hex.clone());
+                            break;
+                        }
+                        Err(_) => match read_existing() {
+                            Ok(contents) if is_valid(&contents) => {
+                                published_hex = Some(contents);
+                                break;
+                            }
+                            _ => {
+                                // Still invalid: a stale leftover, not a
+                                // concurrent legitimate publish. Clear it and
+                                // let the loop retry the hard link.
+                                let _ = std::fs::remove_file(&path);
+                            }
+                        },
+                    }
                 }
-                file.write_all(hex.as_bytes()).map_err(|_| unavailable())?;
-                hex
+                published_hex.ok_or_else(unavailable)?
             }
-            // Another caller won the create_new race (e.g. concurrent
-            // startup priming) -- read the secret it wrote rather than
-            // discarding our own and returning a value nobody can match.
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let mut contents = String::new();
-                open_existing_bootstrap_secret_file(self)
-                    .and_then(|mut file| file.read_to_string(&mut contents))
-                    .map_err(|_| unavailable())?;
-                contents
-            }
-            Err(_) => return Err(unavailable()),
         };
 
         SecretMaterial::try_from_hex(stored_hex.trim()).map_err(|_| unavailable())
@@ -2579,6 +2554,93 @@ mod tests {
         node.insert_profile_and_grant(node.workspace_id, ProfileId::new_v7());
 
         assert!(node.authenticate().is_err());
+    }
+
+    #[test]
+    fn bootstrap_secret_recovers_from_a_zero_length_file_left_by_a_crashed_write() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        // A write that reached open()/create_new() but crashed before
+        // write_all() completed -- exactly what the old non-atomic
+        // create-then-write left behind, and what would have permanently
+        // wedged every future startup without an atomic publish.
+        std::fs::write(root.path().join("bootstrap.secret"), b"")
+            .expect("seed a zero-length secret file");
+
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("a zero-length prior file must not be treated as durably published");
+
+        let republished = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after recovery");
+        assert_eq!(republished.trim(), secret.expose_hex());
+        assert!(
+            !root.path().join("bootstrap.secret.tmp").exists(),
+            "the temporary publish file must not linger after a successful rename"
+        );
+    }
+
+    #[test]
+    fn bootstrap_secret_is_stable_across_repeated_calls() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+
+        let first = kernel
+            .ensure_bootstrap_secret()
+            .expect("first bootstrap secret");
+        let second = kernel
+            .ensure_bootstrap_secret()
+            .expect("second bootstrap secret");
+
+        assert_eq!(first.expose_hex(), second.expose_hex());
+    }
+
+    #[test]
+    fn concurrent_bootstrap_secret_publishers_agree_on_one_value() {
+        // `SqliteKernel::open` takes an exclusive OS-level lock on the data
+        // root (StoreOpenError::DataRootLocked), so two *processes* (two
+        // separate `open()` calls) can never race to publish this file --
+        // only one can ever hold an open kernel against a given data root.
+        // The scenario worth guarding is concurrent *callers sharing one
+        // already-open kernel* (e.g. multiple threads before the code that
+        // primes this at startup is known to run exactly once) -- this
+        // exercises that instead of racing separate `open()` calls, which
+        // would just deadlock on the data-root lock rather than test
+        // anything about the publish logic itself.
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let barrier = Barrier::new(8);
+
+        let results: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let kernel = &kernel;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        kernel
+                            .ensure_bootstrap_secret()
+                            .expect("bootstrap secret")
+                            .expose_hex()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("publisher thread panicked"))
+                .collect()
+        });
+
+        let persisted = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after concurrent publishing");
+        for result in &results {
+            assert_eq!(
+                result,
+                persisted.trim(),
+                "every concurrent caller must return the value that was actually persisted, \
+                 never a value only it generated but lost the publish race for"
+            );
+        }
     }
 
     #[test]

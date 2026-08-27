@@ -2,9 +2,7 @@
 
 ## Current status
 
-This document describes the read path that lists Records for display: `metadata_field_claims`/`metadata_field_overrides` persistence in `fasti-store`, the `IdentityPort::list_records` query, the authenticated HTTP `GET /api/v1/records` route, and the matching Tauri command.
-
-The HTTP and Tauri surfaces call the same application capability. Neither surface owns a separate record rule. Provider adapters can add evidence and metadata claims through their owning application boundaries; the record read model remains provider-neutral.
+This document describes the read path that lists Records for display: `metadata_field_claims`/`metadata_field_overrides` persistence in `fasti-store`, the `IdentityPort::list_records` query, and its two surfaces -- the `list_records` Tauri command, and the bearer-authenticated `GET /api/v1/records` HTTP route (`crates/fasti-api/src/records.rs`, merged into the local router in `crates/fasti-api/src/local.rs`). Neither surface owns a separate record rule. No provider adapter exists yet to write real claims -- every Record currently resolves with empty title/poster fields unless a test or a future adapter writes claims directly.
 
 ## 1. Why this exists
 
@@ -39,6 +37,8 @@ The HTTP response currently returns `status: "active"` because the storage query
 ## 4. Public surfaces
 
 ### HTTP
+
+`crates/fasti-api/src/records.rs` exposes the same query as `GET /api/v1/records`, bearer-authenticated the same way as every other production-runtime route. This is the surface the browser-hosted web app uses -- the Tauri command below is desktop-only and never reachable from a browser tab.
 
 The loopback application API mounts:
 

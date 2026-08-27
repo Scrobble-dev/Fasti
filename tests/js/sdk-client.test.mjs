@@ -475,19 +475,24 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         ).sort();
         assert.deepEqual(methods, [
           "acceptObservation",
+          "attachIdentifier",
           "configureListener",
           "constructor",
+          "createRecord",
           "discoverCapabilities",
           "enrollDurableFirstClient",
           "enrollFirstClient",
           "health",
           "initializeDurableNode",
           "initializeNode",
+          "listRecords",
           "receiptEvents",
+          "registerNamespace",
           "replayReceipt",
           "revokeCredential",
           "rotateCredential",
           "selectProfile",
+          "submitObservation",
         ]);
       },
     );

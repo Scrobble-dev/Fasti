@@ -1,52 +1,28 @@
-use crate::local::{run_kernel, LocalApiState};
+use crate::local::{bearer_secret, run_kernel, LocalApiState};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use axum::{
     extract::{rejection::JsonRejection, State},
-    http::{header, HeaderMap},
+    http::HeaderMap,
     routing::post,
     Json, Router,
 };
 use fasti_application::{
     AttachIdentifierCommand, AuthenticateCredentialQuery, CapabilityKey, CreateRecordCommand,
-    FastiProblem, ListRecordsQuery, ProblemCode, RegisterNamespaceDefinitionCommand,
-    SecretMaterial,
+    FastiProblem, ListRecordsQuery, RegisterNamespaceDefinitionCommand, Violation,
 };
 use fasti_contracts::{
-    AttachIdentifierRequest, AttachIdentifierResponse, CreateRecordRequest, CreateRecordResponse,
-    ListRecordsResponse, ProblemDetails, RecordActivityDto, RecordSummaryDto,
-    RegisterNamespaceRequest, RegisterNamespaceResponse, ResolvedFieldDto,
+    AttachIdentifierRequest, AttachIdentifierResponse, ClaimedPrecisionDto, ClaimedTrustDto,
+    CreateRecordRequest, CreateRecordResponse, ListRecordsResponse, OccurredTimeDto,
+    ProblemDetails, RecordActivityDto, RecordSummaryDto, RegisterNamespaceRequest,
+    RegisterNamespaceResponse, ResolvedFieldDto,
 };
 use fasti_domain::{
-    ExternalIdentifierClaim, Grain, NamespaceDefinition, NamespaceLicencePosture,
-    RequestCorrelationId, ResolvedField,
+    ClaimedPrecision, ClaimedTime, ClaimedTrust, ExternalIdentifierClaim, Grain,
+    NamespaceDefinition, NamespaceLicencePosture, RequestCorrelationId, ResolvedField,
 };
 use std::str::FromStr;
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
-
-fn bearer_secret(
-    headers: &HeaderMap,
-    capability: CapabilityKey,
-    correlation_id: RequestCorrelationId,
-) -> Result<SecretMaterial, HttpProblem> {
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
-        .ok_or_else(|| {
-            application_problem(Box::new(FastiProblem::authentication_failed(
-                capability,
-                correlation_id,
-            )))
-        })?;
-    SecretMaterial::try_from_hex(token).map_err(|_| {
-        application_problem(Box::new(FastiProblem::authentication_failed(
-            capability,
-            correlation_id,
-        )))
-    })
-}
 
 fn invalid_identifier_input(
     capability: CapabilityKey,
@@ -58,15 +34,43 @@ fn invalid_identifier_input(
     )))
 }
 
-fn validation_failed(
+/// Namespace-definition rejections, unlike record/identifier input, are
+/// declared in the registry catalog as `validation_failed`, not
+/// `invalid_identifier` -- see `identity.namespace.register` in
+/// `contracts/registry/v1/capabilities.yaml`.
+fn invalid_namespace_definition(
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
 ) -> HttpProblem {
-    application_problem(Box::new(FastiProblem::from_code(
-        ProblemCode::ValidationFailed,
-        capability,
-        correlation_id,
-    )))
+    let violation = Violation::try_new(
+        "invalid_namespace_definition",
+        "/",
+        "namespace definition does not satisfy the domain contract",
+        "a registered grain list, a known licence posture, and a valid identifier pattern",
+    )
+    .expect("adapter-owned namespace violation is valid");
+    let problem = FastiProblem::validation_failed(capability, correlation_id, vec![violation])
+        .expect("one namespace violation is within bounds");
+    application_problem(Box::new(problem))
+}
+
+fn occurred_time_dto(claim: &ClaimedTime) -> OccurredTimeDto {
+    OccurredTimeDto {
+        original: claim.original().to_owned(),
+        precision: match claim.precision() {
+            ClaimedPrecision::Date => ClaimedPrecisionDto::Date,
+            ClaimedPrecision::Second => ClaimedPrecisionDto::Second,
+            ClaimedPrecision::Millisecond => ClaimedPrecisionDto::Millisecond,
+            ClaimedPrecision::Microsecond => ClaimedPrecisionDto::Microsecond,
+            ClaimedPrecision::Nanosecond => ClaimedPrecisionDto::Nanosecond,
+        },
+        trust: match claim.trust() {
+            ClaimedTrust::SourceClaim => ClaimedTrustDto::SourceClaim,
+            ClaimedTrust::DeviceObserved => ClaimedTrustDto::DeviceObserved,
+            ClaimedTrust::UserEntered => ClaimedTrustDto::UserEntered,
+            ClaimedTrust::Inferred => ClaimedTrustDto::Inferred,
+        },
+    }
 }
 
 fn resolved_field_dto(field: &ResolvedField) -> ResolvedFieldDto {
@@ -196,7 +200,7 @@ pub(crate) async fn attach_identifier(
     path = "/api/v1/records",
     tag = "records",
     responses(
-        (status = 200, description = "Active records visible to this credential's workspace", body = ListRecordsResponse),
+        (status = 200, description = "Records visible to this credential's workspace", body = ListRecordsResponse),
         (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Credential lacks record-read scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
@@ -229,17 +233,16 @@ pub(crate) async fn list_records(
             .map(|summary| RecordSummaryDto {
                 record_id: summary.record_id().to_string(),
                 grain: summary.grain().as_str().to_owned(),
-                // The read model intentionally selects only active records. Do
-                // not fabricate a wider lifecycle state on this surface.
-                status: "active".to_owned(),
+                status: serde_json::to_value(summary.status())
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .unwrap_or_else(|| "active".to_owned()),
                 title: resolved_field_dto(summary.title()),
                 poster: resolved_field_dto(summary.poster()),
                 latest_activity: summary.latest_activity().map(|activity| RecordActivityDto {
-                    occurred_at: activity.occurred_at().and_then(|value| {
-                        serde_json::to_value(value)
-                            .ok()
-                            .and_then(|json| json.as_str().map(str::to_owned))
-                    }),
+                    occurred_at: activity
+                        .occurred_at()
+                        .map(|value| occurred_time_dto(value.claim())),
                     interpretation_state: serde_json::to_value(activity.interpretation_state())
                         .ok()
                         .and_then(|value| value.as_str().map(str::to_owned))
@@ -282,7 +285,8 @@ pub(crate) async fn register_namespace(
     let mut grains = Vec::with_capacity(request.grains.len());
     for grain in &request.grains {
         grains.push(
-            Grain::from_str(grain).map_err(|_| validation_failed(capability, correlation_id))?,
+            Grain::from_str(grain)
+                .map_err(|_| invalid_namespace_definition(capability, correlation_id))?,
         );
     }
     let licence_posture = match request.licence_posture.as_str() {
@@ -291,7 +295,7 @@ pub(crate) async fn register_namespace(
         "indirect_only" => NamespaceLicencePosture::IndirectOnly,
         "excluded" => NamespaceLicencePosture::Excluded,
         "unknown" => NamespaceLicencePosture::Unknown,
-        _ => return Err(validation_failed(capability, correlation_id)),
+        _ => return Err(invalid_namespace_definition(capability, correlation_id)),
     };
     let definition = NamespaceDefinition::try_new(
         &request.namespace,
@@ -301,7 +305,7 @@ pub(crate) async fn register_namespace(
         &request.normalization,
         licence_posture,
     )
-    .map_err(|_| validation_failed(capability, correlation_id))?;
+    .map_err(|_| invalid_namespace_definition(capability, correlation_id))?;
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {

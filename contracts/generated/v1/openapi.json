@@ -53,6 +53,25 @@
         ],
         "type": "object"
       },
+      "ClaimedPrecisionDto": {
+        "enum": [
+          "date",
+          "second",
+          "millisecond",
+          "microsecond",
+          "nanosecond"
+        ],
+        "type": "string"
+      },
+      "ClaimedTrustDto": {
+        "enum": [
+          "source_claim",
+          "device_observed",
+          "user_entered",
+          "inferred"
+        ],
+        "type": "string"
+      },
       "ClientEnrollmentResponse": {
         "additionalProperties": false,
         "description": "One-time credential returned by durable first-client enrollment.\n\nDeliberately omits `Debug` and `Clone` so diagnostics cannot print the\nsecret accidentally.",
@@ -396,6 +415,30 @@
         ],
         "type": "string"
       },
+      "OccurredTimeDto": {
+        "additionalProperties": false,
+        "properties": {
+          "original": {
+            "format": "iso-date-or-rfc3339",
+            "maxLength": 35,
+            "minLength": 10,
+            "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2}))$",
+            "type": "string"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/ClaimedPrecisionDto"
+          },
+          "trust": {
+            "$ref": "#/components/schemas/ClaimedTrustDto"
+          }
+        },
+        "required": [
+          "original",
+          "precision",
+          "trust"
+        ],
+        "type": "object"
+      },
       "ProblemActionDto": {
         "additionalProperties": false,
         "properties": {
@@ -495,9 +538,14 @@
             "type": "string"
           },
           "occurred_at": {
-            "type": [
-              "string",
-              "null"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/OccurredTimeDto",
+                "description": "The full claimed-time structure (original text, precision, trust), not\na collapsed string -- matches the desktop host's `RecordActivityView`\nso both surfaces expose the same field shape for the same data."
+              }
             ]
           }
         },
@@ -2706,7 +2754,7 @@
                 }
               }
             },
-            "description": "Active records visible to this credential's workspace"
+            "description": "Records visible to this credential's workspace"
           },
           "401": {
             "content": {

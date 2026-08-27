@@ -116,9 +116,9 @@
           </div>
           <div class="case-actions">
             <div class="new-record-form">
-              <label for="grain-{item.review_item_id}"
-                >Not one of these — create a new record with grain</label
-              >
+              <label for="grain-{item.review_item_id}">
+                Not one of these — create a new record with grain
+              </label>
               <select
                 id="grain-{item.review_item_id}"
                 value={grainFor(item.review_item_id)}

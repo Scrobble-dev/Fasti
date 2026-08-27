@@ -163,6 +163,11 @@
     color: var(--fasti-text-primary);
   }
 
+  .fast-btn:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
+  }
+
   .fast-btn.active {
     color: var(--fasti-action-primary);
     background: color-mix(
