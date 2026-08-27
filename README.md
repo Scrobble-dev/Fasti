@@ -45,11 +45,11 @@ The production daemon deliberately exposes only behavior it can prove:
 
 | Surface                                                                 | Current state                                                                                                                                             |
 | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /api/v1/health`                                                    | Implemented in `fastid` and described by the production OpenAPI document, which covers health and durable setup routes                                  |
+| `GET /api/v1/health`                                                    | Implemented in `fastid` and described by the production OpenAPI document, which covers health, durable setup, observations, and records/namespaces routes |
 | One-time node initialization/enrollment                                | Durable production routes are mounted only for a loopback bind with an explicit `FASTI_DATA_ROOT`; one-time secrets remain in JSON bodies                |
 | B1 conformance HTTP and SSE                                             | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability |
 | `POST /api/v1/observations`                                             | Durable production route, bearer-authenticated, mounted alongside node setup on the same loopback bind                                                  |
-| `/api/v1/records`, `/api/v1/records/identifiers`, `/api/v1/namespaces` | Durable production routes, bearer-authenticated, mounted alongside node setup on the same loopback bind                                                 |
+| `POST`/`GET /api/v1/records`, `POST /api/v1/records/identifiers`, `POST /api/v1/namespaces`   | Durable production routes, bearer-authenticated, mounted alongside node setup on the same loopback bind                                                  |
 | B2 local kernel                                                         | Constructed by `fastid` for durable local setup; evidence, receipt, and identity review operations remain internal                                      |
 | B3 correction and portability                                          | Implemented behind application ports and Linux SQLite/filesystem adapters for review; not mounted by `fastid` or `fasti` and not a release claim        |
 | `POST /api/v1/events`                   | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                          |
@@ -90,9 +90,9 @@ crates/fasti-application
                      use cases, authorization, B1 fixture behavior, B2 ports, and typed problems
 crates/fasti-contracts
                      shared public DTOs and generated capability identifiers
-crates/fasti-api     production Utoipa health/setup/observation/records API plus a separately gated loopback fixture
+crates/fasti-api     production Utoipa health/setup/observations/records/namespaces API plus a separately gated loopback fixture
 crates/fasti-cli     local capability discovery and explicit B3 nonzero guards
-crates/fasti-store   B2 kernel mounted for setup, observation, and records; evidence, receipt, review, and B3 adapters remain staged
+crates/fasti-store   B2 kernel mounted for setup, observations, records, and namespaces; evidence, receipt, review, and B3 adapters remain staged
 
 contracts            authoritative registry, authored semantics, examples, and generated artifacts
 packages/sdk         generated typed TypeScript HTTP/SSE client
