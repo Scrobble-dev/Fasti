@@ -158,8 +158,9 @@
 
   .problem,
   .warning {
-    border-left: 4px solid var(--fasti-state-attention);
-    padding-left: 16px;
+    border: 1px solid var(--fasti-state-attention);
+    border-radius: 4px;
+    padding: 12px 16px;
   }
 
   .empty-state {

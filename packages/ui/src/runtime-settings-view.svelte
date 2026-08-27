@@ -1081,7 +1081,9 @@
 
   .inactive-note {
     padding: 12px 14px;
-    border-left: 3px solid var(--fasti-state-attention);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-attention) 45%, transparent);
+    border-radius: 4px;
     background: color-mix(
       in srgb,
       var(--fasti-state-attention) 9%,
