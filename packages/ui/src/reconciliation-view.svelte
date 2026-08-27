@@ -31,11 +31,19 @@
 
   interface Props {
     items: ReviewItem[];
+    loading?: boolean;
+    unavailableReason?: string;
     onResolveExisting?: (reviewItemId: string, recordId: string) => void;
     onResolveNew?: (reviewItemId: string, grain: string) => void;
   }
 
-  let { items, onResolveExisting, onResolveNew }: Props = $props();
+  let {
+    items,
+    loading = false,
+    unavailableReason,
+    onResolveExisting,
+    onResolveNew,
+  }: Props = $props();
 
   const openItems = $derived(items.filter((item) => item.status === "open"));
 
@@ -58,16 +66,28 @@
     <div class="safe-banner">
       <IconShieldCheck size={20} class="verified-icon" />
       <span
-        ><strong>Zero Silent Merges:</strong> Unresolved records remain safe and usable.</span
+        ><strong>Safe by default:</strong> Fasti does not merge unresolved records.</span
       >
     </div>
   </header>
 
-  {#if openItems.length === 0}
+  {#if loading}
+    <div class="empty-inbox" role="status">
+      <IconClock size={48} class="empty-icon" />
+      <h2>Loading review inbox</h2>
+      <p>Fasti is checking for open identity reviews.</p>
+    </div>
+  {:else if unavailableReason}
+    <div class="empty-inbox" role="alert">
+      <IconClock size={48} class="empty-icon" />
+      <h2>Review listing is unavailable</h2>
+      <p>{unavailableReason}</p>
+    </div>
+  {:else if openItems.length === 0}
     <div class="empty-inbox">
       <IconShieldCheck size={48} class="empty-icon" />
-      <h2>All caught up!</h2>
-      <p>No open reviews right now.</p>
+      <h2>No open reviews</h2>
+      <p>Fasti has no open identity reviews.</p>
     </div>
   {:else}
     <div class="cases-list">

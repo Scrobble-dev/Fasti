@@ -627,31 +627,27 @@
             : undefined}
         />
       {:else if activeSection === "reconciliation"}
-        {#if reviewsLoading}
-          <p class="state-message" role="status">Loading the review inbox…</p>
-        {:else if reviewsProblem}
-          <p class="state-message problem" role="alert">{reviewsProblem}</p>
-        {:else}
-          <ReconciliationView
-            items={reviews}
-            onResolveExisting={host.resolveReview
-              ? (reviewItemId, recordId) =>
-                  resolveReview({
-                    review_item_id: reviewItemId,
-                    target: { kind: "existing", value: recordId },
-                    identifiers: [],
-                  })
-              : undefined}
-            onResolveNew={host.resolveReview
-              ? (reviewItemId, grain) =>
-                  resolveReview({
-                    review_item_id: reviewItemId,
-                    target: { kind: "new", value: grain },
-                    identifiers: [],
-                  })
-              : undefined}
-          />
-        {/if}
+        <ReconciliationView
+          items={reviewsProblem ? [] : reviews}
+          loading={reviewsLoading}
+          unavailableReason={reviewsProblem}
+          onResolveExisting={host.resolveReview
+            ? (reviewItemId, recordId) =>
+                resolveReview({
+                  review_item_id: reviewItemId,
+                  target: { kind: "existing", value: recordId },
+                  identifiers: [],
+                })
+            : undefined}
+          onResolveNew={host.resolveReview
+            ? (reviewItemId, grain) =>
+                resolveReview({
+                  review_item_id: reviewItemId,
+                  target: { kind: "new", value: grain },
+                  identifiers: [],
+                })
+            : undefined}
+        />
       {:else if activeSection === "library"}
         {@render recordStatus()}
         <LibraryView
