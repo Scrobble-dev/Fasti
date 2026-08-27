@@ -12,7 +12,10 @@
  * component is conditionally mounted (`{#if show}<Modal .../>{/if}`) is
  * removed from the DOM directly and never fires `close` at all. */
 export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
-  let previouslyFocused: HTMLElement | null = null;
+  // Capture the opener synchronously when the action is attached, before
+  // any showModal() call shifts focus into the dialog.
+  let previouslyFocused: HTMLElement | null =
+    document.activeElement as HTMLElement | null;
 
   function focusFirst(): void {
     const focusable = node.querySelectorAll<HTMLElement>(
@@ -31,7 +34,8 @@ export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
   }
 
   function handleOpened(): void {
-    previouslyFocused = document.activeElement as HTMLElement | null;
+    // Don't overwrite the stored opener with a dialog descendant -- the
+    // opener was captured synchronously at attachment time.
     focusFirst();
   }
 
@@ -52,7 +56,12 @@ export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
     destroy() {
       node.removeEventListener("close", handleClosed);
       observer.disconnect();
-      handleClosed();
+      // Restore focus when destroyed without a close event (e.g. component
+      // unmounted), reusing the stored opener.
+      if (previouslyFocused) {
+        previouslyFocused.focus();
+        previouslyFocused = null;
+      }
     },
   };
 }

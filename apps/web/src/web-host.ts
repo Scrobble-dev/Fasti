@@ -163,7 +163,7 @@ function requireCredential(): string {
 }
 
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
-  const client = new FastiClient({
+  let client = new FastiClient({
     baseUrl: defaultApiUrl,
     credential: requireCredential,
   });
@@ -200,6 +200,12 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
           // still correct, it just won't survive a reload.
         }
       }
+      // Recreate the client with the saved service URL so subsequent SDK
+      // calls use the new endpoint rather than the original defaultApiUrl.
+      client = new FastiClient({
+        baseUrl: input.service_url,
+        credential: requireCredential,
+      });
       return config;
     },
 
