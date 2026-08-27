@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+            <!-- To ship a private CA, add res/raw/fasti_ca.crt and an @raw/fasti_ca certificate entry. -->
+        </trust-anchors>
+    </base-config>
+    <!-- debug-overrides is compiled out of release builds entirely (Android
+         only applies it when android:debuggable="true"), so permitting
+         cleartext here does not weaken the release posture above. It only
+         allows reaching the Tauri dev server over plain HTTP on the emulator
+         loopback (10.0.2.2) or a local network during development. -->
+    <debug-overrides cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

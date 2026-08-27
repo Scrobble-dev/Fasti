@@ -95,6 +95,15 @@ export interface ConnectionEndpoint {
   readonly loopbackAliases: readonly string[];
 }
 
+/**
+ * Creates a normalized connection endpoint from a URL string.
+ * @param value - The base URL string to normalize.
+ * @param source - The source of the connection value.
+ * @returns A frozen ConnectionEndpoint object.
+ * @throws {TypeError} If the URL scheme is not http or https, contains credentials,
+ *   includes a query string or fragment, has an application path, has an invalid port
+ *   (must be from 1 to 65535), or if a non-loopback HTTP connection is attempted.
+ */
 export function connectionEndpoint(
   value: string,
   source: ConnectionValueSource = "saved",
@@ -838,6 +847,14 @@ export class FastiClient {
   }
 }
 
+/**
+ * Parses outgoing request data against the generated contract schema.
+ * @param parser - The JSON schema parser function.
+ * @param value - The value to parse.
+ * @param label - A label for error reporting.
+ * @returns The parsed and validated value.
+ * @throws {FastiProtocolError} If parsing fails.
+ */
 function parseOutgoing<T>(
   parser: JsonParser<T>,
   value: unknown,
@@ -850,12 +867,24 @@ function parseOutgoing<T>(
   }
 }
 
+/**
+ * Rejects successful responses for bindings that define only problem responses.
+ *
+ * @throws FastiProtocolError Always throws a protocol error.
+ */
 function unexpectedProblemOnlySuccess(_value: unknown): never {
   throw new FastiProtocolError(
     "Problem-only fixture binding returned an undocumented success",
   );
 }
 
+/**
+ * Normalizes and validates a base URL for Fasti client connections.
+ *
+ * @param value - The URL string to validate.
+ * @returns A validated HTTP or HTTPS origin URL.
+ * @throws {TypeError} If the URL is invalid or contains credentials, a path, query, fragment, or invalid port.
+ */
 export function normalizeBaseUrl(value: string): URL {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -878,10 +907,22 @@ export function normalizeBaseUrl(value: string): URL {
   return url;
 }
 
+/**
+ * Determines whether a hostname identifies a loopback address.
+ *
+ * @param hostname - The hostname to check.
+ * @returns `true` for `localhost`, `127.0.0.1`, or `[::1]`, `false` otherwise.
+ */
 function isLoopbackHostname(hostname: string): boolean {
   return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
 }
 
+/**
+ * Generates equivalent loopback origins for a URL.
+ *
+ * @param url - The URL whose loopback hostname and port determine the aliases.
+ * @returns Loopback origin aliases, or an empty array if the hostname is not loopback.
+ */
 function loopbackAliases(url: URL): readonly string[] {
   if (!isLoopbackHostname(url.hostname)) return Object.freeze([]);
   const port = url.port === "" ? "" : `:${url.port}`;
@@ -893,6 +934,14 @@ function loopbackAliases(url: URL): readonly string[] {
     `${url.protocol}//127.0.0.1${port}`,
   ]);
 }
+
+/**
+ * Normalizes retry policy options with validation and defaults.
+ * @param override - Partial retry policy to override defaults.
+ * @param fallback - The fallback retry policy to use for missing values.
+ * @returns A complete, frozen retry policy.
+ * @throws {RangeError} If policy values are invalid.
+ */
 function normalizeRetryPolicy(
   override?: Partial<RetryPolicy>,
   fallback: RetryPolicy = DEFAULT_RETRY_POLICY,

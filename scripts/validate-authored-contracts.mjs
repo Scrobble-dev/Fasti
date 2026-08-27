@@ -14,6 +14,12 @@ import { readStrictJson } from "./lib/strict-json.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Recursively validates that JSON Schema references are internal only (start with #/).
+ * @param {*} value - The value to validate (object, array, or primitive).
+ * @param {string} [path="$"] - The JSONPath to the current value for error reporting.
+ * @throws {AssertionError} If an external reference is found.
+ */
 const assertInternalReferencesOnly = (value, path = "$") => {
   if (Array.isArray(value)) {
     value.forEach((child, index) =>
@@ -34,6 +40,12 @@ const assertInternalReferencesOnly = (value, path = "$") => {
   }
 };
 
+/**
+ * Validates authored AsyncAPI, portability, and JSON-LD contracts for a repository.
+ * @param {string} [root=repositoryRoot] - Repository root directory containing the contract files.
+ * @returns {Promise<Object>} Validation results with the AsyncAPI version, expanded document count, and portability format.
+ * @throws {AssertionError} If contract validation or consistency checks fail.
+ */
 export async function validateAuthoredContracts(root = repositoryRoot) {
   const asyncApiPath = resolve(root, "contracts/asyncapi/v1/transport.yaml");
   const conformanceOpenApiPath = resolve(
