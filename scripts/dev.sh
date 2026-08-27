@@ -399,7 +399,7 @@ _require_container_image() {
   if "$FASTI_CONTAINER_RUNTIME" image inspect "$FASTI_IMAGE" >/dev/null 2>&1; then
     return 0
   fi
-  echo "Container image $FASTI_IMAGE is not available. Build it with: $FASTI_CONTAINER_RUNTIME build --tag $FASTI_IMAGE ." >&2
+  echo "Container image $FASTI_IMAGE is not available. Build it with: $FASTI_CONTAINER_RUNTIME build --tag $FASTI_IMAGE $PROJECT_ROOT" >&2
   return 1
 }
 
