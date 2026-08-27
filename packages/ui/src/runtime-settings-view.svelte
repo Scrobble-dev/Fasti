@@ -44,11 +44,8 @@
   }: Props = $props();
 
   let active:
-    | "network"
-    | "providers"
-    | "preferences"
-    | "custom_fields"
-    | "system" = $state("network");
+    "network" | "providers" | "preferences" | "custom_fields" | "system" =
+    $state("network");
   let network = $state<NetworkConfiguration>();
   let networkLoading = $state(false);
   let networkProblem = $state<string>();
@@ -493,9 +490,7 @@
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
                     animeProvider: e.currentTarget.value as
-                      | "mal"
-                      | "anilist"
-                      | "kitsu",
+                      "mal" | "anilist" | "kitsu",
                   })}
               >
                 <option value="mal">MyAnimeList</option>
@@ -505,17 +500,14 @@
             </div>
 
             <div class="form-field">
-              <label for="pref-title-language">Title Language Preference</label
-              >
+              <label for="pref-title-language">Title Language Preference</label>
               <select
                 id="pref-title-language"
                 value={workbenchPreferences.titleLanguage}
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
                     titleLanguage: e.currentTarget.value as
-                      | "romaji"
-                      | "english"
-                      | "native",
+                      "romaji" | "english" | "native",
                   })}
               >
                 <option value="romaji">Romaji</option>
@@ -532,9 +524,7 @@
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
                     hideCompleted: e.currentTarget.value as
-                      | "disabled"
-                      | "home_only"
-                      | "everywhere",
+                      "disabled" | "home_only" | "everywhere",
                   })}
               >
                 <option value="disabled">Disabled</option>
@@ -551,8 +541,7 @@
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
                     gameLogging: e.currentTarget.value as
-                      | "repeats"
-                      | "sessions",
+                      "repeats" | "sessions",
                   })}
               >
                 <option value="sessions">Sessions</option>
@@ -568,9 +557,7 @@
                 onchange={(e) =>
                   onUpdateWorkbenchPreferences?.({
                     progressFormat: e.currentTarget.value as
-                      | "percentage"
-                      | "time_remaining"
-                      | "episodes",
+                      "percentage" | "time_remaining" | "episodes",
                   })}
               >
                 <option value="percentage">Percentage</option>
@@ -624,7 +611,12 @@
               <div class="prefs-grid">
                 <div class="form-field">
                   <label for="cf-name">Name</label>
-                  <input id="cf-name" type="text" bind:value={newFieldName} required />
+                  <input
+                    id="cf-name"
+                    type="text"
+                    bind:value={newFieldName}
+                    required
+                  />
                 </div>
                 <div class="form-field">
                   <label for="cf-key">Key</label>
@@ -696,7 +688,9 @@
                 {/each}
               </ul>
             {:else}
-              <p class="managed-note">No custom metadata fields registered yet.</p>
+              <p class="managed-note">
+                No custom metadata fields registered yet.
+              </p>
             {/if}
           </div>
 
@@ -706,7 +700,12 @@
               <div class="prefs-grid">
                 <div class="form-field">
                   <label for="cmt-name">Name</label>
-                  <input id="cmt-name" type="text" bind:value={newTypeName} required />
+                  <input
+                    id="cmt-name"
+                    type="text"
+                    bind:value={newTypeName}
+                    required
+                  />
                 </div>
                 <div class="form-field">
                   <label for="cmt-singular">Singular</label>
@@ -841,10 +840,7 @@
                   onclick={() =>
                     onClearCache?.(
                       cache.id as
-                        | "search"
-                        | "history"
-                        | "statistics"
-                        | "discover",
+                        "search" | "history" | "statistics" | "discover",
                     )}
                 >
                   Clear
@@ -868,7 +864,11 @@
         <section aria-labelledby="diagnostics-settings-title">
           <h2 id="diagnostics-settings-title">Diagnostics & Support</h2>
           <div class="diagnostics-actions">
-            <button type="button" class="secondary" onclick={handleDownloadLogs}>
+            <button
+              type="button"
+              class="secondary"
+              onclick={handleDownloadLogs}
+            >
               <IconFileDownload size={16} aria-hidden="true" /> Download Sanitized
               Logs
             </button>

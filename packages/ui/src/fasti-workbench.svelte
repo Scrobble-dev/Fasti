@@ -126,9 +126,7 @@
       defaultItems: T[],
     ): T[] => [
       ...storedItems,
-      ...defaultItems.filter(
-        (d) => !storedItems.some((s) => s.id === d.id),
-      ),
+      ...defaultItems.filter((d) => !storedItems.some((s) => s.id === d.id)),
     ];
     return {
       ...stored,
