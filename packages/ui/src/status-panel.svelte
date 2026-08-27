@@ -74,8 +74,8 @@
     <section class="status-panel" aria-labelledby="status-title">
       <h1 id="status-title">Local service status</h1>
       <p class="intro">
-        This diagnostic surface checks local service health. Use the Workbench
-        for capability status and actions.
+        This diagnostic surface checks the only active production capability.
+        Fasti records media activity. Players play it.
       </p>
 
       <div class="state-region">
@@ -148,8 +148,8 @@
       </div>
 
       <p class="scope-note">
-        This check does not prove that every capability is ready.
-        Authentication, host support, and each capability contract still apply.
+        Catalogue, review, playback, provider, and account controls remain
+        unavailable until their contracts and milestone gates are active.
       </p>
     </section>
 
