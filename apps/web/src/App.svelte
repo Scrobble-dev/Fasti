@@ -59,32 +59,13 @@
     retryPolicy: { maxAttempts: 1 },
   });
 
-  const WORKBENCH_PATHS = new Set([
-    "/connections",
-    "/settings",
-    "/discover",
-    "/reconciliation",
-    "/reviews",
-    "/library",
-    "/calendar",
-  ]);
-
   function computeInitialSurface(): "status" | "workbench" {
-    if (typeof window === "undefined") return "status";
+    if (typeof window === "undefined") return "workbench";
     const path = window.location.pathname;
     if (path === "/status") return "status";
-    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records")) {
-      return "workbench";
-    }
     const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("surface") === "workbench") return "workbench";
     if (urlParams.get("surface") === "status") return "status";
-    try {
-      const saved = localStorage.getItem("fasti-surface");
-      if (saved === "workbench") return "workbench";
-      if (saved === "status") return "status";
-    } catch {}
-    return "status";
+    return "workbench";
   }
 
   let status: StatusPanelState = $state({ view: "loading" });
@@ -101,7 +82,14 @@
           : "http://127.0.0.1:8420"),
     ),
   );
-  let activeSurface = $state<"status" | "workbench">(computeInitialSurface());
+  const initialSurface = computeInitialSurface();
+  let activeSurface = $state<"status" | "workbench">(initialSurface);
+  if (typeof document !== "undefined") {
+    document.title =
+      initialSurface === "status"
+        ? "Local service status · Fasti"
+        : "Fasti media workbench";
+  }
 
   function statusProblemFor(error: unknown): StatusProblem {
     if (error instanceof FastiProtocolError) {
@@ -205,12 +193,10 @@
 
   function openWorkbench(): void {
     activeSurface = "workbench";
-    if (typeof window !== "undefined" && window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-    try {
-      localStorage.setItem("fasti-surface", "workbench");
-    } catch {}
+    if (typeof document !== "undefined")
+      document.title = "Fasti media workbench";
+    if (typeof window !== "undefined")
+      window.history.replaceState(null, "", "/");
   }
 
   async function setup(): Promise<void> {

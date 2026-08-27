@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pre-production Fasti health and interface quality harness",
+  "description": "Pre-production Fasti media Workbench and service-status QA surface",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

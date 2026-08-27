@@ -95,6 +95,21 @@ async function mockTrustedHost(page: Page) {
   });
 }
 
+test("the root opens the recovered media workbench", async ({ page }) => {
+  await mockHealth(page);
+  await page.goto("/");
+
+  await expect(page).toHaveTitle("Fasti media workbench");
+  await expect(page.getByRole("button", { name: "Discover" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Settings", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Sign in to Fasti");
+  await expect(
+    page.getByRole("heading", { name: "Local service status" }),
+  ).toHaveCount(0);
+});
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
     test(`${theme} theme at ${viewport.width}px is truthful, reflowable, and accessible`, async ({
@@ -106,7 +121,7 @@ for (const theme of ["light", "dark"] as const) {
         theme,
       );
       await mockHealth(page);
-      await page.goto("/");
+      await page.goto("/status");
 
       await expect(page).toHaveTitle("Local service status · Fasti");
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -165,7 +180,7 @@ test("keyboard path, theme persistence, and unavailable recovery remain clear", 
 }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await page.route(healthEndpoint, (route) => route.abort("connectionrefused"));
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.getByRole("alert")).toContainText(
     "local service is unavailable",
@@ -214,7 +229,7 @@ test("invalid health responses use the contract recovery state", async ({
       body: JSON.stringify({ status: "healthy" }),
     }),
   );
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", {
@@ -254,7 +269,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/");
+  await page.goto("/status");
   const retry = page.getByRole("button", { name: "Try again" });
   await expect(retry).toBeVisible();
 
@@ -279,7 +294,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
 });
 
 test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
@@ -291,7 +306,7 @@ test("the saved theme is applied before the application module", async ({
 }) => {
   await page.addInitScript(() => localStorage.setItem("fasti-theme", "dark"));
   await page.route(/\/src\/main\.ts$/, (route) => route.abort());
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(page.locator("body")).toHaveCSS(
@@ -313,7 +328,7 @@ test("system dark mode survives unavailable local storage", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(
@@ -332,7 +347,7 @@ test("theme changes remain usable when persistence is unavailable", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
@@ -346,7 +361,7 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
 }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.locator("html").evaluate((element) => {
     element.style.fontSize = "200%";
@@ -395,7 +410,7 @@ test("reduced motion stops the loading animation", async ({ page }) => {
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/status", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.locator(".spinner")).toHaveCSS("animation-name", "none");
@@ -410,7 +425,7 @@ test("forced colors preserves visible status and controls", async ({
 }) => {
   await page.emulateMedia({ forcedColors: "active" });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
@@ -432,7 +447,7 @@ test("the harness does not contact third-party origins", async ({ page }) => {
     if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();

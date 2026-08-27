@@ -10,7 +10,7 @@
 #   ./scripts/dev.sh --open      # Open the web UI, or the API health check
 #   ./scripts/dev.sh --self-test # Verify scoped process cleanup
 #
-# apps/web (the Svelte health/interface-quality harness) only exists on
+# apps/web (the Svelte media Workbench and status QA surface) only exists on
 # worktrees checked out at a branch that carries it -- not every worktree
 # has it, so this is detected at runtime rather than assumed.
 #
@@ -196,6 +196,14 @@ _wait_for_health() {
     sleep 0.5
   done
   return 1
+}
+
+_durable_api_is_mounted() {
+  local status=""
+  status="$(curl --connect-timeout 2 --max-time 5 --silent --output /dev/null \
+    --write-out '%{http_code}' --request POST --header 'content-type: application/json' \
+    --data '{}' "$FASTI_API_URL/api/v1/node/initialization")" || return 1
+  [[ "$status" == 403 ]]
 }
 
 _read_bound_addr() {
@@ -428,12 +436,18 @@ _container_port() {
 
 _run_container() {
   local ceiling_mib=""
+  local user_args=(--user "$(id -u):$(id -g)")
   ceiling_mib="$(_memory_ceiling_mib)"
+  if [[ "$FASTI_CONTAINER_RUNTIME" == podman ]]; then
+    user_args=(--userns keep-id --user "$(id -u):$(id -g)")
+  fi
   "$FASTI_CONTAINER_RUNTIME" run -d --name "$CONTAINER_NAME" --rm \
+    "${user_args[@]}" \
     --memory "${ceiling_mib}m" --memory-swap "${ceiling_mib}m" \
     --publish "$1" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
+    -e FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
     "$FASTI_IMAGE"
 }
 
@@ -483,10 +497,11 @@ _start_container() {
   fi
   _write_bound_addr "127.0.0.1:$actual_port"
 
-  if _wait_for_health; then
-    echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy: $FASTI_API_URL/api/v1/health"
+  if _wait_for_health && _durable_api_is_mounted; then
+    echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy with durable routes on $FASTI_API_URL"
   else
-    echo "Fasti $FASTI_CONTAINER_RUNTIME container failed its health probe; run: $FASTI_CONTAINER_RUNTIME logs $CONTAINER_NAME" >&2
+    echo "Fasti $FASTI_CONTAINER_RUNTIME container failed its health or durable-route probe:" >&2
+    "$FASTI_CONTAINER_RUNTIME" logs "$CONTAINER_NAME" >&2 || true
     "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
     return 1
   fi
@@ -530,10 +545,10 @@ _start_native() {
   fi
 
   echo "Waiting for daemon health probe..."
-  if _wait_for_health "$daemon_pid"; then
-    echo "Fasti daemon is healthy: $FASTI_API_URL/api/v1/health"
+  if _wait_for_health "$daemon_pid" && _durable_api_is_mounted; then
+    echo "Fasti daemon is healthy with durable routes on $FASTI_API_URL"
   else
-    echo "Fasti daemon failed to start; see .dev-logs/fastid.log" >&2
+    echo "Fasti daemon failed its health or durable-route probe; see .dev-logs/fastid.log" >&2
     return 1
   fi
 
