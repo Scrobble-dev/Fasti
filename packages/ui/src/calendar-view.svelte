@@ -184,7 +184,7 @@
     padding: 6px 12px;
     border-radius: 4px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     font-size: 0.82rem;
     font-weight: 600;
     border: none;

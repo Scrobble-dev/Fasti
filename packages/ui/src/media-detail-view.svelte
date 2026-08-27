@@ -1256,11 +1256,11 @@
   }
   .status-select.watching {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
   .status-select.completed {
     background: var(--fasti-state-verified);
-    color: white;
+    color: var(--fasti-verified-contrast);
   }
 
   .icon-action-btn {
@@ -1642,7 +1642,7 @@
   .ep-check-btn.checked {
     background: var(--fasti-state-verified);
     border-color: var(--fasti-state-verified);
-    color: white;
+    color: var(--fasti-verified-contrast);
   }
   .ep-num {
     font-family: var(--fasti-font-mono);
@@ -1827,7 +1827,7 @@
   .btn-primary {
     padding: 8px 16px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;

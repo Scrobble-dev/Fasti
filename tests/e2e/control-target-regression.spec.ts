@@ -46,7 +46,28 @@ test("Workbench controls inherit the shared 44 pixel target", async ({
     "true",
   );
   expect(await undersizedControls(page)).toEqual([]);
-  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  for (const accent of [
+    "Tabler Blue",
+    "Red",
+    "Green",
+    "Orange",
+    "Purple",
+    "Teal",
+    "Cyan",
+    "Fasti Oxblood",
+    "Horological Gold",
+  ]) {
+    const choice = page.getByRole("button", { name: accent, exact: true });
+    await choice.click();
+    await expect(choice).toHaveAttribute("aria-pressed", "true");
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  }
+
+  for (const mode of ["Dark", "Night"]) {
+    await page.getByRole("button", { name: mode }).click();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  }
 
   await page.getByRole("button", { name: "Done" }).click();
   await page.goto("/records");

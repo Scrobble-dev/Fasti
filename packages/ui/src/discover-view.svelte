@@ -309,7 +309,7 @@
     padding: 10px 16px;
     background: var(--fasti-action-primary);
     border-color: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     font-weight: 700;
     cursor: pointer;
   }

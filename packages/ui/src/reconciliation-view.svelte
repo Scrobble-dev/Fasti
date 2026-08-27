@@ -413,7 +413,7 @@
 
   .action-btn.accept {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
 
   .action-btn.not-same {

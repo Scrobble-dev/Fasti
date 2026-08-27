@@ -70,6 +70,8 @@ export const cssVariables = `
   --fasti-muted: var(--fasti-text-muted);
   --fasti-action: var(--fasti-action-primary);
   --fasti-action-contrast: var(--fasti-surface-paper);
+  --fasti-brand-contrast: var(--fasti-surface-paper);
+  --fasti-verified-contrast: var(--fasti-surface-paper);
   --fasti-verified: var(--fasti-state-verified);
   --fasti-attention: var(--fasti-state-attention);
   --fasti-border: color-mix(in srgb, var(--fasti-text-muted) 42%, transparent);

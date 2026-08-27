@@ -373,7 +373,7 @@
     gap: 6px;
     padding: 8px 20px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;

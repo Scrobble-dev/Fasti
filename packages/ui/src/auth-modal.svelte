@@ -342,7 +342,7 @@
     border: 0;
     border-radius: 4px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     font-weight: 750;
     cursor: pointer;
   }

@@ -21,6 +21,7 @@ const forbiddenIconPackages = [
   "iconify",
 ];
 const inlineSvgExceptions = new Set(["packages/ui/src/nav-sidebar.svelte"]);
+const semanticBackgrounds = ["action-primary", "brand-mark", "state-verified"];
 const failures = [];
 
 async function sourceFiles(relativeDirectory) {
@@ -47,6 +48,17 @@ for (const uiRoot of uiRoots) {
     }
     if (source.includes("<svg") && !inlineSvgExceptions.has(file)) {
       failures.push(`${file}: raw SVG needs a documented brand-only exception`);
+    }
+    for (const background of semanticBackgrounds) {
+      const hardCodedForeground = new RegExp(
+        `\\{[^{}]*background:\\s*var\\(--fasti-${background}\\);[^{}]*color:\\s*(?:white|#fff(?:fff)?);[^{}]*\\}`,
+        "i",
+      );
+      if (hardCodedForeground.test(source)) {
+        failures.push(
+          `${file}: --fasti-${background} needs its semantic contrast token`,
+        );
+      }
     }
   }
 }

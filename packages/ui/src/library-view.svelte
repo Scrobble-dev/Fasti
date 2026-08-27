@@ -618,7 +618,7 @@
 
   .mode-btn.active {
     background: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
   }
 
   .toolbar {
@@ -674,7 +674,7 @@
   .filter-pill.active {
     background: var(--fasti-brand-mark);
     border-color: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
     font-weight: 600;
   }
 
@@ -691,7 +691,7 @@
     margin-top: 12px;
     padding: 8px 16px;
     background: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;

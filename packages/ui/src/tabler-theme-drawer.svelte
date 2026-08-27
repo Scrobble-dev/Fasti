@@ -409,7 +409,7 @@
 
   .segment-btn.active {
     background: var(--fasti-action-primary);
-    color: #ffffff;
+    color: var(--fasti-action-contrast);
   }
 
   .drawer-footer {
@@ -446,7 +446,7 @@
     align-items: center;
     gap: 6px;
     background: var(--fasti-action-primary);
-    color: #ffffff;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: var(--tblr-border-radius, 4px);
     padding: 10px 20px;

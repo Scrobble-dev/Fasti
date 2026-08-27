@@ -422,7 +422,7 @@
   button.primary {
     border-color: var(--fasti-action-primary);
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
 
   button:disabled,

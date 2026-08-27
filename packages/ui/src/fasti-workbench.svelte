@@ -72,6 +72,26 @@
     return fallback;
   }
 
+  function accessibleAccent(value: string): {
+    color: string;
+    contrast: "#000000" | "#ffffff";
+  } {
+    const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
+    const color = match ? `#${match[1]}` : DEFAULT_THEME_SETTINGS.accentColor;
+    const channels = [1, 3, 5].map((index) => {
+      const channel = Number.parseInt(color.slice(index, index + 2), 16) / 255;
+      return channel <= 0.04045
+        ? channel / 12.92
+        : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    const luminance =
+      channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    return {
+      color,
+      contrast: luminance > 0.179 ? "#000000" : "#ffffff",
+    };
+  }
+
   function pathForSection(section: Section): string {
     switch (section) {
       case "connections":
@@ -187,11 +207,11 @@
     root.dataset.bsTheme = themeSettings.mode === "light" ? "light" : "dark";
     root.style.colorScheme = themeSettings.mode === "light" ? "light" : "dark";
     if (themeSettings.accentColor) {
-      root.style.setProperty(
-        "--fasti-action-primary",
-        themeSettings.accentColor,
-      );
-      root.style.setProperty("--tblr-primary", themeSettings.accentColor);
+      const accent = accessibleAccent(themeSettings.accentColor);
+      root.style.setProperty("--fasti-action-primary", accent.color);
+      root.style.setProperty("--fasti-action-contrast", accent.contrast);
+      root.style.setProperty("--tblr-primary", accent.color);
+      root.style.setProperty("--tblr-primary-fg", accent.contrast);
     }
     if (themeSettings.fontFamily === "serif") {
       root.style.setProperty(
