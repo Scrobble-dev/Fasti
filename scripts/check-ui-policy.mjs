@@ -80,6 +80,21 @@ for (const rule of [
   if (!agentRules.includes(rule)) failures.push(`AGENTS.md: missing ${rule}`);
 }
 
+const uiIndex = await readFile(
+  path.join(root, "packages/ui/src/index.ts"),
+  "utf8",
+);
+if (!uiIndex.includes('from "./runtime-settings-view.svelte"')) {
+  failures.push(
+    "packages/ui/src/index.ts: RuntimeSettingsView export is required",
+  );
+}
+if (uiIndex.includes('from "./settings-view.svelte"')) {
+  failures.push(
+    "packages/ui/src/index.ts: legacy SettingsView must stay outside the product API",
+  );
+}
+
 if (failures.length > 0) {
   console.error(failures.join("\n"));
   process.exitCode = 1;
