@@ -29,12 +29,12 @@ prints the port it actually got. Automatic fallback is unavailable when
 pin the URL other tooling should use. Run `./scripts/dev.sh --status` at
 any time to see the live URL.
 
-Some worktrees also carry `apps/web`, the pre-production media Workbench and
-service-status QA surface. If this worktree has `apps/web`, the command also
-builds `@fasti/tokens` and `@fasti/sdk` (its workspace dependencies), then
-starts Vite. The Workbench listens at `http://127.0.0.1:5173`, keeps service
-diagnostics at `/status`, and proxies `/api` requests to whichever URL
-`fastid` actually started on.
+Some worktrees also carry `apps/web`, a pre-production health and
+interface-quality harness (see the "Browser QA harness" row in the status
+table above). If this worktree has `apps/web`, the command also builds
+`@fasti/tokens` and `@fasti/sdk` (its workspace dependencies), then starts
+Vite. The harness listens at `http://127.0.0.1:5173` and proxies `/api`
+requests to whichever URL `fastid` actually started on.
 
 Not every worktree has `apps/web`. Check with `git worktree list`. Then look
 for `apps/web` inside each worktree path. If your current worktree does not

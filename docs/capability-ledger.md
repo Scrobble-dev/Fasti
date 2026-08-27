@@ -23,7 +23,7 @@ Those commands report contract state. They do not activate later-body runtime be
 | Identity records, identifiers, and namespaces                                    | Durable production HTTP routes on the same local exposure (`/api/v1/records`, `/api/v1/records/identifiers`, `/api/v1/namespaces`), bearer-authenticated, covered by `cargo xtask contract verify` |
 | Identity review (inspect, defer, resume, resolve)                                | Implemented behind internal B2 ports for review; no production route exists                                     |
 | Corrections and portability                                                      | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards |
-| Browser Workbench and status surface                                             | Local review UI over real host methods; `/status` remains the private `system.health` QA surface                |
+| Browser QA harness                                                               | Local, private `system.health` evidence tooling; not a product UI or capability activation                      |
 | Trusted desktop network settings and Google Books search                         | Local Tauri IPC review body; no public HTTP route, event, record write, or browser provider execution           |
 | Product packaging and release behavior                                           | Later bodies; absent now                                                                                        |
 
@@ -31,12 +31,7 @@ The fixture separates contract proof from availability claims. Its finite routes
 
 Required surfaces are generated or validated from the registry across domain/application ownership, OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, semantic examples, CLI, typed TypeScript HTTP/SSE SDK, knowledge, and package smoke. Reasoned `N/A` is explicit—for example, operational health has no event stream and access administration is not linked-data domain state.
 
-The browser Workbench consumes existing generated SDK methods and adds no API
-shape, domain state, retry queue, persistence, or public binding. It renders
-real host results and truthful unavailable states; it does not invent media or
-store provider credentials. Its `/status` route consumes the generated
-`system.health` parser. The local Vite proxy is not an endpoint-configuration
-authority.
+The browser harness consumes the generated `system.health` SDK parser and adds no API shape, domain state, retry queue, persistence, or public binding. Its local Vite proxy is not an endpoint-configuration authority. The registry therefore keeps the product UI surface not applicable through B3.
 
 The trusted Tauri host can persist non-secret network preferences, test a
 configured Fasti service, store a Google Books key in the platform credential
