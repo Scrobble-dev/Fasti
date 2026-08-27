@@ -119,6 +119,16 @@ test("OpenAPI authorization posture mutation is rejected", async () => {
   );
 });
 
+test("production OpenAPI bearer requirements cannot be removed", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        delete document.paths["/api/v1/records"].get.security;
+      }),
+    (result) => assert.rejects(result),
+  );
+});
+
 test("JSON Schema dialect mutation is rejected", async () => {
   await withArtifacts(
     (root) =>

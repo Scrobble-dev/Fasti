@@ -858,6 +858,7 @@ fn enrich_production_openapi(
     public_registry: &Value,
     capability_keys: &BTreeMap<String, CapabilityKey>,
 ) -> anyhow::Result<()> {
+    validate_production_security_schemes(openapi)?;
     enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
@@ -925,6 +926,57 @@ fn enrich_production_openapi(
             &Value::Null,
         )?;
     }
+    Ok(())
+}
+
+fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
+    for name in ["bootstrap_bearer", "credential_bearer"] {
+        let pointer = format!("/components/securitySchemes/{name}");
+        let scheme = value_at(openapi, &pointer)?;
+        ensure!(
+            string_at(scheme, "/type")? == "http" && string_at(scheme, "/scheme")? == "bearer",
+            "production security scheme {name} must be HTTP bearer"
+        );
+    }
+    Ok(())
+}
+
+fn validate_production_operation_security(
+    operation: &Value,
+    operation_id: &str,
+    method: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    let expected = match operation_id {
+        "initialize_node" => Some("bootstrap_bearer"),
+        "submit_observation" | "create_record" | "attach_identifier" | "list_records"
+        | "register_namespace" => Some("credential_bearer"),
+        "enroll_first_client" | "health_check" => None,
+        other => anyhow::bail!("unknown production operation {other}"),
+    };
+    let Some(expected) = expected else {
+        ensure!(
+            operation.get("security").is_none(),
+            "production operation {method} {path} must not declare header authentication"
+        );
+        return Ok(());
+    };
+    let requirements = array_at(operation, "/security")?;
+    ensure!(
+        requirements.len() == 1,
+        "production operation {method} {path} must declare one security requirement"
+    );
+    let requirement = requirements[0]
+        .as_object()
+        .context("production security requirement must be an object")?;
+    ensure!(
+        requirement.len() == 1
+            && requirement
+                .get(expected)
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty),
+        "production operation {method} {path} must use {expected} without OAuth scopes"
+    );
     Ok(())
 }
 
@@ -1704,19 +1756,17 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
             None => None,
         };
 
-        // Bootstrap proofs stay in request bodies. Existing bearer credentials must not
-        // be attached to either one-time setup operation.
+        // Bootstrap proofs stay in request bodies. The initialization route uses its
+        // separate data-root bootstrap bearer; enrollment consumes the proof body and
+        // must not receive either bearer credential.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
-        let has_security = operation
-            .get("security")
-            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
-        ensure!(
-            has_security == authenticated,
-            "production security declaration changed for {} {}",
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
             expected.method,
-            expected.path
-        );
+            expected.path,
+        )?;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
@@ -1899,14 +1949,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             None => None,
         };
 
-        // The production OpenAPI document does not populate the standard
-        // `security` field for any route today (a pre-existing gap separate
-        // from this SDK-emission fix -- `x-fasti-authorization` is the
-        // contract's actual authenticated/unauthenticated signal until that's
-        // addressed), so unlike the conformance and bootstrap renderers this
-        // one does not cross-check `security` against `expected.authenticated`.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
+            expected.method,
+            expected.path,
+        )?;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;

@@ -690,6 +690,20 @@
         ],
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "bootstrap_bearer": {
+        "bearerFormat": "64-character lowercase hexadecimal secret",
+        "description": "One-time local data-root bootstrap secret. Never use an enrolled client credential here.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "credential_bearer": {
+        "bearerFormat": "64-character lowercase hexadecimal credential",
+        "description": "Enrolled Fasti client credential sent only in the Authorization header.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -1043,6 +1057,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "records"
         ],
@@ -1205,6 +1224,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "bootstrap_bearer": []
+          }
+        ],
         "tags": [
           "node"
         ],
@@ -1408,6 +1432,11 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "observations"
         ],
@@ -1526,6 +1555,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "records"
         ],
@@ -1692,6 +1726,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "records"
         ],
@@ -1885,6 +1924,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "records"
         ],

@@ -272,6 +272,14 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   const healthOperation = openapi.paths["/api/v1/health"].get;
   const healthCapability = capabilities.get("system.health");
+  assert.deepEqual(Object.keys(openapi.components.securitySchemes).sort(), [
+    "bootstrap_bearer",
+    "credential_bearer",
+  ]);
+  for (const scheme of Object.values(openapi.components.securitySchemes)) {
+    assert.equal(scheme.type, "http");
+    assert.equal(scheme.scheme, "bearer");
+  }
   assert.equal(healthOperation["x-fasti-capability-id"], healthCapability.id);
   assert.equal(
     healthOperation["x-fasti-authorization"],
@@ -289,6 +297,26 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     healthOperation["x-fasti-example-ids"],
     healthCapability.examples,
   );
+  assert.equal(healthOperation.security, undefined);
+
+  const productionSecurity = new Map([
+    ["initialize_node", "bootstrap_bearer"],
+    ["submit_observation", "credential_bearer"],
+    ["create_record", "credential_bearer"],
+    ["attach_identifier", "credential_bearer"],
+    ["list_records", "credential_bearer"],
+    ["register_namespace", "credential_bearer"],
+  ]);
+  for (const pathItem of Object.values(openapi.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      const scheme = productionSecurity.get(operation.operationId);
+      if (scheme) {
+        assert.deepEqual(operation.security, [{ [scheme]: [] }]);
+      } else {
+        assert.equal(operation.security, undefined);
+      }
+    }
+  }
 
   const httpOperations = new Map(
     operations.map(({ operation }) => [
