@@ -15,10 +15,19 @@ export function dialogFocus(node: HTMLDialogElement): { destroy(): void } {
   let previouslyFocused: HTMLElement | null = null;
 
   function focusFirst(): void {
-    const target = node.querySelector<HTMLElement>(
+    const focusable = node.querySelectorAll<HTMLElement>(
       'input, select, textarea, button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
     );
-    (target ?? node).focus();
+    // Both current dialogs put their dismiss button first in DOM order (it's
+    // in the header, above the actual content). Defaulting focus there risks
+    // an accidental Enter/Space closing the dialog the user just opened --
+    // WAI-ARIA's dialog pattern recommends the first control that isn't the
+    // close action. Falls back to it only if nothing else is focusable.
+    const first =
+      Array.from(focusable).find(
+        (element) => !/close/i.test(element.getAttribute("aria-label") ?? ""),
+      ) ?? focusable[0];
+    (first ?? node).focus();
   }
 
   function handleOpened(): void {
