@@ -339,6 +339,25 @@
       "uat": []
     },
     {
+      "authorization": "unauthenticated",
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "integration.status.success"
+      ],
+      "id": "integration.status",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [],
+      "runtime_body": "b1",
+      "scopes": [],
+      "surface_profile": "b1_integration_status",
+      "uat": []
+    },
+    {
       "authorization": "scoped",
       "bounded_context": "observation.ingress",
       "contract_body": "b1",
@@ -771,6 +790,58 @@
       },
       "sse_asyncapi": {
         "reason": "This capability has no server-sent event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_integration_status": {
+      "cli": {
+        "body": "b2",
+        "reason": "A governed CLI surface for integration status is deferred to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Integration status is operational state, not linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "reason": "Integration status has no governed recovery problem.",
+        "state": "not_applicable"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "A network-isolated native package smoke for integration status is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b2",
+        "reason": "A generated SDK client method for integration status is deferred to B2.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "reason": "Integration status is a finite request with no event channel.",
         "state": "not_applicable"
       },
       "ui": {

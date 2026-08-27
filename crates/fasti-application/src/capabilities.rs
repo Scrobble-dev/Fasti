@@ -113,6 +113,17 @@ define_capabilities!(
         []
     ),
     (
+        IntegrationStatus,
+        B1,
+        B1,
+        Finalized,
+        Implemented,
+        Unauthenticated,
+        [],
+        [],
+        []
+    ),
+    (
         DiscoverCapabilities,
         B1,
         B1,

@@ -346,6 +346,11 @@ export async function validateExamples(root = repositoryRoot) {
     conformanceOpenapi,
     "ObservationReceiptDto",
   );
+  const integrationStatus = compileOpenApiComponent(
+    ajv,
+    openapi,
+    "IntegrationStatusListResponse",
+  );
   const receiptEvent = ajv.compile(
     asyncApi.components.messages.receiptCommitted.payload.schema,
   );
@@ -425,6 +430,17 @@ export async function validateExamples(root = repositoryRoot) {
     if (id === "system.health.success") {
       assertValid(health, value, id, ajv);
       assert.equal(value.status, "healthy");
+      assert.deepEqual(
+        httpOperations.get(owner.id).operation.responses["200"].content[
+          "application/json"
+        ].examples[id].value,
+        value,
+        `${id} differs from the embedded production OpenAPI example`,
+      );
+      continue;
+    }
+    if (id === "integration.status.success") {
+      assertValid(integrationStatus, value, id, ajv);
       assert.deepEqual(
         httpOperations.get(owner.id).operation.responses["200"].content[
           "application/json"

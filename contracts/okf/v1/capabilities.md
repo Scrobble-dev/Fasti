@@ -7,6 +7,7 @@ tags: [fasti, b1, contracts, capabilities]
 status: draft
 identifiers:
   - system.health
+  - integration.status
   - system.capabilities.discover
   - node.initialize
   - client.enroll
@@ -27,6 +28,7 @@ authorization_postures:
   - scoped
 authorization_assignments:
   system.health: unauthenticated
+  integration.status: unauthenticated
   system.capabilities.discover: scoped
   node.initialize: bootstrap_only
   client.enroll: scoped
@@ -57,6 +59,7 @@ not automatically an implemented runtime. Read each entry together with the
 | Capability                     | Bounded context             | Authorization     | B1 runtime disposition                       |
 | ------------------------------ | --------------------------- | ----------------- | -------------------------------------------- |
 | `system.health`                | `system.operations`         | `unauthenticated` | Implemented                                  |
+| `integration.status`           | `observation.ingress`       | `unauthenticated` | Implemented                                  |
 | `system.capabilities.discover` | `system.contracts`          | `scoped`          | Fixture only                                 |
 | `node.initialize`              | `node.administration`       | `bootstrap_only`  | Fixture only; durable behavior belongs to B2 |
 | `client.enroll`                | `client.enrollment`         | `scoped`          | Fixture only; durable behavior belongs to B2 |

@@ -213,6 +213,191 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     "additionalProperties": false,
     "type": "object"
   },
+  "IntegrationObservationRequest": {
+    "additionalProperties": false,
+    "description": "Provider-neutral webhook body used by integrations that support a custom\nJSON template (Tautulli and the Jellyfin Webhook plugin, for example).\n\nThis is transport evidence. Fasti still derives durable identity and the\nsource client from the authenticated credential and provider-specific\nadapter route.",
+    "properties": {
+      "completed": {
+        "description": "Chronicle ingress currently accepts only complete occurrences.",
+        "type": "boolean"
+      },
+      "device_id": {
+        "maxLength": 128,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "duration_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "episode_number": {
+        "format": "int32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "item_type": {
+        "description": "`movie`, `episode`, `track`, or another adapter-supported item kind.",
+        "maxLength": 32,
+        "minLength": 1,
+        "type": "string"
+      },
+      "observed_at": {
+        "description": "RFC 3339 time at which the adapter observed the event.",
+        "type": "string"
+      },
+      "occurred_at": {
+        "description": "Optional provider-claimed event time.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "position_seconds": {
+        "format": "int64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "provider_ids": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Provider IDs for the observed item. Keys are lower-case provider names\nsuch as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`.",
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "season_number": {
+        "format": "int32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "series_provider_ids": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Provider IDs for the parent series when `item_type` is `episode`.",
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "series_title": {
+        "description": "Optional series title retained as evidence for episode observations.",
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "server_id": {
+        "description": "Safe source binding clues. They are recorded as evidence and can also be\nchecked by a configured adapter before mutation.",
+        "maxLength": 128,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "source_event_id": {
+        "description": "Stable provider event identity. Retries must reuse this value.",
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": {
+        "description": "Human-readable evidence only. It is never used as an irreversible\nidentity key.",
+        "maxLength": 512,
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "user_id": {
+        "maxLength": 128,
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "source_event_id",
+      "observed_at",
+      "item_type",
+      "completed",
+      "provider_ids",
+      "series_provider_ids"
+    ],
+    "type": "object"
+  },
+  "IntegrationStatusDto": {
+    "additionalProperties": false,
+    "description": "Runtime status exposed to the trusted workbench. It intentionally excludes\ncredentials and raw provider payloads.",
+    "properties": {
+      "available": {
+        "type": "boolean"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "endpoint_ready": {
+        "type": "boolean"
+      },
+      "id": {
+        "type": "string"
+      },
+      "label": {
+        "type": "string"
+      },
+      "setup_action": {
+        "type": "string"
+      },
+      "state": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "label",
+      "state",
+      "available",
+      "endpoint_ready",
+      "setup_action",
+      "detail"
+    ],
+    "type": "object"
+  },
+  "IntegrationStatusListResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "integrations": {
+        "items": {
+          "$ref": "#/components/schemas/IntegrationStatusDto"
+        },
+        "maxItems": 16,
+        "type": "array"
+      }
+    },
+    "required": [
+      "integrations"
+    ],
+    "type": "object"
+  },
   "ListRecordsResponse": {
     "additionalProperties": false,
     "properties": {
@@ -430,10 +615,10 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     "properties": {
       "grains": {
         "items": {
-          "minLength": 1,
           "type": "string"
         },
         "maxItems": 16,
+        "minItems": 1,
         "type": "array"
       },
       "id_pattern": {
@@ -747,13 +932,13 @@ export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "local_operator" | "scoped" | "unauthenticated";
   readonly bounded_context: string;
   readonly contract_body: "b1" | "b2" | "b3";
-  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
   readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "record_not_found" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
   readonly runtime_body: "b0" | "b1" | "b2" | "b3";
   readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "health" | "later_b2" | "later_b3";
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "health" | "later_b2" | "later_b3";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -971,6 +1156,7 @@ const B1_CONFORMANCE_SCHEMAS = {
             "identity.namespace.register.validation_failed",
             "identity.record.create.validation_failed",
             "identity.record.list.forbidden",
+            "integration.status.success",
             "listener.configure.capability_unavailable",
             "node.initialize.validation_failed",
             "observation.accept.capacity_exceeded",
@@ -1004,6 +1190,7 @@ const B1_CONFORMANCE_SCHEMAS = {
           "identity.review.inspect",
           "identity.review.resolve",
           "identity.review.resume",
+          "integration.status",
           "listener.configure",
           "node.initialize",
           "observation.accept",
@@ -1086,6 +1273,7 @@ const B1_CONFORMANCE_SCHEMAS = {
         "enum": [
           "b1_durable_bootstrap",
           "b1_http_fixture",
+          "b1_integration_status",
           "b1_observation_accept",
           "b1_receipt_replay",
           "b1_receipt_stream",
@@ -1125,8 +1313,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 24,
-        "minItems": 24,
+        "maxItems": 25,
+        "minItems": 25,
         "type": "array",
         "uniqueItems": true
       },
@@ -1164,12 +1352,13 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 9,
-        "minProperties": 9,
+        "maxProperties": 10,
+        "minProperties": 10,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
             "b1_http_fixture",
+            "b1_integration_status",
             "b1_observation_accept",
             "b1_receipt_replay",
             "b1_receipt_stream",
@@ -2005,6 +2194,7 @@ export type CapabilityId =
   | "identity.review.inspect"
   | "identity.review.resolve"
   | "identity.review.resume"
+  | "integration.status"
   | "listener.configure"
   | "node.initialize"
   | "observation.accept"
@@ -2396,6 +2586,25 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
         "review_write"
       ],
       "surface_profile": "later_b2",
+      "uat": []
+    },
+    {
+      "authorization": "unauthenticated",
+      "bounded_context": "observation.ingress",
+      "contract_body": "b1",
+      "examples": [
+        "integration.status.success"
+      ],
+      "id": "integration.status",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [],
+      "runtime_body": "b1",
+      "scopes": [],
+      "surface_profile": "b1_integration_status",
       "uat": []
     },
     {
@@ -2827,6 +3036,58 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "sse_asyncapi": {
         "reason": "This capability has no server-sent event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "reason": "Fasti is headless through B3.",
+        "state": "not_applicable"
+      }
+    },
+    "b1_integration_status": {
+      "cli": {
+        "body": "b2",
+        "reason": "A governed CLI surface for integration status is deferred to B2.",
+        "state": "later_body"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Integration status is operational state, not linked-data domain state.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "reason": "Integration status has no governed recovery problem.",
+        "state": "not_applicable"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "body": "b2",
+        "reason": "A network-isolated native package smoke for integration status is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.",
+        "state": "later_body"
+      },
+      "sdk": {
+        "body": "b2",
+        "reason": "A generated SDK client method for integration status is deferred to B2.",
+        "state": "later_body"
+      },
+      "sse_asyncapi": {
+        "reason": "Integration status is a finite request with no event channel.",
         "state": "not_applicable"
       },
       "ui": {
@@ -5053,7 +5314,7 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
 const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "record_not_found", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore

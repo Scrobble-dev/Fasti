@@ -65,6 +65,12 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   assert.deepEqual(Object.keys(openapi.paths), [
     "/api/v1/client-enrollments",
     "/api/v1/health",
+    "/api/v1/integrations",
+    "/api/v1/integrations/emby/webhook",
+    "/api/v1/integrations/jellyfin/webhook",
+    "/api/v1/integrations/nuvio/webhook",
+    "/api/v1/integrations/plex/webhook",
+    "/api/v1/integrations/tautulli/webhook",
     "/api/v1/namespaces",
     "/api/v1/node/initialization",
     "/api/v1/observations",
@@ -119,7 +125,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 24);
+  assert.equal(registry.capabilities.length, 25);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -131,6 +137,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
       return `later_${capability.contract_body}`;
     }
     if (capability.id === "system.health") return "health";
+    if (capability.id === "integration.status") return "b1_integration_status";
     if (["client.enroll", "node.initialize"].includes(capability.id)) {
       return "b1_durable_bootstrap";
     }
@@ -239,6 +246,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         ![
           "receipt.stream",
           "system.health",
+          "integration.status",
           "identity.record.create",
           "identity.identifier.attach",
           "identity.record.list",

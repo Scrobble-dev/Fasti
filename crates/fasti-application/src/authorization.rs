@@ -427,6 +427,7 @@ mod tests {
             !matches!(
                 capability,
                 CapabilityKey::SystemHealth
+                    | CapabilityKey::IntegrationStatus
                     | CapabilityKey::InitializeNode
                     | CapabilityKey::RestoreWorkspace
             )

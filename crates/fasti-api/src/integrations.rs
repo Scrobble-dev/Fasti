@@ -231,12 +231,16 @@ async fn template_webhook(
     request_body = IntegrationObservationRequest,
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails),
-        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails),
-        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails),
-        (status = 415, description = "Webhook is not application/json", body = ProblemDetails),
-        (status = 422, description = "Webhook does not describe a complete supported occurrence", body = ProblemDetails)
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Webhook is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Webhook does not describe a complete supported occurrence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn tautulli_webhook(
@@ -254,12 +258,16 @@ pub(crate) async fn tautulli_webhook(
     request_body = IntegrationObservationRequest,
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails),
-        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails),
-        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails),
-        (status = 415, description = "Webhook is not application/json", body = ProblemDetails),
-        (status = 422, description = "Webhook does not describe a complete supported occurrence", body = ProblemDetails)
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Webhook is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Webhook does not describe a complete supported occurrence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn jellyfin_webhook(
@@ -277,12 +285,16 @@ pub(crate) async fn jellyfin_webhook(
     request_body = IntegrationObservationRequest,
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails),
-        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails),
-        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails),
-        (status = 415, description = "Webhook is not application/json", body = ProblemDetails),
-        (status = 422, description = "Webhook does not describe a complete supported occurrence", body = ProblemDetails)
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Webhook is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Webhook does not describe a complete supported occurrence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn nuvio_webhook(
@@ -427,12 +439,16 @@ fn emby_request(
     tag = "integrations",
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails),
-        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails),
-        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails),
-        (status = 415, description = "Webhook is not application/json", body = ProblemDetails),
-        (status = 422, description = "Webhook does not describe a completed supported occurrence", body = ProblemDetails)
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Provider event identity was reused with changed evidence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Webhook body exceeds its bound", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Webhook is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Webhook does not describe a completed supported occurrence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn emby_webhook(
@@ -627,12 +643,16 @@ fn plex_request(
     tag = "integrations",
     responses(
         (status = 200, description = "Durable Plex scrobble receipt", body = SubmitObservationResponse),
-        (status = 401, description = "A trusted proxy did not inject the scoped Fasti bearer credential", body = ProblemDetails),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails),
-        (status = 409, description = "Plex event identity was reused with changed evidence", body = ProblemDetails),
-        (status = 413, description = "Multipart body exceeds its bound", body = ProblemDetails),
-        (status = 415, description = "Request is not Plex multipart/form-data", body = ProblemDetails),
-        (status = 422, description = "Payload is not a supported completed Plex event", body = ProblemDetails)
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "A trusted proxy did not inject the scoped Fasti bearer credential", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Plex event identity was reused with changed evidence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Multipart body exceeds its bound", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Request is not Plex multipart/form-data", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Payload is not a supported completed Plex event", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(crate) async fn plex_webhook(

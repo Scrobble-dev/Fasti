@@ -147,6 +147,191 @@
         "additionalProperties": false,
         "type": "object"
       },
+      "IntegrationObservationRequest": {
+        "additionalProperties": false,
+        "description": "Provider-neutral webhook body used by integrations that support a custom\nJSON template (Tautulli and the Jellyfin Webhook plugin, for example).\n\nThis is transport evidence. Fasti still derives durable identity and the\nsource client from the authenticated credential and provider-specific\nadapter route.",
+        "properties": {
+          "completed": {
+            "description": "Chronicle ingress currently accepts only complete occurrences.",
+            "type": "boolean"
+          },
+          "device_id": {
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "episode_number": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "item_type": {
+            "description": "`movie`, `episode`, `track`, or another adapter-supported item kind.",
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "observed_at": {
+            "description": "RFC 3339 time at which the adapter observed the event.",
+            "type": "string"
+          },
+          "occurred_at": {
+            "description": "Optional provider-claimed event time.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position_seconds": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "provider_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Provider IDs for the observed item. Keys are lower-case provider names\nsuch as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "season_number": {
+            "format": "int32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "series_provider_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Provider IDs for the parent series when `item_type` is `episode`.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "series_title": {
+            "description": "Optional series title retained as evidence for episode observations.",
+            "maxLength": 512,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_id": {
+            "description": "Safe source binding clues. They are recorded as evidence and can also be\nchecked by a configured adapter before mutation.",
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_event_id": {
+            "description": "Stable provider event identity. Retries must reuse this value.",
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "description": "Human-readable evidence only. It is never used as an irreversible\nidentity key.",
+            "maxLength": 512,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "user_id": {
+            "maxLength": 128,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "source_event_id",
+          "observed_at",
+          "item_type",
+          "completed",
+          "provider_ids",
+          "series_provider_ids"
+        ],
+        "type": "object"
+      },
+      "IntegrationStatusDto": {
+        "additionalProperties": false,
+        "description": "Runtime status exposed to the trusted workbench. It intentionally excludes\ncredentials and raw provider payloads.",
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "endpoint_ready": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "setup_action": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "state",
+          "available",
+          "endpoint_ready",
+          "setup_action",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "IntegrationStatusListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "integrations": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrationStatusDto"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "integrations"
+        ],
+        "type": "object"
+      },
       "ListRecordsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -364,10 +549,10 @@
         "properties": {
           "grains": {
             "items": {
-              "minLength": 1,
               "type": "string"
             },
             "maxItems": 16,
+            "minItems": 1,
             "type": "array"
           },
           "id_pattern": {
@@ -848,6 +1033,1126 @@
         "x-fasti-runtime-availability": "implemented"
       }
     },
+    "/api/v1/integrations": {
+      "get": {
+        "operationId": "integration_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "integration.status.success": {
+                    "value": {
+                      "integrations": [
+                        {
+                          "available": true,
+                          "detail": "Authenticated occurrence ingress is mounted. Nuvio must keep its own durable retry outbox.",
+                          "endpoint_ready": true,
+                          "id": "nuvio",
+                          "label": "NuvioTV",
+                          "setup_action": "Create an observation client and configure the Nuvio Fasti provider.",
+                          "state": "setup_required"
+                        },
+                        {
+                          "available": true,
+                          "detail": "Plex webhooks do not carry a Fasti credential. Fasti never places authorization secrets in webhook URLs.",
+                          "endpoint_ready": true,
+                          "id": "plex",
+                          "label": "Plex",
+                          "setup_action": "Use Tautulli, or place the Plex webhook behind a trusted proxy that injects a scoped Fasti Authorization header.",
+                          "state": "setup_required"
+                        },
+                        {
+                          "available": true,
+                          "detail": "Tautulli can submit watched events through a bounded authenticated webhook.",
+                          "endpoint_ready": true,
+                          "id": "tautulli",
+                          "label": "Tautulli",
+                          "setup_action": "Configure the documented JSON template and Authorization header.",
+                          "state": "setup_required"
+                        },
+                        {
+                          "available": true,
+                          "detail": "Completed playback notifications are normalized into durable Fasti occurrences.",
+                          "endpoint_ready": true,
+                          "id": "jellyfin",
+                          "label": "Jellyfin",
+                          "setup_action": "Configure the Jellyfin Webhook plugin with the Fasti template and Authorization header.",
+                          "state": "setup_required"
+                        },
+                        {
+                          "available": true,
+                          "detail": "Native Emby event payloads are accepted only when completion is explicit.",
+                          "endpoint_ready": true,
+                          "id": "emby",
+                          "label": "Emby",
+                          "setup_action": "Configure Emby playback-stop/mark-played webhooks with a scoped Authorization header.",
+                          "state": "setup_required"
+                        },
+                        {
+                          "available": true,
+                          "detail": "MPRIS support is platform-scoped and never claimed on unsupported operating systems.",
+                          "endpoint_ready": false,
+                          "id": "mpris",
+                          "label": "Desktop MPRIS observer",
+                          "setup_action": "Enable the desktop MPRIS observer.",
+                          "state": "setup_required"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationStatusListResponse"
+                }
+              }
+            },
+            "description": "Production integration runtime status"
+          }
+        },
+        "tags": [
+          "integrations"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "integration.status",
+        "x-fasti-example-ids": [
+          "integration.status.success"
+        ],
+        "x-fasti-problem-codes": [],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/integrations/emby/webhook": {
+      "post": {
+        "operationId": "emby_webhook",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable occurrence receipt"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider event identity was reused with changed evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook body exceeds its bound"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook does not describe a completed supported occurrence"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "integrations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/integrations/jellyfin/webhook": {
+      "post": {
+        "operationId": "jellyfin_webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable occurrence receipt"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider event identity was reused with changed evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook body exceeds its bound"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook does not describe a complete supported occurrence"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "integrations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/integrations/nuvio/webhook": {
+      "post": {
+        "operationId": "nuvio_webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable occurrence receipt"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider event identity was reused with changed evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook body exceeds its bound"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook does not describe a complete supported occurrence"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "integrations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/integrations/plex/webhook": {
+      "post": {
+        "operationId": "plex_webhook",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable Plex scrobble receipt"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "A trusted proxy did not inject the scoped Fasti bearer credential"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Plex event identity was reused with changed evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Multipart body exceeds its bound"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request is not Plex multipart/form-data"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Payload is not a supported completed Plex event"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "integrations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/integrations/tautulli/webhook": {
+      "post": {
+        "operationId": "tautulli_webhook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntegrationObservationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitObservationResponse"
+                }
+              }
+            },
+            "description": "Durable occurrence receipt"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bearer credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential lacks observation acceptance scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider event identity was reused with changed evidence"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook body exceeds its bound"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000011",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Webhook does not describe a complete supported occurrence"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          },
+          "507": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "observation.accept.capacity_exceeded": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "observation.accept",
+                      "code": "capacity_exceeded",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000010",
+                      "detail": "bounded application capacity has been reached",
+                      "next_actions": [
+                        {
+                          "id": "release_capacity",
+                          "label": "Release retained capacity before retrying"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 507,
+                      "title": "Capacity exceeded",
+                      "type": "https://fasti.scrobble.dev/v1/problems/capacity-exceeded",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Bounded evidence or observation capacity is exhausted"
+          }
+        },
+        "tags": [
+          "integrations"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "observation.accept",
+        "x-fasti-example-ids": [
+          "observation.accept.capacity_exceeded",
+          "observation.accept.receipt",
+          "observation.accept.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capacity_exceeded",
+          "forbidden",
+          "idempotency_conflict",
+          "integrity_failed",
+          "invalid_observation",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/namespaces": {
       "post": {
         "operationId": "register_namespace",
@@ -1062,7 +2367,7 @@
                 }
               }
             },
-            "description": "Bootstrap authorization was denied"
+            "description": "Bootstrap authorization was denied -- the bootstrap secret header is missing, malformed, or does not match the secret at <data_root>/bootstrap.secret"
           },
           "409": {
             "content": {
@@ -1401,7 +2706,7 @@
                 }
               }
             },
-            "description": "Records visible to this credential's workspace"
+            "description": "Active records visible to this credential's workspace"
           },
           "401": {
             "content": {
