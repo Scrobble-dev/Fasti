@@ -14,7 +14,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 - Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value. Automatic collision recovery stays on the requested loopback address. It never moves a public or wildcard listener.
 - Client and public origins reject credentials, paths, queries, and fragments. Non-loopback origins require HTTPS and platform certificate validation.
-- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
+- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port. Durable routes remain disabled unless `FASTI_EXTERNAL_BIND_IP` explicitly declares the outer loopback-only port forward.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.
 - Planned export, restore, and verify commands exit nonzero and change no data.
@@ -27,7 +27,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 - `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
-These controls make the development baseline and B2 review implementation safer. Production mounts only the durable loopback setup slice when `FASTI_DATA_ROOT` is explicit. This does not make Fasti a supported service.
+These controls make the development baseline and B2 review implementation safer. Production mounts durable routes only when `FASTI_DATA_ROOT` is explicit and client exposure is direct loopback or an explicitly declared loopback-only container port forward. This does not make Fasti a supported service.
 
 ## Temporary dependency exception
 

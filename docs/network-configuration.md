@@ -11,6 +11,7 @@ reverse-proxy address from changing the daemon bind address.
 | `FASTI_API_URL`           | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
 | `FASTI_PUBLIC_URL`        | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                     |
 | `FASTI_CONTAINER_RUNTIME` | launcher                 | `podman` or `docker`. Default: `podman`.                                                             |
+| `FASTI_EXTERNAL_BIND_IP`  | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP is accepted.            |
 | `FASTI_BOUND_ADDR_FILE`   | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                           |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
@@ -33,8 +34,15 @@ FASTI_PORT=19420 ./scripts/dev.sh --docker
 ```
 
 The container always listens on port `8420` internally. The launcher maps the
-configured host port to it. The memory ceiling remains 192 MiB with no extra
-swap.
+configured host port to it on `127.0.0.1` and sets
+`FASTI_EXTERNAL_BIND_IP=127.0.0.1`. That explicit assertion lets `fastid`
+mount the durable API through the wildcard container socket. A wildcard
+listener without the assertion stays health-only. A non-loopback assertion is
+rejected. Do not set this variable when the outer published address is public.
+The launcher runs the container process as the invoking non-root user so its
+worktree-owned data directory remains writable. Podman uses `keep-id` for the
+rootless user namespace. The image default remains the non-root `fasti` user.
+The memory ceiling remains 192 MiB with no extra swap.
 
 ## Recover from a port collision
 
@@ -158,8 +166,9 @@ real authenticated profile context.
 
 ## Contract disposition
 
-These values and provider searches use local Tauri IPC. They do not add a
-public Fasti HTTP route, event, domain entity, or linked-data term. OpenAPI,
-AsyncAPI, JSON Schema, and JSON-LD therefore remain unchanged. The Tauri command
-types and this document own the local app contract until a public capability is
-authorized.
+The connection values and provider searches use local Tauri IPC. The container
+exposure assertion changes only which existing production router is composed;
+it adds no route or payload. These settings do not add a public Fasti HTTP
+route, event, domain entity, or linked-data term. OpenAPI, AsyncAPI, JSON Schema,
+and JSON-LD therefore remain unchanged. The Tauri command types and this
+document own the local app contract until a public capability is authorized.

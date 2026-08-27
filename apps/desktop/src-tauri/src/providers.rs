@@ -417,9 +417,6 @@ fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProble
         .into_iter()
         .filter_map(|item| {
             let id = item.id?;
-            if !seen.insert(id.clone()) {
-                return None;
-            }
             let volume_info = item.volume_info?;
             let title = volume_info.title?;
             if !valid_candidate_text(&id, 256)
@@ -430,6 +427,9 @@ fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProble
                     .iter()
                     .any(|author| !valid_candidate_text(author, 128))
             {
+                return None;
+            }
+            if !seen.insert(id.clone()) {
                 return None;
             }
             Some(ProviderCandidate {
@@ -502,6 +502,21 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].title, "First");
+    }
+
+    #[test]
+    fn invalid_duplicate_does_not_hide_a_later_valid_candidate() {
+        let body = br#"{
+          "items": [
+            {"id":"same","volumeInfo":{"authors":["Author"]}},
+            {"id":"same","volumeInfo":{"title":"Valid","authors":["Author"]}}
+          ]
+        }"#;
+        let candidates = parse_candidates(body).expect("valid duplicate candidate");
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].provider_id, "same");
+        assert_eq!(candidates[0].title, "Valid");
     }
 
     #[test]

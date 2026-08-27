@@ -24,6 +24,8 @@ fi
 
 container_id="$("$oci_runtime" run --detach --rm --publish 127.0.0.1::8420 "$image")"
 isolated_id=""
+durable_id=""
+durable_volume=""
 cli_stdout=""
 cli_stderr=""
 # cleanup removes temporary CLI output files and force-removes the test containers.
@@ -37,6 +39,12 @@ cleanup() {
   "$oci_runtime" rm --force "$container_id" >/dev/null 2>&1 || true
   if [[ -n "$isolated_id" ]]; then
     "$oci_runtime" rm --force "$isolated_id" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$durable_id" ]]; then
+    "$oci_runtime" rm --force "$durable_id" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$durable_volume" ]]; then
+    "$oci_runtime" volume rm --force "$durable_volume" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -94,6 +102,42 @@ if [[ "$bootstrap_status" != "404" ]]; then
   echo "Remote bootstrap returned HTTP $bootstrap_status instead of 404" >&2
   exit 1
 fi
+
+durable_volume="fasti-smoke-data-$$"
+"$oci_runtime" volume create "$durable_volume" >/dev/null
+"$oci_runtime" run --rm --user 0:0 --volume "$durable_volume:/data" \
+  "$image" chown fasti:fasti /data
+durable_id="$(
+  "$oci_runtime" run --detach --rm --publish 127.0.0.1::8420 \
+    --volume "$durable_volume:/data" \
+    --env FASTI_DATA_ROOT=/data \
+    --env FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
+    "$image"
+)"
+durable_port="$("$oci_runtime" port "$durable_id" 8420/tcp | head -1 | awk -F: '{print $NF}')"
+
+for attempt in $(seq 1 30); do
+  durable_bootstrap_status="$(
+    curl --silent --output /dev/null --write-out '%{http_code}' \
+      --connect-timeout 5 \
+      --max-time 10 \
+      --request POST \
+      --header 'content-type: application/json' \
+      --data '{}' \
+      "http://127.0.0.1:${durable_port}/api/v1/node/initialization"
+  )" || true
+  if [[ "$durable_bootstrap_status" == "403" ]]; then
+    break
+  fi
+
+  if [[ "$attempt" -eq 30 ]]; then
+    "$oci_runtime" logs "$durable_id"
+    echo "Trusted loopback port forward did not mount the durable API" >&2
+    exit 1
+  fi
+
+  sleep 1
+done
 
 cli_stdout="$(mktemp)"
 cli_stderr="$(mktemp)"
@@ -160,5 +204,5 @@ if ((memory_bytes > memory_limit_bytes)); then
 fi
 
 image_size_bytes="$("$oci_runtime" image inspect "$image" --format '{{.Size}}')"
-printf 'PASS: runtime=%s image=%s user=fasti:fasti health=healthy network_denied=pass post_events=404 post_initialization=404 cli_verify=nonzero idle_memory=%s idle_limit=%sMiB image_size_bytes=%s\n' \
+printf 'PASS: runtime=%s image=%s user=fasti:fasti health=healthy network_denied=pass post_events=404 post_initialization=404 durable_loopback_initialization=403 cli_verify=nonzero idle_memory=%s idle_limit=%sMiB image_size_bytes=%s\n' \
   "$oci_runtime" "$image" "$memory_sample" "$idle_limit_mib" "$image_size_bytes"
