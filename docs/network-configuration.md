@@ -89,9 +89,9 @@ FASTI_PUBLIC_URL=https://fasti.internal \
 cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-The browser Workbench uses its same-origin Vite proxy during local QA. Listener
-and collision variables belong to `fastid`, not to the embedded Tauri or APK
-kernel.
+The browser health harness deliberately ignores these values and remains on
+its fixed QA proxy. Listener and collision variables belong to `fastid`, not to
+the embedded Tauri or APK kernel.
 
 ## Edit desktop settings
 
