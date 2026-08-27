@@ -1,16 +1,16 @@
 use crate::{
-    local::{run_kernel, LocalApiState},
+    local::{bearer_secret, run_kernel, LocalApiState},
     problem::{application_problem, json_rejection, HttpProblem},
 };
 use axum::{
     extract::{rejection::JsonRejection, State},
-    http::{header, HeaderMap},
+    http::HeaderMap,
     routing::post,
     Json, Router,
 };
 use fasti_application::{
     derive_deterministic_operation_id, AcceptObservationCommand, AuthenticateCredentialQuery,
-    CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel, SecretMaterial, Violation,
+    CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel, Violation,
 };
 use fasti_contracts::{ProblemDetails, SubmitObservationRequest, SubmitObservationResponse};
 use fasti_domain::{
@@ -115,29 +115,6 @@ fn validate_request(
     Ok(())
 }
 
-fn bearer_secret(
-    headers: &HeaderMap,
-    correlation_id: RequestCorrelationId,
-) -> Result<SecretMaterial, HttpProblem> {
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
-        .ok_or_else(|| {
-            application_problem(Box::new(FastiProblem::authentication_failed(
-                CapabilityKey::AcceptObservation,
-                correlation_id,
-            )))
-        })?;
-    SecretMaterial::try_from_hex(token).map_err(|_| {
-        application_problem(Box::new(FastiProblem::authentication_failed(
-            CapabilityKey::AcceptObservation,
-            correlation_id,
-        )))
-    })
-}
-
 fn resolution_name(value: ObservationResolution) -> &'static str {
     match value {
         ObservationResolution::Unresolved => "unresolved",
@@ -174,7 +151,7 @@ pub(crate) async fn submit_observation(
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
-    let secret = bearer_secret(&headers, correlation_id)?;
+    let secret = bearer_secret(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     validate_request(&request, correlation_id)?;
 
     let observed_at = ObservedAt::parse(&request.observed_at, ClaimedTrust::DeviceObserved)

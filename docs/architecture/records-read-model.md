@@ -2,7 +2,7 @@
 
 ## Current status
 
-This document describes the read path that lists Records for display: `metadata_field_claims`/`metadata_field_overrides` persistence in `fasti-store`, the `IdentityPort::list_records` query, and the `list_records` Tauri command. No HTTP route exists; this is Tauri-command-only, matching how `reviews`/`provider-credential` capabilities were wired. No provider adapter exists yet to write real claims -- every Record currently resolves with empty title/poster fields unless a test or a future adapter writes claims directly.
+This document describes the read path that lists Records for display: `metadata_field_claims`/`metadata_field_overrides` persistence in `fasti-store`, the `IdentityPort::list_records` query, and its two surfaces -- the `list_records` Tauri command, and the bearer-authenticated `GET /api/v1/records` HTTP route (`crates/fasti-api/src/records.rs`, merged into the local router in `crates/fasti-api/src/local.rs`). No provider adapter exists yet to write real claims -- every Record currently resolves with empty title/poster fields unless a test or a future adapter writes claims directly.
 
 ## 1. Why this exists
 
@@ -32,9 +32,11 @@ A Record with zero claims and zero occurrences still returns a valid `RecordSumm
 
 `core.title` and `core.poster_url` are the two canonical `FieldKey` values this read path resolves (`fasti_domain::{TITLE_FIELD_KEY, POSTER_FIELD_KEY}`). `metadata.rs`'s own doc comment cites `core.title` as the canonical example; `core.poster_url` follows the same convention.
 
-## 4. Tauri surface
+## 4. Tauri and HTTP surfaces
 
 `apps/desktop/src-tauri/src/records.rs` exposes `list_records`, following `reviews.rs`'s exact shape: `authenticate()`/`require_access()` from `setup.rs`, `DesktopProblem` error mapping, no HTTP round-trip. Registered in `lib.rs`'s `invoke_handler!`.
+
+`crates/fasti-api/src/records.rs` exposes the same query as `GET /api/v1/records`, bearer-authenticated the same way as every other production-runtime route. This is the surface the browser-hosted web app uses -- the Tauri command above is desktop-only and never reachable from a browser tab.
 
 The wire `RecordSummary` view carries `grain: Grain` unchanged -- `Grain` is identity granularity (Work/Series/Release/Season/Episode/Film/...), distinct from the frontend's display-oriented `MediaKind` (movie/show/anime/book/...). A later frontend-wiring pass owns the `Grain` -> `MediaKind` projection; this task deliberately does not invent one.
 
@@ -42,4 +44,4 @@ No `get_record` detail-view command exists yet -- the current frontend need is l
 
 ## 5. Capability registry
 
-`identity.record.list` is registered in `contracts/registry/v1/capabilities.yaml` as `contract_body: b2`, `runtime_availability: fixture_only` -- the same precedent `ConfigureListener` set for a capability whose runtime body owns real behavior but which is reachable only through the Tauri desktop path today, not a routed HTTP operation. No OpenAPI/AsyncAPI path was added; this stays Tauri-command-only.
+`identity.record.list` is registered in `contracts/registry/v1/capabilities.yaml` as `contract_body: b1`, `lifecycle.contract_state: finalized`, `lifecycle.runtime_availability: implemented`, under `surface_profile: b1_records`. That profile declares `http_openapi: required`, so an OpenAPI path is required and present -- `GET /api/v1/records` is real, routed, and covered by `cargo xtask contract verify`, not a reserved-for-later binding.

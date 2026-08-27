@@ -330,6 +330,15 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &capability_discovery_example,
     )?;
     validate_problem_schema_parity(&problem_schema, &conformance_openapi)?;
+    let sdk_source = typescript_sdk(
+        &public_registry,
+        &problem_catalog,
+        &health_schema,
+        &problem_schema,
+        &asyncapi,
+        &production_openapi,
+        &conformance_openapi,
+    )?;
     validate_required_b1_bindings(
         workspace_root,
         &capability_keys,
@@ -338,6 +347,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &asyncapi,
         &problem_catalog,
         &health_schema,
+        &sdk_source,
     )?;
     insert(&mut artifacts, OPENAPI_PATH, production_openapi.clone())?;
     insert(
@@ -362,20 +372,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     )?;
     insert(&mut artifacts, HEALTH_SCHEMA_PATH, health_schema.clone())?;
     insert(&mut artifacts, PROBLEM_SCHEMA_PATH, problem_schema.clone())?;
-    insert_bytes(
-        &mut artifacts,
-        SDK_GENERATED_PATH,
-        typescript_sdk(
-            &public_registry,
-            &problem_catalog,
-            &health_schema,
-            &problem_schema,
-            &asyncapi,
-            &production_openapi,
-            &conformance_openapi,
-        )?
-        .into_bytes(),
-    )?;
+    insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
         &mut artifacts,
         RUST_CAPABILITY_IDS_PATH,
@@ -1005,6 +1002,7 @@ fn validate_required_b1_bindings(
     asyncapi: &Value,
     problem_catalog: &Value,
     health_schema: &Value,
+    sdk_source: &str,
 ) -> anyhow::Result<()> {
     for required in registry::finalized_b1_required_bindings(workspace_root)? {
         resolve_required_binding(
@@ -1018,6 +1016,7 @@ fn validate_required_b1_bindings(
             asyncapi,
             problem_catalog,
             health_schema,
+            sdk_source,
         )
         .with_context(|| {
             format!(
@@ -1027,6 +1026,22 @@ fn validate_required_b1_bindings(
         })?;
     }
     Ok(())
+}
+
+/// True only if some operation entry for `capability_id` was actually emitted
+/// into the generated SDK text, not merely declared in one of the
+/// `*_OPERATIONS` arrays that feed the generator. Membership in those arrays
+/// is necessary but not sufficient -- a rendering gap (a category the
+/// generator forgot to render, as `PRODUCTION_RUNTIME_OPERATIONS` once was)
+/// would still pass a membership-only check while shipping an SDK with no
+/// method for that capability.
+fn sdk_source_declares_capability(sdk_source: &str, capability_id: &str) -> bool {
+    PRODUCTION_BOOTSTRAP_OPERATIONS
+        .iter()
+        .chain(PRODUCTION_RUNTIME_OPERATIONS.iter())
+        .chain(CONFORMANCE_OPERATIONS.iter())
+        .filter(|operation| operation.capability_id == capability_id)
+        .any(|operation| sdk_source.contains(&format!("  {}: {{ operationId:", operation.alias)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1041,6 +1056,7 @@ fn resolve_required_binding(
     asyncapi: &Value,
     problem_catalog: &Value,
     health_schema: &Value,
+    sdk_source: &str,
 ) -> anyhow::Result<()> {
     match surface {
         "domain_application" => {
@@ -1146,16 +1162,10 @@ fn resolve_required_binding(
             ensure!(
                 capability_id == "system.health"
                     || capability_id == "receipt.stream"
-                    || PRODUCTION_BOOTSTRAP_OPERATIONS
-                        .iter()
-                        .any(|operation| operation.capability_id == capability_id)
-                    || PRODUCTION_RUNTIME_OPERATIONS
-                        .iter()
-                        .any(|operation| operation.capability_id == capability_id)
-                    || CONFORMANCE_OPERATIONS
-                        .iter()
-                        .any(|operation| operation.capability_id == capability_id),
-                "generated SDK capability is absent"
+                    || sdk_source_declares_capability(sdk_source, capability_id),
+                "generated SDK omits an operation entry for this capability -- list \
+                 membership in a *_OPERATIONS array is not enough, the alias must \
+                 actually appear as an emitted operation in {SDK_GENERATED_PATH}"
             );
         }
         "knowledge" => {
@@ -1738,34 +1748,219 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
     }
     output.push_str("} as const;\n\n");
 
+    // Dumps every production schema, not just the two named above -- the
+    // runtime contract rendered separately by `render_production_runtime_contract`
+    // reuses this same dump rather than emitting its own, since it validates
+    // against the same production OpenAPI document.
     let schemas_json = serde_json::to_string_pretty(&sort_json(Value::Object(schemas.clone())))?;
     writeln!(
         output,
-        "// prettier-ignore\nconst PRODUCTION_BOOTSTRAP_SCHEMAS = {schemas_json} as const;\n"
+        "// prettier-ignore\nconst PRODUCTION_SCHEMAS = {schemas_json} as const;\n"
     )?;
     output.push_str(
         r#"// prettier-ignore
 export function parseNodeInitializationResponse(value: unknown): NodeInitializationResponse {
-  return parseProductionBootstrapDto("NodeInitializationResponse", value);
+  return parseProductionDto("NodeInitializationResponse", value);
 }
 
 // prettier-ignore
 export function parseClientEnrollmentResponse(value: unknown): ClientEnrollmentResponse {
-  return parseProductionBootstrapDto("ClientEnrollmentResponse", value);
+  return parseProductionDto("ClientEnrollmentResponse", value);
 }
 
 // prettier-ignore
-function parseProductionBootstrapDto<T>(schemaName: string, value: unknown): T {
-  const schema = (PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>)[schemaName];
+function parseProductionDto<T>(schemaName: string, value: unknown): T {
+  const schema = (PRODUCTION_SCHEMAS as Record<string, unknown>)[schemaName];
   if (schema === undefined) {
-    throw new FastiContractParseError(`Unknown production bootstrap schema ${schemaName}`);
+    throw new FastiContractParseError(`Unknown production schema ${schemaName}`);
   }
-  validateOpenApiValue(value, schema, schemaName, PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>);
+  validateOpenApiValue(value, schema, schemaName, PRODUCTION_SCHEMAS as Record<string, unknown>);
   return value as T;
 }
 
 "#,
     );
+    Ok(output)
+}
+
+/// Renders the durable, authenticated production-runtime surface (records,
+/// observations) that runs after bootstrap. Parallels
+/// `render_production_bootstrap_contract` but for `PRODUCTION_RUNTIME_OPERATIONS`,
+/// and reuses that function's `PRODUCTION_SCHEMAS` dump rather than emitting
+/// its own -- both validate against the same production OpenAPI document, so
+/// this must run after `render_production_bootstrap_contract` in the output.
+fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String> {
+    let expected_paths: BTreeSet<_> = PRODUCTION_RUNTIME_OPERATIONS
+        .iter()
+        .map(|operation| operation.path)
+        .collect();
+    let actual_paths: BTreeSet<_> = object_at(openapi, "/paths")?
+        .keys()
+        .map(String::as_str)
+        .collect();
+    ensure!(
+        expected_paths.is_subset(&actual_paths),
+        "production OpenAPI is missing a runtime route: expected {expected_paths:?}, found {actual_paths:?}"
+    );
+
+    let schemas = object_at(openapi, "/components/schemas")?;
+    let mut output = String::new();
+    let name = "ObservationIngressKind";
+    let schema = schemas
+        .get(name)
+        .with_context(|| format!("production OpenAPI omits {name}"))?;
+    writeln!(
+        output,
+        "// prettier-ignore\nexport type {name} = {};\n",
+        typescript_type(schema)?
+    )?;
+    for name in [
+        "ObservationIdentifierInput",
+        "SubmitObservationRequest",
+        "SubmitObservationResponse",
+        "CreateRecordRequest",
+        "CreateRecordResponse",
+        "ResolvedFieldDto",
+        "RecordActivityDto",
+        "RecordSummaryDto",
+        "ListRecordsResponse",
+        "AttachIdentifierRequest",
+        "AttachIdentifierResponse",
+        "RegisterNamespaceRequest",
+        "RegisterNamespaceResponse",
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        output.push_str(&render_interface(name, schema)?);
+        output.push('\n');
+    }
+
+    output.push_str("// prettier-ignore\nexport const LOCAL_RUNTIME_OPERATIONS = {\n");
+    for expected in PRODUCTION_RUNTIME_OPERATIONS {
+        let operation_pointer = format!(
+            "/paths/{}/{}",
+            escape_pointer(expected.path),
+            expected.method
+        );
+        let operation = value_at(openapi, &operation_pointer)?;
+        ensure!(
+            string_at(operation, "/operationId")? == expected.operation_id,
+            "production operation ID changed for {} {}",
+            expected.method,
+            expected.path
+        );
+
+        let request_name = match expected.request {
+            Some(expected_request) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/requestBody/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_request);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production request schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_request)
+            }
+            None => {
+                ensure!(
+                    operation.get("requestBody").is_none(),
+                    "unexpected request body for {} {}",
+                    expected.method,
+                    expected.path
+                );
+                None
+            }
+        };
+
+        let response_name = match expected.response {
+            Some(expected_response) => {
+                let actual_ref = string_at(
+                    operation,
+                    "/responses/200/content/application~1json/schema/$ref",
+                )?;
+                let expected_ref = format!("#/components/schemas/{}", expected_response);
+                ensure!(
+                    actual_ref == expected_ref,
+                    "production response schema mismatch for {} {}: expected {}, found {}",
+                    expected.method,
+                    expected.path,
+                    expected_ref,
+                    actual_ref
+                );
+                Some(expected_response)
+            }
+            None => None,
+        };
+
+        // The production OpenAPI document does not populate the standard
+        // `security` field for any route today (a pre-existing gap separate
+        // from this SDK-emission fix -- `x-fasti-authorization` is the
+        // contract's actual authenticated/unauthenticated signal until that's
+        // addressed), so unlike the conformance and bootstrap renderers this
+        // one does not cross-check `security` against `expected.authenticated`.
+        let authorization = string_at(operation, "/x-fasti-authorization")?;
+        let authenticated = expected.authenticated;
+
+        let required_scopes =
+            serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
+        let problem_codes = serde_json::to_string(array_at(operation, "/x-fasti-problem-codes")?)?;
+        let example_ids = serde_json::to_string(array_at(operation, "/x-fasti-example-ids")?)?;
+        writeln!(
+            output,
+            "  {}: {{ operationId: {}, method: {}, path: {}, capabilityId: {}, authorization: {}, requiredScopes: {required_scopes}, problemCodes: {problem_codes}, exampleIds: {example_ids}, authenticated: {}, runtimeAvailability: {}, durability: \"durable\", retry: {}, requestSchema: {}, responseSchema: {} }},",
+            expected.alias,
+            json_string(expected.operation_id)?,
+            json_string(&expected.method.to_ascii_uppercase())?,
+            json_string(expected.path)?,
+            json_string(expected.capability_id)?,
+            json_string(authorization)?,
+            authenticated,
+            json_string(string_at(
+                operation,
+                "/x-fasti-runtime-availability"
+            )?)?,
+            json_string(expected.retry)?,
+            request_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+            response_name
+                .map(json_string)
+                .transpose()?
+                .unwrap_or_else(|| "null".to_owned()),
+        )?;
+    }
+    output.push_str("} as const;\n\n");
+
+    for (alias, dto) in [
+        ("parseSubmitObservationRequest", "SubmitObservationRequest"),
+        (
+            "parseSubmitObservationResponse",
+            "SubmitObservationResponse",
+        ),
+        ("parseCreateRecordRequest", "CreateRecordRequest"),
+        ("parseCreateRecordResponse", "CreateRecordResponse"),
+        ("parseListRecordsResponse", "ListRecordsResponse"),
+        ("parseAttachIdentifierRequest", "AttachIdentifierRequest"),
+        ("parseAttachIdentifierResponse", "AttachIdentifierResponse"),
+        ("parseRegisterNamespaceRequest", "RegisterNamespaceRequest"),
+        (
+            "parseRegisterNamespaceResponse",
+            "RegisterNamespaceResponse",
+        ),
+    ] {
+        writeln!(
+            output,
+            "// prettier-ignore\nexport function {alias}(value: unknown): {dto} {{\n  return parseProductionDto(\"{dto}\", value);\n}}\n"
+        )?;
+    }
     Ok(output)
 }
 
@@ -1811,6 +2006,7 @@ fn typescript_sdk(
     );
 
     output.push_str(&render_production_bootstrap_contract(production_openapi)?);
+    output.push_str(&render_production_runtime_contract(production_openapi)?);
     output.push_str(&render_conformance_contract(conformance_openapi)?);
 
     let capabilities = array_at(public_registry, "/capabilities")?;

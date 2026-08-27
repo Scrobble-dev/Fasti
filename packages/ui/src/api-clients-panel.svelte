@@ -30,6 +30,7 @@
   let copied = $state(false);
   let revealCredential = $state(false);
   let pendingRevoke = $state<string>();
+  let revoking = $state<string>();
   let secretNotice: HTMLDivElement | undefined;
 
   const canManage = $derived(
@@ -79,7 +80,8 @@
   }
 
   async function revoke(credentialId: string): Promise<void> {
-    if (!host?.revokeApiClient) return;
+    if (!host?.revokeApiClient || revoking) return;
+    revoking = credentialId;
     problem = undefined;
     try {
       clients = await host.revokeApiClient(credentialId);
@@ -93,6 +95,8 @@
         error instanceof Error
           ? error.message
           : "Fasti could not revoke the API client.";
+    } finally {
+      revoking = undefined;
     }
   }
 
@@ -299,6 +303,7 @@
                       <button
                         type="button"
                         class="danger-action"
+                        disabled={Boolean(revoking)}
                         onclick={() => void revoke(client.credential_id)}
                       >
                         Confirm revoke

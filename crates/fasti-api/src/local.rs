@@ -33,6 +33,35 @@ type HttpResult<T> = Result<Json<T>, HttpProblem>;
 /// legitimate first client for the one-time bootstrap credential. Presenting
 /// this value proves the caller can read a file this data root's OS user
 /// owns -- see `AccessAdministrationPort::verify_bootstrap_secret`.
+/// Bearer-credential extraction shared by every capability-scoped route
+/// (records, observations). Returns `AuthenticationFailed`, distinct from
+/// `bootstrap_secret`'s `Forbidden` below -- a missing/malformed application
+/// credential and a missing/wrong bootstrap secret are different failure
+/// classes with different registry-declared problem codes.
+pub(crate) fn bearer_secret(
+    headers: &HeaderMap,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<SecretMaterial, HttpProblem> {
+    let token = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|value| !value.is_empty() && !value.chars().any(char::is_whitespace))
+        .ok_or_else(|| {
+            application_problem(Box::new(FastiProblem::authentication_failed(
+                capability,
+                correlation_id,
+            )))
+        })?;
+    SecretMaterial::try_from_hex(token).map_err(|_| {
+        application_problem(Box::new(FastiProblem::authentication_failed(
+            capability,
+            correlation_id,
+        )))
+    })
+}
+
 fn bootstrap_secret(
     headers: &HeaderMap,
     correlation_id: RequestCorrelationId,

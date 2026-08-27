@@ -66,7 +66,7 @@ export const LOCAL_BOOTSTRAP_OPERATIONS = {
 } as const;
 
 // prettier-ignore
-const PRODUCTION_BOOTSTRAP_SCHEMAS = {
+const PRODUCTION_SCHEMAS = {
   "AttachIdentifierRequest": {
     "additionalProperties": false,
     "properties": {
@@ -118,6 +118,25 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
       "created"
     ],
     "type": "object"
+  },
+  "ClaimedPrecisionDto": {
+    "enum": [
+      "date",
+      "second",
+      "millisecond",
+      "microsecond",
+      "nanosecond"
+    ],
+    "type": "string"
+  },
+  "ClaimedTrustDto": {
+    "enum": [
+      "source_claim",
+      "device_observed",
+      "user_entered",
+      "inferred"
+    ],
+    "type": "string"
   },
   "ClientEnrollmentResponse": {
     "additionalProperties": false,
@@ -277,6 +296,30 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     ],
     "type": "string"
   },
+  "OccurredTimeDto": {
+    "additionalProperties": false,
+    "properties": {
+      "original": {
+        "format": "iso-date-or-rfc3339",
+        "maxLength": 35,
+        "minLength": 10,
+        "pattern": "^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2}))$",
+        "type": "string"
+      },
+      "precision": {
+        "$ref": "#/components/schemas/ClaimedPrecisionDto"
+      },
+      "trust": {
+        "$ref": "#/components/schemas/ClaimedTrustDto"
+      }
+    },
+    "required": [
+      "original",
+      "precision",
+      "trust"
+    ],
+    "type": "object"
+  },
   "ProblemActionDto": {
     "additionalProperties": false,
     "properties": {
@@ -376,9 +419,14 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
         "type": "string"
       },
       "occurred_at": {
-        "type": [
-          "string",
-          "null"
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/OccurredTimeDto",
+            "description": "The full claimed-time structure (original text, precision, trust), not\na collapsed string -- matches the desktop host's `RecordActivityView`\nso both surfaces expose the same field shape for the same data."
+          }
         ]
       }
     },
@@ -430,10 +478,10 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
     "properties": {
       "grains": {
         "items": {
-          "minLength": 1,
           "type": "string"
         },
         "maxItems": 16,
+        "minItems": 1,
         "type": "array"
       },
       "id_pattern": {
@@ -712,22 +760,179 @@ const PRODUCTION_BOOTSTRAP_SCHEMAS = {
 
 // prettier-ignore
 export function parseNodeInitializationResponse(value: unknown): NodeInitializationResponse {
-  return parseProductionBootstrapDto("NodeInitializationResponse", value);
+  return parseProductionDto("NodeInitializationResponse", value);
 }
 
 // prettier-ignore
 export function parseClientEnrollmentResponse(value: unknown): ClientEnrollmentResponse {
-  return parseProductionBootstrapDto("ClientEnrollmentResponse", value);
+  return parseProductionDto("ClientEnrollmentResponse", value);
 }
 
 // prettier-ignore
-function parseProductionBootstrapDto<T>(schemaName: string, value: unknown): T {
-  const schema = (PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>)[schemaName];
+function parseProductionDto<T>(schemaName: string, value: unknown): T {
+  const schema = (PRODUCTION_SCHEMAS as Record<string, unknown>)[schemaName];
   if (schema === undefined) {
-    throw new FastiContractParseError(`Unknown production bootstrap schema ${schemaName}`);
+    throw new FastiContractParseError(`Unknown production schema ${schemaName}`);
   }
-  validateOpenApiValue(value, schema, schemaName, PRODUCTION_BOOTSTRAP_SCHEMAS as Record<string, unknown>);
+  validateOpenApiValue(value, schema, schemaName, PRODUCTION_SCHEMAS as Record<string, unknown>);
   return value as T;
+}
+
+// prettier-ignore
+export type ObservationIngressKind = "consumption_occurrence";
+
+export interface ObservationIdentifierInput {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly value: string;
+}
+
+export interface SubmitObservationRequest {
+  readonly duration_seconds?: null | number;
+  readonly identifiers: ReadonlyArray<ObservationIdentifierInput>;
+  readonly kind: ObservationIngressKind;
+  readonly observed_at: string;
+  readonly occurred_at?: null | string;
+  readonly position_seconds?: null | number;
+  readonly progress_percent?: null | number;
+  readonly source: string;
+  readonly source_event_id: string;
+  readonly target_grain?: null | string;
+  readonly title?: null | string;
+}
+
+export interface SubmitObservationResponse {
+  readonly committed_at: string;
+  readonly disposition: string;
+  readonly evidence_id: string;
+  readonly interpretation_id?: null | string;
+  readonly observation_id: string;
+  readonly occurrence_id?: null | string;
+  readonly operation_id: string;
+  readonly payload_digest: string;
+  readonly profile_id: string;
+  readonly receipt_id: string;
+  readonly received_at: string;
+  readonly record_id?: null | string;
+  readonly resolution: string;
+  readonly review_item_id?: null | string;
+  readonly source_client_id: string;
+  readonly workspace_id: string;
+}
+
+export interface CreateRecordRequest {
+  readonly grain: string;
+}
+
+export interface CreateRecordResponse {
+  readonly grain: string;
+  readonly record_id: string;
+}
+
+export interface ResolvedFieldDto {
+  readonly is_stale: boolean;
+  readonly source?: null | string;
+  readonly tier: string;
+  readonly value?: null | string;
+}
+
+export interface RecordActivityDto {
+  readonly interpretation_state: string;
+  readonly occurred_at?: OccurredTimeDto | null;
+}
+
+export interface RecordSummaryDto {
+  readonly grain: string;
+  readonly latest_activity?: RecordActivityDto | null;
+  readonly poster: ResolvedFieldDto;
+  readonly record_id: string;
+  readonly status: string;
+  readonly title: ResolvedFieldDto;
+}
+
+export interface ListRecordsResponse {
+  readonly records: ReadonlyArray<RecordSummaryDto>;
+}
+
+export interface AttachIdentifierRequest {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly record_id: string;
+  readonly value: string;
+}
+
+export interface AttachIdentifierResponse {
+  readonly created: boolean;
+  readonly external_identifier_id: string;
+  readonly record_id: string;
+}
+
+export interface RegisterNamespaceRequest {
+  readonly grains: ReadonlyArray<string>;
+  readonly id_pattern: string;
+  readonly label: string;
+  readonly licence_posture: string;
+  readonly namespace: string;
+  readonly normalization: string;
+}
+
+export interface RegisterNamespaceResponse {
+  readonly created: boolean;
+  readonly namespace: string;
+}
+
+// prettier-ignore
+export const LOCAL_RUNTIME_OPERATIONS = {
+  submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
+  createRecord: { operationId: "create_record", method: "POST", path: "/api/v1/records", capabilityId: "identity.record.create", authorization: "scoped", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","integrity_failed","invalid_identifier","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.record.create.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CreateRecordRequest", responseSchema: "CreateRecordResponse" },
+  listRecords: { operationId: "list_records", method: "GET", path: "/api/v1/records", capabilityId: "identity.record.list", authorization: "scoped", requiredScopes: ["identity_read"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","integrity_failed","storage_unavailable"], exampleIds: ["identity.record.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListRecordsResponse" },
+  attachIdentifier: { operationId: "attach_identifier", method: "POST", path: "/api/v1/records/identifiers", capabilityId: "identity.identifier.attach", authorization: "scoped", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","identity_conflict","integrity_failed","invalid_identifier","malformed_json","payload_too_large","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.identifier.attach.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "AttachIdentifierRequest", responseSchema: "AttachIdentifierResponse" },
+  registerNamespace: { operationId: "register_namespace", method: "POST", path: "/api/v1/namespaces", capabilityId: "identity.namespace.register", authorization: "scoped", requiredScopes: ["identity_write"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["identity.namespace.register.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "RegisterNamespaceRequest", responseSchema: "RegisterNamespaceResponse" },
+} as const;
+
+// prettier-ignore
+export function parseSubmitObservationRequest(value: unknown): SubmitObservationRequest {
+  return parseProductionDto("SubmitObservationRequest", value);
+}
+
+// prettier-ignore
+export function parseSubmitObservationResponse(value: unknown): SubmitObservationResponse {
+  return parseProductionDto("SubmitObservationResponse", value);
+}
+
+// prettier-ignore
+export function parseCreateRecordRequest(value: unknown): CreateRecordRequest {
+  return parseProductionDto("CreateRecordRequest", value);
+}
+
+// prettier-ignore
+export function parseCreateRecordResponse(value: unknown): CreateRecordResponse {
+  return parseProductionDto("CreateRecordResponse", value);
+}
+
+// prettier-ignore
+export function parseListRecordsResponse(value: unknown): ListRecordsResponse {
+  return parseProductionDto("ListRecordsResponse", value);
+}
+
+// prettier-ignore
+export function parseAttachIdentifierRequest(value: unknown): AttachIdentifierRequest {
+  return parseProductionDto("AttachIdentifierRequest", value);
+}
+
+// prettier-ignore
+export function parseAttachIdentifierResponse(value: unknown): AttachIdentifierResponse {
+  return parseProductionDto("AttachIdentifierResponse", value);
+}
+
+// prettier-ignore
+export function parseRegisterNamespaceRequest(value: unknown): RegisterNamespaceRequest {
+  return parseProductionDto("RegisterNamespaceRequest", value);
+}
+
+// prettier-ignore
+export function parseRegisterNamespaceResponse(value: unknown): RegisterNamespaceResponse {
+  return parseProductionDto("RegisterNamespaceResponse", value);
 }
 
 export interface AcceptObservationRequest {

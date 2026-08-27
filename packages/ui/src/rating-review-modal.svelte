@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
+  import { dialogFocus } from "./dialog-focus.js";
   import {
     IconX,
     IconStarFilled,
@@ -41,6 +42,7 @@
 
 <dialog
   bind:this={dialog}
+  use:dialogFocus
   class="modal-backdrop"
   aria-labelledby="review-title"
   oncancel={onClose}
@@ -207,7 +209,9 @@
     font-size: 1.8rem;
     color: color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     cursor: pointer;
-    padding: 0;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 0 4px;
     transition:
       transform 80ms ease,
       color 80ms ease;

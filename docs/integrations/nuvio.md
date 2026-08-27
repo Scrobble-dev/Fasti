@@ -97,13 +97,13 @@ A retry is not a rewatch.
 
 A real repeat consumption needs a new source event identity.
 
-## Progress is not implemented by this route
+## Partial progress is not accepted by this route
 
-`POST /api/v1/observations` currently represents a durable consumption occurrence. It is not a progress-heartbeat endpoint.
+`POST /api/v1/observations` accepts only a complete, durable consumption occurrence.
 
-A request with `progress_percent` below 100 is rejected. Fasti does this deliberately so a playback heartbeat cannot become false Chronicle history.
+A request with `progress_percent` below 100 is rejected. Fasti does this deliberately: an incomplete occurrence must never become false Chronicle history.
 
-Partial progress needs a separate progress capability and persistence contract before Nuvio can synchronize resume state safely.
+A record of partial progress needs a separate capability and persistence contract, not this route.
 
 ## Network boundary
 
@@ -131,7 +131,7 @@ Trakt
 Simkl
 ```
 
-The current scrobble coordinator fans playback updates to enabled providers in that registry. There is no Fasti provider in the current upstream registry.
+The current scrobble coordinator fans occurrence updates to enabled providers in that registry. There is no Fasti provider in the current upstream registry.
 
 Source files checked during this implementation:
 
@@ -156,7 +156,7 @@ The first useful Nuvio slice is one-way and durable:
 6. Keep the same source event identity across timeout and reconnect retries.
 7. Retire the outbox item only after Fasti returns its durable receipt.
 8. Show pending, delivered, blocked, and rejected state to the user.
-9. Keep playback independent of Fasti availability.
+9. Keep Nuvio's own operation independent of Fasti availability.
 
 This slice must not invent partial progress support. It can submit complete occurrences only until Fasti has a separate progress capability.
 

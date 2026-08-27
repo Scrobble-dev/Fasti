@@ -126,14 +126,22 @@
       storedItems: T[],
       defaultItems: T[],
     ): T[] => [
-      ...storedItems,
-      ...defaultItems.filter((d) => !storedItems.some((s) => s.id === d.id)),
+      ...(Array.isArray(storedItems) ? storedItems : []),
+      ...defaultItems.filter(
+        (d) =>
+          !Array.isArray(storedItems) ||
+          !storedItems.some((s) => s?.id === d.id),
+      ),
     ];
+    // `defaults` spreads first so a preference field added since a browser's
+    // stored copy was last written (e.g. `customFields`) is backfilled
+    // instead of coming back `undefined` and crashing the first read.
     return {
-      ...stored,
-      navItems: mergeById(stored.navItems, defaults.navItems),
+      ...defaults,
+      ...(stored && typeof stored === "object" ? stored : {}),
+      navItems: mergeById(stored?.navItems, defaults.navItems),
       contextMenuItems: mergeById(
-        stored.contextMenuItems,
+        stored?.contextMenuItems,
         defaults.contextMenuItems,
       ),
     };

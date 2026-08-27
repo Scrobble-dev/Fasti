@@ -52,7 +52,7 @@ pub struct RegisterNamespaceRequest {
     #[schema(min_length = 1, max_length = 128)]
     pub label: String,
     #[schemars(length(min = 1, max = 16))]
-    #[schema(min_length = 1, max_items = 16)]
+    #[schema(min_items = 1, max_items = 16)]
     pub grains: Vec<String>,
     #[schemars(length(min = 1, max = 256))]
     #[schema(min_length = 1, max_length = 256)]
@@ -82,7 +82,10 @@ pub struct ResolvedFieldDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RecordActivityDto {
-    pub occurred_at: Option<String>,
+    /// The full claimed-time structure (original text, precision, trust), not
+    /// a collapsed string -- matches the desktop host's `RecordActivityView`
+    /// so both surfaces expose the same field shape for the same data.
+    pub occurred_at: Option<crate::OccurredTimeDto>,
     pub interpretation_state: String,
 }
 

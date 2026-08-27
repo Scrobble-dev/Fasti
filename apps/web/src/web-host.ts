@@ -1,14 +1,38 @@
+import { FastiClient } from "@fasti/sdk";
 import type {
+  AttachIdentifierInput,
+  AttachIdentifierResult,
+  CreateRecordResult,
   EndpointConnectionStatus,
   NetworkConfiguration,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
   RecordSummary,
+  RegisterNamespaceInput,
+  RegisterNamespaceResult,
   SaveNetworkConfigurationRequest,
   WorkbenchHost,
 } from "@fasti/ui";
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
+
+/** Bearer credential for this browser's own session, distinct from provider
+ * API keys (never stored client-side at all -- see `providerCredentialStatus`
+ * below). Nothing writes this key yet: the browser has no working sign-in
+ * flow (`auth-modal.svelte` is UI-only pending a real passkey/OIDC/PAT
+ * backend), so every call below fails closed with a clear message until one
+ * exists. The SDK methods are real and wired now; only the credential source
+ * is still missing. */
+const CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
+
+function storedCredential(): string | undefined {
+  if (typeof localStorage === "undefined") return undefined;
+  try {
+    return localStorage.getItem(CREDENTIAL_STORAGE_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const PROVIDERS: ReadonlyArray<{
   provider: string;
@@ -128,7 +152,22 @@ function unavailable(message: string): Error {
   return new Error(message);
 }
 
+function requireCredential(): string {
+  const credential = storedCredential();
+  if (!credential) {
+    throw unavailable(
+      "Sign in to Fasti to see and manage records. This browser has no stored credential yet.",
+    );
+  }
+  return credential;
+}
+
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
+  const client = new FastiClient({
+    baseUrl: defaultApiUrl,
+    credential: requireCredential,
+  });
+
   return {
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return loadNetworkConfiguration(defaultApiUrl);
@@ -153,7 +192,13 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         outbound_policy: input.outbound_policy,
       };
       if (typeof localStorage !== "undefined") {
-        localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
+        try {
+          localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
+        } catch {
+          // Best-effort: a blocked or full localStorage should not fail a
+          // save the caller already validated -- the returned config is
+          // still correct, it just won't survive a reload.
+        }
       }
       return config;
     },
@@ -168,7 +213,7 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       }
       if (
         parsed.protocol === "http:" &&
-        !["127.0.0.1", "localhost", "::1"].includes(parsed.hostname)
+        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
       ) {
         throw unavailable(
           "Cleartext HTTP is allowed only for loopback endpoints.",
@@ -234,9 +279,28 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     },
 
     async listRecords(): Promise<RecordSummary[]> {
-      throw unavailable(
-        "Record listing is not active in the browser host. It requires the trusted native or server host.",
-      );
+      requireCredential();
+      const response = await client.listRecords();
+      return response.records as RecordSummary[];
+    },
+
+    async createRecord(grain: string): Promise<CreateRecordResult> {
+      requireCredential();
+      return client.createRecord({ grain });
+    },
+
+    async attachIdentifier(
+      input: AttachIdentifierInput,
+    ): Promise<AttachIdentifierResult> {
+      requireCredential();
+      return client.attachIdentifier(input);
+    },
+
+    async registerNamespace(
+      input: RegisterNamespaceInput,
+    ): Promise<RegisterNamespaceResult> {
+      requireCredential();
+      return client.registerNamespace(input);
     },
   };
 }

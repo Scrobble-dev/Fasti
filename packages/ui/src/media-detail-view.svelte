@@ -1497,6 +1497,7 @@
   }
   .btn-secondary-sm {
     padding: 6px 12px;
+    min-height: 44px;
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1569,6 +1570,7 @@
   .mark-prev-btn {
     flex-shrink: 0;
     padding: 5px 10px;
+    min-height: 44px;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1582,6 +1584,11 @@
   .mark-prev-btn:hover {
     color: var(--fasti-action-primary);
     border-color: var(--fasti-action-primary);
+  }
+
+  :is(.btn-secondary-sm, .mark-prev-btn):focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
   }
 
   .cast-grid {

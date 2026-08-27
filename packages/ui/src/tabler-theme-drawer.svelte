@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ThemeSettings } from "./types.js";
   import { DEFAULT_THEME_SETTINGS } from "./defaults.js";
+  import { dialogFocus } from "./dialog-focus.js";
   import {
     IconSun,
     IconMoon,
@@ -60,7 +61,9 @@
 
 <dialog
   bind:this={drawer}
+  use:dialogFocus
   class="theme-drawer-panel"
+  aria-modal="true"
   aria-labelledby="theme-drawer-title"
   oncancel={onClose}
   onclick={(event) => {

@@ -124,9 +124,12 @@
           </div>
 
           <div class="case-actions">
-            <label class="new-record-form">
-              <span>Not one of these — create a new record with grain</span>
+            <div class="new-record-form">
+              <label for="grain-{item.review_item_id}">
+                Not one of these — create a new record with grain
+              </label>
               <select
+                id="grain-{item.review_item_id}"
                 value={grainFor(item.review_item_id)}
                 onchange={(e) =>
                   (newGrainByItem = {
@@ -153,7 +156,7 @@
               >
                 Create new record
               </button>
-            </label>
+            </div>
           </div>
         </article>
       {/each}
