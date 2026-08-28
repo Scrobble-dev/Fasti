@@ -890,6 +890,7 @@ test("Nuvio Collections SDK preserves the bare document and its larger bounded r
     credential: "profile-state-secret",
     fetch: async (url, init) => {
       calls.push({
+        url: String(url),
         method: init?.method,
         authorization: new Headers(init?.headers).get("authorization"),
         body: init?.body === undefined ? undefined : JSON.parse(init.body),
@@ -915,23 +916,27 @@ test("Nuvio Collections SDK preserves the bare document and its larger bounded r
   });
   assert.deepEqual(await client.clearNuvioCollections(), { document: null });
   assert.deepEqual(
-    calls.map(({ method, authorization, body }) => ({
+    calls.map(({ url, method, authorization, body }) => ({
+      url,
       method,
       authorization,
       body,
     })),
     [
       {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
         method: "GET",
         authorization: "Bearer profile-state-secret",
         body: undefined,
       },
       {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
         method: "PUT",
         authorization: "Bearer profile-state-secret",
         body: replacement,
       },
       {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
         method: "DELETE",
         authorization: "Bearer profile-state-secret",
         body: undefined,

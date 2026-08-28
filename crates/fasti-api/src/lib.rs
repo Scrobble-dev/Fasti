@@ -490,6 +490,7 @@ mod tests {
         .expect("enrollment response")
     }
 
+    #[cfg(target_os = "linux")]
     fn browser_cookie_pair(response: &axum::response::Response) -> (String, String) {
         let cookies: Vec<_> = response
             .headers()

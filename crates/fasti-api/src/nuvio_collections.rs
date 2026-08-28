@@ -102,12 +102,12 @@ pub(crate) async fn replace_nuvio_collections(
 ) -> HttpResult<NuvioCollectionsStateDto> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ReplaceNuvioCollections;
+    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
     let document = request
         .into_application()
         .map_err(|error| invalid_document(correlation_id, error))?;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
     let kernel = state.kernel;
     let document = run_kernel(capability, correlation_id, move || {
         let access = authenticate_request(

@@ -182,6 +182,7 @@
             id={result.id}
             type="button"
             role="option"
+            tabindex="-1"
             aria-selected={index === activeIndex}
             class:active={index === activeIndex}
             onpointermove={() => (activeIndex = index)}

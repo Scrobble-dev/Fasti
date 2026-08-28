@@ -77,8 +77,10 @@
     let folders = 0;
     let sources = 0;
     for (const collection of document ?? []) {
-      const collectionFolders = Array.isArray(collection.folders)
-        ? collection.folders
+      if (!collection || typeof collection !== "object") continue;
+      const value = collection as Record<string, unknown>;
+      const collectionFolders = Array.isArray(value.folders)
+        ? value.folders
         : [];
       folders += collectionFolders.length;
       for (const folder of collectionFolders) {

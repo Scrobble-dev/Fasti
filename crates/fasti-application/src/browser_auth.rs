@@ -491,7 +491,7 @@ pub trait BrowserAccountPort: Send + Sync {
         &self,
         command: UpdateBrowserUserCommand,
     ) -> ApplicationResult<BrowserUserView>;
-    fn delete_browser_user(&self, command: DeleteBrowserUserCommand) -> ApplicationResult<()>;
+    fn delete_browser_user(&self, command: DeleteBrowserUserCommand) -> ApplicationResult<bool>;
 }
 
 #[cfg(test)]

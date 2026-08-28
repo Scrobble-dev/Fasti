@@ -462,9 +462,14 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             ));
         };
-        let locked = match locked_until {
-            Some(value) => parse_timestamp(&value, capability, correlation_id)? > created_at,
+        let locked = match locked_until.as_deref() {
+            Some(value) => parse_timestamp(value, capability, correlation_id)? > created_at,
             None => false,
+        };
+        let failed_count = if locked_until.is_some() && !locked {
+            0
+        } else {
+            failed_count
         };
         if active == 0 || locked {
             consume_dummy_password_work(command.password(), capability, correlation_id)?;
@@ -743,7 +748,7 @@ impl BrowserAccountPort for SqliteKernel {
         user_view(row, capability, correlation_id)
     }
 
-    fn delete_browser_user(&self, command: DeleteBrowserUserCommand) -> ApplicationResult<()> {
+    fn delete_browser_user(&self, command: DeleteBrowserUserCommand) -> ApplicationResult<bool> {
         let capability = CapabilityKey::DeleteBrowserUser;
         let (correlation_id, session, csrf, target_user_id, current_password) =
             command.into_parts();
@@ -778,6 +783,7 @@ impl BrowserAccountPort for SqliteKernel {
         if !verify_password(&current_password, &caller_hash, capability, correlation_id)? {
             return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
         }
+        let deleted_self = caller.user().user_id() == target_user_id;
         let changed = map_sql(
             transaction.execute(
                 "DELETE FROM browser_users WHERE user_id = ?1",
@@ -793,13 +799,64 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             ));
         }
-        map_sql(transaction.commit(), capability, correlation_id)
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(deleted_self)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn login(
+        kernel: &SqliteKernel,
+        username: &str,
+        password: &str,
+    ) -> ApplicationResult<CreatedBrowserSession> {
+        kernel.create_browser_session(
+            CreateBrowserSessionCommand::try_new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                BrowserUsername::try_new(username).expect("username"),
+                BrowserPassword::try_new(password).expect("password"),
+                60,
+            )
+            .expect("command"),
+        )
+    }
+
+    #[test]
+    fn expired_lockout_restarts_the_failed_login_count() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        kernel
+            .ensure_development_browser_user(
+                BrowserUsername::try_new("testadmin").expect("username"),
+                BrowserPassword::try_new("testadmin").expect("password"),
+            )
+            .expect("seed user");
+        for _ in 0..MAX_FAILED_LOGINS {
+            assert!(login(&kernel, "testadmin", "wrongpass").is_err());
+        }
+
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        connection
+            .execute(
+                "UPDATE browser_users SET locked_until = '2020-01-01T00:00:00Z' WHERE username = 'testadmin'",
+                [],
+            )
+            .expect("expire lockout");
+
+        assert!(login(&kernel, "testadmin", "wrongpass").is_err());
+        let (failed_count, locked_until): (i64, Option<String>) = connection
+            .query_row(
+                "SELECT failed_login_count, locked_until FROM browser_users WHERE username = 'testadmin'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read failed login state");
+        assert_eq!(failed_count, 1);
+        assert_eq!(locked_until, None);
+    }
 
     #[test]
     fn development_user_is_seeded_once_and_can_be_deleted() {
@@ -902,20 +959,43 @@ mod tests {
                 .expect("command"),
             )
             .expect("login after password edit");
-        let session =
-            fasti_application::SecretMaterial::try_from_hex(&login.session().expose_hex())
-                .expect("session");
-        let csrf = fasti_application::SecretMaterial::try_from_hex(&login.csrf().expose_hex())
-            .expect("csrf");
-        kernel
+        let session = login.session().expose_hex();
+        let csrf = login.csrf().expose_hex();
+        let other_user_id = BrowserUserId::new_v7();
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        connection
+            .execute(
+                r#"
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, created_at, updated_at
+                )
+                SELECT ?1, 'otheradmin', password_hash, client_id, profile_id,
+                       1, 0, 1, created_at, updated_at
+                FROM browser_users WHERE user_id = ?2
+                "#,
+                params![other_user_id.to_string(), user_id.to_string()],
+            )
+            .expect("seed second administrator");
+        drop(connection);
+        assert!(!kernel
             .delete_browser_user(DeleteBrowserUserCommand::new(
                 fasti_domain::RequestCorrelationId::new_v7(),
-                session,
-                csrf,
+                fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
+                other_user_id,
+                BrowserPassword::try_new("editedadmin").expect("password"),
+            ))
+            .expect("delete another user"));
+        assert!(kernel
+            .delete_browser_user(DeleteBrowserUserCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
                 user_id,
                 BrowserPassword::try_new("editedadmin").expect("password"),
             ))
-            .expect("delete user");
+            .expect("delete user"));
         kernel
             .ensure_development_browser_user(
                 BrowserUsername::try_new("testadmin").expect("username"),

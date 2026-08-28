@@ -1,5 +1,5 @@
 use anyhow::{ensure, Context};
-use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy};
+use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy, WorkspaceExportEntity};
 use fasti_contracts::{ChecksummedWorkspaceManifestDto, HealthResponse, ProblemDetails};
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde_json::{Map, Value};
@@ -589,27 +589,7 @@ fn portability_v2_schema() -> anyhow::Result<Value> {
         .context("generated portability schema omits format_version")? = serde_json::json!({
         "const": 2
     });
-    let entities = [
-        "workspaces",
-        "profiles",
-        "clients",
-        "records",
-        "namespaces",
-        "external_identifiers",
-        "evidence",
-        "observations",
-        "observation_clues",
-        "occurrences",
-        "interpretations",
-        "review_items",
-        "review_candidates",
-        "corrections",
-        "receipts",
-        "operations",
-        "metadata_field_claims",
-        "metadata_field_overrides",
-        "profile_record_tracking_dispositions",
-    ];
+    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
     *schema
         .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
         .context("generated portability schema omits streams")? = serde_json::json!({
@@ -642,11 +622,10 @@ fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .and_then(Value::as_array_mut)
         .context("archive-v1 example omits streams")?;
     let empty_digest = format!("sha256:{:x}", Sha256::digest([]));
-    for entity in [
-        "metadata_field_claims",
-        "metadata_field_overrides",
-        "profile_record_tracking_dispositions",
-    ] {
+    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V1.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
         streams.push(serde_json::json!({
             "entity": entity,
             "row_count": 0,

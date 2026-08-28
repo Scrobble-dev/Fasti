@@ -16,8 +16,8 @@ POST /api/v1/observations
 
 The route:
 
-- requires a scoped bearer credential;
-- accepts only on the local loopback API;
+- requires a scoped bearer credential or an authenticated browser session;
+- accepts requests on the local loopback API or through Fasti's explicit trusted HTTPS proxy boundary;
 - stores the normalized request as immutable content-addressed evidence;
 - authenticates and authorizes the client before mutation;
 - derives the Fasti operation identity from the authenticated client, source, and source event identity;

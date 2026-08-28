@@ -391,7 +391,7 @@ pub(crate) async fn delete_user(
     let current_password = BrowserPassword::try_new(request.current_password)
         .map_err(|_| validation_problem(capability, correlation_id))?;
     let kernel = state.kernel;
-    run_kernel(capability, correlation_id, move || {
+    let deleted_self = run_kernel(capability, correlation_id, move || {
         kernel.delete_browser_user(DeleteBrowserUserCommand::new(
             correlation_id,
             session,
@@ -401,7 +401,12 @@ pub(crate) async fn delete_user(
         ))
     })
     .await?;
-    Ok((clear_cookies(state.secure_cookies), StatusCode::NO_CONTENT).into_response())
+    let headers = if deleted_self {
+        clear_cookies(state.secure_cookies)
+    } else {
+        no_store_headers()
+    };
+    Ok((headers, StatusCode::NO_CONTENT).into_response())
 }
 
 pub(crate) fn router() -> Router<LocalApiState> {

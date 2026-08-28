@@ -728,12 +728,15 @@ fn tmdb_request(
     url: reqwest::Url,
     credential: Option<String>,
 ) -> Result<reqwest::RequestBuilder, DesktopProblem> {
-    let mut secret = credential.ok_or_else(|| {
+    let mut credential = credential.ok_or_else(|| {
         DesktopProblem::provider_credential(
             "Add a TMDB API Read Access Token in Settings before searching TMDB.",
         )
     })?;
-    secret.insert_str(0, "Bearer ");
+    let mut secret = String::with_capacity("Bearer ".len() + credential.len());
+    secret.push_str("Bearer ");
+    secret.push_str(&credential);
+    credential.zeroize();
     let header_result = HeaderValue::from_str(&secret);
     secret.zeroize();
     let mut header = header_result
@@ -793,11 +796,16 @@ fn validate_credential_bytes(value: &[u8]) -> Result<(), DesktopProblem> {
 }
 
 fn validate_provider_id(provider_id: &str) -> Result<(), DesktopProblem> {
-    if valid_candidate_text(provider_id, 256) {
+    if !provider_id.is_empty()
+        && provider_id.len() <= 256
+        && provider_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
         Ok(())
     } else {
         Err(DesktopProblem::configuration(
-            "The provider ID must contain 1 to 256 bytes without leading, trailing, or control characters.",
+            "The provider ID must contain 1 to 256 ASCII letters, digits, hyphens, or underscores.",
         ))
     }
 }
@@ -1007,6 +1015,8 @@ mod tests {
         assert!(validate_query("isbn:9780140328721").is_ok());
         assert!(validate_query(" leading").is_err());
         assert!(validate_query(&"x".repeat(QUERY_LIMIT + 1)).is_err());
+        assert!(validate_provider_id("book_42-valid").is_ok());
+        assert!(validate_provider_id("../other-path").is_err());
     }
 
     #[test]

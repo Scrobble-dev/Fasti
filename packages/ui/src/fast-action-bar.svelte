@@ -28,12 +28,8 @@
     onOpenContextMenu,
   }: Props = $props();
 
-  const isWatched = $derived(
-    Boolean(onToggleWatched && record.status === "completed"),
-  );
-  const isWatchlist = $derived(
-    Boolean(onToggleWatchlist && record.status === "plan_to_watch"),
-  );
+  const isWatched = $derived(record.status === "completed");
+  const isWatchlist = $derived(record.status === "plan_to_watch");
 </script>
 
 <div

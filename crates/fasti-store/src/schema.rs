@@ -1,4 +1,5 @@
-use rusqlite::{Connection, Result};
+use crate::{access::FULL_ADMIN_SCOPES, kernel::scope_storage_key};
+use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
 pub(crate) const SCHEMA_VERSION: i64 = 9;
@@ -684,10 +685,9 @@ fn migrate_v7(connection: &Connection) -> Result<()> {
 }
 
 fn migrate_v8(connection: &Connection) -> Result<()> {
-    connection.execute_batch(
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
         r#"
-        BEGIN IMMEDIATE;
-
         CREATE TABLE browser_users (
             user_id TEXT PRIMARY KEY,
             username TEXT NOT NULL UNIQUE,
@@ -702,6 +702,32 @@ fn migrate_v8(connection: &Connection) -> Result<()> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         ) STRICT;
+
+        CREATE TRIGGER browser_users_scope_insert
+        BEFORE INSERT ON browser_users
+        WHEN NOT EXISTS (
+            SELECT 1
+            FROM clients c
+            JOIN profiles p ON p.profile_id = NEW.profile_id
+            WHERE c.client_id = NEW.client_id
+              AND c.workspace_id = p.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'browser user crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER browser_users_scope_update
+        BEFORE UPDATE ON browser_users
+        WHEN NOT EXISTS (
+            SELECT 1
+            FROM clients c
+            JOIN profiles p ON p.profile_id = NEW.profile_id
+            WHERE c.client_id = NEW.client_id
+              AND c.workspace_id = p.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'browser user crosses a workspace boundary');
+        END;
 
         CREATE TABLE browser_sessions (
             session_digest TEXT PRIMARY KEY,
@@ -721,19 +747,25 @@ fn migrate_v8(connection: &Connection) -> Result<()> {
             seeded_at TEXT NOT NULL
         ) STRICT;
 
-        INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
-        SELECT pg.grant_id, 'browser_user_manage'
-        FROM profile_grants pg
-        JOIN node_state ns
-          ON ns.singleton = 1
-         AND ns.client_id = pg.client_id
-         AND ns.profile_id = pg.profile_id
-        WHERE pg.status = 'active';
-
-        PRAGMA user_version = 8;
-        COMMIT;
         "#,
-    )
+    )?;
+    for scope in FULL_ADMIN_SCOPES {
+        transaction.execute(
+            r#"
+            INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
+            SELECT pg.grant_id, ?1
+            FROM profile_grants pg
+            JOIN node_state ns
+              ON ns.singleton = 1
+             AND ns.client_id = pg.client_id
+             AND ns.profile_id = pg.profile_id
+            WHERE pg.status = 'active'
+            "#,
+            [scope_storage_key(*scope)],
+        )?;
+    }
+    transaction.pragma_update(None, "user_version", 8)?;
+    transaction.commit()
 }
 
 fn migrate_v9(connection: &Connection) -> Result<()> {
@@ -961,6 +993,103 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read current version");
         assert_eq!(after, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn version_six_upgrade_backfills_the_full_node_owner_scope_set() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("version one");
+        migrate_v2(&connection).expect("version two");
+        migrate_v3(&connection).expect("version three");
+        migrate_v4(&connection).expect("version four");
+        migrate_v5(&connection).expect("version five");
+        migrate_v6(&connection).expect("version six");
+        seed_version_one_rows(&connection);
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO profile_grants(
+                    grant_id, workspace_id, profile_id, client_id, status, created_at
+                ) VALUES (
+                    'grt_seed', 'wsp_seed', 'prf_seed', 'cli_seed', 'active',
+                    '2026-08-24T00:00:05Z'
+                );
+                INSERT INTO grant_scopes(grant_id, scope_key)
+                    VALUES ('grt_seed', 'capability_read');
+                INSERT INTO node_state(
+                    singleton, initialized, workspace_id, profile_id, client_id, created_at
+                ) VALUES (
+                    1, 1, 'wsp_seed', 'prf_seed', 'cli_seed',
+                    '2026-08-24T00:00:06Z'
+                );
+                "#,
+            )
+            .expect("seed enrolled version-six node");
+
+        migrate(&connection).expect("upgrade version-six database");
+
+        let scopes: Vec<String> = connection
+            .prepare(
+                "SELECT scope_key FROM grant_scopes WHERE grant_id = 'grt_seed' ORDER BY scope_key",
+            )
+            .expect("prepare scope query")
+            .query_map([], |row| row.get(0))
+            .expect("query scopes")
+            .collect::<Result<_, _>>()
+            .expect("collect scopes");
+        let mut expected: Vec<_> = FULL_ADMIN_SCOPES
+            .iter()
+            .map(|scope| scope_storage_key(*scope).to_owned())
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(scopes, expected);
+    }
+
+    #[test]
+    fn browser_users_cannot_cross_workspace_client_and_profile_ownership() {
+        let connection = migrated_connection();
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_browser_a', '2026-08-24T00:00:00Z');
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_browser_b', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_browser_a', 'wsp_browser_a', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_browser_b', 'wsp_browser_b', '2026-08-24T00:00:00Z');
+                INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at)
+                    VALUES ('cli_browser_a', 'wsp_browser_a', 'active', 1, '2026-08-24T00:00:00Z');
+                "#,
+            )
+            .expect("seed browser ownership graph");
+        let insert_user = |user_id: &str, profile_id: &str| {
+            connection.execute(
+                r#"
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, created_at, updated_at
+                ) VALUES (?1, ?1, 'hash', 'cli_browser_a', ?2, 1, 1, 1, ?3, ?3)
+                "#,
+                params![user_id, profile_id, CREATED_AT],
+            )
+        };
+
+        assert!(insert_user("usr_cross", "prf_browser_b").is_err());
+        assert_eq!(
+            insert_user("usr_same", "prf_browser_a").expect("same workspace"),
+            1
+        );
+        assert!(connection
+            .execute(
+                "UPDATE browser_users SET profile_id = 'prf_browser_b' WHERE user_id = 'usr_same'",
+                [],
+            )
+            .is_err());
     }
 
     /// Seed the minimum row set that a real version-one database would hold.

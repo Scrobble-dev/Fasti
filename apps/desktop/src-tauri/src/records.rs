@@ -5,7 +5,7 @@ use fasti_application::{
     ApplyProviderMetadataCommand, AttachIdentifierCommand, CreateProviderRecordCommand,
     CreateRecordCommand, IdentityPort, ListRecordsQuery, ListTrackingDispositionsQuery,
     ProfileRecordStatePort, ProviderMetadataPort, RegisterNamespaceDefinitionCommand,
-    SetTrackingDispositionCommand,
+    RequestAccessContext, SetTrackingDispositionCommand,
 };
 use fasti_contracts::{
     TrackingDispositionDto, TrackingDispositionStateDto, TrackingDispositionUpdateDto,
@@ -257,10 +257,9 @@ fn register_provider_namespace(
 
 pub(crate) fn create_provider_record(
     kernel: &SqliteKernel,
-    store: &impl SetupSecretStore,
+    access: RequestAccessContext,
     candidate: ProviderCandidate,
 ) -> Result<CreateRecordView, DesktopProblem> {
-    let access = require_access(kernel, store)?;
     register_provider_namespace(kernel, access, &candidate)?;
     let grain = candidate.grain()?;
     let identifier = candidate.identifier()?;
@@ -282,14 +281,10 @@ pub(crate) fn create_provider_record(
 
 pub(crate) fn apply_provider_metadata(
     kernel: &SqliteKernel,
-    store: &impl SetupSecretStore,
-    record_id: &str,
+    access: RequestAccessContext,
+    record_id: RecordId,
     candidate: ProviderCandidate,
 ) -> Result<(), DesktopProblem> {
-    let access = require_access(kernel, store)?;
-    let record_id = record_id
-        .parse::<RecordId>()
-        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
     register_provider_namespace(kernel, access, &candidate)?;
     let identifier = candidate.identifier()?;
     let fields = candidate.metadata_fields()?;

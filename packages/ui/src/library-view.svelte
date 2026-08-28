@@ -172,7 +172,7 @@
           onReconcile: onOpenReconciliation,
           onCopyId:
             typeof navigator !== "undefined" && navigator.clipboard
-              ? () => void navigator.clipboard.writeText(rec.id)
+              ? () => void navigator.clipboard.writeText(rec.id).catch(() => {})
               : undefined,
         },
         contextMenuConfigs,

@@ -154,6 +154,7 @@
       editPassword = "";
       if (sessionInvalidated) {
         username = updated.username;
+        users = [];
         onSessionChange(null);
         notice = "Account updated. Sign in again with the new details.";
       } else {

@@ -29,7 +29,7 @@
     return menuRef
       ? Array.from(
           menuRef.querySelectorAll<HTMLButtonElement>("[role=menuitem]"),
-        ).filter((button) => !button.disabled)
+        )
       : [];
   }
 
@@ -124,7 +124,10 @@
         type="button"
         class="dropdown-item d-flex align-items-center gap-2 py-2"
         class:text-danger={item.danger}
-        disabled={item.disabled}
+        aria-disabled={item.disabled || undefined}
+        aria-describedby={item.description
+          ? `context-${item.id}-description`
+          : undefined}
         onclick={() => {
           if (item.disabled) return;
           item.action();
@@ -143,7 +146,9 @@
         <span class="menu-item-copy">
           <span>{item.label}</span>
           {#if item.description}
-            <small>{item.description}</small>
+            <small id={`context-${item.id}-description`}
+              >{item.description}</small
+            >
           {/if}
         </span>
       </button>
@@ -182,7 +187,7 @@
     line-height: 1.3;
   }
 
-  .dropdown-item:disabled {
+  .dropdown-item[aria-disabled="true"] {
     cursor: not-allowed;
     opacity: 0.62;
   }

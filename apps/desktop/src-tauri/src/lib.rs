@@ -19,6 +19,8 @@ use endpoint::{EndpointConnectionInput, EndpointConnectionStatus};
 #[cfg(feature = "desktop-runtime")]
 use fasti_store::SqliteKernel;
 #[cfg(feature = "desktop-runtime")]
+use fasti_domain::RecordId;
+#[cfg(feature = "desktop-runtime")]
 use network_config::{NetworkConfigStore, NetworkConfiguration, SaveNetworkConfigurationInput};
 #[cfg(feature = "desktop-runtime")]
 use providers::{
@@ -204,6 +206,8 @@ async fn track_provider_candidate(
     input: ProviderSelectionInput,
 ) -> Result<records::CreateRecordView, DesktopProblem> {
     let kernel = state.kernel()?;
+    let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
+    let access = records::require_access(&kernel, &store)?;
     let configuration = state.network.load()?;
     let candidate = providers::fetch_selection(
         input,
@@ -215,11 +219,7 @@ async fn track_provider_candidate(
         .artwork
         .cache_candidate(&candidate, configuration.outbound_policy())
         .await?;
-    records::create_provider_record(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-        candidate,
-    )
+    records::create_provider_record(&kernel, access, candidate)
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -237,6 +237,12 @@ async fn apply_provider_metadata(
     input: ApplyProviderMetadataInput,
 ) -> Result<(), DesktopProblem> {
     let kernel = state.kernel()?;
+    let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
+    let access = records::require_access(&kernel, &store)?;
+    let record_id = input
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
     let configuration = state.network.load()?;
     let candidate = providers::fetch_selection(
         input.selection,
@@ -248,12 +254,7 @@ async fn apply_provider_metadata(
         .artwork
         .cache_candidate(&candidate, configuration.outbound_policy())
         .await?;
-    records::apply_provider_metadata(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-        &input.record_id,
-        candidate,
-    )
+    records::apply_provider_metadata(&kernel, access, record_id, candidate)
 }
 
 #[cfg(feature = "desktop-runtime")]

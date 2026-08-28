@@ -20,7 +20,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
 const INITIALIZATION_LIFETIME_MINUTES: i64 = 10;
-const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
+pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::CapabilityRead,
     ScopeKey::ProfileSelect,
     ScopeKey::CredentialManage,
