@@ -12,10 +12,10 @@
   interface Props {
     record: MediaRecord;
     onSelectRecord: (recordId: string) => void;
-    onToggleWatched: (rec: MediaRecord) => void;
-    onToggleWatchlist: (rec: MediaRecord) => void;
-    onOpenCollection: (rec: MediaRecord) => void;
-    onOpenReview: (rec: MediaRecord) => void;
+    onToggleWatched?: (rec: MediaRecord) => void;
+    onToggleWatchlist?: (rec: MediaRecord) => void;
+    onOpenCollection?: (rec: MediaRecord) => void;
+    onOpenReview?: (rec: MediaRecord) => void;
     onOpenContextMenu: (rec: MediaRecord, e: MouseEvent) => void;
   }
 
@@ -118,8 +118,8 @@
       {record}
       {onToggleWatched}
       {onToggleWatchlist}
-      onOpenCollection={(r) => onOpenCollection(r)}
-      onOpenReview={(r) => onOpenReview(r)}
+      {onOpenCollection}
+      {onOpenReview}
       onOpenContextMenu={(r, e) => onOpenContextMenu(r, e)}
     />
   </div>

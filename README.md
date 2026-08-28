@@ -246,7 +246,7 @@ The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user
 
 The approved [brand and design system](brand/DESIGN.md) is a protected input. B0 preserves its tokens, logos, boards, preview assets, accessibility rules, and ADHD/AuDHD state-continuity requirements byte-for-byte.
 
-The pre-production Workbench is the active B4 interface over the headless contract and local kernel. It provides media-first navigation, poster and row views, a collapsible rail, browser account access, implemented data reads, visible quick actions, and a Tabler-based theme panel governed by Fasti tokens. Capabilities that remain immature must be completed against real data rather than removed or presented as successful. There is no playback control and no persistent “offline ready” badge.
+The pre-production Workbench is the active B4 interface over the headless contract and local kernel. It provides media-first navigation, poster and row views, a collapsible rail, browser account access, global record and navigation search, implemented data reads, configurable grouped record actions, profile-owned tracking disposition, and a Tabler-based theme panel governed by Fasti tokens. Unsupported completion, progress, watchlist, collection, review, and tag mutations remain visibly unavailable instead of reporting prototype success. There is no playback control and no persistent “offline ready” badge.
 
 ## Relationship to Scrobble.dev
 
@@ -258,7 +258,7 @@ The pre-production Workbench is the active B4 interface over the headless contra
 - **B1: Executable contract spine** — software surfaces are executable and drift-proof; closure still requires a current aggregate manifest with QA, Tauri, and same-attempt x86_64/aarch64 envelope receipts.
 - **B2: Local kernel** — observation acceptance, browser sessions, identity records/identifiers/namespaces, and profile tracking state are activated on durable local and governed remote surfaces; bootstrap stays loopback-only; evidence, receipts, and identity review remain behind internal ports for review.
 - **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
-- **B4: Product experience** — the Tabler Workbench and browser-account lifecycle are active pre-production work; metadata selection, enrichment, configurable actions, full settings maturity, and release evidence remain open.
+- **B4: Product experience** — the Tabler Workbench, browser-account lifecycle, global search, configurable record actions, and profile-owned tracking disposition are active pre-production work; metadata selection, enrichment, full settings maturity, and release evidence remain open.
 - **B5 and later** — implement provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
 
 Nuvio adaptation does not begin before the B7 provider gate, applicable B8 evidence, and maintainer agreement. See [ROADMAP.md](ROADMAP.md) for the dependency order.

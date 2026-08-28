@@ -51,10 +51,10 @@ impl DesktopState {
         if let Some(kernel) = current.as_ref() {
             return Ok(Arc::clone(kernel));
         }
-        let kernel = Arc::new(
-            SqliteKernel::open(&self.data_root)
-                .map_err(|_| DesktopProblem::storage("Fasti could not open its local data root."))?,
-        );
+        let kernel =
+            Arc::new(SqliteKernel::open(&self.data_root).map_err(|_| {
+                DesktopProblem::storage("Fasti could not open its local data root.")
+            })?);
         *current = Some(Arc::clone(&kernel));
         Ok(kernel)
     }
@@ -250,6 +250,32 @@ fn register_namespace(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
+fn list_tracking_dispositions(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<Vec<fasti_contracts::TrackingDispositionStateDto>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::list_tracking_dispositions(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn set_tracking_disposition(
+    state: tauri::State<'_, DesktopState>,
+    input: records::SetTrackingDispositionInput,
+) -> Result<fasti_contracts::TrackingDispositionStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::set_tracking_disposition(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
 fn list_reviews(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Vec<reviews::ReviewItem>, DesktopProblem> {
@@ -359,6 +385,8 @@ pub fn run() {
             create_record,
             attach_identifier,
             register_namespace,
+            list_tracking_dispositions,
+            set_tracking_disposition,
             list_reviews,
             resolve_review
         ])

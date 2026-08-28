@@ -206,6 +206,155 @@ test("the development browser user can sign in, edit, and delete itself", async 
   expect(accessibility.violations).toEqual([]);
 });
 
+test("global search and configured record actions use durable tracking state", async ({
+  page,
+  context,
+}) => {
+  const recordId = "rec_01991f588e0070008000000000000002";
+  const csrf = "a".repeat(64);
+  let updatedDisposition: string | null = null;
+
+  await context.addCookies([
+    {
+      name: "fasti_csrf",
+      value: csrf,
+      url: "http://127.0.0.1:4173",
+      sameSite: "Strict",
+    },
+  ]);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "fasti-workbench-preferences",
+      JSON.stringify({
+        contextMenuItems: [
+          { id: "view", label: "View Details", visible: false, order: 0 },
+        ],
+      }),
+    );
+  });
+  await page.route(/\/api\/v1\/browser\/session$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        expires_at: "2026-08-28T12:00:00Z",
+        user: {
+          active: true,
+          created_at: "2026-08-28T00:00:00Z",
+          is_admin: true,
+          is_test_account: true,
+          updated_at: "2026-08-28T00:00:00Z",
+          user_id: "usr_01991f58-8e00-7000-8000-000000000001",
+          username: "testadmin",
+        },
+      }),
+    }),
+  );
+  await page.route(/\/api\/v1\/records$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        records: [
+          {
+            grain: "film",
+            latest_activity: {
+              occurred_at: null,
+              interpretation_state: "resolved",
+            },
+            poster: {
+              is_stale: false,
+              tier: "empty",
+              value: null,
+              source: null,
+            },
+            record_id: recordId,
+            status: "active",
+            title: {
+              is_stale: false,
+              tier: "user_override",
+              value: "Alpha Film",
+              source: "local",
+            },
+          },
+        ],
+      }),
+    }),
+  );
+  await page.route(
+    /\/api\/v1\/profile\/record-tracking-dispositions(?:\/[^/]+)?$/,
+    async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        await route.abort("failed");
+        return;
+      }
+      expect(request.method()).toBe("PUT");
+      expect(request.headers()["x-fasti-csrf"]).toBe(csrf);
+      updatedDisposition = request.postDataJSON().disposition;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          record_id: recordId,
+          disposition: updatedDisposition,
+        }),
+      });
+    },
+  );
+
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+  await expect(page.getByText("Alpha Film", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "Records still use their activity fallback.",
+  );
+
+  const search = page.getByRole("combobox", {
+    name: "Search records or commands",
+  });
+  await search.fill("Alpha");
+  await expect(page.getByRole("option", { name: /Alpha Film/ })).toBeVisible();
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "Alpha Film" })).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Profile tracking state" }),
+  ).toHaveValue("unset");
+  await page.getByRole("button", { name: "Back to Library" }).click();
+
+  await page.getByRole("group", { name: "Alpha Film card" }).click({
+    button: "right",
+  });
+  const menu = page.getByRole("menu");
+  await expect(
+    menu.getByText("Playback & tracking", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByText("Library & lists", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByText("Identity & metadata", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: /View media details/ }),
+  ).toHaveCount(0);
+  await expect(
+    menu.getByRole("menuitem", { name: /Update progress and episodes/ }),
+  ).toBeDisabled();
+  await menu.getByRole("menuitem", { name: "Mark as on hold" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "Tracking state set to on hold.",
+  );
+  await expect(page.getByText("on hold", { exact: true })).toBeVisible();
+  expect(updatedDisposition).toBe("on_hold");
+
+  await page.keyboard.press("Control+K");
+  await expect(search).toBeFocused();
+  await search.fill("Settings");
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
     test(`${theme} theme at ${viewport.width}px is truthful, reflowable, and accessible`, async ({

@@ -21,6 +21,8 @@ import type {
   RegisterNamespaceInput,
   RegisterNamespaceResult,
   SaveNetworkConfigurationRequest,
+  TrackingDispositionState,
+  TrackingDispositionUpdate,
   WorkbenchHost,
 } from "@fasti/ui";
 
@@ -334,6 +336,20 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       input: RegisterNamespaceInput,
     ): Promise<RegisterNamespaceResult> {
       return client.registerNamespace(input);
+    },
+
+    async listTrackingDispositions(): Promise<TrackingDispositionState[]> {
+      const response = await client.listTrackingDispositions();
+      return response.states as TrackingDispositionState[];
+    },
+
+    async setTrackingDisposition(
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ): Promise<TrackingDispositionState> {
+      return client.setTrackingDisposition(recordId, {
+        disposition,
+      }) as Promise<TrackingDispositionState>;
     },
 
     async createBrowserSession(

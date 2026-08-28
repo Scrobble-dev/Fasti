@@ -12,6 +12,7 @@
     IconUserCircle,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
+  import GlobalSearch from "./global-search.svelte";
   import HomeView from "./home-view.svelte";
   import ConnectionsView from "./connections-view.svelte";
   import RuntimeSettingsView from "./runtime-settings-view.svelte";
@@ -36,6 +37,7 @@
     ResolveReviewInput,
     ReviewItem,
     ThemeSettings,
+    TrackingDispositionUpdate,
     WorkbenchHost,
     WorkbenchPreferences,
   } from "./types.js";
@@ -112,6 +114,7 @@
 
   let activeSection = $state<Section>("home");
   let selectedRecordId = $state<string | null>(null);
+  let selectedRecordTab = $state<"overview" | "sources">("overview");
 
   // A prior session's localStorage predates nav items or context-menu items
   // added since (e.g. "settings", "connections") -- without this, those
@@ -228,8 +231,12 @@
     select(section as Section);
   }
 
-  function openRecord(recordId: string): void {
+  function openRecord(
+    recordId: string,
+    tab: "overview" | "sources" = "overview",
+  ): void {
     selectedRecordId = recordId;
+    selectedRecordTab = tab;
     select("detail");
   }
 
@@ -300,6 +307,8 @@
   let mediaRecords = $state<MediaRecord[]>([]);
   let recordsLoading = $state(false);
   let recordsProblem = $state<string | undefined>(undefined);
+  let recordActionProblem = $state<string | undefined>(undefined);
+  let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
 
   async function loadRecords(): Promise<void> {
@@ -310,7 +319,23 @@
     recordsLoading = true;
     recordsProblem = undefined;
     try {
-      mediaRecords = (await host.listRecords()).map(projectRecordSummary);
+      const statesPromise = host.listTrackingDispositions
+        ? host.listTrackingDispositions().catch((error) => {
+            const detail = hostProblemText(error, "Fasti request failed.");
+            recordActionProblem = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
+            return [];
+          })
+        : Promise.resolve([]);
+      const [summaries, states] = await Promise.all([
+        host.listRecords(),
+        statesPromise,
+      ]);
+      const dispositions = new Map(
+        states.map((state) => [state.record_id, state.disposition]),
+      );
+      mediaRecords = summaries.map((summary) =>
+        projectRecordSummary(summary, dispositions.get(summary.record_id)),
+      );
     } catch (error) {
       recordsProblem = hostProblemText(
         error,
@@ -318,6 +343,42 @@
       );
     } finally {
       recordsLoading = false;
+    }
+  }
+
+  async function setTrackingDisposition(
+    recordId: string,
+    disposition: TrackingDispositionUpdate,
+  ): Promise<void> {
+    if (!host.setTrackingDisposition) {
+      recordActionProblem =
+        "Profile tracking state is not available on this host.";
+      return;
+    }
+    recordActionProblem = undefined;
+    recordActionNotice = undefined;
+    try {
+      const state = await host.setTrackingDisposition(recordId, disposition);
+      mediaRecords = mediaRecords.map((record) =>
+        record.id === recordId
+          ? {
+              ...record,
+              status:
+                state.disposition ??
+                (record.lastActivityAt ? "watching" : "plan_to_watch"),
+              trackingDisposition: state.disposition,
+            }
+          : record,
+      );
+      recordActionNotice =
+        disposition === "unset"
+          ? "Tracking state now follows recorded activity."
+          : `Tracking state set to ${disposition.replaceAll("_", " ")}.`;
+    } catch (error) {
+      recordActionProblem = hostProblemText(
+        error,
+        "Could not update the profile tracking state.",
+      );
     }
   }
 
@@ -386,6 +447,12 @@
   const selectedRecord = $derived(
     mediaRecords.find((record) => record.id === selectedRecordId),
   );
+  const showsRecordFeedback = $derived(
+    activeSection === "home" ||
+      activeSection === "library" ||
+      activeSection === "calendar" ||
+      activeSection === "detail",
+  );
 
   $effect(() => {
     if (activeSection === "discover" && !discoverLoaded) {
@@ -397,10 +464,6 @@
       void loadReviews();
     }
     if (
-      (activeSection === "home" ||
-        activeSection === "library" ||
-        activeSection === "calendar" ||
-        activeSection === "detail") &&
       (!host.currentBrowserSession ||
         (browserSessionChecked && browserSession !== null)) &&
       !recordsLoaded
@@ -519,32 +582,51 @@
         <span class="section-title">{formatSectionTitle(activeSection)}</span>
       </div>
 
-      <button
-        type="button"
-        class="icon-btn"
-        onclick={() => (themeDrawerOpen = true)}
-        title="Theme settings"
-        aria-label="Theme settings"
-      >
-        <IconPalette size={18} />
-      </button>
+      <GlobalSearch
+        records={mediaRecords}
+        navItems={workbenchPreferences.navItems}
+        onSelectRecord={openRecord}
+        onSelectSection={handleSelectSection}
+      />
 
-      <button
-        type="button"
-        class="icon-btn"
-        onclick={() => (authModalOpen = true)}
-        title={browserSession
-          ? `Account: ${browserSession.user.username}`
-          : "Sign in"}
-        aria-label={browserSession
-          ? `Manage account ${browserSession.user.username}`
-          : "Sign in"}
-      >
-        <IconUserCircle size={18} />
-      </button>
+      <div class="top-bar-actions">
+        <button
+          type="button"
+          class="icon-btn"
+          onclick={() => (themeDrawerOpen = true)}
+          title="Theme settings"
+          aria-label="Theme settings"
+        >
+          <IconPalette size={18} />
+        </button>
+
+        <button
+          type="button"
+          class="icon-btn"
+          onclick={() => (authModalOpen = true)}
+          title={browserSession
+            ? `Account: ${browserSession.user.username}`
+            : "Sign in"}
+          aria-label={browserSession
+            ? `Manage account ${browserSession.user.username}`
+            : "Sign in"}
+        >
+          <IconUserCircle size={18} />
+        </button>
+      </div>
     </header>
 
     <main id="main-content" class="main-content" tabindex="-1">
+      {#if showsRecordFeedback && recordActionNotice}
+        <p class="record-action-feedback" role="status">
+          {recordActionNotice}
+        </p>
+      {/if}
+      {#if showsRecordFeedback && recordActionProblem}
+        <p class="record-action-feedback problem" role="alert">
+          {recordActionProblem}
+        </p>
+      {/if}
       {#if activeSection === "connections"}
         <ConnectionsView {host} />
       {:else if activeSection === "settings"}
@@ -604,6 +686,10 @@
             records={mediaRecords}
             availableCollections={[]}
             onSelectRecord={openRecord}
+            contextMenuConfigs={workbenchPreferences.contextMenuItems}
+            onSetTrackingDisposition={(recordId, disposition) =>
+              void setTrackingDisposition(recordId, disposition)}
+            onOpenReconciliation={() => select("reconciliation")}
           />
         {/if}
       {:else if activeSection === "calendar"}
@@ -623,7 +709,12 @@
           <MediaDetailView
             record={selectedRecord}
             availableCollections={[]}
+            initialTab={selectedRecordTab}
+            contextMenuConfigs={workbenchPreferences.contextMenuItems}
             onBack={() => select("library")}
+            onSetTrackingDisposition={(recordId, disposition) =>
+              void setTrackingDisposition(recordId, disposition)}
+            onOpenReconciliation={() => select("reconciliation")}
           />
         {:else}
           <div class="state-message">
@@ -645,6 +736,10 @@
             records={mediaRecords}
             availableCollections={[]}
             onSelectRecord={openRecord}
+            contextMenuConfigs={workbenchPreferences.contextMenuItems}
+            onSetTrackingDisposition={(recordId, disposition) =>
+              void setTrackingDisposition(recordId, disposition)}
+            onOpenReconciliation={() => select("reconciliation")}
           />
         {/if}
       {:else}
@@ -775,6 +870,8 @@
       mediaRecords = [];
       recordsLoaded = false;
       recordsProblem = undefined;
+      recordActionNotice = undefined;
+      recordActionProblem = undefined;
     }
   }}
 />
@@ -828,6 +925,13 @@
     align-items: center;
     gap: 10px;
     min-width: 0;
+    flex: 0 1 220px;
+  }
+
+  .top-bar-actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
   }
 
   .section-title {
@@ -867,6 +971,29 @@
   .main-content {
     min-width: 0;
     flex: 1;
+  }
+
+  .record-action-feedback {
+    margin: 0;
+    padding: 9px 16px;
+    border-bottom: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-verified) 10%,
+      var(--fasti-surface-paper)
+    );
+    color: var(--fasti-text-primary);
+    font-size: 0.86rem;
+  }
+
+  .record-action-feedback.problem {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-error, #b42318) 10%,
+      var(--fasti-surface-paper)
+    );
+    color: var(--fasti-state-error, #b42318);
   }
 
   .state-message {
@@ -1001,6 +1128,20 @@
   }
 
   @media (max-width: 56rem) {
+    .top-bar {
+      flex-wrap: wrap;
+    }
+
+    .top-bar-left {
+      flex: 1 1 auto;
+    }
+
+    .top-bar :global(.global-search) {
+      order: 3;
+      flex: 1 0 100%;
+      width: 100%;
+    }
+
     .overview {
       padding: 32px 20px 56px;
     }

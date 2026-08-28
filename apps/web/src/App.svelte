@@ -196,6 +196,11 @@
         createRecord: (grain) => invoke("create_record", { grain }),
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),
+        listTrackingDispositions: () => invoke("list_tracking_dispositions"),
+        setTrackingDisposition: (recordId, disposition) =>
+          invoke("set_tracking_disposition", {
+            input: { record_id: recordId, disposition },
+          }),
       };
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
     } catch (error) {

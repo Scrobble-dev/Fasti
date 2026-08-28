@@ -1,12 +1,16 @@
 use crate::setup::{authenticate, DesktopProblem, SetupSecretStore};
 use fasti_application::{
     AttachIdentifierCommand, CreateRecordCommand, IdentityPort, ListRecordsQuery,
-    RegisterNamespaceDefinitionCommand,
+    ListTrackingDispositionsQuery, ProfileRecordStatePort, RegisterNamespaceDefinitionCommand,
+    SetTrackingDispositionCommand,
+};
+use fasti_contracts::{
+    TrackingDispositionDto, TrackingDispositionStateDto, TrackingDispositionUpdateDto,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, Grain, InterpretationState, NamespaceDefinition,
     NamespaceLicencePosture, OccurredAt, RecordId, RecordStatus, RequestCorrelationId,
-    ResolvedField,
+    ResolvedField, TrackingDisposition,
 };
 use fasti_store::SqliteKernel;
 use serde::{Deserialize, Serialize};
@@ -199,6 +203,71 @@ pub(crate) fn register_namespace(
     })
 }
 
+fn disposition_dto(disposition: TrackingDisposition) -> TrackingDispositionDto {
+    match disposition {
+        TrackingDisposition::Watching => TrackingDispositionDto::Watching,
+        TrackingDisposition::OnHold => TrackingDispositionDto::OnHold,
+        TrackingDisposition::Dropped => TrackingDispositionDto::Dropped,
+    }
+}
+
+pub(crate) fn list_tracking_dispositions(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+) -> Result<Vec<TrackingDispositionStateDto>, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    kernel
+        .list_tracking_dispositions(ListTrackingDispositionsQuery::new(correlation_id, access))
+        .map(|states| {
+            states
+                .into_iter()
+                .map(|state| TrackingDispositionStateDto {
+                    record_id: state.record_id().to_string(),
+                    disposition: Some(disposition_dto(state.disposition())),
+                })
+                .collect()
+        })
+        .map_err(|problem| DesktopProblem::application(&problem))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SetTrackingDispositionInput {
+    record_id: String,
+    disposition: TrackingDispositionUpdateDto,
+}
+
+pub(crate) fn set_tracking_disposition(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    input: SetTrackingDispositionInput,
+) -> Result<TrackingDispositionStateDto, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let record_id = input
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
+    let disposition = match input.disposition {
+        TrackingDispositionUpdateDto::Watching => Some(TrackingDisposition::Watching),
+        TrackingDispositionUpdateDto::OnHold => Some(TrackingDisposition::OnHold),
+        TrackingDispositionUpdateDto::Dropped => Some(TrackingDisposition::Dropped),
+        TrackingDispositionUpdateDto::Unset => None,
+    };
+    let state = kernel
+        .set_tracking_disposition(SetTrackingDispositionCommand::new(
+            correlation_id,
+            access,
+            record_id,
+            disposition,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(TrackingDispositionStateDto {
+        record_id: record_id.to_string(),
+        disposition: state.map(|value| disposition_dto(value.disposition())),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,7 +428,33 @@ mod tests {
         let first = register_namespace(&kernel, &store, input()).expect("register namespace");
         assert!(first.created);
 
-        let second = register_namespace(&kernel, &store, input()).expect("register namespace again");
+        let second =
+            register_namespace(&kernel, &store, input()).expect("register namespace again");
         assert!(!second.created);
+    }
+
+    #[test]
+    fn tracking_disposition_round_trips_through_the_desktop_adapter() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+        let created = create_record(&kernel, &store, Grain::Film).expect("create record");
+
+        let updated = set_tracking_disposition(
+            &kernel,
+            &store,
+            SetTrackingDispositionInput {
+                record_id: created.record_id.clone(),
+                disposition: TrackingDispositionUpdateDto::OnHold,
+            },
+        )
+        .expect("set disposition");
+        assert_eq!(updated.record_id, created.record_id);
+        assert_eq!(updated.disposition, Some(TrackingDispositionDto::OnHold));
+
+        assert_eq!(
+            list_tracking_dispositions(&kernel, &store).expect("list dispositions"),
+            vec![updated]
+        );
     }
 }

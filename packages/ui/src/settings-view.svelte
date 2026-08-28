@@ -324,7 +324,13 @@
   }
 
   function handleResetNavPreferences(): void {
-    onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
+    const defaults = createDefaultWorkbenchPreferences();
+    onUpdateWorkbenchPreferences?.({
+      sidebarCollapsed: defaults.sidebarCollapsed,
+      sidebarHidden: defaults.sidebarHidden,
+      navItems: defaults.navItems,
+      contextMenuItems: defaults.contextMenuItems,
+    });
   }
 
   async function saveProviderKey(provider: string): Promise<void> {

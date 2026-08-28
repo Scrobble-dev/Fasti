@@ -2,6 +2,7 @@ import type {
   MediaKind,
   MediaRecord,
   RecordSummary,
+  TrackingDisposition,
   WatchStatus,
 } from "./types.js";
 
@@ -43,18 +44,20 @@ function mediaKindForGrain(grain: string): MediaKind {
  * Projects the desktop host's real `RecordSummary` (from `list_records`)
  * onto the presentational `MediaRecord` shape the view components expect.
  *
- * No watch-status pipeline is wired yet (that needs Chronicle/occurrence
- * history, which this pass explicitly does not restore), so `status` is a
- * placeholder: "watching" if the record has any recorded activity, else
- * "plan_to_watch". This asserts nothing false, it just can't be precise yet.
+ * An explicit profile-owned tracking disposition wins. Without one, `status`
+ * remains a presentation fallback: "watching" if the record has any recorded
+ * activity, else "plan_to_watch". Completion still needs Chronicle history;
+ * watchlist intent still needs its own list-membership capability.
  *
  * ponytail: status heuristic ceiling is "activity present or not"; upgrade
  * once occurrence-derived watch status exists.
  */
-export function projectRecordSummary(summary: RecordSummary): MediaRecord {
-  const status: WatchStatus = summary.latest_activity
-    ? "watching"
-    : "plan_to_watch";
+export function projectRecordSummary(
+  summary: RecordSummary,
+  disposition?: TrackingDisposition | null,
+): MediaRecord {
+  const status: WatchStatus =
+    disposition ?? (summary.latest_activity ? "watching" : "plan_to_watch");
   const titleValue =
     summary.title.tier !== "empty" && summary.title.value
       ? summary.title.value
@@ -69,6 +72,7 @@ export function projectRecordSummary(summary: RecordSummary): MediaRecord {
     title: titleValue,
     mediaKind: mediaKindForGrain(summary.grain),
     status,
+    trackingDisposition: disposition ?? null,
     posterUrl: posterValue,
     externalIds: [],
     displaySource: "Fasti local record",

@@ -13,6 +13,14 @@ export type MediaKind =
 export type WatchStatus =
   "watching" | "completed" | "plan_to_watch" | "on_hold" | "dropped";
 
+export type TrackingDisposition = "watching" | "on_hold" | "dropped";
+export type TrackingDispositionUpdate = TrackingDisposition | "unset";
+
+export interface TrackingDispositionState {
+  readonly record_id: string;
+  readonly disposition: TrackingDisposition | null;
+}
+
 export interface ExternalId {
   readonly namespace: string;
   readonly value: string;
@@ -73,6 +81,7 @@ export interface MediaRecord {
   readonly posterUrl?: string;
   readonly backdropUrl?: string;
   readonly status: WatchStatus;
+  readonly trackingDisposition?: TrackingDisposition | null;
   readonly userRating?: number;
   readonly communityRating?: {
     readonly score: number;
@@ -295,6 +304,11 @@ export interface WorkbenchHost {
   registerNamespace?(
     input: RegisterNamespaceInput,
   ): Promise<RegisterNamespaceResult>;
+  listTrackingDispositions?(): Promise<TrackingDispositionState[]>;
+  setTrackingDisposition?(
+    recordId: string,
+    disposition: TrackingDispositionUpdate,
+  ): Promise<TrackingDispositionState>;
   createBrowserSession?(
     username: string,
     password: string,

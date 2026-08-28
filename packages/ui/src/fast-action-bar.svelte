@@ -12,10 +12,10 @@
 
   interface Props {
     record: MediaRecord;
-    onToggleWatched: (record: MediaRecord) => void;
-    onToggleWatchlist: (record: MediaRecord) => void;
-    onOpenCollection: (record: MediaRecord) => void;
-    onOpenReview: (record: MediaRecord) => void;
+    onToggleWatched?: (record: MediaRecord) => void;
+    onToggleWatchlist?: (record: MediaRecord) => void;
+    onOpenCollection?: (record: MediaRecord) => void;
+    onOpenReview?: (record: MediaRecord) => void;
     onOpenContextMenu: (record: MediaRecord, event: MouseEvent) => void;
   }
 
@@ -28,8 +28,12 @@
     onOpenContextMenu,
   }: Props = $props();
 
-  const isWatched = $derived(record.status === "completed");
-  const isWatchlist = $derived(record.status === "plan_to_watch");
+  const isWatched = $derived(
+    Boolean(onToggleWatched && record.status === "completed"),
+  );
+  const isWatchlist = $derived(
+    Boolean(onToggleWatchlist && record.status === "plan_to_watch"),
+  );
 </script>
 
 <div
@@ -42,11 +46,16 @@
     type="button"
     class="fast-btn"
     class:active={isWatched}
+    disabled={!onToggleWatched}
     onclick={(e) => {
       e.stopPropagation();
-      onToggleWatched(record);
+      onToggleWatched?.(record);
     }}
-    title={isWatched ? "Marked as completed / seen" : "Mark as seen"}
+    title={onToggleWatched
+      ? isWatched
+        ? "Marked as completed / seen"
+        : "Mark as seen"
+      : "Completion needs Chronicle progress history"}
     aria-label="Toggle watched"
     aria-pressed={isWatched}
   >
@@ -62,11 +71,16 @@
     type="button"
     class="fast-btn"
     class:active={isWatchlist}
+    disabled={!onToggleWatchlist}
     onclick={(e) => {
       e.stopPropagation();
-      onToggleWatchlist(record);
+      onToggleWatchlist?.(record);
     }}
-    title={isWatchlist ? "In your watchlist" : "Add to watchlist"}
+    title={onToggleWatchlist
+      ? isWatchlist
+        ? "In your watchlist"
+        : "Add to watchlist"
+      : "Watchlist membership is not active on this host"}
     aria-label="Toggle watchlist"
     aria-pressed={isWatchlist}
   >
@@ -81,13 +95,16 @@
   <button
     type="button"
     class="fast-btn"
+    disabled={!onOpenCollection}
     onclick={(e) => {
       e.stopPropagation();
-      onOpenCollection(record);
+      onOpenCollection?.(record);
     }}
-    title={record.collectionName
-      ? `In collection: ${record.collectionName}`
-      : "Add to collection / lists"}
+    title={onOpenCollection
+      ? record.collectionName
+        ? `In collection: ${record.collectionName}`
+        : "Add to collection / lists"
+      : "Collections are not active on this host"}
     aria-label="Add to collection"
   >
     <IconFolder size={16} stroke={2} />
@@ -97,13 +114,16 @@
   <button
     type="button"
     class="fast-btn"
+    disabled={!onOpenReview}
     onclick={(e) => {
       e.stopPropagation();
-      onOpenReview(record);
+      onOpenReview?.(record);
     }}
-    title={record.userRating
-      ? `Rated ${record.userRating}/10`
-      : "Add rating or review"}
+    title={onOpenReview
+      ? record.userRating
+        ? `Rated ${record.userRating}/10`
+        : "Add rating or review"
+      : "Personal ratings and reviews are not active on this host"}
     aria-label="Add rating or review"
   >
     <IconMessage size={16} stroke={2} />
@@ -156,6 +176,16 @@
   .fast-btn:hover {
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
+  }
+
+  .fast-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .fast-btn:disabled:hover {
+    background: transparent;
+    color: var(--fasti-text-muted);
   }
 
   .fast-btn:focus-visible {

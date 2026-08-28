@@ -4,6 +4,8 @@
     WatchStatus,
     ExternalId,
     ChronicleOccurrence,
+    ContextMenuItemConfig,
+    TrackingDispositionUpdate,
   } from "./types.js";
   import {
     IconArrowLeft,
@@ -32,6 +34,7 @@
   import CollectionModal from "./collection-modal.svelte";
   import ArtworkModal, { type ArtworkCandidate } from "./artwork-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
 
   /** Namespaces whose external ID value is a real key an image CDN can
    * resolve directly, and the resolver for that namespace. Providers whose
@@ -54,7 +57,14 @@
     record: MediaRecord;
     availableCollections: string[];
     occurrences?: ChronicleOccurrence[];
+    initialTab?: "overview" | "sources";
+    contextMenuConfigs?: ContextMenuItemConfig[];
     onBack: () => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
     onToggleEpisode?: (recordId: string, episodeId: string) => void;
@@ -80,7 +90,11 @@
     record,
     availableCollections,
     occurrences = [],
+    initialTab = "overview",
+    contextMenuConfigs,
     onBack,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
     onUpdateStatus,
     onUpdateRating,
     onToggleEpisode,
@@ -117,6 +131,7 @@
   $effect(() => {
     if (record.id !== syncedRecordId) {
       syncedRecordId = record.id;
+      activeTab = initialTab;
       editedNotesText = record.userNotes ?? "";
       isEditingNotes = false;
     }
@@ -148,13 +163,19 @@
       .filter((c): c is ArtworkCandidate => c !== null),
   );
 
-  const statusOptions: Array<{ id: WatchStatus; label: string }> = [
+  const trackingOptions: Array<{
+    id: TrackingDispositionUpdate;
+    label: string;
+  }> = [
+    { id: "unset", label: "Automatic from activity" },
     { id: "watching", label: "In Progress / Watching" },
-    { id: "completed", label: "Completed" },
-    { id: "plan_to_watch", label: "Plan to Watch" },
     { id: "on_hold", label: "On Hold" },
     { id: "dropped", label: "Dropped" },
   ];
+
+  const selectedTrackingDisposition = $derived<TrackingDispositionUpdate>(
+    record.trackingDisposition ?? "unset",
+  );
 
   function handleSaveNotes(): void {
     onUpdateNotes?.(record.id, editedNotesText);
@@ -203,32 +224,51 @@
     contextMenuState = {
       x: e.clientX,
       y: e.clientY,
-      items: [
+      items: recordContextMenuItems(
+        record,
         {
-          id: "prog",
-          label: "Update Progress...",
-          icon: IconAdjustments,
-          action: () => (showProgressModal = true),
+          onView: () => (activeTab = "overview"),
+          onSetTrackingDisposition: onSetTrackingDisposition
+            ? (disposition) => onSetTrackingDisposition(record.id, disposition)
+            : undefined,
+          onMarkCompleted: onUpdateStatus
+            ? () =>
+                onUpdateStatus(
+                  record.id,
+                  record.status === "completed" ? "watching" : "completed",
+                )
+            : undefined,
+          onUpdateProgress: onUpdateProgress
+            ? () => (showProgressModal = true)
+            : undefined,
+          onToggleWatchlist: onUpdateStatus
+            ? () =>
+                onUpdateStatus(
+                  record.id,
+                  record.status === "plan_to_watch"
+                    ? "watching"
+                    : "plan_to_watch",
+                )
+            : undefined,
+          onOpenCollection: onSaveCollection
+            ? () => (showCollectionModal = true)
+            : undefined,
+          onOpenReview: onSaveReview
+            ? () => (showReviewModal = true)
+            : undefined,
+          onEditTags:
+            onAddTag || onRemoveTag
+              ? () => (activeTab = "overview")
+              : undefined,
+          onInspectIds: () => (activeTab = "sources"),
+          onReconcile: onOpenReconciliation,
+          onCopyId:
+            typeof navigator !== "undefined" && navigator.clipboard
+              ? () => void navigator.clipboard.writeText(record.id)
+              : undefined,
         },
-        {
-          id: "review",
-          label: "Post a Review...",
-          icon: IconMessage,
-          action: () => (showReviewModal = true),
-        },
-        {
-          id: "coll",
-          label: "Add to Collection...",
-          icon: IconFolderPlus,
-          action: () => (showCollectionModal = true),
-        },
-        { id: "d1", label: "", divider: true, action: () => {} },
-        {
-          id: "copy_id",
-          label: `Copy Fasti ID (${record.id})`,
-          action: () => navigator.clipboard.writeText(record.id),
-        },
-      ],
+        contextMenuConfigs,
+      ),
     };
   }
 </script>
@@ -318,6 +358,7 @@
           <select
             class="rating-select"
             value={record.userRating ?? 0}
+            disabled={!onUpdateRating}
             onchange={(e) =>
               onUpdateRating?.(record.id, Number(e.currentTarget.value))}
             aria-label="User Rating"
@@ -329,16 +370,21 @@
           </select>
         </div>
 
-        <!-- Status Selector Dropdown -->
+        <!-- Profile-owned tracking state. Completion and watchlist intent are
+             separate domains and are not folded into this selector. -->
         <div class="status-select-wrap">
           <select
             class="status-select {record.status}"
-            value={record.status}
+            value={selectedTrackingDisposition}
+            disabled={!onSetTrackingDisposition}
             onchange={(e) =>
-              onUpdateStatus?.(record.id, e.currentTarget.value as WatchStatus)}
-            aria-label="Watch Status"
+              onSetTrackingDisposition?.(
+                record.id,
+                e.currentTarget.value as TrackingDispositionUpdate,
+              )}
+            aria-label="Profile tracking state"
           >
-            {#each statusOptions as opt}
+            {#each trackingOptions as opt}
               <option value={opt.id}>{opt.label}</option>
             {/each}
           </select>
@@ -348,8 +394,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onSaveCollection}
           onclick={() => (showCollectionModal = true)}
-          title="Add to Collection"
+          title={onSaveCollection
+            ? "Add to Collection"
+            : "Collections are not active on this host"}
         >
           <IconBookmark size={18} />
         </button>
@@ -357,8 +406,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onUpdatePoster}
           onclick={() => (showArtworkModal = true)}
-          title="Edit Artwork"
+          title={onUpdatePoster
+            ? "Edit Artwork"
+            : "Artwork editing is not active on this host"}
         >
           <IconPhoto size={18} />
         </button>
@@ -366,8 +418,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onUpdateProgress}
           onclick={() => (showProgressModal = true)}
-          title="Update Progress"
+          title={onUpdateProgress
+            ? "Update Progress"
+            : "Progress editing is not active on this host"}
         >
           <IconAdjustments size={18} />
         </button>
@@ -712,6 +767,10 @@
             <button
               type="button"
               class="ryot-action-btn"
+              disabled={!onUpdateProgress}
+              title={onUpdateProgress
+                ? "Update progress"
+                : "Progress editing is not active on this host"}
               onclick={() => (showProgressModal = true)}
             >
               <div class="action-btn-icon"><IconAdjustments size={22} /></div>
@@ -724,6 +783,10 @@
             <button
               type="button"
               class="ryot-action-btn"
+              disabled={!onSaveReview}
+              title={onSaveReview
+                ? "Post a review"
+                : "Personal ratings and reviews are not active on this host"}
               onclick={() => (showReviewModal = true)}
             >
               <div class="action-btn-icon"><IconMessage size={22} /></div>
@@ -736,6 +799,10 @@
             <button
               type="button"
               class="ryot-action-btn"
+              disabled={!onSaveCollection}
+              title={onSaveCollection
+                ? "Add to collection"
+                : "Collections are not active on this host"}
               onclick={() => (showCollectionModal = true)}
             >
               <div class="action-btn-icon"><IconFolderPlus size={22} /></div>
@@ -875,6 +942,10 @@
               <button
                 type="button"
                 class="edit-notes-btn"
+                disabled={!onUpdateNotes}
+                title={onUpdateNotes
+                  ? "Edit notes"
+                  : "Personal notes are not active on this host"}
                 onclick={() => {
                   editedNotesText = record.userNotes ?? "";
                   isEditingNotes = true;
@@ -928,6 +999,7 @@
                 <button
                   type="button"
                   class="tag-delete-btn"
+                  disabled={!onRemoveTag}
                   onclick={() => onRemoveTag?.(record.id, tag)}
                   aria-label="Remove tag {tag}"
                 >
@@ -939,6 +1011,7 @@
             <form onsubmit={handleAddTagSubmit} class="add-tag-form">
               <input
                 type="text"
+                disabled={!onAddTag}
                 placeholder="+ Add tag..."
                 bind:value={newTagInput}
                 class="add-tag-input"
@@ -1639,7 +1712,8 @@
       var(--fasti-state-verified) 12%,
       transparent
     );
-    border-left: 4px solid var(--fasti-state-verified);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-verified) 32%, transparent);
     border-radius: 4px;
     margin-bottom: 20px;
   }

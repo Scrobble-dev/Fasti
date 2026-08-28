@@ -32,7 +32,7 @@ The fixture separates contract proof from availability claims. Its finite routes
 
 Required surfaces are generated or validated from the registry across domain/application ownership, OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, semantic examples, CLI, typed TypeScript HTTP/SSE SDK, knowledge, and package smoke. Reasoned `N/A` is explicit—for example, operational health has no event stream and access administration is not linked-data domain state.
 
-The browser Workbench consumes generated production DTO parsers and browser-session cookies. Integration clients continue to use separately revocable scoped bearer credentials. The local Vite proxy is QA tooling, not an endpoint-configuration authority. Browser account request/response operations are OpenAPI-owned; they do not add an AsyncAPI event channel or JSON-LD domain entity.
+The browser Workbench consumes generated production DTO parsers and browser-session cookies. Its global search uses loaded records and valid navigation commands. Its shared, configurable record-action registry mutates only active host capabilities; unsupported completion, progress, watchlist, collection, review, and tag operations stay disabled. Profile tracking disposition uses the governed profile-state route on web and the same application port on Desktop. Integration clients continue to use separately revocable scoped bearer credentials. The local Vite proxy is QA tooling, not an endpoint-configuration authority. Browser account request/response operations are OpenAPI-owned; they do not add an AsyncAPI event channel or JSON-LD domain entity.
 
 The trusted Tauri host can persist non-secret network preferences, test a
 configured Fasti service, store a Google Books key in the platform credential
