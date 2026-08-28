@@ -190,13 +190,7 @@ pub(crate) fn save_credential(
     identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
     let result = (|| {
-        let provider = provider(&input.provider)?;
-        if environment_is_configured(provider)? {
-            return Err(DesktopProblem::secure_storage(format!(
-                "The {} credential is managed by {}.",
-                provider.label, provider.environment
-            )));
-        }
+        let provider = writable_provider(&input.provider)?;
         validate_credential(provider, &input.credential)?;
         let entry = provider_entry(provider, identity)?;
         entry.set_secret(input.credential.as_bytes()).map_err(|_| {
@@ -228,13 +222,7 @@ pub(crate) fn delete_credential(
     input: DeleteProviderCredentialInput,
     identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    let provider = provider(&input.provider)?;
-    if environment_is_configured(provider)? {
-        return Err(DesktopProblem::secure_storage(format!(
-            "The {} credential is managed by {}.",
-            provider.label, provider.environment
-        )));
-    }
+    let provider = writable_provider(&input.provider)?;
     match provider_entry(provider, identity)?.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => credential_statuses(identity),
         Err(_) => Err(DesktopProblem::secure_storage(format!(
@@ -242,6 +230,17 @@ pub(crate) fn delete_credential(
             provider.label
         ))),
     }
+}
+
+fn writable_provider(id: &str) -> Result<ProviderDefinition, DesktopProblem> {
+    let provider = provider(id)?;
+    if environment_is_configured(provider)? {
+        return Err(DesktopProblem::secure_storage(format!(
+            "The {} credential is managed by {}.",
+            provider.label, provider.environment
+        )));
+    }
+    Ok(provider)
 }
 
 pub(crate) async fn search(
