@@ -131,6 +131,21 @@
   const recordOccurrences = $derived(
     occurrences.filter((occ) => occ.recordId === record.id),
   );
+  const isSummary = $derived(record.detailLevel === "summary");
+  const hasRecordMutations = $derived(
+    Boolean(
+      onUpdateStatus ||
+      onUpdateRating ||
+      onToggleEpisode ||
+      onUpdateProgress ||
+      onSaveReview ||
+      onSaveCollection ||
+      onUpdateNotes ||
+      onAddTag ||
+      onRemoveTag ||
+      onUpdatePoster,
+    ),
+  );
 
   const candidatePosters = $derived(
     record.externalIds
@@ -157,31 +172,34 @@
   ];
 
   function handleSaveNotes(): void {
-    onUpdateNotes?.(record.id, editedNotesText);
+    if (!onUpdateNotes) return;
+    onUpdateNotes(record.id, editedNotesText);
     isEditingNotes = false;
   }
 
   function handleAddTagSubmit(e: Event): void {
     e.preventDefault();
-    if (newTagInput.trim().length > 0) {
-      onAddTag?.(record.id, newTagInput.trim());
+    if (onAddTag && newTagInput.trim().length > 0) {
+      onAddTag(record.id, newTagInput.trim());
       newTagInput = "";
     }
   }
 
   function handleMarkSeasonWatched(seasonIndex: number): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
-      if (!ep.watched) onToggleEpisode?.(record.id, ep.id);
+      if (!ep.watched) onToggleEpisode(record.id, ep.id);
     }
   }
 
   function handleMarkSeasonUnwatched(seasonIndex: number): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
-      if (ep.watched) onToggleEpisode?.(record.id, ep.id);
+      if (ep.watched) onToggleEpisode(record.id, ep.id);
     }
   }
 
@@ -189,47 +207,52 @@
     seasonIndex: number,
     upToEpisodeNumber: number,
   ): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
       if (ep.number < upToEpisodeNumber && !ep.watched) {
-        onToggleEpisode?.(record.id, ep.id);
+        onToggleEpisode(record.id, ep.id);
       }
     }
   }
 
   function handleOpenContextMenu(e: MouseEvent): void {
     e.preventDefault();
-    contextMenuState = {
-      x: e.clientX,
-      y: e.clientY,
-      items: [
-        {
-          id: "prog",
-          label: "Update Progress...",
-          icon: IconAdjustments,
-          action: () => (showProgressModal = true),
-        },
-        {
-          id: "review",
-          label: "Post a Review...",
-          icon: IconMessage,
-          action: () => (showReviewModal = true),
-        },
-        {
-          id: "coll",
-          label: "Add to Collection...",
-          icon: IconFolderPlus,
-          action: () => (showCollectionModal = true),
-        },
-        { id: "d1", label: "", divider: true, action: () => {} },
-        {
-          id: "copy_id",
-          label: `Copy Fasti ID (${record.id})`,
-          action: () => navigator.clipboard.writeText(record.id),
-        },
-      ],
-    };
+    const items: ContextMenuItem[] = [];
+    if (onUpdateProgress) {
+      items.push({
+        id: "prog",
+        label: "Update Progress...",
+        icon: IconAdjustments,
+        action: () => (showProgressModal = true),
+      });
+    }
+    if (onSaveReview) {
+      items.push({
+        id: "review",
+        label: "Post a Review...",
+        icon: IconMessage,
+        action: () => (showReviewModal = true),
+      });
+    }
+    if (onSaveCollection) {
+      items.push({
+        id: "coll",
+        label: "Add to Collection...",
+        icon: IconFolderPlus,
+        action: () => (showCollectionModal = true),
+      });
+    }
+    if (items.length > 0) {
+      items.push({ id: "d1", label: "", divider: true, action: () => {} });
+    }
+    items.push({
+      id: "copy_id",
+      label: `Copy Fasti ID (${record.id})`,
+      action: () => navigator.clipboard.writeText(record.id),
+    });
+    contextMenuState = { x: e.clientX, y: e.clientY, items };
   }
 </script>
 
@@ -320,7 +343,13 @@
             value={record.userRating ?? 0}
             onchange={(e) =>
               onUpdateRating?.(record.id, Number(e.currentTarget.value))}
-            aria-label="User Rating"
+            aria-label={onUpdateRating
+              ? "User rating"
+              : "User rating unavailable"}
+            title={onUpdateRating
+              ? "User rating"
+              : "Ratings are not available on this host"}
+            disabled={!onUpdateRating}
           >
             <option value="0">Unrated</option>
             {#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as num}
@@ -336,8 +365,17 @@
             value={record.status}
             onchange={(e) =>
               onUpdateStatus?.(record.id, e.currentTarget.value as WatchStatus)}
-            aria-label="Watch Status"
+            aria-label={onUpdateStatus
+              ? "Watch status"
+              : "Watch status unavailable"}
+            title={onUpdateStatus
+              ? "Watch status"
+              : "Watch-state changes are not available on this host"}
+            disabled={!onUpdateStatus}
           >
+            {#if record.status === "unknown"}
+              <option value="unknown">Tracking state unavailable</option>
+            {/if}
             {#each statusOptions as opt}
               <option value={opt.id}>{opt.label}</option>
             {/each}
@@ -349,7 +387,13 @@
           type="button"
           class="icon-action-btn"
           onclick={() => (showCollectionModal = true)}
-          title="Add to Collection"
+          title={onSaveCollection
+            ? "Add to collection"
+            : "Collections are not available on this host"}
+          aria-label={onSaveCollection
+            ? "Add to collection"
+            : "Collections unavailable"}
+          disabled={!onSaveCollection}
         >
           <IconBookmark size={18} />
         </button>
@@ -358,7 +402,13 @@
           type="button"
           class="icon-action-btn"
           onclick={() => (showArtworkModal = true)}
-          title="Edit Artwork"
+          title={onUpdatePoster
+            ? "Edit artwork"
+            : "Artwork changes are not available on this host"}
+          aria-label={onUpdatePoster
+            ? "Edit artwork"
+            : "Artwork changes unavailable"}
+          disabled={!onUpdatePoster}
         >
           <IconPhoto size={18} />
         </button>
@@ -367,7 +417,13 @@
           type="button"
           class="icon-action-btn"
           onclick={() => (showProgressModal = true)}
-          title="Update Progress"
+          title={onUpdateProgress
+            ? "Update progress"
+            : "Progress changes are not available on this host"}
+          aria-label={onUpdateProgress
+            ? "Update progress"
+            : "Progress changes unavailable"}
+          disabled={!onUpdateProgress}
         >
           <IconAdjustments size={18} />
         </button>
@@ -376,7 +432,8 @@
           type="button"
           class="icon-action-btn"
           onclick={handleOpenContextMenu}
-          title="More Actions..."
+          title="More actions"
+          aria-label="More actions"
         >
           <IconDotsVertical size={18} />
         </button>
@@ -384,7 +441,10 @@
 
       <!-- Synopsis -->
       <p class="synopsis-prose">
-        {record.overview ?? "No synopsis available for this record."}
+        {record.overview ??
+          (isSummary
+            ? "A synopsis is not included in this record summary."
+            : "No synopsis is recorded for this record.")}
       </p>
     </div>
   </header>
@@ -469,27 +529,41 @@
       <!-- External Links -->
       <div class="sidebar-section">
         <h4 class="sidebar-subheading">External Identifiers</h4>
-        <div class="xid-links">
-          {#each record.externalIds as xid}
-            <a
-              href={xid.url ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="xid-link"
-              title="Open in {xid.namespace}"
-            >
-              <span class="ns-tag">{xid.namespace}</span>
-              <span class="ns-val">{xid.value}</span>
-              <IconExternalLink size={12} class="link-icon" />
-            </a>
-          {/each}
-        </div>
+        {#if isSummary}
+          <p class="empty-custom-fields-hint">
+            External identifiers are not included in this record summary.
+          </p>
+        {:else if record.externalIds.length === 0}
+          <p class="empty-custom-fields-hint">
+            No external identifiers are recorded.
+          </p>
+        {:else}
+          <div class="xid-links">
+            {#each record.externalIds as xid}
+              <a
+                href={xid.url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="xid-link"
+                title="Open in {xid.namespace}"
+              >
+                <span class="ns-tag">{xid.namespace}</span>
+                <span class="ns-val">{xid.value}</span>
+                <IconExternalLink size={12} class="link-icon" />
+              </a>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- Custom Fields -->
       <div class="sidebar-section">
         <h4 class="sidebar-subheading">Custom Fields</h4>
-        {#if record.customFields && Object.keys(record.customFields).length > 0}
+        {#if isSummary}
+          <p class="empty-custom-fields-hint">
+            Custom fields are not included in this record summary.
+          </p>
+        {:else if record.customFields && Object.keys(record.customFields).length > 0}
           <dl class="sidebar-meta-list">
             {#each Object.entries(record.customFields) as [key, value]}
               <div class="meta-pair">
@@ -499,9 +573,7 @@
             {/each}
           </dl>
         {:else}
-          <p class="empty-custom-fields-hint">
-            No custom fields. Add some in Settings → Custom Fields.
-          </p>
+          <p class="empty-custom-fields-hint">No custom fields are recorded.</p>
         {/if}
       </div>
     </aside>
@@ -515,6 +587,7 @@
           class="tab-btn"
           class:active={activeTab === "overview"}
           onclick={() => (activeTab = "overview")}
+          aria-pressed={activeTab === "overview"}
         >
           <IconListNumbers size={16} /> Overview & Seasons
         </button>
@@ -524,6 +597,7 @@
           class="tab-btn"
           class:active={activeTab === "actions"}
           onclick={() => (activeTab = "actions")}
+          aria-pressed={activeTab === "actions"}
         >
           <IconAdjustments size={16} /> Actions & Progress
         </button>
@@ -533,8 +607,11 @@
           class="tab-btn"
           class:active={activeTab === "history"}
           onclick={() => (activeTab = "history")}
+          aria-pressed={activeTab === "history"}
         >
-          <IconHistory size={16} /> History ({recordOccurrences.length})
+          <IconHistory size={16} /> History{isSummary
+            ? ""
+            : ` (${recordOccurrences.length})`}
         </button>
 
         <button
@@ -542,9 +619,11 @@
           class="tab-btn"
           class:active={activeTab === "sources"}
           onclick={() => (activeTab = "sources")}
+          aria-pressed={activeTab === "sources"}
         >
-          <IconShieldCheck size={16} /> Sources & Identity ({record.externalIds
-            .length})
+          <IconShieldCheck size={16} /> Sources & Identity{isSummary
+            ? ""
+            : ` (${record.externalIds.length})`}
         </button>
 
         <button
@@ -552,6 +631,7 @@
           class="tab-btn"
           class:active={activeTab === "reviews"}
           onclick={() => (activeTab = "reviews")}
+          aria-pressed={activeTab === "reviews"}
         >
           <IconNotes size={16} /> Notes & Reviews
         </button>
@@ -569,6 +649,7 @@
                   class="season-card-btn"
                   class:active={selectedSeasonIndex === sIdx}
                   onclick={() => (selectedSeasonIndex = sIdx)}
+                  aria-pressed={selectedSeasonIndex === sIdx}
                 >
                   {#if season.posterUrl}
                     <img src={season.posterUrl} alt="" class="season-thumb" />
@@ -596,6 +677,10 @@
                       class="btn-secondary-sm"
                       onclick={() =>
                         handleMarkSeasonWatched(selectedSeasonIndex)}
+                      title={onToggleEpisode
+                        ? "Mark season watched"
+                        : "Episode changes are not available on this host"}
+                      disabled={!onToggleEpisode}
                     >
                       Mark Watched
                     </button>
@@ -604,6 +689,10 @@
                       class="btn-secondary-sm"
                       onclick={() =>
                         handleMarkSeasonUnwatched(selectedSeasonIndex)}
+                      title={onToggleEpisode
+                        ? "Mark season unwatched"
+                        : "Episode changes are not available on this host"}
+                      disabled={!onToggleEpisode}
                     >
                       Mark Unwatched
                     </button>
@@ -617,7 +706,13 @@
                         class="ep-check-btn"
                         class:checked={ep.watched}
                         onclick={() => onToggleEpisode?.(record.id, ep.id)}
-                        aria-label="Toggle watched for Episode {ep.number}"
+                        aria-label={onToggleEpisode
+                          ? `Toggle watched for episode ${ep.number}`
+                          : `Episode ${ep.number} changes unavailable`}
+                        title={onToggleEpisode
+                          ? `Toggle watched for episode ${ep.number}`
+                          : "Episode changes are not available on this host"}
+                        disabled={!onToggleEpisode}
                       >
                         {#if ep.watched}
                           <IconCheck size={16} stroke={3} />
@@ -661,6 +756,10 @@
                               selectedSeasonIndex,
                               ep.number,
                             )}
+                          title={onToggleEpisode
+                            ? `Mark episodes 1 to ${ep.number - 1} seen`
+                            : "Episode changes are not available on this host"}
+                          disabled={!onToggleEpisode}
                         >
                           Mark 1–{ep.number - 1} Seen
                         </button>
@@ -704,8 +803,9 @@
         <section class="tab-pane">
           <h3 class="pane-heading">Media Action Center</h3>
           <p class="pane-sub">
-            Execute state changes, log manual occurrences, or re-organize
-            collections.
+            {hasRecordMutations
+              ? "Use the changes supported by the active host."
+              : "This host exposes this record as read-only. Each unavailable action is disabled."}
           </p>
 
           <div class="ryot-actions-grid">
@@ -713,6 +813,10 @@
               type="button"
               class="ryot-action-btn"
               onclick={() => (showProgressModal = true)}
+              title={onUpdateProgress
+                ? "Update progress"
+                : "Progress changes are not available on this host"}
+              disabled={!onUpdateProgress}
             >
               <div class="action-btn-icon"><IconAdjustments size={22} /></div>
               <div class="action-btn-text">
@@ -725,6 +829,10 @@
               type="button"
               class="ryot-action-btn"
               onclick={() => (showReviewModal = true)}
+              title={onSaveReview
+                ? "Post a review"
+                : "Reviews are not available on this host"}
+              disabled={!onSaveReview}
             >
               <div class="action-btn-icon"><IconMessage size={22} /></div>
               <div class="action-btn-text">
@@ -737,6 +845,10 @@
               type="button"
               class="ryot-action-btn"
               onclick={() => (showCollectionModal = true)}
+              title={onSaveCollection
+                ? "Add to collection"
+                : "Collections are not available on this host"}
+              disabled={!onSaveCollection}
             >
               <div class="action-btn-icon"><IconFolderPlus size={22} /></div>
               <div class="action-btn-text">
@@ -765,10 +877,18 @@
         <section class="tab-pane">
           <h3 class="pane-heading">Chronicle History for this Entity</h3>
           <p class="pane-sub">
-            Every recorded observation, rewatch, and device scrobble for {record.title}.
+            {isSummary
+              ? "History is not included in the Records summary."
+              : `Every recorded occurrence available for ${record.title}.`}
           </p>
 
-          {#if recordOccurrences.length === 0}
+          {#if isSummary}
+            <div class="empty-history-box">
+              <IconClock size={32} class="empty-icon" />
+              <h4>History is unavailable in this view</h4>
+              <p>The active host returned only record summary fields.</p>
+            </div>
+          {:else if recordOccurrences.length === 0}
             <div class="empty-history-box">
               <IconClock size={32} class="empty-icon" />
               <h4>No occurrences recorded yet</h4>
@@ -840,30 +960,41 @@
             </div>
           </div>
 
-          <table class="assertions-table">
-            <thead>
-              <tr>
-                <th scope="col">Namespace</th>
-                <th scope="col">Identifier</th>
-                <th scope="col">Status</th>
-                <th scope="col">Provenance Route</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each record.externalIds as xid}
+          {#if isSummary}
+            <div class="empty-history-box">
+              <h4>Identity claims are unavailable in this view</h4>
+              <p>The active host returned only record summary fields.</p>
+            </div>
+          {:else if record.externalIds.length === 0}
+            <div class="empty-history-box">
+              <h4>No external identity claims are recorded</h4>
+            </div>
+          {:else}
+            <table class="assertions-table">
+              <thead>
                 <tr>
-                  <td class="mono">{xid.namespace}</td>
-                  <td class="mono"><strong>{xid.value}</strong></td>
-                  <td
-                    ><span class="status-pill matched"
-                      >{xid.status.replaceAll("_", " ")}</span
-                    ></td
-                  >
-                  <td>{xid.source}</td>
+                  <th scope="col">Namespace</th>
+                  <th scope="col">Identifier</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Provenance Route</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each record.externalIds as xid}
+                  <tr>
+                    <td class="mono">{xid.namespace}</td>
+                    <td class="mono"><strong>{xid.value}</strong></td>
+                    <td
+                      ><span class="status-pill matched"
+                        >{xid.status.replaceAll("_", " ")}</span
+                      ></td
+                    >
+                    <td>{xid.source}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
         </section>
 
         <!-- TAB 5: PERSONAL REVIEWS & NOTES -->
@@ -879,6 +1010,10 @@
                   editedNotesText = record.userNotes ?? "";
                   isEditingNotes = true;
                 }}
+                title={onUpdateNotes
+                  ? "Edit notes"
+                  : "Notes are not editable on this host"}
+                disabled={!onUpdateNotes}
               >
                 <IconEdit size={14} /> Edit Notes
               </button>
@@ -912,8 +1047,9 @@
                 <p class="notes-text">{record.userNotes}</p>
               {:else}
                 <p class="empty-notes-hint">
-                  No personal notes recorded yet. Click 'Edit Notes' to add your
-                  thoughts.
+                  {onUpdateNotes
+                    ? "No personal notes are recorded. Select Edit Notes to add one."
+                    : "No personal notes are available. This host exposes notes as read-only."}
                 </p>
               {/if}
             </div>
@@ -930,6 +1066,10 @@
                   class="tag-delete-btn"
                   onclick={() => onRemoveTag?.(record.id, tag)}
                   aria-label="Remove tag {tag}"
+                  title={onRemoveTag
+                    ? `Remove tag ${tag}`
+                    : "Tags are not editable on this host"}
+                  disabled={!onRemoveTag}
                 >
                   <IconX size={12} />
                 </button>
@@ -943,6 +1083,10 @@
                 bind:value={newTagInput}
                 class="add-tag-input"
                 aria-label="New tag name"
+                title={onAddTag
+                  ? "Add tag"
+                  : "Tags are not editable on this host"}
+                disabled={!onAddTag}
               />
             </form>
           </div>
@@ -953,33 +1097,33 @@
 </div>
 
 <!-- Modal Dialogs -->
-{#if showProgressModal}
+{#if showProgressModal && onUpdateProgress}
   <ProgressModal
     {record}
     onClose={() => (showProgressModal = false)}
     onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
+      onUpdateProgress(recId, eps, sec, st)}
   />
 {/if}
 
-{#if showReviewModal}
+{#if showReviewModal && onSaveReview}
   <RatingReviewModal
     {record}
     onClose={() => (showReviewModal = false)}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
   />
 {/if}
 
-{#if showCollectionModal}
+{#if showCollectionModal && onSaveCollection}
   <CollectionModal
     {record}
     collections={availableCollections}
     onClose={() => (showCollectionModal = false)}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
   />
 {/if}
 
-{#if showArtworkModal}
+{#if showArtworkModal && onUpdatePoster}
   <ArtworkModal
     {record}
     candidates={candidatePosters}
@@ -1156,16 +1300,16 @@
   }
   .status-select.watching {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
   .status-select.completed {
     background: var(--fasti-state-verified);
-    color: white;
+    color: var(--fasti-verified-contrast);
   }
 
   .icon-action-btn {
-    width: 36px;
-    height: 36px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
     border-radius: 4px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1178,6 +1322,11 @@
   .icon-action-btn.active {
     color: #e11d48;
     border-color: #e11d48;
+  }
+
+  :is(button, select, input, textarea):disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .synopsis-prose {
@@ -1524,8 +1673,8 @@
     opacity: 0.75;
   }
   .ep-check-btn {
-    width: 28px;
-    height: 28px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
     border-radius: 4px;
     border: 2px solid var(--fasti-text-muted);
     background: transparent;
@@ -1537,7 +1686,7 @@
   .ep-check-btn.checked {
     background: var(--fasti-state-verified);
     border-color: var(--fasti-state-verified);
-    color: white;
+    color: var(--fasti-verified-contrast);
   }
   .ep-num {
     font-family: var(--fasti-font-mono);
@@ -1639,7 +1788,8 @@
       var(--fasti-state-verified) 12%,
       transparent
     );
-    border-left: 4px solid var(--fasti-state-verified);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-verified) 45%, transparent);
     border-radius: 4px;
     margin-bottom: 20px;
   }
@@ -1721,7 +1871,7 @@
   .btn-primary {
     padding: 8px 16px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;

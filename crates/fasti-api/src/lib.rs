@@ -6,7 +6,10 @@ use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, Violatio
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
-use utoipa::OpenApi;
+use utoipa::{
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+    Modify, OpenApi,
+};
 
 mod local;
 mod observation;
@@ -32,6 +35,39 @@ pub async fn health_check() -> Json<HealthResponse> {
         status: "healthy".to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
     })
+}
+
+struct ProductionSecurityAddon;
+
+impl Modify for ProductionSecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bootstrap_bearer",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("64-character lowercase hexadecimal secret")
+                        .description(Some(
+                            "One-time local data-root bootstrap secret. Never use an enrolled client credential here.",
+                        ))
+                        .build(),
+                ),
+            );
+            components.add_security_scheme(
+                "credential_bearer",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("64-character lowercase hexadecimal credential")
+                        .description(Some(
+                            "Enrolled Fasti client credential sent only in the Authorization header.",
+                        ))
+                        .build(),
+                ),
+            );
+        }
+    }
 }
 
 #[derive(OpenApi)]
@@ -70,7 +106,8 @@ pub async fn health_check() -> Json<HealthResponse> {
         ProblemActionDto,
         ProblemDetails,
         ViolationDto
-    ))
+    )),
+    modifiers(&ProductionSecurityAddon)
 )]
 struct ApiDoc;
 
@@ -175,8 +212,46 @@ mod tests {
         }
         assert_eq!(document.paths.paths.len(), 7);
 
-        let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
-        assert!(serialized.contains("#/components/schemas/HealthResponse"));
+        let serialized = serde_json::to_value(&document).expect("serializable OpenAPI document");
+        assert!(serialized
+            .to_string()
+            .contains("#/components/schemas/HealthResponse"));
+        for scheme in ["bootstrap_bearer", "credential_bearer"] {
+            assert!(
+                serialized
+                    .pointer(&format!("/components/securitySchemes/{scheme}"))
+                    .is_some(),
+                "missing {scheme}"
+            );
+        }
+        for (pointer, scheme) in [
+            (
+                "/paths/~1api~1v1~1node~1initialization/post/security/0/bootstrap_bearer",
+                "bootstrap_bearer",
+            ),
+            (
+                "/paths/~1api~1v1~1observations/post/security/0/credential_bearer",
+                "credential_bearer",
+            ),
+            (
+                "/paths/~1api~1v1~1records/get/security/0/credential_bearer",
+                "credential_bearer",
+            ),
+        ] {
+            assert!(
+                serialized
+                    .pointer(pointer)
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(Vec::is_empty),
+                "{scheme} requirement is absent"
+            );
+        }
+        assert!(serialized
+            .pointer("/paths/~1api~1v1~1health/get/security")
+            .is_none());
+        assert!(serialized
+            .pointer("/paths/~1api~1v1~1client-enrollments/post/security")
+            .is_none());
 
         let schemas = &document.components.expect("OpenAPI components").schemas;
         for schema in [

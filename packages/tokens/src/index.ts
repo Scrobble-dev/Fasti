@@ -60,6 +60,7 @@ export const cssVariables = `
   --fasti-action-primary: ${colors.action.primary};
   --fasti-state-verified: ${colors.state.verified};
   --fasti-state-attention: ${colors.state.attention};
+  --fasti-overlay-contrast: ${colors.surface.paper};
   --fasti-font-display: ${typography.display};
   --fasti-font-body: ${typography.body};
   --fasti-font-mono: ${typography.mono};
@@ -70,6 +71,8 @@ export const cssVariables = `
   --fasti-muted: var(--fasti-text-muted);
   --fasti-action: var(--fasti-action-primary);
   --fasti-action-contrast: var(--fasti-surface-paper);
+  --fasti-brand-contrast: var(--fasti-surface-paper);
+  --fasti-verified-contrast: var(--fasti-surface-paper);
   --fasti-verified: var(--fasti-state-verified);
   --fasti-attention: var(--fasti-state-attention);
   --fasti-border: color-mix(in srgb, var(--fasti-text-muted) 42%, transparent);
@@ -108,5 +111,7 @@ export const cssVariables = `
   --fasti-state-verified: color-mix(in srgb, ${colors.state.verified} 55%, ${colors.surface.paper});
   --fasti-state-attention: color-mix(in srgb, ${colors.state.attention} 45%, ${colors.surface.paper});
   --fasti-state-error: color-mix(in srgb, #b42318 55%, ${colors.surface.paper});
+  --fasti-brand-contrast: var(--fasti-surface-night);
+  --fasti-verified-contrast: var(--fasti-surface-night);
 }
 `;

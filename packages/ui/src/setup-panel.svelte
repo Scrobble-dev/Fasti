@@ -141,7 +141,7 @@
     border-radius: 2px;
     padding: 10px 18px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     font: 700 1rem var(--fasti-font-body);
     cursor: pointer;
   }
@@ -158,8 +158,9 @@
 
   .problem,
   .warning {
-    border-left: 4px solid var(--fasti-state-attention);
-    padding-left: 16px;
+    border: 1px solid var(--fasti-state-attention);
+    border-radius: 4px;
+    padding: 12px 16px;
   }
 
   .empty-state {

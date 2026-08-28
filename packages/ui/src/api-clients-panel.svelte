@@ -31,7 +31,7 @@
   let copied = $state(false);
   let revealCredential = $state(false);
   let pendingRevoke = $state<string>();
-  let secretNotice: HTMLDivElement | undefined;
+  let secretNotice = $state<HTMLDivElement>();
 
   const canManage = $derived(
     Boolean(
@@ -447,7 +447,7 @@
   .primary-action {
     border: 1px solid var(--fasti-action-primary);
     background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast, #fff);
+    color: var(--fasti-action-contrast);
   }
 
   .secondary-action {

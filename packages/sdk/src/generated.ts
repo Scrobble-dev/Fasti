@@ -2088,6 +2088,12 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     return;
   }
+  if (schemaTypes.includes("boolean")) {
+    if (typeof value !== "boolean") {
+      throw new FastiContractParseError(`${path} must be a boolean`);
+    }
+    return;
+  }
   if (schemaTypes.includes("array")) {
     if (!Array.isArray(value)) {
       throw new FastiContractParseError(`${path} must be an array`);

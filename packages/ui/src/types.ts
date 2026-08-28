@@ -11,7 +11,12 @@ export type MediaKind =
   | "custom";
 
 export type WatchStatus =
-  "watching" | "completed" | "plan_to_watch" | "on_hold" | "dropped";
+  | "unknown"
+  | "watching"
+  | "completed"
+  | "plan_to_watch"
+  | "on_hold"
+  | "dropped";
 
 export interface ExternalId {
   readonly namespace: string;
@@ -59,6 +64,8 @@ export interface SeasonItem {
 export interface MediaRecord {
   readonly id: string;
   readonly title: string;
+  /** Declares whether optional detail collections are authoritative. */
+  readonly detailLevel?: "summary" | "complete";
   readonly originalTitle?: string;
   readonly mediaKind: MediaKind;
   readonly customTypeName?: string;
@@ -240,11 +247,15 @@ export interface ProviderSearchCandidate {
 }
 
 export interface WorkbenchHost {
+  readonly networkConfigurationScope: "client" | "node";
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
   ): Promise<NetworkConfiguration>;
-  testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
+  testEndpointConnection(
+    endpoint: string,
+    signal?: AbortSignal,
+  ): Promise<EndpointConnectionStatus>;
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
   saveProviderCredential(
     provider: string,
@@ -272,6 +283,8 @@ export interface WorkbenchHost {
   registerNamespace?(
     input: RegisterNamespaceInput,
   ): Promise<RegisterNamespaceResult>;
+  setSessionCredential?(credential: string): void;
+  clearSessionCredential?(): void;
 }
 
 /** Wire shape of the desktop host's `create_record` command output. */

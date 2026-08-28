@@ -89,9 +89,15 @@ FASTI_PUBLIC_URL=https://fasti.internal \
 cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-The browser health harness deliberately ignores these values and remains on
-its fixed QA proxy. Listener and collision variables belong to `fastid`, not to
-the embedded Tauri or APK kernel.
+The browser Workbench uses the Vite `/api` proxy by default. It can save one
+non-secret client service URL in browser storage. It never stores a bearer.
+Before sending a memory-only bearer, the connection dialog names the exact
+service origin and requires explicit confirmation for a non-loopback origin.
+Changing the URL changes the browser client only; it does not bind `fastid`.
+A cross-origin URL requires an HTTPS reverse proxy that explicitly permits the
+Workbench page origin through CORS. Direct `fastid` does not provide CORS.
+Listener and collision variables belong to `fastid`, not to the browser,
+embedded Tauri host, or APK kernel.
 
 ## Edit desktop settings
 
@@ -172,9 +178,10 @@ real authenticated profile context.
 
 ## Contract disposition
 
-The connection values and provider searches use local Tauri IPC. The container
-exposure assertion changes only which existing production router is composed;
-it adds no route or payload. These settings do not add a public Fasti HTTP
-route, event, domain entity, or linked-data term. OpenAPI, AsyncAPI, JSON Schema,
-and JSON-LD therefore remain unchanged. The Tauri command types and this
-document own the local app contract until a public capability is authorized.
+Desktop connection values and provider searches use local Tauri IPC. The
+browser service URL is non-secret client configuration. The container exposure
+assertion changes only which existing production router is composed. None of
+these settings adds a route, payload, event, domain entity, or linked-data term.
+OpenAPI, AsyncAPI, JSON Schema, and JSON-LD are therefore not applicable to the
+settings themselves. Tauri command types, browser host types, and this document
+own the local client contracts until a public capability is authorized.

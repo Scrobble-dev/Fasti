@@ -272,6 +272,14 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   const healthOperation = openapi.paths["/api/v1/health"].get;
   const healthCapability = capabilities.get("system.health");
+  assert.deepEqual(Object.keys(openapi.components.securitySchemes).sort(), [
+    "bootstrap_bearer",
+    "credential_bearer",
+  ]);
+  for (const scheme of Object.values(openapi.components.securitySchemes)) {
+    assert.equal(scheme.type, "http");
+    assert.equal(scheme.scheme, "bearer");
+  }
   assert.equal(healthOperation["x-fasti-capability-id"], healthCapability.id);
   assert.equal(
     healthOperation["x-fasti-authorization"],
@@ -289,6 +297,29 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     healthOperation["x-fasti-example-ids"],
     healthCapability.examples,
   );
+  assert.equal(healthOperation.security, undefined);
+
+  for (const pathItem of Object.values(openapi.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      const capability = capabilities.get(operation["x-fasti-capability-id"]);
+      assert.ok(
+        capability,
+        `production operation ${operation.operationId} has no capability`,
+      );
+      const scheme =
+        capability.authorization === "bootstrap_only"
+          ? "bootstrap_bearer"
+          : capability.authorization === "scoped" &&
+              capability.id !== "client.enroll"
+            ? "credential_bearer"
+            : undefined;
+      assert.deepEqual(
+        operation.security,
+        scheme ? [{ [scheme]: [] }] : undefined,
+        `production operation ${operation.operationId} security must match ${capability.authorization} authorization`,
+      );
+    }
+  }
 
   const httpOperations = new Map(
     operations.map(({ operation }) => [

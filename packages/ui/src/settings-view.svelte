@@ -1423,6 +1423,7 @@
       {:else if activeSettingsSection === "advanced"}
         {#if onSaveNetworkConfiguration && onTestEndpoint}
           <NetworkSettings
+            scope="node"
             configuration={networkConfiguration}
             loading={networkLoading}
             loadProblem={networkLoadProblem}
@@ -2153,7 +2154,7 @@
 
   .save-key-btn {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
   }
 
@@ -2220,7 +2221,7 @@
     gap: 6px;
     padding: 8px 18px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;
@@ -2333,7 +2334,7 @@
   .btn-save {
     padding: 10px 20px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;

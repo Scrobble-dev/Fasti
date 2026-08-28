@@ -15,24 +15,7 @@ import type {
 } from "@fasti/ui";
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
-
-/** Bearer credential for this browser's own session, distinct from provider
- * API keys (never stored client-side at all -- see `providerCredentialStatus`
- * below). Nothing writes this key yet: the browser has no working sign-in
- * flow (`auth-modal.svelte` is UI-only pending a real passkey/OIDC/PAT
- * backend), so every call below fails closed with a clear message until one
- * exists. The SDK methods are real and wired now; only the credential source
- * is still missing. */
-const CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
-
-function storedCredential(): string | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    return localStorage.getItem(CREDENTIAL_STORAGE_KEY) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
+const RETIRED_CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
 
 const PROVIDERS: ReadonlyArray<{
   provider: string;
@@ -103,27 +86,65 @@ const PROVIDERS: ReadonlyArray<{
 
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
+  source: "default" | "saved" = "default",
 ): NetworkConfiguration {
   return {
     connection: {
       service_url: {
         value: defaultApiUrl || "http://127.0.0.1:8420",
-        source: "default",
+        source,
         managed: false,
       },
-      public_url: { value: null, source: "default", managed: false },
+      public_url: { value: null, source: "default", managed: true },
     },
     outbound_policy: {
-      allow_providers: ["*"],
+      allow_providers: [],
       deny_providers: [],
-      allow_capabilities: ["*"],
+      allow_capabilities: [],
       deny_capabilities: [],
-      allow_hosts: ["*"],
+      allow_hosts: [],
       deny_hosts: [],
-      allow_networks: ["public", "loopback", "private"],
+      allow_networks: [],
       deny_networks: [],
     },
   };
+}
+
+function unavailable(message: string): Error {
+  return new Error(message);
+}
+
+function validatedEndpoint(endpoint: string): {
+  normalized: string;
+  parsed: URL;
+} {
+  let parsed: URL;
+  try {
+    parsed = new URL(endpoint.trim());
+  } catch {
+    throw unavailable("Enter a valid Fasti service URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
+  }
+  if (
+    parsed.protocol === "http:" &&
+    !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
+  ) {
+    throw unavailable("Cleartext HTTP is allowed only for loopback endpoints.");
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname !== "" && parsed.pathname !== "/")
+  ) {
+    throw unavailable(
+      "The Fasti service URL must contain only a scheme, host, and optional port.",
+    );
+  }
+  return { normalized: parsed.origin, parsed };
 }
 
 function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
@@ -133,77 +154,93 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
   try {
     const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
-    const value = JSON.parse(raw) as Partial<NetworkConfiguration>;
-    if (
-      typeof value?.connection?.service_url?.value !== "string" ||
-      !value.outbound_policy ||
-      !Array.isArray(value.outbound_policy.allow_networks) ||
-      !Array.isArray(value.outbound_policy.deny_networks)
-    ) {
+    const value = JSON.parse(raw) as {
+      service_url?: unknown;
+      connection?: { service_url?: { value?: unknown } };
+    };
+    const candidate =
+      typeof value.service_url === "string"
+        ? value.service_url
+        : value.connection?.service_url?.value;
+    if (typeof candidate !== "string")
       return defaultNetworkConfiguration(defaultApiUrl);
-    }
-    return value as NetworkConfiguration;
+    return defaultNetworkConfiguration(
+      validatedEndpoint(candidate).normalized,
+      "saved",
+    );
   } catch {
     return defaultNetworkConfiguration(defaultApiUrl);
   }
 }
 
-function unavailable(message: string): Error {
-  return new Error(message);
-}
-
-function requireCredential(): string {
-  const credential = storedCredential();
-  if (!credential) {
-    throw unavailable(
-      "Sign in to Fasti to see and manage records. This browser has no stored credential yet.",
-    );
-  }
-  return credential;
-}
-
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.removeItem(RETIRED_CREDENTIAL_STORAGE_KEY);
+    } catch {
+      // The browser host still fails closed when storage is unavailable.
+    }
+  }
+  let sessionCredential: string | undefined;
+  const requireCredential = (): string => {
+    if (!sessionCredential) {
+      throw unavailable(
+        "Records need an active local bearer credential. Select Connect records and paste a credential with identity_read scope.",
+      );
+    }
+    return sessionCredential;
+  };
+  let network = loadNetworkConfiguration(defaultApiUrl);
   let client = new FastiClient({
-    baseUrl: defaultApiUrl,
+    baseUrl: network.connection.service_url.value,
     credential: requireCredential,
   });
 
   return {
+    networkConfigurationScope: "client",
+
+    setSessionCredential(credential: string): void {
+      const normalized = credential.trim();
+      if (!/^[0-9a-f]{64}$/i.test(normalized)) {
+        throw unavailable(
+          "The bearer credential must contain exactly 64 hexadecimal characters.",
+        );
+      }
+      sessionCredential = normalized.toLowerCase();
+    },
+
+    clearSessionCredential(): void {
+      sessionCredential = undefined;
+    },
+
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
-      return loadNetworkConfiguration(defaultApiUrl);
+      return network;
     },
 
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
-      const config: NetworkConfiguration = {
-        connection: {
-          service_url: {
-            value: input.service_url,
-            source: "saved",
-            managed: false,
-          },
-          public_url: {
-            value: input.public_url,
-            source: "saved",
-            managed: false,
-          },
-        },
-        outbound_policy: input.outbound_policy,
-      };
-      if (typeof localStorage !== "undefined") {
-        try {
-          localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
-        } catch {
-          // Best-effort: a blocked or full localStorage should not fail a
-          // save the caller already validated -- the returned config is
-          // still correct, it just won't survive a reload.
-        }
+      const serviceUrl = validatedEndpoint(input.service_url).normalized;
+      const config = defaultNetworkConfiguration(serviceUrl, "saved");
+      if (typeof localStorage === "undefined") {
+        throw unavailable("Browser storage is unavailable.");
       }
-      // Recreate the client with the saved service URL so subsequent SDK
-      // calls use the new endpoint rather than the original defaultApiUrl.
+      try {
+        localStorage.setItem(
+          NETWORK_STORAGE_KEY,
+          JSON.stringify({ service_url: serviceUrl }),
+        );
+      } catch {
+        throw unavailable(
+          "The browser could not save the Fasti service URL. Check site storage permissions and try again.",
+        );
+      }
+      if (network.connection.service_url.value !== serviceUrl) {
+        sessionCredential = undefined;
+      }
+      network = config;
       client = new FastiClient({
-        baseUrl: input.service_url,
+        baseUrl: serviceUrl,
         credential: requireCredential,
       });
       return config;
@@ -211,35 +248,19 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
 
     async testEndpointConnection(
       endpoint: string,
+      signal?: AbortSignal,
     ): Promise<EndpointConnectionStatus> {
-      const normalized = endpoint.replace(/\/+$/, "");
-      const parsed = new URL(normalized);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
-      }
-      if (
-        parsed.protocol === "http:" &&
-        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
-      ) {
-        throw unavailable(
-          "Cleartext HTTP is allowed only for loopback endpoints.",
-        );
-      }
-      const response = await fetch(`${normalized}/api/v1/health`, {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok) {
-        throw unavailable(`The endpoint returned status ${response.status}.`);
-      }
-      const data = (await response.json()) as {
-        status?: string;
-        version?: string;
-      };
+      const { normalized, parsed } = validatedEndpoint(endpoint);
+      const health = await new FastiClient({
+        baseUrl: normalized,
+        timeoutMs: 3_000,
+        retryPolicy: { maxAttempts: 1 },
+      }).health({ signal });
       return {
         endpoint: normalized,
         scheme: parsed.protocol === "https:" ? "https" : "http",
-        status: data.status ?? "healthy",
-        version: data.version ?? "unknown",
+        status: health.status,
+        version: health.version,
       };
     },
 

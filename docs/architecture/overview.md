@@ -2,7 +2,7 @@
 
 Fasti is an identity-first local system of record for media activity. It is not a media player.
 
-## Current B0-B3 review spine
+## Current B0-B4 review spine
 
 ```text
 fasti-domain
@@ -15,7 +15,7 @@ fasti-domain
               ├── fasti CLI ──> capability list/show; guarded B3 commands
               ├── fasti-store ──> staged B2 kernel and B3 portability adapters
               └── generated TypeScript HTTP/SSE SDK
-                        └── apps/web local health QA harness
+                        └── apps/web local Workbench and /status diagnostic
                                   ├── packages/ui presentation
                                   └── packages/tokens design projection
 
@@ -59,8 +59,8 @@ Any failure before the durability boundary returns a typed problem and cannot re
 
 ## Distribution
 
-The native daemon and CLI are the current executable product shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. The native daemon and loopback-only container launcher mount the existing durable production router when an explicit data root is present. `apps/web` is a local, private, unpackaged QA harness over the generated `system.health` binding. `apps/desktop` remains a trusted-host review candidate, not a supported package. Neither interface activates a product capability or presentation milestone. There is no supported installation, release, player, or product web application.
+The native daemon and CLI are the current executable product shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. The native daemon and loopback-only container launcher mount the existing durable production router when an explicit data root is present. `apps/web` is a local, private, unpackaged Workbench. `/` reads real Record summaries through the generated SDK, and `/status` keeps the health diagnostic separate. The browser stores no credential and owns no domain persistence. `apps/desktop` remains a trusted-host review candidate, not a supported package. Neither interface is a public release. There is no supported installation, release, player, or deployed web application.
 
-B1 cannot close on software checks alone. Its milestone manifest binds contract, QA, Tauri, raw-gate, and retained performance artifacts. The two performance receipts must declare one exact `dev` push and workflow attempt, cover x86_64 and aarch64, complete the 600-second warm-up and 900-second route-less idle window, and bind the kernel-applied 192 MiB, one-vCPU, zero-swap envelope. The verifier recomputes memory, CPU, architecture, and applicable artifact-size results. Optional Pi 5 and J4125 specifications remain useful comparison targets but do not gate the milestone. B4 adds the product browser presentation only after B0-B3 prove the headless kernel; the earlier health harness gathers interface-quality evidence without changing that sequence. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
+B1 cannot close on software checks alone. Its milestone manifest binds contract, QA, Tauri, raw-gate, and retained performance artifacts. The two performance receipts must declare one exact `dev` push and workflow attempt, cover x86_64 and aarch64, complete the 600-second warm-up and 900-second route-less idle window, and bind the kernel-applied 192 MiB, one-vCPU, zero-swap envelope. The verifier recomputes memory, CPU, architecture, and applicable artifact-size results. Optional Pi 5 and J4125 specifications remain useful comparison targets but do not gate the milestone. B4 now has a reviewable Workbench, but mutation contracts, packaged accessibility evidence, and milestone acceptance remain open. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
 
 See [the constitution](../constitution.md), [capability ledger](../capability-ledger.md), and [contract ownership](../../contracts/README.md).
