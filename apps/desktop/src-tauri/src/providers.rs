@@ -5,32 +5,76 @@ use fasti_application::{
     authorize_outbound, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
 };
 use fasti_store::DataRootIdentity;
-use reqwest::header::{HeaderValue, CONTENT_TYPE};
+use reqwest::header::{HeaderValue, ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::time::Duration;
 use zeroize::Zeroize;
 
-const GOOGLE_BOOKS_PROVIDER: &str = "google-books";
-const GOOGLE_BOOKS_LABEL: &str = "Google Books";
-const GOOGLE_BOOKS_HOST: &str = "www.googleapis.com";
-const GOOGLE_BOOKS_URL: &str = "https://www.googleapis.com/books/v1/volumes";
-const GOOGLE_BOOKS_ENV: &str = "GOOGLE_BOOKS_API_KEY";
-const GOOGLE_BOOKS_ACCOUNT: &str = "provider/google-books/api-key";
-const GOOGLE_BOOKS_DOCS: &str = "https://developers.google.com/books/docs/v1/using";
-const GOOGLE_BOOKS_CAPABILITY: &str = "metadata.search";
+const METADATA_SEARCH_CAPABILITY: &str = "metadata.search";
 const QUERY_LIMIT: usize = 256;
 const CREDENTIAL_LIMIT: usize = 512;
 const RESPONSE_LIMIT: usize = 2_000_000;
 const RESULT_LIMIT: usize = 10;
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(15);
 
-const GOOGLE_BOOKS_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
-    provider: GOOGLE_BOOKS_PROVIDER,
-    capabilities: &[GOOGLE_BOOKS_CAPABILITY],
-    hosts: &[GOOGLE_BOOKS_HOST],
-    networks: &[NetworkClass::Public],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderKind {
+    GoogleBooks,
+    Tmdb,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ProviderDefinition {
+    kind: ProviderKind,
+    id: &'static str,
+    label: &'static str,
+    host: &'static str,
+    endpoint: &'static str,
+    environment: &'static str,
+    account: &'static str,
+    docs_url: &'static str,
+    authorization_header: &'static str,
+    access: OutboundAccessDeclaration<'static>,
+}
+
+const GOOGLE_BOOKS: ProviderDefinition = ProviderDefinition {
+    kind: ProviderKind::GoogleBooks,
+    id: "google-books",
+    label: "Google Books",
+    host: "www.googleapis.com",
+    endpoint: "https://www.googleapis.com/books/v1/volumes",
+    environment: "GOOGLE_BOOKS_API_KEY",
+    account: "provider/google-books/api-key",
+    docs_url: "https://developers.google.com/books/docs/v1/using",
+    authorization_header: "X-Goog-Api-Key",
+    access: OutboundAccessDeclaration {
+        provider: "google-books",
+        capabilities: &[METADATA_SEARCH_CAPABILITY],
+        hosts: &["www.googleapis.com"],
+        networks: &[NetworkClass::Public],
+    },
 };
+
+const TMDB: ProviderDefinition = ProviderDefinition {
+    kind: ProviderKind::Tmdb,
+    id: "tmdb",
+    label: "TMDB",
+    host: "api.themoviedb.org",
+    endpoint: "https://api.themoviedb.org/3/search/multi",
+    environment: "TMDB_API_KEY",
+    account: "provider/tmdb/read-access-token",
+    docs_url: "https://developer.themoviedb.org/docs/authentication-application",
+    authorization_header: "Authorization",
+    access: OutboundAccessDeclaration {
+        provider: "tmdb",
+        capabilities: &[METADATA_SEARCH_CAPABILITY],
+        hosts: &["api.themoviedb.org"],
+        networks: &[NetworkClass::Public],
+    },
+};
+
+const PROVIDERS: [ProviderDefinition; 2] = [GOOGLE_BOOKS, TMDB];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,10 +147,42 @@ struct GoogleVolumeInfo {
     authors: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct TmdbSearchResponse {
+    #[serde(default)]
+    results: Vec<TmdbSearchResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmdbSearchResult {
+    #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
+    media_type: Option<TmdbMediaType>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    adult: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TmdbMediaType {
+    Movie,
+    Tv,
+    #[serde(other)]
+    Other,
+}
+
 pub(crate) fn credential_statuses(
     identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    Ok(vec![google_books_status(identity)?])
+    PROVIDERS
+        .iter()
+        .map(|provider| credential_status(*provider, identity))
+        .collect()
 }
 
 pub(crate) fn save_credential(
@@ -114,18 +190,14 @@ pub(crate) fn save_credential(
     identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
     let result = (|| {
-        require_google_books(&input.provider)?;
-        if environment_is_configured()? {
-            return Err(DesktopProblem::secure_storage(
-                "The Google Books credential is managed by GOOGLE_BOOKS_API_KEY.",
-            ));
-        }
-        validate_credential(&input.credential)?;
-        let entry = provider_entry(identity)?;
+        let provider = writable_provider(&input.provider)?;
+        validate_credential(provider, &input.credential)?;
+        let entry = provider_entry(provider, identity)?;
         entry.set_secret(input.credential.as_bytes()).map_err(|_| {
-            DesktopProblem::secure_storage(
-                "Fasti could not save the Google Books credential securely.",
-            )
+            DesktopProblem::secure_storage(format!(
+                "Fasti could not save the {} credential securely.",
+                provider.label
+            ))
         })?;
         let mut stored = entry.get_secret().map_err(|_| {
             DesktopProblem::secure_storage(
@@ -150,18 +222,25 @@ pub(crate) fn delete_credential(
     input: DeleteProviderCredentialInput,
     identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
-    require_google_books(&input.provider)?;
-    if environment_is_configured()? {
-        return Err(DesktopProblem::secure_storage(
-            "The Google Books credential is managed by GOOGLE_BOOKS_API_KEY.",
-        ));
-    }
-    match provider_entry(identity)?.delete_credential() {
+    let provider = writable_provider(&input.provider)?;
+    match provider_entry(provider, identity)?.delete_credential() {
         Ok(()) | Err(KeyringError::NoEntry) => credential_statuses(identity),
-        Err(_) => Err(DesktopProblem::secure_storage(
-            "Fasti could not remove the Google Books credential.",
-        )),
+        Err(_) => Err(DesktopProblem::secure_storage(format!(
+            "Fasti could not remove the {} credential.",
+            provider.label
+        ))),
     }
+}
+
+fn writable_provider(id: &str) -> Result<ProviderDefinition, DesktopProblem> {
+    let provider = provider(id)?;
+    if environment_is_configured(provider)? {
+        return Err(DesktopProblem::secure_storage(format!(
+            "The {} credential is managed by {}.",
+            provider.label, provider.environment
+        )));
+    }
+    Ok(provider)
 }
 
 pub(crate) async fn search(
@@ -169,62 +248,59 @@ pub(crate) async fn search(
     policy: &OutboundAccessPolicy,
     identity: DataRootIdentity,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
-    require_google_books(&input.provider)?;
+    let provider = provider(&input.provider)?;
     validate_query(&input.query)?;
 
-    let addresses = resolve_once(GOOGLE_BOOKS_HOST, 443)
+    let addresses = resolve_once(provider.host, 443)
         .await
         .map_err(DesktopProblem::provider)?;
     let address_values = addresses.iter().map(|value| value.ip()).collect::<Vec<_>>();
     authorize_outbound(
-        GOOGLE_BOOKS_ACCESS,
+        provider.access,
         policy,
-        GOOGLE_BOOKS_CAPABILITY,
-        GOOGLE_BOOKS_HOST,
+        METADATA_SEARCH_CAPABILITY,
+        provider.host,
         &address_values,
     )
     .map_err(|denial| {
         DesktopProblem::provider(format!(
-            "The outbound policy denied the Google Books {}.",
+            "The outbound policy denied the {} {}.",
+            provider.label,
             denial.dimension()
         ))
     })?;
-    let client = pinned_client(GOOGLE_BOOKS_HOST, &addresses, PROVIDER_TIMEOUT)
+    let client = pinned_client(provider.host, &addresses, PROVIDER_TIMEOUT)
         .map_err(DesktopProblem::provider)?;
 
     // Credential access follows DNS resolution, declaration checks, policy checks,
     // and construction of a proxy-free, redirect-free client.
-    let credential = load_credential(identity)?;
-    let mut url = reqwest::Url::parse(GOOGLE_BOOKS_URL)
-        .map_err(|_| DesktopProblem::provider("The Google Books endpoint is invalid."))?;
-    url.query_pairs_mut()
-        .append_pair("q", &input.query)
-        .append_pair("startIndex", "0")
-        .append_pair("maxResults", &RESULT_LIMIT.to_string())
-        .append_pair("projection", "lite");
-    let request = authenticated_request(&client, url, credential)?;
-    let response = request
-        .send()
-        .await
-        .map_err(|_| DesktopProblem::provider("Google Books could not be reached."))?;
+    let credential = load_credential(provider, identity)?;
+    let url = search_url(provider, &input.query)?;
+    let request = authenticated_request(provider, &client, url, credential)?;
+    let response = request.send().await.map_err(|_| {
+        DesktopProblem::provider(format!("{} could not be reached.", provider.label))
+    })?;
     if matches!(
         response.status(),
         reqwest::StatusCode::BAD_REQUEST
             | reqwest::StatusCode::UNAUTHORIZED
             | reqwest::StatusCode::FORBIDDEN
     ) {
-        return Err(DesktopProblem::provider_credential(
-            "Google Books rejected the configured API key.",
-        ));
+        return Err(DesktopProblem::provider_credential(format!(
+            "{} rejected the configured credential.",
+            provider.label
+        )));
     }
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(DesktopProblem::provider(
-            "Google Books rate limited the request. Wait, then retry.",
-        ));
+        return Err(DesktopProblem::provider(format!(
+            "{} rate limited the request. Wait, then retry.",
+            provider.label
+        )));
     }
     if response.status() != reqwest::StatusCode::OK {
         return Err(DesktopProblem::provider(format!(
-            "Google Books returned HTTP {}.",
+            "{} returned HTTP {}.",
+            provider.label,
             response.status().as_u16()
         )));
     }
@@ -234,25 +310,27 @@ pub(crate) async fn search(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.to_ascii_lowercase().starts_with("application/json"));
     if !json_content_type {
-        return Err(DesktopProblem::provider(
-            "Google Books returned an unexpected content type.",
-        ));
+        return Err(DesktopProblem::provider(format!(
+            "{} returned an unexpected content type.",
+            provider.label
+        )));
     }
     let body = bounded_body(response, RESPONSE_LIMIT)
         .await
         .map_err(DesktopProblem::provider)?;
-    parse_candidates(&body)
+    parse_candidates(provider, &body)
 }
 
-fn google_books_status(
+fn credential_status(
+    provider: ProviderDefinition,
     identity: DataRootIdentity,
 ) -> Result<ProviderCredentialStatus, DesktopProblem> {
-    if environment_is_configured()? {
-        return Ok(status(true, CredentialSource::Environment, false));
+    if environment_is_configured(provider)? {
+        return Ok(status(provider, true, CredentialSource::Environment, false));
     }
-    let configured = match provider_entry(identity)?.get_secret() {
+    let configured = match provider_entry(provider, identity)?.get_secret() {
         Ok(mut secret) => {
-            let valid = validate_credential_bytes(&secret).is_ok();
+            let valid = validate_credential_bytes(provider, &secret).is_ok();
             secret.zeroize();
             valid
         }
@@ -264,6 +342,7 @@ fn google_books_status(
         }
     };
     Ok(status(
+        provider,
         configured,
         if configured {
             CredentialSource::CredentialStore
@@ -275,45 +354,50 @@ fn google_books_status(
 }
 
 const fn status(
+    provider: ProviderDefinition,
     configured: bool,
     source: CredentialSource,
     writable: bool,
 ) -> ProviderCredentialStatus {
     ProviderCredentialStatus {
-        provider: GOOGLE_BOOKS_PROVIDER,
-        label: GOOGLE_BOOKS_LABEL,
+        provider: provider.id,
+        label: provider.label,
         configured,
         source,
         writable,
-        docs_url: GOOGLE_BOOKS_DOCS,
+        docs_url: provider.docs_url,
     }
 }
 
-fn provider_entry(identity: DataRootIdentity) -> Result<Entry, DesktopProblem> {
-    let account = crate::secure_storage::scoped_account(GOOGLE_BOOKS_ACCOUNT, identity);
+fn provider_entry(
+    provider: ProviderDefinition,
+    identity: DataRootIdentity,
+) -> Result<Entry, DesktopProblem> {
+    let account = crate::secure_storage::scoped_account(provider.account, identity);
     Entry::new(KEYRING_SERVICE, &account).map_err(|_| {
         DesktopProblem::secure_storage("Fasti could not open the system credential store.")
     })
 }
 
-fn environment_credential() -> Result<Option<String>, DesktopProblem> {
-    match std::env::var(GOOGLE_BOOKS_ENV) {
+fn environment_credential(provider: ProviderDefinition) -> Result<Option<String>, DesktopProblem> {
+    match std::env::var(provider.environment) {
         Ok(mut value) => {
-            if let Err(problem) = validate_credential(&value) {
+            if let Err(problem) = validate_credential(provider, &value) {
                 value.zeroize();
                 return Err(problem);
             }
             Ok(Some(value))
         }
         Err(std::env::VarError::NotPresent) => Ok(None),
-        Err(std::env::VarError::NotUnicode(_)) => Err(DesktopProblem::secure_storage(
-            "GOOGLE_BOOKS_API_KEY must contain valid UTF-8.",
-        )),
+        Err(std::env::VarError::NotUnicode(_)) => Err(DesktopProblem::secure_storage(format!(
+            "{} must contain valid UTF-8.",
+            provider.environment
+        ))),
     }
 }
 
-fn environment_is_configured() -> Result<bool, DesktopProblem> {
-    match environment_credential()? {
+fn environment_is_configured(provider: ProviderDefinition) -> Result<bool, DesktopProblem> {
+    match environment_credential(provider)? {
         Some(mut value) => {
             value.zeroize();
             Ok(true)
@@ -322,14 +406,17 @@ fn environment_is_configured() -> Result<bool, DesktopProblem> {
     }
 }
 
-fn load_credential(identity: DataRootIdentity) -> Result<Option<String>, DesktopProblem> {
-    if let Some(value) = environment_credential()? {
+fn load_credential(
+    provider: ProviderDefinition,
+    identity: DataRootIdentity,
+) -> Result<Option<String>, DesktopProblem> {
+    if let Some(value) = environment_credential(provider)? {
         return Ok(Some(value));
     }
-    match provider_entry(identity)?.get_secret() {
+    match provider_entry(provider, identity)?.get_secret() {
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(mut value) => {
-                if let Err(problem) = validate_credential(&value) {
+                if let Err(problem) = validate_credential(provider, &value) {
                     value.zeroize();
                     return Err(problem);
                 }
@@ -338,9 +425,10 @@ fn load_credential(identity: DataRootIdentity) -> Result<Option<String>, Desktop
             Err(error) => {
                 let mut bytes = error.into_bytes();
                 bytes.zeroize();
-                Err(DesktopProblem::provider_credential(
-                    "The saved Google Books credential is invalid.",
-                ))
+                Err(DesktopProblem::provider_credential(format!(
+                    "The saved {} credential is invalid.",
+                    provider.label
+                )))
             }
         },
         Err(KeyringError::NoEntry) => Ok(None),
@@ -351,32 +439,50 @@ fn load_credential(identity: DataRootIdentity) -> Result<Option<String>, Desktop
 }
 
 fn authenticated_request(
+    provider: ProviderDefinition,
     client: &reqwest::Client,
     url: reqwest::Url,
     credential: Option<String>,
 ) -> Result<reqwest::RequestBuilder, DesktopProblem> {
     let mut secret = credential.ok_or_else(|| {
-        DesktopProblem::provider_credential(
-            "Add a Google Books API key in Settings before searching Google Books.",
-        )
+        DesktopProblem::provider_credential(format!(
+            "Add a {} credential in Settings before searching {}.",
+            provider.label, provider.label
+        ))
     })?;
-    let header_result = HeaderValue::from_str(&secret);
+    let header_result = match provider.kind {
+        ProviderKind::GoogleBooks => HeaderValue::from_str(&secret),
+        ProviderKind::Tmdb => {
+            let mut bearer = String::with_capacity("Bearer ".len() + secret.len());
+            bearer.push_str("Bearer ");
+            bearer.push_str(&secret);
+            let result = HeaderValue::from_str(&bearer);
+            bearer.zeroize();
+            result
+        }
+    };
     secret.zeroize();
     let mut header = header_result.map_err(|_| {
-        DesktopProblem::provider_credential("The Google Books credential is invalid.")
+        DesktopProblem::provider_credential(format!(
+            "The {} credential is invalid.",
+            provider.label
+        ))
     })?;
     header.set_sensitive(true);
-    Ok(client.get(url).header("X-Goog-Api-Key", header))
+    Ok(client
+        .get(url)
+        .header(ACCEPT, "application/json")
+        .header(provider.authorization_header, header))
 }
 
-fn require_google_books(provider: &str) -> Result<(), DesktopProblem> {
-    if provider == GOOGLE_BOOKS_PROVIDER {
-        Ok(())
-    } else {
-        Err(DesktopProblem::configuration(
-            "The requested metadata provider is not supported.",
-        ))
-    }
+fn provider(id: &str) -> Result<ProviderDefinition, DesktopProblem> {
+    PROVIDERS
+        .iter()
+        .copied()
+        .find(|provider| provider.id == id)
+        .ok_or_else(|| {
+            DesktopProblem::configuration("The requested metadata provider is not supported.")
+        })
 }
 
 fn validate_query(query: &str) -> Result<(), DesktopProblem> {
@@ -392,23 +498,60 @@ fn validate_query(query: &str) -> Result<(), DesktopProblem> {
     Ok(())
 }
 
-fn validate_credential(value: &str) -> Result<(), DesktopProblem> {
-    validate_credential_bytes(value.as_bytes())
+fn validate_credential(provider: ProviderDefinition, value: &str) -> Result<(), DesktopProblem> {
+    validate_credential_bytes(provider, value.as_bytes())
 }
 
-fn validate_credential_bytes(value: &[u8]) -> Result<(), DesktopProblem> {
+fn validate_credential_bytes(
+    provider: ProviderDefinition,
+    value: &[u8],
+) -> Result<(), DesktopProblem> {
     if value.is_empty()
         || value.len() > CREDENTIAL_LIMIT
         || !value.iter().all(|byte| byte.is_ascii_graphic())
     {
-        return Err(DesktopProblem::provider_credential(
-            "The Google Books credential must contain 1 to 512 visible ASCII characters.",
-        ));
+        return Err(DesktopProblem::provider_credential(format!(
+            "The {} credential must contain 1 to 512 visible ASCII characters.",
+            provider.label
+        )));
     }
     Ok(())
 }
 
-fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+fn search_url(provider: ProviderDefinition, query: &str) -> Result<reqwest::Url, DesktopProblem> {
+    let mut url = reqwest::Url::parse(provider.endpoint).map_err(|_| {
+        DesktopProblem::provider(format!("The {} endpoint is invalid.", provider.label))
+    })?;
+    match provider.kind {
+        ProviderKind::GoogleBooks => {
+            url.query_pairs_mut()
+                .append_pair("q", query)
+                .append_pair("startIndex", "0")
+                .append_pair("maxResults", &RESULT_LIMIT.to_string())
+                .append_pair("projection", "lite");
+        }
+        ProviderKind::Tmdb => {
+            url.query_pairs_mut()
+                .append_pair("query", query)
+                .append_pair("include_adult", "false")
+                .append_pair("language", "en-US")
+                .append_pair("page", "1");
+        }
+    }
+    Ok(url)
+}
+
+fn parse_candidates(
+    provider: ProviderDefinition,
+    body: &[u8],
+) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    match provider.kind {
+        ProviderKind::GoogleBooks => parse_google_books_candidates(body),
+        ProviderKind::Tmdb => parse_tmdb_candidates(body),
+    }
+}
+
+fn parse_google_books_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
     let response: GoogleVolumesResponse = serde_json::from_slice(body)
         .map_err(|_| DesktopProblem::provider("Google Books returned invalid JSON."))?;
     let mut seen = BTreeSet::new();
@@ -433,11 +576,47 @@ fn parse_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProble
                 return None;
             }
             Some(ProviderCandidate {
-                provider: GOOGLE_BOOKS_PROVIDER,
+                provider: GOOGLE_BOOKS.id,
                 provider_id: id,
                 title,
                 kind: "book",
                 authors: volume_info.authors,
+                image_url: None,
+            })
+        })
+        .take(RESULT_LIMIT)
+        .collect())
+}
+
+fn parse_tmdb_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    let response: TmdbSearchResponse = serde_json::from_slice(body)
+        .map_err(|_| DesktopProblem::provider("TMDB returned invalid JSON."))?;
+    let mut seen = BTreeSet::new();
+    Ok(response
+        .results
+        .into_iter()
+        .filter_map(|item| {
+            if item.adult != Some(false) {
+                return None;
+            }
+            let (kind, title) = match item.media_type? {
+                TmdbMediaType::Movie => ("movie", item.title?),
+                TmdbMediaType::Tv => ("show", item.name?),
+                TmdbMediaType::Other => return None,
+            };
+            let id = item.id?.to_string();
+            if !valid_candidate_text(&id, 32)
+                || !valid_candidate_text(&title, 512)
+                || !seen.insert(format!("{kind}:{id}"))
+            {
+                return None;
+            }
+            Some(ProviderCandidate {
+                provider: TMDB.id,
+                provider_id: id,
+                title,
+                kind,
+                authors: Vec::new(),
                 image_url: None,
             })
         })
@@ -467,10 +646,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let body = format!(r#"{{"items":[{items}]}}"#);
-        let candidates = parse_candidates(body.as_bytes()).expect("provider candidates");
+        let candidates =
+            parse_candidates(GOOGLE_BOOKS, body.as_bytes()).expect("provider candidates");
 
         assert_eq!(candidates.len(), RESULT_LIMIT);
-        assert_eq!(candidates[0].provider, GOOGLE_BOOKS_PROVIDER);
+        assert_eq!(candidates[0].provider, GOOGLE_BOOKS.id);
         assert_eq!(candidates[0].kind, "book");
         assert!(candidates[0].image_url.is_none());
     }
@@ -484,7 +664,7 @@ mod tests {
             {"id":"control","volumeInfo":{"title":"Bad\nTitle","authors":[]}}
           ]
         }"#;
-        let candidates = parse_candidates(body).expect("partial response");
+        let candidates = parse_candidates(GOOGLE_BOOKS, body).expect("partial response");
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider_id, "valid");
@@ -498,7 +678,7 @@ mod tests {
             {"id":"same","volumeInfo":{"title":"Second","authors":["Author"]}}
           ]
         }"#;
-        let candidates = parse_candidates(body).expect("deduplicated response");
+        let candidates = parse_candidates(GOOGLE_BOOKS, body).expect("deduplicated response");
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].title, "First");
@@ -512,7 +692,7 @@ mod tests {
             {"id":"same","volumeInfo":{"title":"Valid","authors":["Author"]}}
           ]
         }"#;
-        let candidates = parse_candidates(body).expect("valid duplicate candidate");
+        let candidates = parse_candidates(GOOGLE_BOOKS, body).expect("valid duplicate candidate");
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].provider_id, "same");
@@ -521,9 +701,10 @@ mod tests {
 
     #[test]
     fn credentials_and_queries_are_strictly_bounded() {
-        assert!(validate_credential("valid-key").is_ok());
-        assert!(validate_credential("").is_err());
-        assert!(validate_credential("key with spaces").is_err());
+        assert!(validate_credential(GOOGLE_BOOKS, "valid-key").is_ok());
+        assert!(validate_credential(TMDB, "valid-token").is_ok());
+        assert!(validate_credential(GOOGLE_BOOKS, "").is_err());
+        assert!(validate_credential(TMDB, "key with spaces").is_err());
         assert!(validate_query("isbn:9780140328721").is_ok());
         assert!(validate_query(" leading").is_err());
         assert!(validate_query(&"x".repeat(QUERY_LIMIT + 1)).is_err());
@@ -536,9 +717,9 @@ mod tests {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("test client");
-        let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
+        let url = reqwest::Url::parse(GOOGLE_BOOKS.endpoint).expect("provider URL");
 
-        assert!(authenticated_request(&client, url, None).is_err());
+        assert!(authenticated_request(GOOGLE_BOOKS, &client, url, None).is_err());
     }
 
     #[test]
@@ -548,8 +729,8 @@ mod tests {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("test client");
-        let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
-        let request = authenticated_request(&client, url, Some("test-key".into()))
+        let url = reqwest::Url::parse(GOOGLE_BOOKS.endpoint).expect("provider URL");
+        let request = authenticated_request(GOOGLE_BOOKS, &client, url, Some("test-key".into()))
             .expect("authenticated request")
             .build()
             .expect("built request");
@@ -561,5 +742,123 @@ mod tests {
         assert_eq!(header, "test-key");
         assert!(header.is_sensitive());
         assert!(!request.url().as_str().contains("test-key"));
+    }
+
+    #[test]
+    fn tmdb_search_returns_only_bounded_neutral_film_and_series_candidates() {
+        let results = (0..12)
+            .map(|index| {
+                let media_type = if index % 2 == 0 { "movie" } else { "tv" };
+                let title = if media_type == "movie" {
+                    format!(r#""title":"Film {index}""#)
+                } else {
+                    format!(r#""name":"Series {index}""#)
+                };
+                format!(
+                    r#"{{"id":{},"media_type":"{media_type}",{title},"adult":false}}"#,
+                    index + 1
+                )
+            })
+            .chain([
+                r#"{"id":90,"media_type":"person","name":"A Person"}"#.to_owned(),
+                r#"{"id":91,"media_type":"movie","title":"Adult","adult":true}"#.to_owned(),
+            ])
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!(r#"{{"results":[{results}]}}"#);
+        let candidates = parse_candidates(TMDB, body.as_bytes()).expect("TMDB candidates");
+
+        assert_eq!(candidates.len(), RESULT_LIMIT);
+        assert_eq!(candidates[0].provider, TMDB.id);
+        assert_eq!(candidates[0].kind, "movie");
+        assert_eq!(candidates[1].kind, "show");
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.authors.is_empty()));
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.image_url.is_none()));
+    }
+
+    #[test]
+    fn tmdb_skips_people_adult_partial_unsafe_and_duplicate_results() {
+        let body = br#"{
+          "results": [
+            {"id":1,"media_type":"person","name":"A Person","adult":false},
+            {"id":2,"media_type":"movie","title":"Adult","adult":true},
+            {"id":3,"media_type":"movie","adult":false},
+            {"id":4,"media_type":"tv","name":"Bad\nTitle","adult":false},
+            {"id":5,"media_type":"movie","title":"A Film","adult":false},
+            {"id":5,"media_type":"movie","title":"Duplicate Film","adult":false},
+            {"id":5,"media_type":"tv","name":"A Series","adult":false},
+            {"id":6,"media_type":"movie","title":"Unknown adult flag","adult":null}
+          ]
+        }"#;
+        let candidates = parse_candidates(TMDB, body).expect("filtered TMDB candidates");
+
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].title, "A Film");
+        assert_eq!(candidates[0].kind, "movie");
+        assert_eq!(candidates[1].title, "A Series");
+        assert_eq!(candidates[1].kind, "show");
+    }
+
+    #[test]
+    fn tmdb_credential_is_sent_only_in_a_sensitive_bearer_header() {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("test client");
+        let url = search_url(TMDB, "The Bear").expect("TMDB search URL");
+        let request = authenticated_request(TMDB, &client, url, Some("test-token".into()))
+            .expect("authenticated request")
+            .build()
+            .expect("built request");
+        let header = request
+            .headers()
+            .get("Authorization")
+            .expect("credential header");
+
+        assert_eq!(header, "Bearer test-token");
+        assert!(header.is_sensitive());
+        assert!(!request.url().as_str().contains("test-token"));
+        assert_eq!(
+            request
+                .url()
+                .query_pairs()
+                .find(|(key, _)| key == "api_key"),
+            None
+        );
+        assert_eq!(
+            request
+                .url()
+                .query_pairs()
+                .find(|(key, _)| key == "include_adult")
+                .map(|(_, value)| value.into_owned()),
+            Some("false".to_owned())
+        );
+    }
+
+    #[test]
+    fn provider_declarations_are_distinct_and_cannot_cross_hosts() {
+        let public = ["18.160.10.1".parse().expect("public address")];
+        assert!(authorize_outbound(
+            TMDB.access,
+            &OutboundAccessPolicy::default(),
+            METADATA_SEARCH_CAPABILITY,
+            TMDB.host,
+            &public,
+        )
+        .is_ok());
+        assert!(authorize_outbound(
+            TMDB.access,
+            &OutboundAccessPolicy::default(),
+            METADATA_SEARCH_CAPABILITY,
+            GOOGLE_BOOKS.host,
+            &public,
+        )
+        .is_err());
+        assert_ne!(TMDB.account, GOOGLE_BOOKS.account);
     }
 }

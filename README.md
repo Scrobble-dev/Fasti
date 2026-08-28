@@ -62,6 +62,11 @@ The production daemon deliberately exposes only behavior it can prove:
 
 The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
 
+The trusted desktop review host can store data-root-scoped Google Books and
+TMDB credentials and return bounded neutral search candidates. Provider search
+is local Tauri IPC, not a daemon HTTP route. The browser does not accept secrets
+or execute provider requests. See [network configuration](docs/network-configuration.md#provider-network-policy).
+
 The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, review state, and durable receipts behind application ports. Node initialization, first-client enrollment, observation acceptance, and identity records/identifiers/namespaces are available through the production composition root. The remaining paths (evidence, receipts, identity review) are exercised by the Rust suites but stay unavailable through production HTTP. Their problems stay staged until the owning public surfaces are activated.
 
 ## Constitution

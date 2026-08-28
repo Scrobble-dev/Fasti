@@ -24,7 +24,7 @@ Those commands report contract state. They do not activate later-body runtime be
 | Identity review (inspect, defer, resume, resolve)                                | Implemented behind internal B2 ports for review; no production route exists                                     |
 | Corrections and portability                                                      | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards |
 | Browser QA harness                                                               | Local, private `system.health` evidence tooling; not a product UI or capability activation                      |
-| Trusted desktop network settings and Google Books search                         | Local Tauri IPC review body; no public HTTP route, event, record write, or browser provider execution           |
+| Trusted desktop network settings and Google Books/TMDB search                    | Local Tauri IPC review body; no public HTTP route, event, record write, or browser provider execution           |
 | Product packaging and release behavior                                           | Later bodies; absent now                                                                                        |
 
 The fixture separates contract proof from availability claims. Its finite routes are generated into a dedicated conformance OpenAPI document. `receipt.stream` is governed as an AsyncAPI 3.x SSE operation. Successful fixture responses identify `fixture_only` availability and `none` durability; problem-only routes cannot imply a false success. The production router mounts health, durable node setup (initialize/enroll), observation acceptance, and the identity records/identifiers/namespaces routes above. All other fixture paths return `404` in production.
@@ -34,11 +34,11 @@ Required surfaces are generated or validated from the registry across domain/app
 The browser harness consumes the generated `system.health` SDK parser and adds no API shape, domain state, retry queue, persistence, or public binding. Its local Vite proxy is not an endpoint-configuration authority. The registry therefore keeps the product UI surface not applicable through B3.
 
 The trusted Tauri host can persist non-secret network preferences, test a
-configured Fasti service, store a Google Books key in the platform credential
-store, and return bounded neutral search candidates. These review commands are
-not daemon HTTP routes and do not activate public provider or media-record
-capabilities. OpenAPI, AsyncAPI, JSON Schema, and JSON-LD remain not applicable
-to this local IPC body.
+configured Fasti service, store Google Books and TMDB credentials in the
+platform credential store, and return bounded neutral search candidates. These
+review commands are not daemon HTTP routes and do not activate public provider
+or media-record capabilities. OpenAPI, AsyncAPI, JSON Schema, and JSON-LD remain
+not applicable to this local IPC body.
 
 `cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1. The mandatory headless QA and developer-experience gates also pass on this branch. Closure requires the exact-head aggregate manifest, including the governed Tauri package and same-workflow-attempt x86_64/aarch64 low-hardware envelope packages from one exact `dev` push. Until `cargo xtask test milestone --body B1` passes, B1 remains in progress and B2 is not authorized.
 

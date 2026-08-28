@@ -142,12 +142,18 @@ They must not enter URLs, arguments, logs, browser storage, screenshots,
 fixtures, or proof bundles.
 
 The Google Books review runtime requires `GOOGLE_BOOKS_API_KEY` or a credential
-saved by the trusted Tauri host. An environment credential takes precedence and
-is read-only in Settings. The host loads the key only after outbound access is
-authorized and sends it as the sensitive `X-Goog-Api-Key` header. Discover
-returns at most ten neutral book candidates and does not create or modify a
-local media record. The browser does not receive credentials or execute
-provider requests.
+saved by the trusted Tauri host. The TMDB review runtime requires
+`TMDB_API_KEY` or a saved credential. For TMDB, this value must be the API Read
+Access Token shown in the TMDB account API settings. Fasti does not put the
+TMDB v3 `api_key` query parameter in a URL.
+
+An environment credential takes precedence and is read-only in Settings. The
+host loads either credential only after outbound access is authorized. It sends
+the Google key as a sensitive `X-Goog-Api-Key` header and the TMDB token as a
+sensitive `Authorization: Bearer` header. Discover returns at most ten neutral
+book, film, or series candidates and does not create or modify a local media
+record during search. TMDB people and adult results are excluded. The browser
+does not receive credentials or execute provider requests.
 
 An app-managed provider credential is scoped to the identity of the opened
 physical Fasti data root. Fasti derives that identity from the retained root
