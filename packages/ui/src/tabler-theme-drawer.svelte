@@ -397,7 +397,6 @@
     font-weight: 500;
     cursor: pointer;
     text-align: center;
-    transition: all 100ms ease;
     display: flex;
     align-items: center;
     justify-content: center;
