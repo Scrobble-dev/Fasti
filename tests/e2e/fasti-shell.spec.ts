@@ -107,7 +107,7 @@ async function mockTrustedHost(page: Page) {
   });
 }
 
-test("the development browser user can sign in, edit, and delete itself", async ({
+test("the development browser user can sign in and edit but cannot delete the last administrator", async ({
   page,
 }) => {
   const developmentUsername = "testadmin";
@@ -123,7 +123,6 @@ test("the development browser user can sign in, edit, and delete itself", async 
     user_id: userId,
     username: developmentUsername,
   };
-  let deleted = false;
 
   await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
     const request = route.request();
@@ -158,7 +157,7 @@ test("the development browser user can sign in, edit, and delete itself", async 
     if (request.method() === "GET") {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ users: deleted ? [] : [user] }),
+        body: JSON.stringify({ users: [user] }),
       });
       return;
     }
@@ -178,8 +177,39 @@ test("the development browser user can sign in, edit, and delete itself", async 
       return;
     }
     expect(body).toEqual({ current_password: editedUsername });
-    deleted = true;
-    await route.fulfill({ status: 204 });
+    await route.fulfill({
+      status: 422,
+      contentType: "application/problem+json",
+      body: JSON.stringify({
+        type: "https://fasti.scrobble.dev/v1/problems/validation-failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "request representation does not satisfy the governed contract",
+        code: "validation_failed",
+        capability_id: "browser.user.delete",
+        safe_state: "no_mutation",
+        retryability: "retry_after_correction",
+        next_actions: [
+          {
+            id: "correct_request",
+            label: "Correct the request representation and retry",
+          },
+        ],
+        correlation_id: "req_01991f588e0070008000000000000002",
+        param: null,
+        actual: null,
+        violations: [
+          {
+            code: "last_active_administrator_required",
+            pointer: "/",
+            reason:
+              "deactivating or deleting this account would remove the workspace's last active administrator",
+            expected: "at least one active administrator must remain",
+            actual: null,
+          },
+        ],
+      }),
+    });
   });
   await page.route(/\/api\/v1\/records$/, (route) =>
     route.fulfill({
@@ -194,6 +224,7 @@ test("the development browser user can sign in, edit, and delete itself", async 
     .getByRole("button", { name: "Sign in", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Username").fill(developmentUsername);
   await dialog.getByLabel("Password").fill(developmentUsername);
   await dialog.getByRole("button", { name: "Sign in" }).click();
   await expect(
@@ -212,16 +243,20 @@ test("the development browser user can sign in, edit, and delete itself", async 
   await dialog.getByRole("button", { name: "Sign in" }).click();
   await dialog.getByRole("button", { name: "Edit" }).click();
   await dialog.getByLabel("Your current password").fill(editedUsername);
-  await dialog.getByRole("checkbox", { name: /cannot be undone/ }).check();
+  const deleteConfirmation = dialog.getByRole("checkbox", {
+    name: /cannot be undone/,
+  });
+  const deleteTarget = await deleteConfirmation.locator("..").boundingBox();
+  expect(deleteTarget?.height).toBeGreaterThanOrEqual(44);
+  await deleteConfirmation.check();
   await dialog.getByRole("button", { name: "Delete user" }).click();
 
-  await expect(dialog.getByRole("status")).toHaveText(
-    "Account deleted. The development seed will not recreate it.",
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "This is the only active administrator. Keep the account active.",
   );
   await expect(
-    dialog.getByRole("button", { name: "Sign in", exact: true }),
+    page.getByRole("button", { name: `Manage account ${editedUsername}` }),
   ).toBeVisible();
-  expect(deleted).toBe(true);
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
 });

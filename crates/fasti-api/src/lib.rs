@@ -541,7 +541,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn development_browser_account_signs_in_edits_deletes_and_authorizes_data() {
+    async fn development_browser_account_signs_in_edits_and_retains_the_last_administrator() {
         let (root, kernel) = test_kernel();
         ensure_development_test_account(kernel.as_ref()).expect("seed test account");
         let app = api_router(kernel.clone(), test_bind_addr(), root.path());
@@ -683,7 +683,20 @@ mod tests {
             )
             .await
             .expect("delete response");
-        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+        assert_eq!(deleted.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let problem: fasti_contracts::ProblemDetails = serde_json::from_slice(
+            &to_bytes(deleted.into_body(), 4096)
+                .await
+                .expect("delete problem body"),
+        )
+        .expect("delete problem");
+        assert_eq!(problem.code, "validation_failed");
+        assert_eq!(problem.violations.len(), 1);
+        assert_eq!(
+            problem.violations[0].code,
+            "last_active_administrator_required"
+        );
+        assert_eq!(problem.violations[0].pointer, "/");
     }
 
     #[cfg(target_os = "linux")]

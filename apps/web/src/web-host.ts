@@ -202,9 +202,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
 
   return {
     networkConfigurationScope: "client",
-    developmentTestAccountHint: import.meta.env.DEV
-      ? "Fresh development data root: testadmin / testadmin"
-      : undefined,
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },

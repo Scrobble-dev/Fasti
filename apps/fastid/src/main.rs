@@ -163,11 +163,19 @@ fn remote_proxy_is_trusted() -> Result<bool> {
     )
 }
 
-fn development_test_account_enabled() -> Result<bool> {
-    parse_boolean(
-        "FASTI_DEVELOPMENT_TEST_ACCOUNT",
+fn parse_development_test_account(value: Option<String>, remote_listener: bool) -> Result<bool> {
+    let enabled = parse_boolean("FASTI_DEVELOPMENT_TEST_ACCOUNT", value, false)?;
+    anyhow::ensure!(
+        !enabled || !remote_listener,
+        "FASTI_DEVELOPMENT_TEST_ACCOUNT is allowed only on a loopback durable listener"
+    );
+    Ok(enabled)
+}
+
+fn development_test_account_enabled(remote_listener: bool) -> Result<bool> {
+    parse_development_test_account(
         env::var("FASTI_DEVELOPMENT_TEST_ACCOUNT").ok(),
-        cfg!(debug_assertions),
+        remote_listener,
     )
 }
 
@@ -204,11 +212,12 @@ async fn main() -> Result<()> {
                 );
                 require_https_public_url()?;
             }
+            let seed_development_account = development_test_account_enabled(remote_listener)?;
             let kernel = Arc::new(
                 SqliteKernel::open(&data_root)
                     .with_context(|| format!("failed to open Fasti data root {data_root:?}"))?,
             );
-            if development_test_account_enabled()? {
+            if seed_development_account {
                 ensure_development_test_account(kernel.as_ref()).map_err(|problem| {
                     anyhow::anyhow!(
                         "failed to seed the one-time development browser account: {}",
@@ -335,6 +344,21 @@ mod tests {
         assert!(parse_boolean("TEST", None, true).expect("default"));
         assert!(!parse_boolean("TEST", Some("false".to_owned()), true).expect("false"));
         assert!(parse_boolean("TEST", Some("yes".to_owned()), false).is_err());
+    }
+
+    #[test]
+    fn development_account_is_explicit_and_loopback_only() {
+        assert!(!parse_development_test_account(None, false).expect("default off"));
+        assert!(
+            parse_development_test_account(Some("true".to_owned()), false)
+                .expect("explicit loopback development account")
+        );
+        assert!(
+            !parse_development_test_account(Some("false".to_owned()), true)
+                .expect("remote listener without development account")
+        );
+        assert!(parse_development_test_account(Some("true".to_owned()), true).is_err());
+        assert!(parse_development_test_account(Some("yes".to_owned()), false).is_err());
     }
 
     #[test]
