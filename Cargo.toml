@@ -44,7 +44,7 @@ axum = { version = "0.8", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
 
 # SQLite & Persistence
-rusqlite = { version = "0.32", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
+rusqlite = { version = "0.40", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
 
 # CLI & Utilities
 clap = { version = "4.5", features = ["derive", "env"] }
@@ -56,7 +56,7 @@ argon2 = "0.5.3"
 serde-saphyr = "1.0.1"
 proptest = "1.6"
 static_assertions = "1.1"
-getrandom = "0.3"
+getrandom = "0.4"
 rustix = { version = "1.1.4", features = ["fs"] }
 tar = { version = "0.4.46", default-features = false }
 zstd = { version = "0.13.3", default-features = false }
