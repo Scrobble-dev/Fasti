@@ -981,28 +981,29 @@
       {#if activeSection === "connections"}
         <ConnectionsView {host} />
       {:else if activeSection === "settings"}
-        {#key host.currentBrowserSession ? (browserSession?.user.user_id ?? "signed-out") : "trusted-host"}
-          <RuntimeSettingsView
-            {host}
-            {workbenchPreferences}
-            canAccessProfileData={!host.currentBrowserSession ||
-              (browserSessionChecked && browserSession !== null)}
-            activeTab={settingsTab}
-            onTabChange={(tab: SettingsTab) => {
-              settingsTab = tab;
-              if (typeof window !== "undefined") {
-                const newPath = pathForSettingsTab(tab);
-                if (window.location.pathname !== newPath) {
-                  window.history.pushState(null, "", newPath);
-                }
+        <RuntimeSettingsView
+          {host}
+          {workbenchPreferences}
+          canAccessProfileData={!host.currentBrowserSession ||
+            (browserSessionChecked && browserSession !== null)}
+          profileDataIdentity={host.currentBrowserSession
+            ? (browserSession?.user.user_id ?? "signed-out")
+            : "trusted-host"}
+          activeTab={settingsTab}
+          onTabChange={(tab: SettingsTab) => {
+            settingsTab = tab;
+            if (typeof window !== "undefined") {
+              const newPath = pathForSettingsTab(tab);
+              if (window.location.pathname !== newPath) {
+                window.history.pushState(null, "", newPath);
               }
-            }}
-            onClientEndpointChanged={resetClientEndpoint}
-            onProviderCredentialsChanged={invalidateDiscoverProviders}
-            onUpdateWorkbenchPreferences={(patch) =>
-              (workbenchPreferences = { ...workbenchPreferences, ...patch })}
-          />
-        {/key}
+            }
+          }}
+          onClientEndpointChanged={resetClientEndpoint}
+          onProviderCredentialsChanged={invalidateDiscoverProviders}
+          onUpdateWorkbenchPreferences={(patch) =>
+            (workbenchPreferences = { ...workbenchPreferences, ...patch })}
+        />
       {:else if activeSection === "discover"}
         <DiscoverView
           providerCredentials={discoverProviders}

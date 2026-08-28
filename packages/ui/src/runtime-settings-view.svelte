@@ -34,6 +34,7 @@
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
     canAccessProfileData?: boolean;
+    profileDataIdentity?: string;
     activeTab?:
       | "network"
       | "providers"
@@ -64,6 +65,7 @@
     host,
     workbenchPreferences,
     canAccessProfileData = true,
+    profileDataIdentity = "trusted-host",
     activeTab = "network",
     onTabChange,
     onUpdateWorkbenchPreferences,
@@ -79,15 +81,6 @@
     | "custom_fields"
     | "nuvio_collections"
     | "system" = $state("network");
-
-  $effect(() => {
-    if (activeTab) {
-      active = activeTab;
-      if (activeTab === "nuvio_collections" && canAccessProfileData) {
-        void untrack(loadNuvioCollections);
-      }
-    }
-  });
 
   function switchTab(tab: typeof active) {
     active = tab;
@@ -182,6 +175,40 @@
   let nuvioLoading = $state(false);
   let nuvioProblem = $state<string>();
   let nuvioNotice = $state<string>();
+  let nuvioRequestGeneration = 0;
+  let activeNuvioIdentity: string | undefined;
+
+  $effect(() => {
+    const identity = profileDataIdentity;
+    const tab = activeTab;
+    const canLoadProfileData = canAccessProfileData;
+    untrack(() => {
+      if (identity !== activeNuvioIdentity) {
+        activeNuvioIdentity = identity;
+        resetNuvioProfileState();
+      }
+      if (tab) {
+        active = tab;
+        if (tab === "nuvio_collections" && canLoadProfileData) {
+          void loadNuvioCollections();
+        }
+      }
+    });
+  });
+
+  function resetNuvioProfileState(): void {
+    nuvioRequestGeneration += 1;
+    nuvioDocument = null;
+    nuvioFile = undefined;
+    if (nuvioFileInput) nuvioFileInput.value = "";
+    nuvioLoading = false;
+    nuvioProblem = undefined;
+    nuvioNotice = undefined;
+  }
+
+  function isCurrentNuvioRequest(generation: number): boolean {
+    return generation === nuvioRequestGeneration;
+  }
 
   const MAX_NUVIO_COLLECTIONS_BYTES = 4 * 1_024 * 1_024;
 
@@ -216,18 +243,23 @@
   async function loadNuvioCollections(): Promise<void> {
     if (!canAccessProfileData || !host.getNuvioCollections || nuvioLoading)
       return;
+    const generation = ++nuvioRequestGeneration;
     nuvioLoading = true;
     nuvioProblem = undefined;
     try {
       const state = await host.getNuvioCollections();
-      nuvioDocument = state.document ?? null;
+      if (isCurrentNuvioRequest(generation)) {
+        nuvioDocument = state.document ?? null;
+      }
     } catch (error) {
-      nuvioProblem = hostProblemText(
-        error,
-        "Fasti could not load this profile's Nuvio Collections document.",
-      );
+      if (isCurrentNuvioRequest(generation)) {
+        nuvioProblem = hostProblemText(
+          error,
+          "Fasti could not load this profile's Nuvio Collections document.",
+        );
+      }
     } finally {
-      nuvioLoading = false;
+      if (isCurrentNuvioRequest(generation)) nuvioLoading = false;
     }
   }
 
@@ -245,26 +277,31 @@
       nuvioProblem = "The selected file exceeds the 4 MiB import limit.";
       return;
     }
+    const generation = ++nuvioRequestGeneration;
     nuvioLoading = true;
     try {
       const value: unknown = JSON.parse(await nuvioFile.text());
+      if (!isCurrentNuvioRequest(generation)) return;
       if (!Array.isArray(value)) {
         throw new Error("The document must be a top-level JSON array.");
       }
       const inputCounts = nuvioCounts(value);
       const state = await host.replaceNuvioCollections(value);
+      if (!isCurrentNuvioRequest(generation)) return;
       nuvioDocument = state.document ?? null;
       const storedCounts = nuvioCounts(nuvioDocument);
       nuvioNotice = `Imported ${inputCounts.collections} collections, ${inputCounts.folders} folders, and ${inputCounts.sources} sources. Stored ${storedCounts.collections} collections, ${storedCounts.folders} folders, and ${storedCounts.sources} sources after Nuvio normalization.`;
       nuvioFile = undefined;
       if (nuvioFileInput) nuvioFileInput.value = "";
     } catch (error) {
-      nuvioProblem = hostProblemText(
-        error,
-        "Fasti could not import the selected Nuvio Collections document.",
-      );
+      if (isCurrentNuvioRequest(generation)) {
+        nuvioProblem = hostProblemText(
+          error,
+          "Fasti could not import the selected Nuvio Collections document.",
+        );
+      }
     } finally {
-      nuvioLoading = false;
+      if (isCurrentNuvioRequest(generation)) nuvioLoading = false;
     }
   }
 
@@ -293,20 +330,24 @@
       )
     )
       return;
+    const generation = ++nuvioRequestGeneration;
     nuvioLoading = true;
     nuvioProblem = undefined;
     nuvioNotice = undefined;
     try {
       const state = await host.clearNuvioCollections();
+      if (!isCurrentNuvioRequest(generation)) return;
       nuvioDocument = state.document ?? null;
       nuvioNotice = "This profile's Nuvio Collections document was cleared.";
     } catch (error) {
-      nuvioProblem = hostProblemText(
-        error,
-        "Fasti could not clear this profile's Nuvio Collections document.",
-      );
+      if (isCurrentNuvioRequest(generation)) {
+        nuvioProblem = hostProblemText(
+          error,
+          "Fasti could not clear this profile's Nuvio Collections document.",
+        );
+      }
     } finally {
-      nuvioLoading = false;
+      if (isCurrentNuvioRequest(generation)) nuvioLoading = false;
     }
   }
 
@@ -424,21 +465,25 @@
         ))
     )
       return;
+    const generation = ++nuvioRequestGeneration;
     nuvioLoading = true;
     nuvioProblem = undefined;
     nuvioNotice = undefined;
     try {
       const state = await host.replaceNuvioCollections(preset);
+      if (!isCurrentNuvioRequest(generation)) return;
       nuvioDocument = state.document ?? null;
       const storedCounts = nuvioCounts(nuvioDocument);
       nuvioNotice = `Installed ${packName}. Stored ${storedCounts.collections} collections, ${storedCounts.folders} folders, and ${storedCounts.sources} sources.`;
     } catch (error) {
-      nuvioProblem = hostProblemText(
-        error,
-        `Fasti could not install ${packName}.`,
-      );
+      if (isCurrentNuvioRequest(generation)) {
+        nuvioProblem = hostProblemText(
+          error,
+          `Fasti could not install ${packName}.`,
+        );
+      }
     } finally {
-      nuvioLoading = false;
+      if (isCurrentNuvioRequest(generation)) nuvioLoading = false;
     }
   }
 
