@@ -364,10 +364,12 @@ test("Discover selects configured providers and refreshes explicit setup state",
     };
     const browserWindow = window as typeof window & {
       __SEARCH_INPUT__?: unknown;
+      __TRACK_INPUTS__?: Array<{ command: string; arguments_: unknown }>;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_?: unknown) => Promise<unknown>;
       };
     };
+    browserWindow.__TRACK_INPUTS__ = [];
     browserWindow.__TAURI_INTERNALS__ = {
       invoke: async (command, arguments_) => {
         switch (command) {
@@ -392,6 +394,13 @@ test("Discover selects configured providers and refreshes explicit setup state",
                 image_url: null,
               },
             ];
+          case "register_namespace":
+          case "attach_identifier":
+            browserWindow.__TRACK_INPUTS__?.push({ command, arguments_ });
+            return {};
+          case "create_record":
+            browserWindow.__TRACK_INPUTS__?.push({ command, arguments_ });
+            return { record_id: "record-tmdb-show" };
           case "list_records":
           case "list_reviews":
             return [];
@@ -415,9 +424,20 @@ test("Discover selects configured providers and refreshes explicit setup state",
     ),
   ).toBeLessThanOrEqual(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page
-    .getByRole("searchbox", { name: "Search TMDB" })
-    .fill("Breaking Bad");
+
+  const search = page.getByRole("searchbox", { name: "Search TMDB" });
+  await search.fill("é".repeat(129));
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("256 UTF-8 bytes");
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __SEARCH_INPUT__?: unknown })
+          .__SEARCH_INPUT__,
+    ),
+  ).toBeUndefined();
+
+  await search.fill("Breaking Bad");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Breaking Bad" }),
@@ -431,6 +451,52 @@ test("Discover selects configured providers and refreshes explicit setup state",
   ).toEqual({
     input: { provider: "tmdb", query: "Breaking Bad" },
   });
+  await page.getByRole("button", { name: "Track Now" }).click();
+  await expect(
+    page.getByRole("button", { name: "Added to library" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __TRACK_INPUTS__?: Array<{
+              command: string;
+              arguments_: unknown;
+            }>;
+          }
+        ).__TRACK_INPUTS__,
+    ),
+  ).toEqual([
+    {
+      command: "register_namespace",
+      arguments_: {
+        input: {
+          namespace: "tmdb.tv",
+          label: "tmdb.tv",
+          grains: ["series"],
+          id_pattern: ".+",
+          normalization: "identity",
+          licence_posture: "identifiers_only",
+        },
+      },
+    },
+    {
+      command: "create_record",
+      arguments_: { grain: "series" },
+    },
+    {
+      command: "attach_identifier",
+      arguments_: {
+        input: {
+          record_id: "record-tmdb-show",
+          namespace: "tmdb.tv",
+          grain: "series",
+          value: "1396",
+        },
+      },
+    },
+  ]);
 
   await provider.selectOption("google-books");
   await expect(
@@ -446,6 +512,17 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await page.getByLabel("New credential").fill("provider-secret");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Credential saved");
+  expect(page.url()).not.toContain("provider-secret");
+  expect(await page.locator("body").innerText()).not.toContain(
+    "provider-secret",
+  );
+  expect(
+    await page
+      .locator("input")
+      .evaluateAll((inputs) =>
+        inputs.map((input) => (input as HTMLInputElement).value),
+      ),
+  ).not.toContain("provider-secret");
 
   await page.getByRole("button", { name: "Discover", exact: true }).click();
   await expect(page.getByLabel("Metadata provider")).toHaveValue(

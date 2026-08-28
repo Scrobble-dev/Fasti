@@ -10,7 +10,7 @@
 #   ./scripts/dev.sh --open      # Open the web UI, or the API health check
 #   ./scripts/dev.sh --self-test # Verify scoped process cleanup
 #
-# apps/web (the Svelte health/interface-quality harness) only exists on
+# apps/web (the local Svelte Workbench) only exists on
 # worktrees checked out at a branch that carries it -- not every worktree
 # has it, so this is detected at runtime rather than assumed.
 #

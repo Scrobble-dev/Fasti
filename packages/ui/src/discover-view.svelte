@@ -100,6 +100,15 @@
     event.preventDefault();
     const value = query.trim();
     if (!value || !selectedProvider?.configured || searching) return;
+    if (
+      /[\u0000-\u001f\u007f]/u.test(value) ||
+      new TextEncoder().encode(value).byteLength > 256
+    ) {
+      problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
+      results = [];
+      searched = false;
+      return;
+    }
     searching = true;
     problem = "";
     searched = false;

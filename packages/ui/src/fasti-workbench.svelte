@@ -379,10 +379,8 @@
   }
 
   /** Inverse of record-projection.ts's `mediaKindForGrain` -- picks one
-   * representative grain per display kind so a Discover search result can
-   * become a record. Only "book" is exercised for real today (Google Books
-   * is the only working provider); the rest are best-effort for when a real
-   * provider search exists for them. */
+   * representative grain per display kind so a provider search result can
+   * become a record. */
   function grainForMediaKind(kind: string): string {
     switch (kind) {
       case "movie":
@@ -418,9 +416,15 @@
       );
     }
     const grain = grainForMediaKind(candidate.kind);
+    let namespace = candidate.provider;
+    if (candidate.provider === "tmdb") {
+      if (candidate.kind === "movie") namespace = "tmdb.movie";
+      else if (candidate.kind === "show") namespace = "tmdb.tv";
+      else throw new Error("TMDB returned an unsupported media kind.");
+    }
     await host.registerNamespace({
-      namespace: candidate.provider,
-      label: candidate.provider,
+      namespace,
+      label: namespace,
       grains: [grain],
       id_pattern: ".+",
       normalization: "identity",
@@ -429,7 +433,7 @@
     const created = await host.createRecord(grain);
     await host.attachIdentifier({
       record_id: created.record_id,
-      namespace: candidate.provider,
+      namespace,
       grain,
       value: candidate.provider_id,
     });
