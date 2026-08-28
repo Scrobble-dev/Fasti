@@ -1,9 +1,13 @@
 import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const failures = [];
 
 function gitGrep(arguments_) {
   const result = spawnSync("git", ["grep", ...arguments_], {
+    cwd: root,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
