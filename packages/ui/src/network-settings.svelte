@@ -431,6 +431,10 @@
     opacity: 0.68;
   }
 
+  .btn-primary:disabled {
+    opacity: 1;
+  }
+
   :is(input, textarea, button):focus-visible {
     outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
