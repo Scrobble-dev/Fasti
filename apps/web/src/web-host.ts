@@ -248,13 +248,14 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
 
     async testEndpointConnection(
       endpoint: string,
+      signal?: AbortSignal,
     ): Promise<EndpointConnectionStatus> {
       const { normalized, parsed } = validatedEndpoint(endpoint);
       const health = await new FastiClient({
         baseUrl: normalized,
         timeoutMs: 3_000,
         retryPolicy: { maxAttempts: 1 },
-      }).health();
+      }).health({ signal });
       return {
         endpoint: normalized,
         scheme: parsed.protocol === "https:" ? "https" : "http",

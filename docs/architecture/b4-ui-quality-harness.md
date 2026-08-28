@@ -7,7 +7,9 @@ public release or promise later infrastructure.
 
 - `/` renders the local media Workbench.
 - `/status` renders the separate service diagnostic.
-- The browser reads generated health and Record contracts.
+- The browser reads generated health and Record contracts. The trusted desktop
+  host validates health with the shared Rust contract before returning typed
+  status over IPC.
 - The Record list is a summary of at most 500 Records. The operation has no
   cursor.
 - The browser owns no domain persistence or mutation queue.
@@ -34,15 +36,18 @@ worktree's server.
 
 The automated matrix covers only states that the current host can produce:
 
-| Dimension     | Covered states                                                                                                               |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Routes        | Workbench root and service diagnostic                                                                                        |
-| Session       | Signed out, valid memory-only bearer, rejected bearer                                                                        |
-| Records       | Empty, bounded summary list, unavailable service                                                                             |
-| Settings      | Browser client URL, saved display state, trusted-host controls disabled                                                      |
-| Viewports     | 320, 768, and 1440 CSS pixels                                                                                                |
-| Themes        | Light and Dark                                                                                                               |
-| Accessibility | Keyboard, focus, Axe, contrast, reflow, text spacing, reduced motion, forced colors, and shared 44 CSS pixel product targets |
+| Dimension          | Covered states                                                                                                               |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Routes             | Workbench root, browser history, and browser or packaged service diagnostic before and after setup                           |
+| Session            | Signed out, valid memory-only bearer, rejected bearer                                                                        |
+| Records            | Empty, bounded summary list, unavailable service, native failure, successful retry, and repeated failed retry               |
+| Provider discovery | Authoritative provider status, explicit selection, search race, unconfigured state, and credential removal confirmation    |
+| Review resolution  | Empty, open review, one mutation in flight, and resolved state                                                               |
+| Settings           | Browser client URL, saved display state, trusted-host network and credential controls, and browser-disabled host controls   |
+| Service status     | Healthy, unavailable, contract-invalid, duplicate retry prevention, setup-inspection failure, and focus recovery            |
+| Viewports          | 320, 768, and 1440 CSS pixels                                                                                                |
+| Themes             | Light and Dark                                                                                                               |
+| Accessibility      | Keyboard, focus, Axe, contrast, reflow, text spacing, reduced motion, forced colors, and shared 44 CSS pixel product targets |
 
 Do not add optimistic stories for a capability that has no real host command.
 Add its states when its bounded context, contract or IPC adapter, typed recovery,

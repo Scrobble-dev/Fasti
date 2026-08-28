@@ -26,6 +26,11 @@ parser modules were unavailable. The empty result is not standalone proof.
 Manual inspection, rendered review, Playwright, Axe, target-size, reflow, and
 contrast evidence support it.
 
+Later Workbench recovery changes were reviewed with the permanent UI policy,
+manual source and rendered inspection, and Playwright/Axe journeys. The
+degraded detector was not rerun, so its `5052bb7b` result is baseline evidence,
+not an exact-head claim.
+
 Resolved craft findings include:
 
 - progress animation now uses `transform: scaleX()` instead of animating width;

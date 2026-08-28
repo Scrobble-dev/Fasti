@@ -80,7 +80,14 @@
   });
 
   function statusProblemFor(error: unknown): StatusProblem {
-    if (error instanceof FastiProtocolError) {
+    const candidate =
+      error !== null && typeof error === "object"
+        ? (error as { code?: unknown })
+        : undefined;
+    if (
+      error instanceof FastiProtocolError ||
+      candidate?.code === "invalid_response"
+    ) {
       return {
         title: "The local service returned an invalid response",
         detail:
@@ -105,7 +112,10 @@
       const configuration = await host.loadNetworkConfiguration();
       const serviceUrl = configuration.connection.service_url;
       endpoint = connectionEndpoint(serviceUrl.value, serviceUrl.source);
-      const response = await host.testEndpointConnection(serviceUrl.value);
+      const response = await host.testEndpointConnection(
+        serviceUrl.value,
+        currentRequest.signal,
+      );
       if (request !== currentRequest) return;
       if (response.status !== "healthy") {
         throw new TypeError("The service did not return a healthy status.");
@@ -183,10 +193,17 @@
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),
       };
-      applySetupStatus(await invoke<SetupStatus>("setup_status"));
+      try {
+        applySetupStatus(await invoke<SetupStatus>("setup_status"));
+      } catch (error) {
+        applySetupProblem(error);
+      }
       if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);
+      if (activeSurface === "status") {
+        status = { view: "blocked", problem: statusProblemFor(error) };
+      }
     }
   }
 

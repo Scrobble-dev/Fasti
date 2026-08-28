@@ -252,7 +252,10 @@ export interface WorkbenchHost {
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
   ): Promise<NetworkConfiguration>;
-  testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
+  testEndpointConnection(
+    endpoint: string,
+    signal?: AbortSignal,
+  ): Promise<EndpointConnectionStatus>;
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
   saveProviderCredential(
     provider: string,

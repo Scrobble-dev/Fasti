@@ -18,9 +18,24 @@ function gitGrep(arguments_) {
 }
 
 const sourcePaths = [
-  ":(glob)apps/web/**/*.{js,ts,svelte}",
-  ":(glob)packages/ui/**/*.{js,ts,svelte}",
+  ":(glob)apps/web/**/*.js",
+  ":(glob)apps/web/**/*.ts",
+  ":(glob)apps/web/**/*.svelte",
+  ":(glob)packages/ui/**/*.js",
+  ":(glob)packages/ui/**/*.ts",
+  ":(glob)packages/ui/**/*.svelte",
 ];
+const trackedSources = spawnSync("git", ["ls-files", "--", ...sourcePaths], {
+  cwd: root,
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "pipe"],
+});
+if (trackedSources.status !== 0) {
+  throw new Error(trackedSources.stderr.trim() || "git ls-files failed");
+}
+if (!trackedSources.stdout.trim()) {
+  failures.push("UI policy source pathspecs must match tracked source files");
+}
 const forbiddenIcons = gitGrep([
   "-nEI",
   "lucide|heroicons|phosphor|fontawesome|react-icons|material-icons|iconify",

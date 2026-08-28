@@ -91,6 +91,15 @@ impl DesktopProblem {
         }
     }
 
+    pub(crate) fn invalid_response(detail: impl Into<String>) -> Self {
+        Self {
+            code: "invalid_response",
+            title: "Invalid service response",
+            detail: detail.into(),
+            next_action: "Stop the local service, rebuild it, and start it again.",
+        }
+    }
+
     pub(crate) fn provider(detail: impl Into<String>) -> Self {
         Self {
             code: "provider_unavailable",

@@ -5,6 +5,8 @@ type Scenario =
   | "search-race"
   | "status-race"
   | "status-route"
+  | "status-setup-error"
+  | "status-invalid-response"
   | "credential-delete"
   | "review-resolution"
   | "record-retry"
@@ -124,6 +126,14 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
       invoke: async (command) => {
         switch (command) {
           case "setup_status":
+            if (activeScenario === "status-setup-error") {
+              throw {
+                code: "storage_unavailable",
+                title: "Local storage is unavailable",
+                detail: "Fasti could not inspect its local data root.",
+                next_action: "Check the Fasti data directory, then retry.",
+              };
+            }
             return {
               phase:
                 activeScenario === "status-route" ? "needs_setup" : "ready",
@@ -133,6 +143,15 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
             return networkConfiguration;
           case "test_endpoint_connection":
             endpointCalls += 1;
+            if (activeScenario === "status-invalid-response") {
+              throw {
+                code: "invalid_response",
+                title: "Invalid service response",
+                detail: "The endpoint returned an invalid health response.",
+                next_action:
+                  "Stop the local service, rebuild it, and start it again.",
+              };
+            }
             return {
               endpoint: "http://127.0.0.1:8420",
               scheme: "http",
@@ -317,6 +336,35 @@ test("packaged status remains available before setup and uses host health", asyn
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
+});
+
+test("packaged status finishes when setup inspection fails", async ({
+  page,
+}) => {
+  await installTrustedHost(page, "status-setup-error");
+  await page.goto("/status");
+  await expect(
+    page.getByRole("heading", { name: "Local service available" }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__ENDPOINT_CALLS__?.()))
+    .toBe(1);
+
+  await page.getByRole("button", { name: "Open Media Workbench" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Local storage is unavailable" }),
+  ).toBeVisible();
+});
+
+test("packaged invalid health uses contract recovery", async ({ page }) => {
+  await installTrustedHost(page, "status-invalid-response");
+  await page.goto("/status");
+  await expect(
+    page.getByRole("heading", {
+      name: "The local service returned an invalid response",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("generated health contract")).toBeVisible();
 });
 
 test("provider credential removal requires confirmation", async ({ page }) => {
