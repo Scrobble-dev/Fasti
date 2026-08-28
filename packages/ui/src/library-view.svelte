@@ -181,6 +181,17 @@
       ),
     };
   }
+
+  function calculateProgress(rec: MediaRecord): number {
+    if (rec.status === "completed") return 100;
+    if (rec.totalEpisodes && rec.progressEpisodes) {
+      return Math.round((rec.progressEpisodes / rec.totalEpisodes) * 100);
+    }
+    if (rec.totalDurationSeconds && rec.progressSeconds) {
+      return Math.round((rec.progressSeconds / rec.totalDurationSeconds) * 100);
+    }
+    return 0;
+  }
 </script>
 
 <div class="library-container">
@@ -291,6 +302,7 @@
   {:else if viewMode === "grid"}
     <div class="media-grid">
       {#each filteredRecords as rec (rec.id)}
+        {@const pct = calculateProgress(rec)}
         <div
           class="card-wrapper"
           role="group"
@@ -316,7 +328,14 @@
 
               <span class="kind-badge {rec.mediaKind}">{rec.mediaKind}</span>
 
-              {#if rec.userRating}
+              {#if pct > 0}
+                <div class="top-badge-pct" title="{pct}% completed">
+                  {pct}%
+                </div>
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" style="width: {pct}%"></div>
+                </div>
+              {:else if rec.userRating}
                 <div class="card-rating">
                   <IconStarFilled size={12} class="star-icon" />
                   <span>{rec.userRating}</span>
@@ -574,8 +593,10 @@
   .mode-btn {
     display: grid;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     border: none;
     background: transparent;
     border-radius: 4px;
@@ -611,7 +632,7 @@
 
   .search-input {
     width: 100%;
-    height: 38px;
+    min-height: 44px;
     padding: 8px 14px 8px 36px;
     background: var(--fasti-surface-paper);
     border: 1px solid
@@ -627,7 +648,12 @@
   }
 
   .filter-pill {
-    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 14px;
     border-radius: 20px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -656,6 +682,8 @@
 
   .reset-btn {
     margin-top: 12px;
+    min-height: 44px;
+    min-width: 44px;
     padding: 8px 16px;
     background: var(--fasti-brand-mark);
     color: var(--fasti-brand-contrast);
@@ -731,6 +759,35 @@
     color: var(--fasti-overlay-contrast);
   }
 
+  .top-badge-pct {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--fasti-overlay-contrast);
+    letter-spacing: -0.02em;
+  }
+
+  .progress-bar-track {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 2;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--fasti-brand-mark);
+  }
+
   .card-rating {
     position: absolute;
     top: 8px;
@@ -768,6 +825,10 @@
     background: transparent;
     border: none;
     padding: 0;
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
     text-align: left;
     cursor: pointer;
   }
@@ -878,8 +939,10 @@
   }
 
   .table-btn {
-    width: 28px;
-    height: 28px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     display: grid;
     place-items: center;
     border: 1px solid

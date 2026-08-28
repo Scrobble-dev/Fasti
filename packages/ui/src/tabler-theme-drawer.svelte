@@ -349,10 +349,10 @@
   }
 
   .swatch-btn {
-    width: var(--fasti-touch-target-min);
-    height: var(--fasti-touch-target-min);
-    min-width: var(--fasti-touch-target-min);
-    min-height: var(--fasti-touch-target-min);
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     border-radius: 50%;
     border: 2px solid transparent;
     cursor: pointer;

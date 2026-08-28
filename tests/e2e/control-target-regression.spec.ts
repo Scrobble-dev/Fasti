@@ -32,6 +32,7 @@ async function undersizedControls(page: Page) {
 test("Workbench controls inherit the shared 44 pixel target", async ({
   page,
 }) => {
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/library");
 

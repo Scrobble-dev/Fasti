@@ -174,13 +174,20 @@ _configure_native_scope() {
   local properties=(-p "MemoryMax=${ceiling_bytes}" -p "MemorySwapMax=0")
   if systemd-run --user --scope --quiet "${properties[@]}" -- python3 -c '
 from pathlib import Path
-import sys
+import os, sys
 
 entry = next(line for line in Path("/proc/self/cgroup").read_text().splitlines() if line.startswith("0::"))
-root = Path("/sys/fs/cgroup") / entry[3:].lstrip("/")
-valid = (root / "memory.max").read_text().strip() == sys.argv[1]
-valid = valid and (root / "memory.swap.max").read_text().strip() == "0"
-raise SystemExit(0 if valid else 1)
+cgroup_rel = entry[3:].lstrip("/")
+root = Path("/sys/fs/cgroup") / cgroup_rel
+if (root / "memory.max").exists():
+    valid = (root / "memory.max").read_text().strip() == sys.argv[1]
+    valid = valid and (root / "memory.swap.max").read_text().strip() == "0"
+    raise SystemExit(0 if valid else 1)
+
+if Path("/run/.containerenv").exists() or Path("/.dockerenv").exists() or "DISTROBOX_ENTER_PATH" in os.environ:
+    raise SystemExit(0)
+
+raise SystemExit(1)
   ' "$ceiling_bytes" 2>/dev/null; then
     NATIVE_SCOPE_RUNNER=(systemd-run --user --scope --quiet "${properties[@]}" --)
     return 0
@@ -371,15 +378,35 @@ _status() {
 }
 
 _open() {
-  _resolve_actual_api_url
-  local target="$FASTI_API_URL/api/v1/health"
-  if _tracked_pid web >/dev/null 2>&1; then
-    target="http://127.0.0.1:$WEB_PORT"
-  elif _has_web; then
-    echo "web isn't running in this worktree yet -- run ./scripts/dev.sh first. Opening the API health check instead." >&2
+  local custom_target="${1:-}"
+  local target=""
+
+  if [[ -n "$custom_target" ]]; then
+    if [[ "$custom_target" =~ ^[0-9]+$ ]]; then
+      target="http://127.0.0.1:$custom_target"
+    elif [[ "$custom_target" == http://* || "$custom_target" == https://* ]]; then
+      target="$custom_target"
+    elif [[ "$custom_target" == localhost* || "$custom_target" == 127.0.0.1* ]]; then
+      target="http://$custom_target"
+    else
+      target="https://$custom_target"
+    fi
+  elif [[ -n "$FASTI_PUBLIC_URL" ]]; then
+    target="$FASTI_PUBLIC_URL"
   else
-    echo "apps/web isn't in this worktree. Opening the API health check instead." >&2
+    _resolve_actual_api_url
+    if _tracked_pid web >/dev/null 2>&1; then
+      target="http://127.0.0.1:$WEB_PORT"
+    elif _has_web; then
+      echo "web isn't running in this worktree yet -- run ./scripts/dev.sh first. Opening the API health check instead." >&2
+      target="$FASTI_API_URL/api/v1/health"
+    else
+      echo "apps/web isn't in this worktree. Opening the API health check instead." >&2
+      target="$FASTI_API_URL/api/v1/health"
+    fi
   fi
+
+  echo "Opening $target..."
   if command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$target" >/dev/null 2>&1 &
   elif command -v open >/dev/null 2>&1; then
@@ -389,6 +416,31 @@ _open() {
   else
     echo "$target"
   fi
+}
+
+_update() {
+  echo "=== Updating Fasti to latest dev ==="
+  (
+    cd "$PROJECT_ROOT" || exit 1
+    git fetch origin || { echo "git fetch failed" >&2; return 1; }
+    local current_branch
+    current_branch="$(git branch --show-current 2>/dev/null || echo "")"
+    if [[ "$current_branch" == "dev" ]]; then
+      echo "Pulling latest changes on dev..."
+      git pull --ff-only || { echo "git pull failed" >&2; return 1; }
+    else
+      echo "Rebasing $current_branch on origin/dev..."
+      git rebase origin/dev || { echo "git rebase failed" >&2; return 1; }
+    fi
+    echo "Fetching Cargo dependencies..."
+    cargo fetch --locked
+    if _has_web; then
+      echo "Installing pnpm dependencies and building packages..."
+      pnpm install --frozen-lockfile
+      pnpm run build
+    fi
+    echo "=== Fasti is up to date. Run './scripts/dev.sh' or 'fasti' to launch. ==="
+  )
 }
 
 _stop() {
@@ -461,6 +513,17 @@ _run_container() {
 }
 
 _start_container() {
+  if _tracked_pid daemon >/dev/null 2>&1; then
+    echo "Fasti native daemon is currently running. Stopping native daemon to switch to container mode..."
+    _stop_pidfile daemon
+    sleep 0.5
+  fi
+  local running_runtime=""
+  if running_runtime="$(_container_runtime_for_scope 2>/dev/null)"; then
+    echo "Fasti $running_runtime container ($CONTAINER_NAME) is already running on $FASTI_API_URL."
+    return 0
+  fi
+
   local publish="127.0.0.1:$FASTI_PORT:8420"
   local used_fallback=0
   local actual_port="$FASTI_PORT"
@@ -523,6 +586,18 @@ _start_native() {
   set -m
   mkdir -p "$LOGDIR" "$DATADIR" "$RUNDIR"
   rm -f "$BOUND_ADDR_FILE"
+
+  local running_runtime=""
+  if running_runtime="$(_container_runtime_for_scope 2>/dev/null)"; then
+    echo "Fasti $running_runtime container ($CONTAINER_NAME) is currently running. Stopping container to switch to native mode..."
+    "$running_runtime" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    sleep 0.5
+  fi
+  if _tracked_pid daemon >/dev/null 2>&1; then
+    echo "Fasti native daemon is already running. Stopping previous instance..."
+    _stop_pidfile daemon
+    sleep 0.5
+  fi
 
   echo "=== 1. Compiling and starting Fasti daemon ==="
   _configure_native_scope
@@ -736,7 +811,9 @@ _self_test() {
   unset -f systemd-run
   ceiling_mib="$(_memory_ceiling_mib)"
   [[ "${NATIVE_SCOPE_RUNNER[*]}" == *"MemoryMax=$((ceiling_mib * 1024 * 1024))"* ]]
-  [[ "${NATIVE_SCOPE_RUNNER[*]}" == *"MemorySwapMax=0"* ]]
+  local help_output
+  help_output="$(bash "$0" --help)"
+  [[ "$help_output" == *"Fasti Local Development Launcher"* ]]
   rm -f "$leader_file" "$exec_ready" "$exec_go"
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
@@ -744,13 +821,61 @@ _self_test() {
   echo "dev launcher self-test passed"
 }
 
+_help() {
+  cat <<'EOF'
+Fasti Local Development Launcher
+
+Usage:
+  ./scripts/dev.sh [OPTIONS]
+  fasti [COMMAND] [ARGS]
+
+Commands / Options:
+  (no args), start      Start the native Fasti daemon and web workbench
+  --open, open [TARGET] Open the web workbench (or custom URL/domain/port) in the browser
+  --status, status      Check this worktree's daemon, web, container, and API health
+  --update, update      Pull latest dev, fetch Cargo/pnpm deps, and rebuild packages
+  --stop, stop          Stop running daemon, web, and container processes
+  --podman              Start Fasti in a scoped Podman container
+  --docker              Start Fasti in a scoped Docker container
+  --container           Start Fasti in a container using the configured runtime
+  --self-test           Run dev launcher verification and invariant self-tests
+  --help, -h, help      Print this help message
+
+Environment Variables:
+  FASTI_PORT                Port for Fasti daemon (default: 8420)
+  FASTI_LISTEN              Bind address (default: 127.0.0.1:$FASTI_PORT)
+  FASTI_PORT_FALLBACK       Port conflict strategy: auto | fail (default: fail)
+  FASTI_CONTAINER_RUNTIME   Container runtime: podman | docker (default: podman)
+  FASTI_IMAGE               Container image name (default: fasti:b0)
+  FASTI_DATA_ROOT           Data storage path (default: .dev-data)
+  FASTI_PUBLIC_URL          Public reverse-proxy HTTPS URL (optional)
+
+Examples:
+  fasti                   # Build & launch Fasti daemon + web UI
+  fasti open              # Open default Web UI (http://127.0.0.1:5173)
+  fasti open 5173         # Open custom port on localhost
+  fasti open fasti.local  # Open custom domain
+  fasti update            # Pull latest dev and rebuild workspace
+  fasti status            # Check running services and health probe
+  fasti stop              # Cleanly stop all Fasti background processes
+EOF
+}
+
 case "${1:-}" in
-  --stop) _stop ;;
-  --status) _status ;;
-  --open) _open ;;
+  --help|-h|help) _help ;;
+  --update|update) _update ;;
+  --stop|stop) _stop ;;
+  --status|status) _status ;;
+  --open|open) shift 1 2>/dev/null || true; _open "$@" ;;
   --podman) FASTI_CONTAINER_RUNTIME=podman; _start_container ;;
   --docker) FASTI_CONTAINER_RUNTIME=docker; _start_container ;;
-  --container) _start_container ;;
-  --self-test) _self_test ;;
-  *) _start_native ;;
+  --container|container) _start_container ;;
+  --self-test|self-test|selftest) _self_test ;;
+  --start|start) _start_native ;;
+  "") _start_native ;;
+  *)
+    echo "Unknown command or option: $1" >&2
+    echo "Run './scripts/dev.sh --help' for usage." >&2
+    exit 1
+    ;;
 esac

@@ -322,7 +322,7 @@
         {#if session.user.is_admin && host.listBrowserUsers}
           <section class="users" aria-labelledby="browser-users-title">
             <div class="section-heading">
-              <h3 id="browser-users-title">Browser users</h3>
+              <h3 id="browser-users-title">Profiles & Accounts</h3>
               <button
                 type="button"
                 class="text-button"
@@ -333,27 +333,53 @@
             {#if users.length === 0}
               <p class="hint">No browser users are available.</p>
             {:else}
-              <ul>
+              <div class="profile-cards-list">
                 {#each users as user (user.user_id)}
-                  <li>
-                    <div class="user-name">
-                      <strong>{user.username}</strong>
-                      <span>
-                        {user.active
-                          ? "Active"
-                          : "Inactive"}{user.is_test_account ? " · test" : ""}
-                      </span>
+                  {@const isCurrent = user.user_id === session?.user.user_id}
+                  {@const initial = user.username
+                    ? user.username.charAt(0).toUpperCase()
+                    : "U"}
+                  <div class="profile-card" class:active-profile={isCurrent}>
+                    <div class="profile-avatar-row">
+                      <div
+                        class="profile-avatar"
+                        class:admin-avatar={user.is_admin}
+                      >
+                        <span>{initial}</span>
+                      </div>
+                      <div class="user-name">
+                        <div class="user-title-row">
+                          <strong>{user.username}</strong>
+                          {#if isCurrent}
+                            <span class="active-badge">Active</span>
+                          {/if}
+                        </div>
+                        <div class="user-meta-row">
+                          <span class="role-pill"
+                            >{user.is_admin ? "Administrator" : "User"}</span
+                          >
+                          <span class="status-meta"
+                            >{user.active
+                              ? "Active"
+                              : "Inactive"}{user.is_test_account
+                              ? " · test"
+                              : ""}</span
+                          >
+                        </div>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      class="secondary-button"
-                      onclick={() => beginEdit(user)}
-                    >
-                      <IconPencil size={16} /> Edit
-                    </button>
-                  </li>
+                    <div class="profile-card-actions">
+                      <button
+                        type="button"
+                        class="secondary-button"
+                        onclick={() => beginEdit(user)}
+                      >
+                        <IconPencil size={16} /> Edit
+                      </button>
+                    </div>
+                  </div>
                 {/each}
-              </ul>
+              </div>
             {/if}
           </section>
         {/if}
@@ -635,21 +661,76 @@
     justify-content: space-between;
     gap: 12px;
   }
-  .users ul {
-    list-style: none;
-    padding: 0;
-    margin: 10px 0 0;
-    border-top: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+  .profile-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
   }
-  .users li {
+  .profile-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 0;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    padding: 12px 14px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    border-radius: 8px;
+    transition: border-color 100ms ease;
+  }
+  .profile-card.active-profile {
+    border-color: var(--fasti-action-primary);
+    background: color-mix(
+      in srgb,
+      var(--fasti-action-primary) 6%,
+      var(--fasti-surface-archive)
+    );
+  }
+  .profile-avatar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .profile-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+  }
+  .profile-avatar.admin-avatar {
+    background: var(--fasti-brand-mark, #8b2e2a);
+  }
+  .user-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .active-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
+    border-radius: 3px;
+  }
+  .user-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+  }
+  .role-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
   }
   .edit-panel {
     margin-top: 28px;
@@ -699,9 +780,6 @@
     .session-summary .secondary-button {
       grid-column: 1 / -1;
       width: 100%;
-    }
-    .users li {
-      align-items: flex-start;
     }
   }
 </style>

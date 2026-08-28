@@ -190,6 +190,132 @@
     }
   }
 
+  const KAPTAIN_COLLECTION_PRESET: NuvioCollectionsDocument = [
+    {
+      id: "kaptain-trending",
+      title: "Kaptain's Trending & Popular",
+      description: "Trending movies and shows curated via TMDB & Trakt feeds",
+      folders: [
+        {
+          id: "kaptain-box-office",
+          title: "Box Office & Theatrical",
+          coverImageUrl: "https://image.tmdb.org/t/p/w500/sample.jpg",
+          sources: [
+            {
+              id: "tmdb-popular-movies",
+              name: "TMDB Popular Movies",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "popularity.desc", vote_count_gte: 100 },
+            },
+            {
+              id: "tmdb-top-rated",
+              name: "TMDB Top Rated",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "vote_average.desc", vote_count_gte: 500 },
+            },
+          ],
+        },
+        {
+          id: "kaptain-tv-series",
+          title: "Prime Time & Streaming TV",
+          coverImageUrl: "https://image.tmdb.org/t/p/w500/sample-tv.jpg",
+          sources: [
+            {
+              id: "tmdb-popular-tv",
+              name: "Popular TV Shows",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "popularity.desc", vote_count_gte: 50 },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: "kaptain-sci-fi-classics",
+      title: "Sci-Fi & Cinema Essentials",
+      description: "Essential science fiction, cyberpunk, and cinema landmarks",
+      folders: [
+        {
+          id: "sci-fi-masterpieces",
+          title: "Sci-Fi Masterpieces",
+          sources: [
+            {
+              id: "tmdb-scifi",
+              name: "TMDB Sci-Fi Spotlight",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { with_genres: "878", vote_average_gte: 7.5 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const AIO_METADATA_PRESET: NuvioCollectionsDocument = [
+    {
+      id: "aio-curated-cinema",
+      title: "AIO Curated Metadata Lists",
+      description:
+        "Comprehensive multi-provider collection lists (AIO Metadata engine)",
+      folders: [
+        {
+          id: "aio-award-winners",
+          title: "Academy & Festival Award Winners",
+          sources: [
+            {
+              id: "tmdb-oscar-winners",
+              name: "Oscar Best Picture Winners",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "vote_average.desc", vote_count_gte: 1000 },
+            },
+          ],
+        },
+        {
+          id: "aio-documentaries",
+          title: "Documentaries & Real Events",
+          sources: [
+            {
+              id: "tmdb-docs",
+              name: "Acclaimed Documentaries",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { with_genres: "99", vote_average_gte: 7.0 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  async function installPresetPack(
+    preset: NuvioCollectionsDocument,
+    packName: string,
+  ): Promise<void> {
+    if (!host.replaceNuvioCollections || nuvioLoading) return;
+    nuvioLoading = true;
+    nuvioProblem = undefined;
+    nuvioNotice = undefined;
+    try {
+      const inputCounts = nuvioCounts(preset);
+      const state = await host.replaceNuvioCollections(preset);
+      nuvioDocument = state.document ?? null;
+      const storedCounts = nuvioCounts(nuvioDocument);
+      nuvioNotice = `Installed ${packName}. Stored ${storedCounts.collections} collections, ${storedCounts.folders} folders, and ${storedCounts.sources} sources.`;
+    } catch (error) {
+      nuvioProblem = hostProblemText(
+        error,
+        `Fasti could not install ${packName}.`,
+      );
+    } finally {
+      nuvioLoading = false;
+    }
+  }
+
   async function loadNetwork(): Promise<void> {
     if (networkLoading) return;
     networkLoading = true;
@@ -1057,6 +1183,128 @@
                 <IconTrash size={16} aria-hidden="true" /> Clear saved document
               </button>
             </div>
+
+            <!-- Preset Catalog Packs -->
+            <div class="nuvio-preset-section">
+              <h3 class="preset-title">Curated Collection Packs</h3>
+              <p class="preset-desc">
+                Instantly install pre-configured collection feeds (Kaptain's
+                Collection & AIO Metadata format).
+              </p>
+              <div class="preset-grid">
+                <div class="preset-card">
+                  <div class="preset-info">
+                    <strong>Kaptain's Mega Collection</strong>
+                    <span
+                      >Trending Box Office, Streaming Hits, and Sci-Fi
+                      Essentials</span
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    class="secondary btn-install-pack"
+                    disabled={nuvioLoading}
+                    onclick={() =>
+                      void installPresetPack(
+                        KAPTAIN_COLLECTION_PRESET,
+                        "Kaptain's Mega Collection",
+                      )}
+                  >
+                    Install pack
+                  </button>
+                </div>
+                <div class="preset-card">
+                  <div class="preset-info">
+                    <strong>AIO Curated Metadata Lists</strong>
+                    <span>Academy Award Winners & Acclaimed Documentaries</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="secondary btn-install-pack"
+                    disabled={nuvioLoading}
+                    onclick={() =>
+                      void installPresetPack(
+                        AIO_METADATA_PRESET,
+                        "AIO Curated Lists",
+                      )}
+                  >
+                    Install pack
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Saved Collections Explorer -->
+            {#if Array.isArray(nuvioDocument) && nuvioDocument.length > 0}
+              <div class="nuvio-tree-section">
+                <h3 class="tree-title">Saved Collections Explorer</h3>
+                <div class="collection-tree">
+                  {#each nuvioDocument as col, cIndex}
+                    {@const colName =
+                      typeof col === "object" && col !== null
+                        ? (col as any).title ||
+                          (col as any).name ||
+                          `Collection ${cIndex + 1}`
+                        : `Collection ${cIndex + 1}`}
+                    {@const folders =
+                      typeof col === "object" &&
+                      col !== null &&
+                      Array.isArray((col as any).folders)
+                        ? (col as any).folders
+                        : []}
+                    <div class="tree-collection-card">
+                      <div class="tree-collection-header">
+                        <span class="tree-badge">Collection</span>
+                        <strong>{colName}</strong>
+                        <span class="tree-count"
+                          >({folders.length} folders)</span
+                        >
+                      </div>
+                      {#if folders.length > 0}
+                        <div class="tree-folders-list">
+                          {#each folders as folder, fIndex}
+                            {@const folderName =
+                              typeof folder === "object" && folder !== null
+                                ? (folder as any).title ||
+                                  (folder as any).name ||
+                                  `Folder ${fIndex + 1}`
+                                : `Folder ${fIndex + 1}`}
+                            {@const sources =
+                              typeof folder === "object" &&
+                              folder !== null &&
+                              Array.isArray((folder as any).sources)
+                                ? (folder as any).sources
+                                : []}
+                            <div class="tree-folder-item">
+                              <div class="tree-folder-header">
+                                <span class="folder-dot">•</span>
+                                <span class="folder-title">{folderName}</span>
+                                <span class="tree-source-count"
+                                  >{sources.length} sources</span
+                                >
+                              </div>
+                              {#if sources.length > 0}
+                                <div class="tree-sources-row">
+                                  {#each sources as src}
+                                    {@const srcLabel =
+                                      typeof src === "object" && src !== null
+                                        ? (src as any).name ||
+                                          (src as any).provider ||
+                                          "source"
+                                        : "source"}
+                                    <span class="source-pill">{srcLabel}</span>
+                                  {/each}
+                                </div>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
           {:else}
             <p class="managed-note">
               This host does not provide profile-scoped Nuvio Collections
@@ -1605,6 +1853,176 @@
   .status-list dd {
     margin: 0;
     color: var(--fasti-text-muted);
+  }
+
+  /* Nuvio Presets & Tree Explorer */
+  .nuvio-preset-section {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .preset-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+    color: var(--fasti-text-primary);
+  }
+
+  .preset-desc {
+    font-size: 0.85rem;
+    color: var(--fasti-text-muted);
+    margin: 0 0 16px;
+  }
+
+  .preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .preset-card {
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .preset-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .preset-info strong {
+    font-size: 0.92rem;
+    color: var(--fasti-text-primary);
+  }
+
+  .preset-info span {
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+    line-height: 1.3;
+  }
+
+  .btn-install-pack {
+    align-self: flex-start;
+    font-size: 0.82rem;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .nuvio-tree-section {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .tree-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 16px;
+    color: var(--fasti-text-primary);
+  }
+
+  .collection-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .tree-collection-card {
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+
+  .tree-collection-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.92rem;
+    color: var(--fasti-text-primary);
+  }
+
+  .tree-badge {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    background: var(--fasti-surface-archive);
+    border-radius: 3px;
+    color: var(--fasti-text-muted);
+  }
+
+  .tree-count {
+    font-size: 0.8rem;
+    color: var(--fasti-text-muted);
+  }
+
+  .tree-folders-list {
+    margin-top: 10px;
+    padding-left: 12px;
+    border-left: 2px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tree-folder-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tree-folder-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+  }
+
+  .folder-dot {
+    color: var(--fasti-action-primary);
+    font-weight: bold;
+  }
+
+  .folder-title {
+    font-weight: 600;
+    color: var(--fasti-text-primary);
+  }
+
+  .tree-source-count {
+    font-size: 0.75rem;
+    color: var(--fasti-text-muted);
+  }
+
+  .tree-sources-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-left: 14px;
+  }
+
+  .source-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    background: var(--fasti-surface-archive);
+    border-radius: 4px;
+    color: var(--fasti-text-muted);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
   }
 
   @media (max-width: 64rem) {
