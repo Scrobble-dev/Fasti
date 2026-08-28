@@ -49,6 +49,7 @@ mod tests {
         let first = fasti_store::SqliteKernel::open(&configured).expect("first kernel");
         let first_identity = first.data_root_identity();
         let first_provider = scoped_account("provider/google-books/api-key", first_identity);
+        let first_tmdb = scoped_account("provider/tmdb/read-access-token", first_identity);
 
         std::fs::rename(&configured, &moved).expect("rename first data root");
         drop(first);
@@ -57,6 +58,13 @@ mod tests {
             first_provider,
             scoped_account(
                 "provider/google-books/api-key",
+                reopened.data_root_identity()
+            )
+        );
+        assert_eq!(
+            first_tmdb,
+            scoped_account(
+                "provider/tmdb/read-access-token",
                 reopened.data_root_identity()
             )
         );
@@ -71,6 +79,14 @@ mod tests {
                 replacement.data_root_identity()
             )
         );
+        assert_ne!(
+            first_tmdb,
+            scoped_account(
+                "provider/tmdb/read-access-token",
+                replacement.data_root_identity()
+            )
+        );
+        assert_ne!(first_provider, first_tmdb);
         assert_ne!(
             first_provider,
             scoped_account("local-admin-credential-v1", first_identity)
