@@ -41,10 +41,10 @@ pub struct IntegrationObservationRequest {
     pub duration_seconds: Option<u64>,
     /// Provider IDs for the observed item. Keys are lower-case provider names
     /// such as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`.
+    #[serde(default)]
     #[schemars(length(max = 16))]
     pub provider_ids: BTreeMap<String, String>,
     /// Provider IDs for the parent series when `item_type` is `episode`.
-    #[schemars(length(max = 16))]
     #[serde(default)]
     #[schemars(length(max = 16))]
     pub series_provider_ids: BTreeMap<String, String>,

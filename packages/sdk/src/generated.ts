@@ -456,9 +456,7 @@ const PRODUCTION_SCHEMAS = {
       "source_event_id",
       "observed_at",
       "item_type",
-      "completed",
-      "provider_ids",
-      "series_provider_ids"
+      "completed"
     ],
     "type": "object"
   },
