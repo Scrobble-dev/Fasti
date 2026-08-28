@@ -9,9 +9,10 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 11] = [
+const EXPECTED_PROFILES: [&str; 12] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
+    "b1_integration_status",
     "b1_observation_accept",
     "b1_receipt_replay",
     "b1_receipt_stream",
@@ -605,6 +606,7 @@ fn nonempty(value: Option<&str>) -> bool {
 const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
     match key {
         CapabilityKey::SystemHealth => "health",
+        CapabilityKey::IntegrationStatus => "b1_integration_status",
         CapabilityKey::InitializeNode | CapabilityKey::EnrollFirstClient => "b1_durable_bootstrap",
         CapabilityKey::AcceptObservation => "b1_observation_accept",
         CapabilityKey::ReplayReceipt => "b1_receipt_replay",

@@ -7,9 +7,6 @@
     IconArrowRight,
   } from "@tabler/icons-svelte";
 
-  // Known `fasti_domain::Grain` values (see `crates/fasti-domain/src/media.rs`).
-  // Used only to pick a grain when creating a new record for an item with no
-  // matching candidate — the review item itself doesn't carry its grain.
   const GRAINS = [
     "work",
     "series",
@@ -49,9 +46,7 @@
     onResolveExisting,
     onResolveNew,
   }: Props = $props();
-
   const openItems = $derived(items.filter((item) => item.status === "open"));
-
   let newGrainByItem = $state<Record<string, string>>({});
 
   function grainFor(itemId: string): string {
@@ -67,7 +62,6 @@
         Resolve observations whose identity is still ambiguous.
       </p>
     </div>
-
     <div class="safe-banner">
       <IconShieldCheck size={20} class="verified-icon" />
       <span
@@ -107,7 +101,6 @@
               Review <code>{item.review_item_id}</code>
             </h2>
           </div>
-
           <div class="case-body">
             <dl class="fact-list">
               <div>
@@ -119,7 +112,6 @@
                 <dd><code>{item.current_interpretation_id}</code></dd>
               </div>
             </dl>
-
             {#if item.candidate_record_ids.length > 0}
               <div class="candidates">
                 <h3 class="section-label">Candidate records</h3>
@@ -154,7 +146,6 @@
               </p>
             {/if}
           </div>
-
           <div class="case-actions">
             <div class="new-record-form">
               <label for="grain-{item.review_item_id}">
@@ -169,9 +160,8 @@
                     [item.review_item_id]: e.currentTarget.value,
                   })}
               >
-                {#each GRAINS as grain}
-                  <option value={grain}>{grain}</option>
-                {/each}
+                {#each GRAINS as grain}<option value={grain}>{grain}</option
+                  >{/each}
               </select>
               <button
                 type="button"
@@ -207,7 +197,6 @@
     flex-direction: column;
     gap: 28px;
   }
-
   .view-header {
     display: flex;
     justify-content: space-between;
@@ -218,7 +207,6 @@
       color-mix(in srgb, var(--fasti-brand-mark) 30%, transparent);
     padding-bottom: 16px;
   }
-
   .view-title {
     font-family: var(--fasti-font-display);
     font-size: 2.4rem;
@@ -226,13 +214,11 @@
     margin: 0 0 4px;
     color: var(--fasti-text-primary);
   }
-
   .view-subtitle {
     margin: 0;
     color: var(--fasti-text-muted);
     font-size: 0.95rem;
   }
-
   .safe-banner {
     display: flex;
     align-items: center;
@@ -247,11 +233,9 @@
     font-size: 0.85rem;
     color: var(--fasti-text-primary);
   }
-
   :global(.verified-icon) {
     color: var(--fasti-state-verified);
   }
-
   .empty-inbox {
     padding: 64px 24px;
     text-align: center;
@@ -260,29 +244,24 @@
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
-
   :global(.empty-icon) {
     color: var(--fasti-state-verified);
     margin-bottom: 16px;
   }
-
   .empty-inbox h2 {
     font-family: var(--fasti-font-display);
     font-size: 1.8rem;
     margin: 0 0 8px;
   }
-
   .empty-inbox p {
     color: var(--fasti-text-muted);
     margin: 0;
   }
-
   .cases-list {
     display: flex;
     flex-direction: column;
     gap: 24px;
   }
-
   .case-card {
     background: var(--fasti-surface-paper);
     border: 1px solid
@@ -291,7 +270,6 @@
     overflow: hidden;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
   }
-
   .case-header {
     padding: 16px 20px;
     background: var(--fasti-surface-archive);
@@ -301,7 +279,6 @@
     align-items: center;
     gap: 12px;
   }
-
   .case-badge {
     font-family: var(--fasti-font-mono);
     font-size: 0.72rem;
@@ -316,7 +293,6 @@
     );
     color: var(--fasti-state-attention);
   }
-
   .case-subject {
     font-family: var(--fasti-font-display);
     font-size: 1.15rem;
@@ -325,28 +301,23 @@
     color: var(--fasti-text-primary);
     overflow-wrap: anywhere;
   }
-
   .case-body {
     padding: 20px;
   }
-
   .fact-list {
     display: grid;
     gap: 8px 16px;
     margin: 0 0 16px;
     font-size: 0.85rem;
   }
-
   .fact-list dt {
     font-weight: 700;
     color: var(--fasti-text-muted);
   }
-
   .fact-list dd {
     margin: 0;
     overflow-wrap: anywhere;
   }
-
   .section-label {
     font-size: 0.8rem;
     font-family: var(--fasti-font-mono);
@@ -354,7 +325,6 @@
     color: var(--fasti-text-muted);
     margin: 0 0 8px;
   }
-
   .candidate-list {
     list-style: none;
     margin: 0;
@@ -363,7 +333,6 @@
     flex-direction: column;
     gap: 8px;
   }
-
   .candidate-row {
     display: flex;
     align-items: center;
@@ -374,19 +343,16 @@
     border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     overflow-wrap: anywhere;
   }
-
   .no-candidates {
     color: var(--fasti-text-muted);
     margin: 0;
   }
-
   .case-actions {
     padding: 16px 20px;
     background: var(--fasti-surface-archive);
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
   }
-
   .new-record-form {
     display: flex;
     align-items: center;
@@ -395,7 +361,6 @@
     font-size: 0.85rem;
     color: var(--fasti-text-muted);
   }
-
   .new-record-form select {
     min-height: 44px;
     padding: 6px 10px;
@@ -405,7 +370,6 @@
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
   }
-
   .action-btn {
     display: inline-flex;
     align-items: center;
@@ -419,20 +383,27 @@
     border: none;
     transition: all 120ms ease;
   }
-
+  .action-btn:focus-visible,
+  .new-record-form select:focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
   .action-btn:disabled {
     cursor: not-allowed;
     opacity: 0.6;
   }
-
   .action-btn.accept {
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
   }
-
   .action-btn.not-same {
     background: transparent;
     border: 1px solid var(--fasti-brand-mark);
     color: var(--fasti-brand-mark);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .action-btn {
+      transition: none;
+    }
   }
 </style>

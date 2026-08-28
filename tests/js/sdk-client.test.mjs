@@ -638,6 +638,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "initializeDurableNode",
           "initializeNode",
           "listBrowserUsers",
+          "listIntegrations",
           "listRecords",
           "listTrackingDispositions",
           "readBrowserSession",
@@ -838,10 +839,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 35);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 36);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    11,
+    12,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1269,7 +1270,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 35);
+    assert.equal(discovery.capabilities.length, 36);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

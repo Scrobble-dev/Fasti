@@ -22,6 +22,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::InitializeNode => "node.initialize",
         CapabilityKey::InspectCorrectionChain => "correction.chain.inspect",
         CapabilityKey::InspectReview => "identity.review.inspect",
+        CapabilityKey::IntegrationStatus => "integration.status",
         CapabilityKey::ListBrowserUsers => "browser.user.list",
         CapabilityKey::ListRecords => "identity.record.list",
         CapabilityKey::ListTrackingDispositions => "profile.record.tracking_disposition.list",

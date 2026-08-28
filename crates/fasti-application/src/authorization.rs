@@ -429,10 +429,17 @@ mod tests {
         assert!(!restore.is_bootstrap_only());
         assert!(restore.required_scopes().is_empty());
 
+        let integrations =
+            AuthorizationRequirement::for_capability(CapabilityKey::IntegrationStatus);
+        assert!(integrations.is_unauthenticated());
+        assert!(!integrations.is_local_operator());
+        assert!(integrations.required_scopes().is_empty());
+
         for capability in CapabilityKey::ALL.iter().copied().filter(|capability| {
             !matches!(
                 capability,
                 CapabilityKey::SystemHealth
+                    | CapabilityKey::IntegrationStatus
                     | CapabilityKey::CreateBrowserSession
                     | CapabilityKey::InitializeNode
                     | CapabilityKey::RestoreWorkspace

@@ -66,7 +66,6 @@
     </div>
 
     <div class="modal-body">
-      <!-- 10-Star Rating Picker -->
       <div class="rating-picker-section">
         <span class="section-label"
           >Your Rating: <strong>{hoverRating ?? ratingVal} / 10</strong></span
@@ -94,7 +93,6 @@
         </div>
       </div>
 
-      <!-- Review Text Field -->
       <div class="field-group">
         <label for="review-notes" class="section-label"
           >Personal Notes & Critical Review:</label
@@ -169,6 +167,10 @@
   }
 
   .close-btn {
+    min-width: 44px;
+    min-height: 44px;
+    display: grid;
+    place-items: center;
     background: transparent;
     border: none;
     cursor: pointer;
@@ -207,6 +209,8 @@
   }
 
   .star-btn {
+    min-width: 44px;
+    min-height: 44px;
     background: transparent;
     border: none;
     font-size: 1.5rem;
@@ -258,6 +262,7 @@
   }
 
   .btn-cancel {
+    min-height: 44px;
     padding: 8px 16px;
     background: transparent;
     border: 1px solid
@@ -268,6 +273,7 @@
   }
 
   .btn-save {
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -278,5 +284,20 @@
     border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
+  }
+
+  .modal-card :is(button, textarea):focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .star-btn {
+      transition: none;
+    }
+
+    .star-btn:hover {
+      transform: none;
+    }
   }
 </style>

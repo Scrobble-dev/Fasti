@@ -1,5 +1,8 @@
 use crate::{
-    local::{authenticate_request, request_authentication, run_kernel, LocalApiState},
+    local::{
+        authenticate_request, request_authentication, run_kernel, LocalApiState,
+        RequestAuthentication,
+    },
     problem::{application_problem, json_rejection, HttpProblem},
 };
 use axum::{
@@ -19,7 +22,7 @@ use fasti_domain::{
 };
 use std::sync::Arc;
 
-const MAX_NORMALIZED_EVIDENCE_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_NORMALIZED_EVIDENCE_BYTES: usize = 64 * 1024;
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
 
@@ -123,42 +126,30 @@ fn resolution_name(value: ObservationResolution) -> &'static str {
     }
 }
 
-#[utoipa::path(
-    post,
-    path = "/api/v1/observations",
-    tag = "observations",
-    security(("credential_bearer" = []), ("browser_session" = [])),
-    request_body = SubmitObservationRequest,
-    responses(
-        (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),
-        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Authenticated principal lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "Source event identity was reused with different evidence", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 413, description = "Request or evidence exceeds a bounded limit", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 422, description = "Observation does not satisfy the governed contract", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
-    )
-)]
-pub(crate) async fn submit_observation(
-    State(state): State<LocalApiState>,
-    headers: HeaderMap,
-    request: Result<Json<SubmitObservationRequest>, JsonRejection>,
+pub(crate) async fn accept_observation_request(
+    state: LocalApiState,
+    authentication: RequestAuthentication,
+    request: SubmitObservationRequest,
+    evidence_bytes: Vec<u8>,
+    correlation_id: RequestCorrelationId,
 ) -> HttpResult<SubmitObservationResponse> {
-    let correlation_id = RequestCorrelationId::new_v7();
-    let Json(request) = request.map_err(|rejection| {
-        json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
-    })?;
-    let authentication = request_authentication(
-        &headers,
-        CapabilityKey::AcceptObservation,
-        correlation_id,
-        true,
-    )?;
     validate_request(&request, correlation_id)?;
+    if evidence_bytes.len() > MAX_NORMALIZED_EVIDENCE_BYTES {
+        return Err(application_problem(Box::new(
+            FastiProblem::payload_too_large(
+                CapabilityKey::AcceptObservation,
+                correlation_id,
+                vec![Violation::try_new(
+                    "invalid_representation",
+                    "/",
+                    "normalized observation evidence exceeds the ingress bound",
+                    "at most 65536 bytes",
+                )
+                .expect("adapter-owned representation violation is valid")],
+            )
+            .expect("one violation is within bounds"),
+        )));
+    }
 
     let observed_at = ObservedAt::parse(&request.observed_at, ClaimedTrust::DeviceObserved)
         .map_err(|_| {
@@ -217,29 +208,6 @@ pub(crate) async fn submit_observation(
                     )
                 })?;
         clues.push(clue);
-    }
-
-    let evidence_bytes = serde_json::to_vec(&request).map_err(|_| {
-        application_problem(Box::new(FastiProblem::integrity_failed(
-            CapabilityKey::AcceptObservation,
-            correlation_id,
-        )))
-    })?;
-    if evidence_bytes.len() > MAX_NORMALIZED_EVIDENCE_BYTES {
-        return Err(application_problem(Box::new(
-            FastiProblem::payload_too_large(
-                CapabilityKey::AcceptObservation,
-                correlation_id,
-                vec![Violation::try_new(
-                    "invalid_representation",
-                    "/",
-                    "normalized observation evidence exceeds the ingress bound",
-                    "at most 65536 bytes",
-                )
-                .expect("adapter-owned representation violation is valid")],
-            )
-            .expect("one violation is within bounds"),
-        )));
     }
 
     let source = request.source;
@@ -313,6 +281,57 @@ pub(crate) async fn submit_observation(
         received_at: receipt.received_at().value().to_rfc3339(),
         committed_at: receipt.committed_at().value().to_rfc3339(),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/observations",
+    tag = "observations",
+    security(("credential_bearer" = []), ("browser_session" = [])),
+    request_body = SubmitObservationRequest,
+    responses(
+        (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),
+        (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Source event identity was reused with different evidence", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 413, description = "Request or evidence exceeds a bounded limit", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "Observation does not satisfy the governed contract", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 507, description = "Bounded evidence or observation capacity is exhausted", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn submit_observation(
+    State(state): State<LocalApiState>,
+    headers: HeaderMap,
+    request: Result<Json<SubmitObservationRequest>, JsonRejection>,
+) -> HttpResult<SubmitObservationResponse> {
+    let correlation_id = RequestCorrelationId::new_v7();
+    let Json(request) = request.map_err(|rejection| {
+        json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
+    })?;
+    let authentication = request_authentication(
+        &headers,
+        CapabilityKey::AcceptObservation,
+        correlation_id,
+        true,
+    )?;
+    let evidence_bytes = serde_json::to_vec(&request).map_err(|_| {
+        application_problem(Box::new(FastiProblem::integrity_failed(
+            CapabilityKey::AcceptObservation,
+            correlation_id,
+        )))
+    })?;
+    accept_observation_request(
+        state,
+        authentication,
+        request,
+        evidence_bytes,
+        correlation_id,
+    )
+    .await
 }
 
 pub(crate) fn router() -> Router<LocalApiState> {

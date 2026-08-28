@@ -12,6 +12,7 @@ use utoipa::{
 };
 
 mod browser_auth;
+mod integrations;
 mod local;
 mod nuvio_collections;
 mod observation;
@@ -101,7 +102,13 @@ impl Modify for ProductionSecurityAddon {
         records::create_record,
         records::attach_identifier,
         records::list_records,
-        records::register_namespace
+        records::register_namespace,
+        integrations::integration_status,
+        integrations::nuvio_webhook,
+        integrations::tautulli_webhook,
+        integrations::jellyfin_webhook,
+        integrations::emby_webhook,
+        integrations::plex_webhook
     ),
     components(schemas(
         HealthResponse,
@@ -117,6 +124,9 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::EnrollFirstClientRequest,
         fasti_contracts::InitializeNodeRequest,
         fasti_contracts::DeleteBrowserUserRequest,
+        fasti_contracts::IntegrationObservationRequest,
+        fasti_contracts::IntegrationStatusDto,
+        fasti_contracts::IntegrationStatusListResponse,
         fasti_contracts::ListRecordsResponse,
         fasti_contracts::ListBrowserUsersResponse,
         fasti_contracts::ListTrackingDispositionsResponse,
@@ -150,7 +160,8 @@ impl Modify for ProductionSecurityAddon {
 )]
 struct ApiDoc;
 
-/// Builds the OpenAPI 3.1 contract for routes actually mounted by [`api_router`].
+/// Builds the OpenAPI 3.1 contract for routes actually mounted by [`api_router`]
+/// and the dedicated integration listener.
 pub fn openapi() -> utoipa::openapi::OpenApi {
     ApiDoc::openapi()
 }
@@ -159,6 +170,19 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
 /// and as the common base for both durable routers.
 pub fn health_router() -> Router {
     Router::new().route("/api/v1/health", get(health_check))
+}
+
+/// Constructs the dedicated integration ingress surface.
+///
+/// It intentionally exposes only health, integration status, and authenticated
+/// provider adapters. Node bootstrap, generic record mutation, and the generic
+/// observation endpoint are never mounted here.
+pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
+    let state = local::LocalApiState {
+        kernel,
+        secure_cookies: false,
+    };
+    health_router().merge(integrations::router().with_state(state))
 }
 
 /// Constructs the durable local API router for fastid.
@@ -201,7 +225,13 @@ pub fn api_router(
     kernel
         .ensure_bootstrap_secret()
         .expect("bootstrap secret must be preparable before serving any route");
-    health_router().merge(local::router(kernel, true, false))
+    let integration_state = local::LocalApiState {
+        kernel: Arc::clone(&kernel),
+        secure_cookies: false,
+    };
+    health_router()
+        .merge(local::router(kernel, true, false))
+        .merge(integrations::router().with_state(integration_state))
 }
 
 /// Constructs the authenticated durable router for a non-loopback listener.
@@ -219,7 +249,13 @@ pub fn remote_api_router(
         !data_root.as_os_str().is_empty(),
         "remote_api_router requires non-empty data_root"
     );
-    health_router().merge(local::router(kernel, false, true))
+    let integration_state = local::LocalApiState {
+        kernel: Arc::clone(&kernel),
+        secure_cookies: true,
+    };
+    health_router()
+        .merge(local::router(kernel, false, true))
+        .merge(integrations::router().with_state(integration_state))
 }
 
 /// Seeds the one-time development account. The durable marker prevents this
@@ -262,7 +298,7 @@ mod tests {
     }
 
     #[test]
-    fn openapi_is_3_1_and_documents_the_real_local_routes() {
+    fn openapi_is_3_1_and_documents_the_real_routes() {
         let document = openapi();
 
         assert!(matches!(document.openapi, OpenApiVersion::Version31));
@@ -277,13 +313,19 @@ mod tests {
             "/api/v1/records",
             "/api/v1/records/identifiers",
             "/api/v1/namespaces",
+            "/api/v1/integrations",
+            "/api/v1/integrations/nuvio/webhook",
+            "/api/v1/integrations/tautulli/webhook",
+            "/api/v1/integrations/jellyfin/webhook",
+            "/api/v1/integrations/emby/webhook",
+            "/api/v1/integrations/plex/webhook",
             "/api/v1/profile/record-tracking-dispositions",
             "/api/v1/profile/record-tracking-dispositions/{record_id}",
             "/api/v1/profile/nuvio-collections",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 13);
+        assert_eq!(document.paths.paths.len(), 19);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -342,6 +384,9 @@ mod tests {
             "ObservationIngressKind",
             "SubmitObservationRequest",
             "SubmitObservationResponse",
+            "IntegrationObservationRequest",
+            "IntegrationStatusDto",
+            "IntegrationStatusListResponse",
             "AttachIdentifierRequest",
             "AttachIdentifierResponse",
             "CreateRecordRequest",
@@ -465,10 +510,9 @@ mod tests {
         app: &Router,
         data_root: &std::path::Path,
     ) -> fasti_contracts::ClientEnrollmentResponse {
-        // The daemon primes this file at startup (api_router calling
-        // ensure_bootstrap_secret would double as priming, but tests build
-        // the router directly) -- read it the same way a legitimate first
-        // client would, proving local filesystem access to this data root.
+        // api_router primes this file at construction time -- read it the
+        // same way a legitimate first client would, proving local
+        // filesystem access to this data root.
         let bootstrap_secret = std::fs::read_to_string(data_root.join("bootstrap.secret"))
             .expect("bootstrap secret readable after api_router primes it");
         let initialized = app
@@ -939,7 +983,7 @@ mod tests {
     #[tokio::test]
     async fn observation_requires_bearer_and_replays_one_source_event_exactly_once() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -1075,6 +1119,41 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn integration_router_exposes_adapters_but_not_bootstrap_or_generic_mutation() {
+        let (_root, kernel) = test_kernel();
+        let app = integration_router(kernel);
+
+        let status = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/integrations")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
+        assert_eq!(status.status(), StatusCode::OK);
+
+        for path in [
+            "/api/v1/node/initialization",
+            "/api/v1/records",
+            "/api/v1/observations",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::post(path)
+                        .body(Body::empty())
+                        .expect("valid request"),
+                )
+                .await
+                .expect("router response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn event_submission_alias_is_absent() {
         let (root, kernel) = test_kernel();
         let response = api_router(kernel, test_bind_addr(), root.path())
@@ -1119,7 +1198,7 @@ mod tests {
     #[tokio::test]
     async fn records_require_bearer_and_support_create_list_attach_and_namespace_registration() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
 
         let unauthorized = app
             .clone()

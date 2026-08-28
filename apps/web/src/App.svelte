@@ -20,7 +20,7 @@
   import markDark from "../../../brand/logos/fasti-mark-dark.svg?url";
   import markLight from "../../../brand/logos/fasti-mark-light.svg?url";
   import { applyTheme, resolveTheme, type Theme } from "./theme.js";
-  import { createWebHost } from "./web-host.js";
+  import { createWebHost, fetchIntegrationStatus } from "./web-host.js";
 
   interface SetupStatus {
     readonly phase: "needs_setup" | "ready";
@@ -245,6 +245,12 @@
         createRecord: (grain) => invoke("create_record", { grain }),
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),
+        listIntegrations: async () => {
+          const network = await invoke<NetworkConfiguration>(
+            "load_network_configuration",
+          );
+          return fetchIntegrationStatus(network.connection.service_url.value);
+        },
         listTrackingDispositions: () => invoke("list_tracking_dispositions"),
         setTrackingDisposition: (recordId, disposition) =>
           invoke("set_tracking_disposition", {
@@ -324,7 +330,6 @@
   function retryHealth(): void {
     void inspectHealth(true);
   }
-
   function toggleTheme(): void {
     theme = theme === "dark" ? "light" : "dark";
     applyTheme(theme);

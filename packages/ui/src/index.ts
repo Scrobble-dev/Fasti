@@ -25,5 +25,6 @@ export { default as FastiWorkbench } from "./fasti-workbench.svelte";
 export { projectRecordSummary } from "./record-projection.js";
 
 export * from "./types.js";
+export * from "./integration-status.js";
 export * from "./setup-types.js";
 export * from "./defaults.js";

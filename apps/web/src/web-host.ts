@@ -7,6 +7,9 @@ import type {
   BrowserUserUpdate,
   CreateRecordResult,
   EndpointConnectionStatus,
+  IntegrationRuntimeStatus,
+  IntegrationStatusHost,
+  IntegrationStatusResponse,
   NetworkConfiguration,
   NuvioCollectionsDocument,
   NuvioCollectionsState,
@@ -90,6 +93,16 @@ const PROVIDERS: ReadonlyArray<{
     docs_url: "https://podcastindex-org.github.io/docs-api",
   },
 ];
+
+const INTEGRATION_STATES = new Set([
+  "available",
+  "setup_required",
+  "active",
+  "degraded",
+  "disabled",
+  "unsupported",
+  "error",
+]);
 
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
@@ -190,7 +203,48 @@ function csrfToken(): string {
   return values.length === 1 ? (values[0][1] ?? "") : "";
 }
 
-export function createWebHost(defaultApiUrl: string): WorkbenchHost {
+function isIntegrationStatus(
+  value: unknown,
+): value is IntegrationRuntimeStatus {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<IntegrationRuntimeStatus>;
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.label === "string" &&
+    typeof candidate.state === "string" &&
+    INTEGRATION_STATES.has(candidate.state) &&
+    typeof candidate.available === "boolean" &&
+    typeof candidate.endpoint_ready === "boolean" &&
+    typeof candidate.setup_action === "string" &&
+    typeof candidate.detail === "string"
+  );
+}
+
+export async function fetchIntegrationStatus(
+  endpoint: string,
+  signal?: AbortSignal,
+): Promise<IntegrationRuntimeStatus[]> {
+  const target = checkedEndpoint(endpoint);
+  const probeClient = new FastiClient({
+    baseUrl: target.url,
+    timeoutMs: 3_000,
+    retryPolicy: { maxAttempts: 1 },
+  });
+  const response = await probeClient.listIntegrations({ signal });
+  if (
+    !Array.isArray(response.integrations) ||
+    !response.integrations.every(isIntegrationStatus)
+  ) {
+    throw unavailable(
+      "Fasti integration status did not match the supported contract.",
+    );
+  }
+  return response.integrations as unknown as IntegrationRuntimeStatus[];
+}
+
+export function createWebHost(
+  defaultApiUrl: string,
+): WorkbenchHost & IntegrationStatusHost {
   const createClient = (baseUrl: string): FastiClient =>
     new FastiClient({
       baseUrl,
@@ -205,7 +259,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },
-
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
@@ -244,7 +297,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       client = nextClient;
       return config;
     },
-
     async testEndpointConnection(
       endpoint: string,
       signal?: AbortSignal,
@@ -262,7 +314,18 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         version: health.version,
       };
     },
-
+    async listIntegrations(): Promise<IntegrationRuntimeStatus[]> {
+      const response = await client.listIntegrations();
+      if (
+        !Array.isArray(response.integrations) ||
+        !response.integrations.every(isIntegrationStatus)
+      ) {
+        throw unavailable(
+          "Fasti integration status did not match the supported contract.",
+        );
+      }
+      return response.integrations as unknown as IntegrationRuntimeStatus[];
+    },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
       return PROVIDERS.map((provider) => ({
         provider: provider.provider,
@@ -273,7 +336,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         docs_url: provider.docs_url,
       }));
     },
-
     async saveProviderCredential(
       provider: string,
     ): Promise<ProviderCredentialStatus[]> {
@@ -281,7 +343,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         `${provider} credentials require the trusted native or server host. The browser host never accepts or stores provider secrets.`,
       );
     },
-
     async deleteProviderCredential(
       provider: string,
     ): Promise<ProviderCredentialStatus[]> {
@@ -289,7 +350,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         `${provider} credentials are not managed by the browser host.`,
       );
     },
-
     async searchProvider(
       provider: string,
       _query: string,
@@ -298,12 +358,10 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         `${provider} search is not active in the browser host. Provider requests must use the governed native or server host.`,
       );
     },
-
     clearSearchCache(): void {},
     getSearchCacheSize(): number {
       return 0;
     },
-
     async listRecords(): Promise<RecordSummary[]> {
       const response = await client.listRecords();
       return response.records.map((record) => ({

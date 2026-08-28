@@ -170,6 +170,11 @@
     padding: 2px;
   }
 
+  .fast-btn:focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
+
   .fast-btn:hover {
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
@@ -205,5 +210,11 @@
 
   :global(.icon-bookmark-active) {
     color: var(--fasti-brand-mark);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fast-btn {
+      transition: none;
+    }
   }
 </style>

@@ -39,6 +39,51 @@ surface_profiles:
         reason: Product UI is not active through B3; the local health diagnostic is evidence tooling.,
       }
 
+  b1_integration_status:
+    domain_application:
+      { state: required, binding: "application:{application_key}" }
+    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    sse_asyncapi:
+      {
+        state: not_applicable,
+        reason: Integration status is a finite request with no event channel.,
+      }
+    cli:
+      {
+        state: later_body,
+        body: b2,
+        reason: A governed CLI surface for integration status is deferred to B2.,
+      }
+    json_schema:
+      {
+        state: required,
+        binding: "schema:production-openapi-operation:{capability_id}",
+      }
+    json_ld:
+      {
+        state: not_applicable,
+        reason: "Integration status is operational state, not linked-data domain state.",
+      }
+    okf: { state: required, binding: "okf:capability-catalog" }
+    sdk:
+      {
+        state: later_body,
+        body: b2,
+        reason: A generated SDK client method for integration status is deferred to B2.,
+      }
+    knowledge:
+      {
+        state: not_applicable,
+        reason: Integration status has no governed recovery problem.,
+      }
+    package_smoke:
+      {
+        state: later_body,
+        body: b2,
+        reason: A network-isolated native package smoke for integration status is deferred to B2; the loopback HTTP contract is proven by fasti-api's own integration tests today.,
+      }
+    ui: { state: not_applicable, reason: Fasti is headless through B3. }
+
   b1_http_fixture:
     domain_application:
       { state: required, binding: "application:{application_key}" }
@@ -377,6 +422,24 @@ capabilities:
     scopes: []
     problems: []
     examples: [system.health.success]
+    uat: []
+
+  - application_key: integration_status
+    id: integration.status
+    bounded_context: observation.ingress
+    contract_body: b1
+    runtime_body: b1
+    authorization: unauthenticated
+    lifecycle:
+      {
+        introduced_in: b1,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b1_integration_status
+    scopes: []
+    problems: []
+    examples: [integration.status.success]
     uat: []
 
   - application_key: discover_capabilities

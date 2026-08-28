@@ -1,0 +1,256 @@
+asyncapi: 3.1.0
+id: https://fasti.scrobble.dev/contracts/asyncapi/v1/integrations
+info:
+  title: Fasti production integration ingress contract
+  version: 1.0.0
+  description: >-
+    Asynchronous provider-to-Fasti observation delivery. Every adapter is
+    bounded, requires a scoped Fasti bearer credential at the Fasti boundary,
+    and submits through the same durable observation application capability.
+    Provider transport shape is not allowed to redefine Chronicle semantics.
+defaultContentType: application/json
+servers:
+  integrationLoopback:
+    host: "{host}:{port}"
+    protocol: http
+    protocolVersion: "1.1"
+    description: Loopback-only integration listener, normally used behind a trusted TLS proxy.
+    variables:
+      host:
+        default: 127.0.0.1
+      port:
+        default: "8421"
+  integrationTls:
+    host: "{host}:{port}"
+    protocol: https
+    protocolVersion: "1.1"
+    description: Operator-protected integration endpoint when TLS terminates before or at Fasti.
+    variables:
+      host:
+        default: fasti.example.test
+      port:
+        default: "443"
+channels:
+  nuvioObservation:
+    address: /api/v1/integrations/nuvio/webhook
+    servers:
+      - $ref: "#/servers/integrationLoopback"
+      - $ref: "#/servers/integrationTls"
+    messages:
+      observation:
+        $ref: "#/components/messages/integrationObservation"
+  tautulliObservation:
+    address: /api/v1/integrations/tautulli/webhook
+    servers:
+      - $ref: "#/servers/integrationLoopback"
+      - $ref: "#/servers/integrationTls"
+    messages:
+      observation:
+        $ref: "#/components/messages/integrationObservation"
+  jellyfinObservation:
+    address: /api/v1/integrations/jellyfin/webhook
+    servers:
+      - $ref: "#/servers/integrationLoopback"
+      - $ref: "#/servers/integrationTls"
+    messages:
+      observation:
+        $ref: "#/components/messages/integrationObservation"
+  embyObservation:
+    address: /api/v1/integrations/emby/webhook
+    servers:
+      - $ref: "#/servers/integrationLoopback"
+      - $ref: "#/servers/integrationTls"
+    messages:
+      observation:
+        $ref: "#/components/messages/embyWebhook"
+  plexObservation:
+    address: /api/v1/integrations/plex/webhook
+    servers:
+      - $ref: "#/servers/integrationLoopback"
+      - $ref: "#/servers/integrationTls"
+    messages:
+      observation:
+        $ref: "#/components/messages/plexWebhook"
+operations:
+  receiveNuvioObservation:
+    action: receive
+    channel:
+      $ref: "#/channels/nuvioObservation"
+    messages:
+      - $ref: "#/channels/nuvioObservation/messages/observation"
+    bindings:
+      http:
+        method: POST
+    security:
+      - $ref: "#/components/securitySchemes/scopedBearer"
+    x-fasti-capability-id: observation.accept
+    x-fasti-required-scopes: [observation_accept]
+    x-fasti-runtime-availability: implemented
+    x-fasti-idempotency: stable_source_event_id
+  receiveTautulliObservation:
+    action: receive
+    channel:
+      $ref: "#/channels/tautulliObservation"
+    messages:
+      - $ref: "#/channels/tautulliObservation/messages/observation"
+    bindings:
+      http:
+        method: POST
+    security:
+      - $ref: "#/components/securitySchemes/scopedBearer"
+    x-fasti-capability-id: observation.accept
+    x-fasti-required-scopes: [observation_accept]
+    x-fasti-runtime-availability: implemented
+    x-fasti-idempotency: stable_source_event_id
+  receiveJellyfinObservation:
+    action: receive
+    channel:
+      $ref: "#/channels/jellyfinObservation"
+    messages:
+      - $ref: "#/channels/jellyfinObservation/messages/observation"
+    bindings:
+      http:
+        method: POST
+    security:
+      - $ref: "#/components/securitySchemes/scopedBearer"
+    x-fasti-capability-id: observation.accept
+    x-fasti-required-scopes: [observation_accept]
+    x-fasti-runtime-availability: implemented
+    x-fasti-idempotency: stable_source_event_id
+  receiveEmbyObservation:
+    action: receive
+    channel:
+      $ref: "#/channels/embyObservation"
+    messages:
+      - $ref: "#/channels/embyObservation/messages/observation"
+    bindings:
+      http:
+        method: POST
+    security:
+      - $ref: "#/components/securitySchemes/scopedBearer"
+    x-fasti-capability-id: observation.accept
+    x-fasti-required-scopes: [observation_accept]
+    x-fasti-runtime-availability: implemented
+    x-fasti-idempotency: canonical_payload_digest
+  receivePlexObservation:
+    action: receive
+    channel:
+      $ref: "#/channels/plexObservation"
+    messages:
+      - $ref: "#/channels/plexObservation/messages/observation"
+    bindings:
+      http:
+        method: POST
+    security:
+      - $ref: "#/components/securitySchemes/scopedBearer"
+    x-fasti-capability-id: observation.accept
+    x-fasti-required-scopes: [observation_accept]
+    x-fasti-runtime-availability: implemented
+    x-fasti-idempotency: canonical_payload_digest
+    x-fasti-auth-note: >-
+      Plex cannot send the Fasti bearer header itself. A trusted proxy must
+      authenticate the Plex source and inject this header, or the operator must
+      use Tautulli. Credentials are never placed in the webhook URL.
+components:
+  securitySchemes:
+    scopedBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: FastiCredential
+      description: Current scoped Fasti API-client credential with observation_accept.
+  messages:
+    integrationObservation:
+      name: integrationObservation
+      title: Provider-neutral completed consumption observation
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/integrationObservationRequest"
+      x-fasti-openapi-schema: IntegrationObservationRequest
+      x-fasti-evidence: original_bounded_json
+    embyWebhook:
+      name: embyWebhook
+      title: Native Emby completed playback notification
+      contentType: application/json
+      payload:
+        type: object
+        additionalProperties: true
+        description: >-
+          Native Emby webhook object. The adapter accepts only explicit
+          playback.stop or item.markplayed completion evidence and extracts a
+          bounded allowlist of fields before domain submission.
+      x-fasti-provider-decoder: emby_native_v1
+      x-fasti-evidence: original_bounded_json
+    plexWebhook:
+      name: plexWebhook
+      title: Native Plex media.scrobble multipart notification
+      contentType: multipart/form-data
+      payload:
+        type: string
+        description: >-
+          Bounded multipart body containing one JSON form-data part named
+          payload and optionally an image part. Fasti ignores the image and
+          accepts only media.scrobble.
+      x-fasti-provider-decoder: plex_multipart_v1
+      x-fasti-evidence: payload_json_only
+  schemas:
+    integrationObservationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - source_event_id
+        - observed_at
+        - item_type
+        - completed
+      properties:
+        source_event_id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        observed_at:
+          type: string
+          format: date-time
+        occurred_at:
+          type: [string, "null"]
+        item_type:
+          type: string
+          minLength: 1
+          maxLength: 32
+        title:
+          type: [string, "null"]
+          maxLength: 512
+        series_title:
+          type: [string, "null"]
+          maxLength: 512
+        season_number:
+          type: [integer, "null"]
+          minimum: 0
+        episode_number:
+          type: [integer, "null"]
+          minimum: 0
+        completed:
+          type: boolean
+        position_seconds:
+          type: [integer, "null"]
+          minimum: 0
+        duration_seconds:
+          type: [integer, "null"]
+          minimum: 0
+        provider_ids:
+          type: object
+          additionalProperties:
+            type: string
+          maxProperties: 16
+        series_provider_ids:
+          type: object
+          additionalProperties:
+            type: string
+          maxProperties: 16
+        server_id:
+          type: [string, "null"]
+          maxLength: 128
+        user_id:
+          type: [string, "null"]
+          maxLength: 128
+        device_id:
+          type: [string, "null"]
+          maxLength: 128
