@@ -91,6 +91,8 @@ cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 
 The browser Workbench uses the Vite `/api` proxy by default. It can save one
 non-secret client service URL in browser storage. It never stores a bearer.
+Before sending a memory-only bearer, the connection dialog names the exact
+service origin and requires explicit confirmation for a non-loopback origin.
 Changing the URL changes the browser client only; it does not bind `fastid`.
 A cross-origin URL requires an HTTPS reverse proxy that explicitly permits the
 Workbench page origin through CORS. Direct `fastid` does not provide CORS.

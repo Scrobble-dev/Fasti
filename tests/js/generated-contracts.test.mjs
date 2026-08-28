@@ -125,7 +125,11 @@ test("production OpenAPI bearer requirements cannot be removed", async () => {
       mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
         delete document.paths["/api/v1/records"].get.security;
       }),
-    (result) => assert.rejects(result),
+    (result) =>
+      assert.rejects(
+        result,
+        /list_records security must match scoped authorization/u,
+      ),
   );
 });
 

@@ -10,15 +10,17 @@
 
   interface Props {
     show: boolean;
+    credentialTarget: string;
     onClose: () => void;
     onSubmit: (credential: string) => void | Promise<void>;
   }
 
-  let { show, onClose, onSubmit }: Props = $props();
+  let { show, credentialTarget, onClose, onSubmit }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
   let credential = $state("");
   let problem = $state("");
   let submitting = $state(false);
+  let externalTargetConfirmed = $state(false);
   type AuthMethod = "passkey" | "oidc" | "device" | "password" | "token";
   let activeMethod = $state<AuthMethod>("token");
   const methods = [
@@ -29,6 +31,19 @@
     { id: "token", label: "API Credential", icon: IconIdBadge },
   ] as const;
   const credentialValid = $derived(/^[0-9a-f]{64}$/i.test(credential.trim()));
+  const externalCredentialTarget = $derived.by(() => {
+    try {
+      const hostname = new URL(credentialTarget).hostname;
+      return !["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
+    } catch {
+      return true;
+    }
+  });
+  const credentialReady = $derived(
+    credentialValid &&
+      credentialTarget.length > 0 &&
+      (!externalCredentialTarget || externalTargetConfirmed),
+  );
 
   $effect(() => {
     if (!dialog) return;
@@ -39,13 +54,14 @@
   function close(): void {
     credential = "";
     problem = "";
+    externalTargetConfirmed = false;
     activeMethod = "token";
     onClose();
   }
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (!credentialValid || submitting) return;
+    if (!credentialReady || submitting) return;
     submitting = true;
     problem = "";
     try {
@@ -102,7 +118,7 @@
   <div class="modal-dialog modal-dialog-centered">
     <form class="modal-content modal-card" onsubmit={submit}>
       <div class="modal-header">
-        <h2 id="auth-modal-title">Connect to local Fasti</h2>
+        <h2 id="auth-modal-title">Connect to Fasti records</h2>
         <button
           type="button"
           class="btn btn-icon btn-ghost-secondary close-btn"
@@ -148,7 +164,8 @@
           <p id="credential-help">
             Paste an active 64-character scoped API credential. Record access
             needs <code>identity_read</code>. Fasti keeps the secret only in
-            this tab's memory and clears it when the page reloads.
+            this tab's memory and sends it only to
+            <code>{credentialTarget}</code>. Reloading clears it.
           </p>
           <label class="form-label" for="session-credential"
             >API client credential</label
@@ -159,6 +176,7 @@
             class="form-control credential-input"
             autocomplete="off"
             spellcheck="false"
+            aria-invalid={credential.length > 0 && !credentialValid}
             aria-describedby="credential-help credential-format"
             bind:value={credential}
           />
@@ -168,13 +186,26 @@
           >
             Enter exactly 64 hexadecimal characters.
           </p>
+          {#if externalCredentialTarget}
+            <label class="form-check target-confirmation">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                bind:checked={externalTargetConfirmed}
+              />
+              <span class="form-check-label">
+                I trust <code>{credentialTarget}</code> and want to send this credential
+                to it.
+              </span>
+            </label>
+          {/if}
           {#if problem}
             <p class="problem" role="alert">{problem}</p>
           {/if}
           <button
             type="submit"
             class="btn btn-primary submit-btn"
-            disabled={!credentialValid || submitting}
+            disabled={!credentialReady || submitting}
           >
             {submitting ? "Connecting…" : "Connect"}
           </button>
@@ -368,6 +399,19 @@
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
     font-family: var(--fasti-font-mono);
+  }
+
+  .target-confirmation {
+    min-height: var(--fasti-touch-target-min);
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+  }
+
+  #credential-help code,
+  .target-confirmation .form-check-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .modal-body > .problem {

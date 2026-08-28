@@ -84,11 +84,10 @@ test("browser Settings reflows and saves only the real client endpoint", async (
   expect(saveBox?.height).toBeGreaterThanOrEqual(44);
   await save.click();
   await expect(page.getByRole("status")).toHaveText("Settings saved.");
-  expect(
-    await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("fasti-network-config") ?? "null"),
-    ),
-  ).toEqual({ service_url: "http://localhost:8420" });
+  await page.reload();
+  await expect(page.getByLabel("Service URL")).toHaveValue(
+    "http://localhost:8420",
+  );
 
   await page
     .getByLabel("Service URL")
@@ -97,11 +96,10 @@ test("browser Settings reflows and saves only the real client endpoint", async (
   await expect(page.getByRole("alert")).toContainText(
     "only a scheme, host, and optional port",
   );
-  expect(
-    await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("fasti-network-config") ?? "null"),
-    ),
-  ).toEqual({ service_url: "http://localhost:8420" });
+  await page.reload();
+  await expect(page.getByLabel("Service URL")).toHaveValue(
+    "http://localhost:8420",
+  );
 
   expect(
     await page.evaluate(

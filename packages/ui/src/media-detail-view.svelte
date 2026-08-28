@@ -1308,8 +1308,8 @@
   }
 
   .icon-action-btn {
-    width: 36px;
-    height: 36px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
     border-radius: 4px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1673,8 +1673,8 @@
     opacity: 0.75;
   }
   .ep-check-btn {
-    width: 28px;
-    height: 28px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
     border-radius: 4px;
     border: 2px solid var(--fasti-text-muted);
     background: transparent;

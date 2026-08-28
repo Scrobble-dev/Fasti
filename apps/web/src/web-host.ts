@@ -206,7 +206,7 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
           "The bearer credential must contain exactly 64 hexadecimal characters.",
         );
       }
-      sessionCredential = normalized;
+      sessionCredential = normalized.toLowerCase();
     },
 
     clearSessionCredential(): void {

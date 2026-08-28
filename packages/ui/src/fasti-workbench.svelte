@@ -56,6 +56,7 @@
     | "detail";
 
   let { host, onOpenStatus }: Props = $props();
+  let credentialTarget = $state("");
 
   const credentialAdministration = $derived(
     Boolean(
@@ -388,6 +389,19 @@
     sessionCredentialActive = true;
   }
 
+  async function openAuthModal(): Promise<void> {
+    try {
+      credentialTarget = (await host.loadNetworkConfiguration()).connection
+        .service_url.value;
+      authModalOpen = true;
+    } catch (error) {
+      recordsProblem = hostProblemText(
+        error,
+        "Could not identify the service that would receive this credential.",
+      );
+    }
+  }
+
   function clearSessionCredential(): void {
     host.clearSessionCredential?.();
     sessionCredentialActive = false;
@@ -428,7 +442,7 @@
   });
 
   // nav-sidebar.svelte turns itself into a fixed-position rail below this
-  // breakpoint (see its own `@media (max-width: 47.99rem)` block). At a
+  // breakpoint (see its own `@media (max-width: 61.99rem)` block). At a
   // phone width, an always-expanded 240px rail leaves too little room for
   // real content and forces horizontal scroll, which then slides content
   // out from under the fixed rail. Force the icon-only (64px) width there
@@ -483,7 +497,7 @@
         <button
           type="button"
           class="btn btn-primary"
-          onclick={() => (authModalOpen = true)}>Connect records</button
+          onclick={() => void openAuthModal()}>Connect records</button
         >
       {:else}
         <button
@@ -596,7 +610,7 @@
             class="icon-btn"
             onclick={sessionCredentialActive
               ? clearSessionCredential
-              : () => (authModalOpen = true)}
+              : () => void openAuthModal()}
             title={sessionCredentialActive
               ? "Clear browser credential"
               : "Connect local credential"}
@@ -821,6 +835,7 @@
 {#if host.setSessionCredential}
   <AuthModal
     show={authModalOpen}
+    {credentialTarget}
     onClose={() => (authModalOpen = false)}
     onSubmit={connectSessionCredential}
   />
@@ -958,6 +973,7 @@
   }
 
   .link-btn {
+    min-height: var(--fasti-touch-target-min);
     border: 1px solid var(--fasti-action-primary);
     border-radius: 4px;
     background: var(--fasti-action-primary);

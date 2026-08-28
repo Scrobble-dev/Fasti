@@ -151,7 +151,7 @@ test("endpoint testing rejects a contract-invalid health response", async ({
 test("a saved service URL owns browser record and status requests after reload", async ({
   page,
 }) => {
-  const savedOrigin = "https://saved.fasti.test";
+  const savedOrigin = `https://${"a".repeat(63)}.fasti.test`;
   const recordUrls: string[] = [];
   const healthUrls: string[] = [];
   await page.addInitScript((serviceUrl) => {
@@ -174,6 +174,7 @@ test("a saved service URL owns browser record and status requests after reload",
       return;
     }
     recordUrls.push(request.url());
+    expect(request.headers().authorization).toBe(`Bearer ${credential}`);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -195,8 +196,29 @@ test("a saved service URL owns browser record and status requests after reload",
     });
   });
 
+  await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/");
-  await submitCredential(page);
+  await page.getByRole("button", { name: "Connect records" }).click();
+  await expect(
+    page
+      .locator("#credential-help code")
+      .getByText(savedOrigin, { exact: true }),
+  ).toBeVisible();
+  const modalCard = page.locator(".modal-card");
+  expect(
+    await modalCard.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  await page.getByLabel("API client credential").fill(credential.toUpperCase());
+  const connect = page.getByRole("button", { name: "Connect", exact: true });
+  await expect(connect).toBeDisabled();
+  await page
+    .getByLabel(
+      `I trust ${savedOrigin} and want to send this credential to it.`,
+    )
+    .check();
+  await connect.click();
   await expect(
     page.getByRole("heading", { name: "Saved endpoint record" }),
   ).toBeVisible();

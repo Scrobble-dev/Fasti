@@ -49,7 +49,7 @@ select option {
 
 ::selection {
   background: var(--fasti-brand-mark);
-  color: var(--fasti-surface-paper);
+  color: var(--fasti-brand-contrast);
 }
 
 .skip-link {

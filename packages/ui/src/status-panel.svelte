@@ -150,7 +150,7 @@
 
       <p class="scope-note">
         Records and durable occurrence ingress have separate authenticated
-        contracts. Provider, review, playback, and account features report their
+        contracts. Provider, review, activity, and account features report their
         own availability in the Workbench.
       </p>
     </section>

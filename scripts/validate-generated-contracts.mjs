@@ -299,22 +299,25 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   );
   assert.equal(healthOperation.security, undefined);
 
-  const productionSecurity = new Map([
-    ["initialize_node", "bootstrap_bearer"],
-    ["submit_observation", "credential_bearer"],
-    ["create_record", "credential_bearer"],
-    ["attach_identifier", "credential_bearer"],
-    ["list_records", "credential_bearer"],
-    ["register_namespace", "credential_bearer"],
-  ]);
   for (const pathItem of Object.values(openapi.paths)) {
     for (const operation of Object.values(pathItem)) {
-      const scheme = productionSecurity.get(operation.operationId);
-      if (scheme) {
-        assert.deepEqual(operation.security, [{ [scheme]: [] }]);
-      } else {
-        assert.equal(operation.security, undefined);
-      }
+      const capability = capabilities.get(operation["x-fasti-capability-id"]);
+      assert.ok(
+        capability,
+        `production operation ${operation.operationId} has no capability`,
+      );
+      const scheme =
+        capability.authorization === "bootstrap_only"
+          ? "bootstrap_bearer"
+          : capability.authorization === "scoped" &&
+              capability.id !== "client.enroll"
+            ? "credential_bearer"
+            : undefined;
+      assert.deepEqual(
+        operation.security,
+        scheme ? [{ [scheme]: [] }] : undefined,
+        `production operation ${operation.operationId} security must match ${capability.authorization} authorization`,
+      );
     }
   }
 

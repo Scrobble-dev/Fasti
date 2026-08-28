@@ -111,5 +111,7 @@ export const cssVariables = `
   --fasti-state-verified: color-mix(in srgb, ${colors.state.verified} 55%, ${colors.surface.paper});
   --fasti-state-attention: color-mix(in srgb, ${colors.state.attention} 45%, ${colors.surface.paper});
   --fasti-state-error: color-mix(in srgb, #b42318 55%, ${colors.surface.paper});
+  --fasti-brand-contrast: var(--fasti-surface-night);
+  --fasti-verified-contrast: var(--fasti-surface-night);
 }
 `;

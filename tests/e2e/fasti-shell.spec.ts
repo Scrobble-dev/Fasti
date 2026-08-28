@@ -96,10 +96,9 @@ async function mockTrustedHost(page: Page) {
 }
 
 async function mockRecords(page: Page, credential: string) {
+  const authorizations: Array<string | undefined> = [];
   await page.route(/\/api\/v1\/records$/, (route) => {
-    expect(route.request().headers().authorization).toBe(
-      `Bearer ${credential}`,
-    );
+    authorizations.push(route.request().headers().authorization);
     return route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -134,10 +133,11 @@ async function mockRecords(page: Page, credential: string) {
       }),
     });
   });
+  return authorizations;
 }
 
 async function connectBrowserRecords(page: Page, credential: string) {
-  await mockRecords(page, credential);
+  const authorizations = await mockRecords(page, credential);
   await page.goto("/");
   await page.getByRole("button", { name: "Connect records" }).click();
   await page.getByLabel("API client credential").fill(credential);
@@ -145,6 +145,7 @@ async function connectBrowserRecords(page: Page, credential: string) {
   await expect(
     page.getByRole("heading", { name: "A real local record" }),
   ).toBeVisible();
+  expect(authorizations).toEqual([`Bearer ${credential}`]);
 }
 
 test("the product root restores the Workbench and ignores the retired surface preference", async ({
@@ -178,7 +179,7 @@ test("browser record access uses a real memory-only bearer and exposes unsupport
   await page.addInitScript((retiredCredential) => {
     localStorage.setItem("fasti-bearer-credential", retiredCredential);
   }, credential);
-  await mockRecords(page, credential);
+  const authorizations = await mockRecords(page, credential);
   await page.goto("/");
 
   await expect(page.getByRole("alert")).toContainText(
@@ -211,15 +212,18 @@ test("browser record access uses a real memory-only bearer and exposes unsupport
   await expect(
     page.getByText("Enter exactly 64 hexadecimal characters."),
   ).toHaveClass(/problem/);
+  await expect(input).toHaveAttribute("aria-invalid", "true");
   await expect(
     page.getByRole("button", { name: "Connect", exact: true }),
   ).toBeDisabled();
 
   await input.fill(credential);
+  await expect(input).toHaveAttribute("aria-invalid", "false");
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "A real local record" }),
   ).toBeVisible();
+  expect(authorizations).toEqual([`Bearer ${credential}`]);
   await expect(
     page.getByRole("button", { name: "Clear browser credential" }),
   ).toBeVisible();
@@ -253,6 +257,13 @@ test("browser record access uses a real memory-only bearer and exposes unsupport
     page.getByRole("combobox", { name: "Watch status unavailable" }),
   ).toBeDisabled();
   await page.getByRole("button", { name: "Actions & Progress" }).click();
+  const iconActions = page.locator(".icon-action-btn");
+  expect(await iconActions.count()).toBeGreaterThan(0);
+  for (const control of await iconActions.all()) {
+    const box = await control.boundingBox();
+    expect(box?.width).toBeGreaterThanOrEqual(44);
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+  }
   await expect(
     page.getByText("This host exposes this record as read-only."),
   ).toBeVisible();
@@ -326,6 +337,59 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("semantic badge contrast remains AA in both themes", async ({ page }) => {
+  await page.goto("/");
+  for (const theme of ["light", "dark"] as const) {
+    const ratios = await page.evaluate((mode) => {
+      document.documentElement.setAttribute("data-bs-theme", mode);
+      const parseColor = (value: string): number[] => {
+        const channels =
+          value
+            .match(/[\d.]+/g)
+            ?.slice(0, 3)
+            .map(Number) ?? [];
+        if (channels.length !== 3) return [];
+        return value.startsWith("color(")
+          ? channels.map((channel) => channel * 255)
+          : channels;
+      };
+      const luminance = (channels: number[]): number =>
+        channels
+          .map((channel) => channel / 255)
+          .map((channel) =>
+            channel <= 0.04045
+              ? channel / 12.92
+              : ((channel + 0.055) / 1.055) ** 2.4,
+          )
+          .reduce(
+            (sum, channel, index) =>
+              sum + channel * [0.2126, 0.7152, 0.0722][index],
+            0,
+          );
+      const contrast = (background: string, foreground: string): number => {
+        const left = luminance(parseColor(background));
+        const right = luminance(parseColor(foreground));
+        return (Math.max(left, right) + 0.05) / (Math.min(left, right) + 0.05);
+      };
+      return [
+        ["--fasti-brand-mark", "--fasti-brand-contrast"],
+        ["--fasti-state-verified", "--fasti-verified-contrast"],
+      ].map(([background, foreground]) => {
+        const sample = document.createElement("span");
+        sample.style.background = `var(${background})`;
+        sample.style.color = `var(${foreground})`;
+        sample.textContent = "Status";
+        document.body.append(sample);
+        const style = getComputedStyle(sample);
+        const ratio = contrast(style.backgroundColor, style.color);
+        sample.remove();
+        return ratio;
+      });
+    }, theme);
+    for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
+  }
+});
 
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {

@@ -36,9 +36,26 @@ if (trackedSources.status !== 0) {
 if (!trackedSources.stdout.trim()) {
   failures.push("UI policy source pathspecs must match tracked source files");
 }
+const untrackedSources = spawnSync(
+  "git",
+  ["ls-files", "--others", "--exclude-standard", "--", ...sourcePaths],
+  {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  },
+);
+if (untrackedSources.status !== 0) {
+  throw new Error(untrackedSources.stderr.trim() || "git ls-files failed");
+}
+if (untrackedSources.stdout.trim()) {
+  failures.push(
+    `Stage new UI source files before running the policy gate:\n${untrackedSources.stdout.trim()}`,
+  );
+}
 const forbiddenIcons = gitGrep([
   "-nEI",
-  "lucide|heroicons|phosphor|fontawesome|react-icons|material-icons|iconify",
+  "lucide|heroicons|phosphor|fontawesome|react-icons|material-icons|iconify|bootstrap-icons|radix-icons|@fortawesome|@ant-design/icons|feather-icons",
   "--",
   ...sourcePaths,
 ]);
@@ -58,16 +75,17 @@ const rawSvg = gitGrep([
 if (rawSvg) {
   failures.push(`Raw SVG needs a documented brand-only exception:\n${rawSvg}`);
 }
-
-const hardCodedSemanticContrast = gitGrep([
-  "-nEI",
-  "background:[^;]*var\\(--fasti-(action-primary|brand-mark|state-verified)\\)[^;]*;.*color:[[:space:]]*(white|#fff|#ffffff)",
+const brandSvg = gitGrep([
+  "-n",
+  "-o",
+  "-F",
+  "<svg",
   "--",
-  ...sourcePaths,
+  "packages/ui/src/nav-sidebar.svelte",
 ]);
-if (hardCodedSemanticContrast) {
+if (brandSvg.split("\n").filter(Boolean).length !== 1) {
   failures.push(
-    `Semantic backgrounds need their matching contrast token:\n${hardCodedSemanticContrast}`,
+    "packages/ui/src/nav-sidebar.svelte must contain exactly one documented brand SVG",
   );
 }
 
@@ -95,12 +113,26 @@ if (
 }
 
 for (const rule of [
-  "FASTI_TABLER_POLICY_START",
-  "FASTI_CHESTERTON_POLICY_START",
-  "FASTI_AUTH_BOUNDARY_START",
+  [
+    "FASTI_TABLER_POLICY_START",
+    "FASTI_TABLER_POLICY_END",
+    "Tabler-First Policy",
+  ],
+  [
+    "FASTI_CHESTERTON_POLICY_START",
+    "FASTI_CHESTERTON_POLICY_END",
+    "Chesterton's fence",
+  ],
+  [
+    "FASTI_AUTH_BOUNDARY_START",
+    "FASTI_AUTH_BOUNDARY_END",
+    "Authentication boundary",
+  ],
 ]) {
-  if (!gitGrep(["-nF", rule, "--", "AGENTS.md"])) {
-    failures.push(`AGENTS.md: missing ${rule}`);
+  for (const requiredText of rule) {
+    if (!gitGrep(["-nF", requiredText, "--", "AGENTS.md"])) {
+      failures.push(`AGENTS.md: missing ${requiredText}`);
+    }
   }
 }
 
