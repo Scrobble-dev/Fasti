@@ -27,6 +27,7 @@ declare global {
   interface Window {
     __DELETE_CALLS__?: () => number;
     __ENDPOINT_CALLS__?: () => number;
+    __ENDPOINT_REQUESTS__?: () => string[];
     __RESOLVE_ENDPOINT__?: () => void;
     __RECORD_CALLS__?: () => number;
     __REVIEW_CALLS__?: () => number;
@@ -44,7 +45,7 @@ declare global {
 
 async function installTrustedHost(page: Page, scenario: Scenario) {
   await page.addInitScript((activeScenario) => {
-    const networkConfiguration = {
+    let networkConfiguration = {
       connection: {
         service_url: {
           value: "http://127.0.0.1:8420",
@@ -94,9 +95,11 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     let reviewCalls = 0;
     let recordCalls = 0;
     let endpointCalls = 0;
+    const endpointRequests: string[] = [];
     const browserWindow = window as typeof window & {
       __DELETE_CALLS__?: () => number;
       __ENDPOINT_CALLS__?: () => number;
+      __ENDPOINT_REQUESTS__?: () => string[];
       __RESOLVE_ENDPOINT__?: () => void;
       __RECORD_CALLS__?: () => number;
       __REVIEW_CALLS__?: () => number;
@@ -115,6 +118,7 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     };
     browserWindow.__DELETE_CALLS__ = () => deleteCalls;
     browserWindow.__ENDPOINT_CALLS__ = () => endpointCalls;
+    browserWindow.__ENDPOINT_REQUESTS__ = () => [...endpointRequests];
     browserWindow.__RECORD_CALLS__ = () => recordCalls;
     browserWindow.__REVIEW_CALLS__ = () => reviewCalls;
     browserWindow.__SEARCH_CALLS__ = () => searchResolvers.length;
@@ -129,7 +133,7 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     let resolveReview: (() => void) | undefined;
     browserWindow.__RESOLVE_REVIEW__ = () => resolveReview?.();
     browserWindow.__TAURI_INTERNALS__ = {
-      invoke: async (command) => {
+      invoke: async (command, arguments_) => {
         switch (command) {
           case "setup_status":
             if (activeScenario === "status-setup-error") {
@@ -147,8 +151,38 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
             };
           case "load_network_configuration":
             return networkConfiguration;
+          case "save_network_configuration": {
+            const input = (
+              arguments_ as {
+                input: {
+                  service_url: string;
+                  public_url: string | null;
+                  outbound_policy: typeof networkConfiguration.outbound_policy;
+                };
+              }
+            ).input;
+            networkConfiguration = {
+              connection: {
+                service_url: {
+                  value: input.service_url,
+                  source: "saved",
+                  managed: false,
+                },
+                public_url: {
+                  value: input.public_url,
+                  source: input.public_url ? "saved" : "default",
+                  managed: false,
+                },
+              },
+              outbound_policy: input.outbound_policy,
+            };
+            return networkConfiguration;
+          }
           case "test_endpoint_connection":
             endpointCalls += 1;
+            endpointRequests.push(
+              (arguments_ as { input: { endpoint: string } }).input.endpoint,
+            );
             if (activeScenario === "status-single-flight") {
               if (endpointCalls === 1) {
                 throw {
@@ -412,7 +446,10 @@ test("packaged retry starts one native health check", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("packaged navigation keeps one native health check", async ({ page }) => {
+test("packaged navigation checks a changed service URL after the current native check", async ({
+  page,
+}) => {
+  const savedEndpoint = "http://127.0.0.1:19420";
   await installTrustedHost(page, "status-navigation-single-flight");
   await page.goto("/status");
   await expect
@@ -422,15 +459,31 @@ test("packaged navigation keeps one native health check", async ({ page }) => {
 
   await page.getByRole("button", { name: "Open Media Workbench" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.goBack();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Service URL").fill(savedEndpoint);
+  await page.getByRole("button", { name: "Save network settings" }).click();
+  await expect(page.getByText("Settings saved.")).toBeVisible();
+  await page.getByRole("link", { name: "Service status" }).click();
   await expect(page.getByText("Checking the local service")).toBeVisible();
   expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(1);
+  expect(await page.evaluate(() => window.__ENDPOINT_REQUESTS__?.())).toEqual([
+    "http://127.0.0.1:8420",
+  ]);
 
+  await page.evaluate(() => window.__RESOLVE_ENDPOINT__?.());
+  await expect
+    .poll(() => page.evaluate(() => window.__ENDPOINT_CALLS__?.()))
+    .toBe(2);
+  expect(await page.evaluate(() => window.__ENDPOINT_REQUESTS__?.())).toEqual([
+    "http://127.0.0.1:8420",
+    savedEndpoint,
+  ]);
+  await expect(page.getByText("Checking the local service")).toBeVisible();
   await page.evaluate(() => window.__RESOLVE_ENDPOINT__?.());
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
-  expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(1);
+  expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(2);
 });
 
 test("provider credential removal requires confirmation", async ({ page }) => {

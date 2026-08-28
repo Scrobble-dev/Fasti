@@ -57,6 +57,7 @@
   let status: StatusPanelState = $state({ view: "loading" });
   let theme: Theme = $state(resolveTheme());
   let request: AbortController | undefined;
+  let refreshHealthAfterCurrent = false;
   let setupState: SetupViewState = $state("loading");
   let setupProblem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
@@ -117,7 +118,7 @@
         serviceUrl.value,
         currentRequest.signal,
       );
-      if (request !== currentRequest) return;
+      if (request !== currentRequest || refreshHealthAfterCurrent) return;
       if (response.status !== "healthy") {
         throw new TypeError("The service did not return a healthy status.");
       }
@@ -126,7 +127,12 @@
         health: { status: "healthy", version: response.version },
       };
     } catch (error) {
-      if (currentRequest.signal.aborted || request !== currentRequest) return;
+      if (
+        currentRequest.signal.aborted ||
+        request !== currentRequest ||
+        refreshHealthAfterCurrent
+      )
+        return;
       status = { view: "blocked", problem: statusProblemFor(error) };
       if (restoreRetryFocus) {
         await tick();
@@ -135,7 +141,13 @@
         }
       }
     } finally {
-      if (request === currentRequest) request = undefined;
+      if (request === currentRequest) {
+        request = undefined;
+        if (refreshHealthAfterCurrent) {
+          refreshHealthAfterCurrent = false;
+          if (activeSurface === "status") void inspectHealth();
+        }
+      }
     }
   }
 
@@ -227,6 +239,14 @@
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", "/status");
     }
+    inspectHealthOnRouteEntry();
+  }
+
+  function inspectHealthOnRouteEntry(): void {
+    if (isTauri && request && !request.signal.aborted) {
+      refreshHealthAfterCurrent = true;
+      return;
+    }
     void inspectHealth();
   }
 
@@ -235,7 +255,7 @@
     if (nextSurface === activeSurface) return;
     activeSurface = nextSurface;
     if (nextSurface === "status") {
-      void inspectHealth();
+      inspectHealthOnRouteEntry();
     } else {
       cancelBrowserHealthInspection();
     }
