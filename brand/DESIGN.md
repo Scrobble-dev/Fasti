@@ -180,6 +180,16 @@ Every engineer and coding agent must follow this strict 4-step decision hierarch
 | **Modal Sheets / Drawers** | `.modal`, `.modal-dialog`, `.offcanvas` | Archival paper elevation, 14px radius | **No** — Always Tabler |
 | **Timeline Scrubber Ticks** | Bespoke SVG / Canvas layout | Fasti Oxblood spine + Gold calibration ticks | **Yes** — Documented Exception |
 
+### 8.3 Workbench shell contract
+
+The Workbench has one structural owner. Use `.page` with an adjacent `.navbar.navbar-vertical.navbar-expand-lg.offcanvas-lg` and `.page-wrapper`. Tabler owns the 15rem desktop navbar, the `lg` breakpoint, the narrow-screen offcanvas transform, and the remaining page width. The optional desktop collapsed preference uses one shared width token. It must not create a mobile rail.
+
+The toolbar uses Tabler navbar composition. Route content uses `.page-body` and a `.container-fluid` when it is an operational canvas. Put a local reading measure around prose only. Do not center the whole Workbench or Settings surface in an application-level maximum width.
+
+Theme settings keeps native dialog protection and uses Tabler offcanvas, fieldset, button-group, form-select, and button classes. Every visible choice must update its advertised data attribute and computed result. The application root owns `data-bs-theme`, `data-bs-theme-base`, `data-bs-theme-font`, `data-bs-theme-primary`, `data-bs-theme-radius`, and `data-fasti-theme`. Dark and Night must remain distinguishable.
+
+Persist theme choices in `fasti-theme-settings`. `fasti-theme` is a compatibility mirror for the light/dark status surface and must not become a second settings owner. Finite Fasti component radii must multiply by `--tblr-border-radius-scale`. Focus indicators use the semantic `--fasti-focus` token so a user-selected accent cannot remove keyboard visibility.
+
 ---
 
 ## 9. Impeccable Craft Floor & Design Modes Integration

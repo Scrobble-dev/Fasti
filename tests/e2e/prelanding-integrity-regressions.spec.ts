@@ -351,8 +351,8 @@ test("Discover keeps the newest provider status when refreshes resolve out of or
   await expect
     .poll(() => page.evaluate(() => window.__STATUS_CALLS__?.()))
     .toBe(1);
-  await page.getByRole("button", { name: "Library", exact: true }).click();
-  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
+  await page.getByRole("link", { name: "Discover", exact: true }).click();
   await expect
     .poll(() => page.evaluate(() => window.__STATUS_CALLS__?.()))
     .toBe(2);
@@ -481,7 +481,7 @@ test("packaged navigation checks a changed service URL after the current native 
 
   await page.getByRole("button", { name: "Open Media Workbench" }).click();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page.getByLabel("Service URL").fill(savedEndpoint);
   await page.getByRole("button", { name: "Save network settings" }).click();
   await expect(page.getByText("Settings saved.")).toBeVisible();
@@ -512,7 +512,7 @@ test("provider credential removal requires confirmation", async ({ page }) => {
   await installTrustedHost(page, "credential-delete");
   await page.goto("/settings");
   await page
-    .getByRole("button", { name: "Metadata credentials", exact: true })
+    .getByRole("link", { name: "Metadata credentials", exact: true })
     .click();
   const remove = page.getByRole("button", { name: "Remove" }).first();
 
@@ -561,7 +561,7 @@ test("native record failure exposes a working retry", async ({ page }) => {
   );
   await page.getByRole("button", { name: "Retry records" }).click();
   await expect(page.getByRole("alert")).toHaveCount(0);
-  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await page.getByRole("link", { name: "Library", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Recovered record" }),
   ).toBeVisible();

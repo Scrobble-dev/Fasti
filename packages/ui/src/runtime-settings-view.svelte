@@ -1,9 +1,13 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import {
+    IconAlertCircle,
     IconBug,
+    IconCheck,
     IconDatabase,
     IconExternalLink,
+    IconEye,
+    IconEyeOff,
     IconFileDownload,
     IconKey,
     IconPlus,
@@ -29,6 +33,22 @@
   interface Props {
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
+    activeTab?:
+      | "network"
+      | "providers"
+      | "preferences"
+      | "custom_fields"
+      | "nuvio_collections"
+      | "system";
+    onTabChange?: (
+      tab:
+        | "network"
+        | "providers"
+        | "preferences"
+        | "custom_fields"
+        | "nuvio_collections"
+        | "system",
+    ) => void;
     onUpdateWorkbenchPreferences?: (
       patch: Partial<WorkbenchPreferences>,
     ) => void;
@@ -42,6 +62,8 @@
   let {
     host,
     workbenchPreferences,
+    activeTab = "network",
+    onTabChange,
     onUpdateWorkbenchPreferences,
     onClientEndpointChanged,
     onProviderCredentialsChanged,
@@ -55,6 +77,94 @@
     | "custom_fields"
     | "nuvio_collections"
     | "system" = $state("network");
+
+  $effect(() => {
+    if (activeTab) {
+      active = activeTab;
+      if (activeTab === "nuvio_collections") {
+        void untrack(loadNuvioCollections);
+      }
+    }
+  });
+
+  function switchTab(tab: typeof active) {
+    active = tab;
+    onTabChange?.(tab);
+    if (tab === "nuvio_collections") void loadNuvioCollections();
+  }
+
+  function followTabLink(event: MouseEvent, tab: typeof active): void {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    switchTab(tab);
+  }
+
+  let showPassword = $state<Record<string, boolean>>({});
+  let testingProvider = $state<string>();
+  let testResults = $state<
+    Record<string, { ok: boolean; message: string } | undefined>
+  >({});
+
+  function providerCategory(provider: string): {
+    label: string;
+    icon: "movie" | "book" | "music" | "tags";
+  } {
+    switch (provider) {
+      case "tmdb":
+      case "tvdb":
+        return { label: "Movies & TV", icon: "movie" };
+      case "kitsu":
+      case "anilist":
+      case "mal":
+        return { label: "Anime & Manga", icon: "movie" };
+      case "open-library":
+      case "google-books":
+        return { label: "Books", icon: "book" };
+      case "musicbrainz":
+        return { label: "Music", icon: "music" };
+      default:
+        return { label: "Metadata", icon: "tags" };
+    }
+  }
+
+  async function testProviderConnection(providerId: string) {
+    testingProvider = providerId;
+    testResults = { ...testResults, [providerId]: undefined };
+    try {
+      const testQuery =
+        providerId === "tmdb" || providerId === "tvdb"
+          ? "Inception"
+          : providerId === "google-books" || providerId === "open-library"
+            ? "Dune"
+            : "Cowboy Bebop";
+      const results = await host.searchProvider(providerId, testQuery);
+      testResults = {
+        ...testResults,
+        [providerId]: {
+          ok: true,
+          message: `Connection successful. Returned ${results.length} search candidate results.`,
+        },
+      };
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Connection test failed. Please verify credentials.";
+      testResults = {
+        ...testResults,
+        [providerId]: { ok: false, message: msg },
+      };
+    } finally {
+      testingProvider = undefined;
+    }
+  }
   let network = $state<NetworkConfiguration>();
   let networkLoading = $state(false);
   let networkProblem = $state<string>();
@@ -190,6 +300,137 @@
     }
   }
 
+  const KAPTAIN_COLLECTION_PRESET: NuvioCollectionsDocument = [
+    {
+      id: "kaptain-trending",
+      title: "Kaptain's Trending & Popular",
+      description: "Trending movies and shows curated via TMDB & Trakt feeds",
+      folders: [
+        {
+          id: "kaptain-box-office",
+          title: "Box Office & Theatrical",
+          sources: [
+            {
+              id: "tmdb-popular-movies",
+              name: "TMDB Popular Movies",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "popularity.desc", vote_count_gte: 100 },
+            },
+            {
+              id: "tmdb-top-rated",
+              name: "TMDB Top Rated",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "vote_average.desc", vote_count_gte: 500 },
+            },
+          ],
+        },
+        {
+          id: "kaptain-tv-series",
+          title: "Prime Time & Streaming TV",
+          sources: [
+            {
+              id: "tmdb-popular-tv",
+              name: "Popular TV Shows",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "popularity.desc", vote_count_gte: 50 },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      id: "kaptain-sci-fi-classics",
+      title: "Sci-Fi & Cinema Essentials",
+      description: "Essential science fiction, cyberpunk, and cinema landmarks",
+      folders: [
+        {
+          id: "sci-fi-masterpieces",
+          title: "Sci-Fi Masterpieces",
+          sources: [
+            {
+              id: "tmdb-scifi",
+              name: "TMDB Sci-Fi Spotlight",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { with_genres: "878", vote_average_gte: 7.5 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const AIO_METADATA_PRESET: NuvioCollectionsDocument = [
+    {
+      id: "aio-curated-cinema",
+      title: "AIO Curated Metadata Lists",
+      description:
+        "Comprehensive multi-provider collection lists (AIO Metadata engine)",
+      folders: [
+        {
+          id: "aio-award-winners",
+          title: "Academy & Festival Award Winners",
+          sources: [
+            {
+              id: "tmdb-oscar-winners",
+              name: "Oscar Best Picture Winners",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { sort_by: "vote_average.desc", vote_count_gte: 1000 },
+            },
+          ],
+        },
+        {
+          id: "aio-documentaries",
+          title: "Documentaries & Real Events",
+          sources: [
+            {
+              id: "tmdb-docs",
+              name: "Acclaimed Documentaries",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { with_genres: "99", vote_average_gte: 7.0 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  async function installPresetPack(
+    preset: NuvioCollectionsDocument,
+    packName: string,
+  ): Promise<void> {
+    if (
+      !host.replaceNuvioCollections ||
+      nuvioLoading ||
+      (nuvioDocument !== null &&
+        !confirm(
+          `Replace this profile's saved Nuvio Collections document with ${packName}? Export it first if you need a backup.`,
+        ))
+    )
+      return;
+    nuvioLoading = true;
+    nuvioProblem = undefined;
+    nuvioNotice = undefined;
+    try {
+      const state = await host.replaceNuvioCollections(preset);
+      nuvioDocument = state.document ?? null;
+      const storedCounts = nuvioCounts(nuvioDocument);
+      nuvioNotice = `Installed ${packName}. Stored ${storedCounts.collections} collections, ${storedCounts.folders} folders, and ${storedCounts.sources} sources.`;
+    } catch (error) {
+      nuvioProblem = hostProblemText(
+        error,
+        `Fasti could not install ${packName}.`,
+      );
+    } finally {
+      nuvioLoading = false;
+    }
+  }
+
   async function loadNetwork(): Promise<void> {
     if (networkLoading) return;
     networkLoading = true;
@@ -288,7 +529,7 @@
   }
 
   onMount(() => {
-    void Promise.all([loadNetwork(), loadProviders(), loadNuvioCollections()]);
+    void Promise.all([loadNetwork(), loadProviders()]);
   });
 
   let newFieldName = $state("");
@@ -426,56 +667,83 @@
   }
 </script>
 
-<div class="settings-container">
+<div class="settings-container container-fluid">
   <header>
     <h1>Settings</h1>
     <p>Only settings with an active host capability are editable here.</p>
   </header>
 
   <div class="settings-layout">
-    <nav aria-label="Settings sections">
-      <button
-        type="button"
-        class:active={active === "network"}
-        aria-pressed={active === "network"}
-        onclick={() => (active = "network")}>Network</button
-      >
-      <button
-        type="button"
-        class:active={active === "providers"}
-        aria-pressed={active === "providers"}
-        onclick={() => (active = "providers")}>Metadata credentials</button
-      >
-      <button
-        type="button"
-        class:active={active === "preferences"}
-        aria-pressed={active === "preferences"}
-        onclick={() => (active = "preferences")}
-        ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</button
-      >
-      <button
-        type="button"
-        class:active={active === "custom_fields"}
-        aria-pressed={active === "custom_fields"}
-        onclick={() => (active = "custom_fields")}
-        ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
-      >
-      <button
-        type="button"
-        class:active={active === "nuvio_collections"}
-        aria-pressed={active === "nuvio_collections"}
-        onclick={() => {
-          active = "nuvio_collections";
-          void loadNuvioCollections();
-        }}>Nuvio Collections</button
-      >
-      <button
-        type="button"
-        class:active={active === "system"}
-        aria-pressed={active === "system"}
-        onclick={() => (active = "system")}>Capability status</button
-      >
-    </nav>
+    <div class="settings-navigation">
+      <div class="settings-section-selector">
+        <label for="settings-section" class="form-label">Settings section</label
+        >
+        <select
+          id="settings-section"
+          class="form-select"
+          value={active}
+          onchange={(event) =>
+            switchTab(event.currentTarget.value as typeof active)}
+        >
+          <option value="network">Network</option>
+          <option value="providers">Metadata credentials</option>
+          <option value="preferences">Preferences & Metadata</option>
+          <option value="custom_fields">Custom Types & Fields</option>
+          <option value="nuvio_collections">Nuvio Collections</option>
+          <option value="system">Capability status</option>
+        </select>
+      </div>
+
+      <nav class="settings-nav list-group" aria-label="Settings sections">
+        <a
+          href="/settings"
+          class="list-group-item list-group-item-action"
+          class:active={active === "network"}
+          aria-current={active === "network" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "network")}>Network</a
+        >
+        <a
+          href="/settings/metadata"
+          class="list-group-item list-group-item-action"
+          class:active={active === "providers"}
+          aria-current={active === "providers" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "providers")}
+          >Metadata credentials</a
+        >
+        <a
+          href="/settings/preferences"
+          class="list-group-item list-group-item-action"
+          class:active={active === "preferences"}
+          aria-current={active === "preferences" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "preferences")}
+          ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</a
+        >
+        <a
+          href="/settings/custom-fields"
+          class="list-group-item list-group-item-action"
+          class:active={active === "custom_fields"}
+          aria-current={active === "custom_fields" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "custom_fields")}
+          ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</a
+        >
+        <a
+          href="/settings/collections"
+          class="list-group-item list-group-item-action"
+          class:active={active === "nuvio_collections"}
+          aria-current={active === "nuvio_collections" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "nuvio_collections")}
+          >Nuvio Collections</a
+        >
+        <a
+          href="/settings/status"
+          class="list-group-item list-group-item-action"
+          class:active={active === "system"}
+          aria-current={active === "system" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "system")}
+          >Capability status</a
+        >
+      </nav>
+    </div>
 
     <div class="settings-panel">
       {#if active === "network"}
@@ -515,7 +783,21 @@
               <article class="provider-card">
                 <div class="provider-heading">
                   <div>
-                    <h3>{provider.label}</h3>
+                    <div class="provider-title-row">
+                      <h3>{provider.label}</h3>
+                      <span class="category-pill"
+                        >{providerCategory(provider.provider).label}</span
+                      >
+                      {#if provider.configured}
+                        <span class="status-badge configured" role="status">
+                          <IconCheck size={14} aria-hidden="true" /> Configured
+                        </span>
+                      {:else}
+                        <span class="status-badge not-configured"
+                          >Not configured</span
+                        >
+                      {/if}
+                    </div>
                     <p>
                       {provider.configured
                         ? `Configured from ${provider.source.replace("_", " ")}.`
@@ -526,6 +808,7 @@
                     href={provider.docs_url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    class="docs-link"
                   >
                     Documentation <IconExternalLink
                       size={14}
@@ -545,19 +828,49 @@
                     <label for={`provider-${provider.provider}`}
                       >New credential</label
                     >
-                    <div>
-                      <input
-                        id={`provider-${provider.provider}`}
-                        type="password"
-                        autocomplete="off"
-                        value={editing[provider.provider] ?? ""}
-                        oninput={(event) =>
-                          (editing = {
-                            ...editing,
-                            [provider.provider]: event.currentTarget.value,
-                          })}
-                        disabled={busyProvider === provider.provider}
-                      />
+                    <div class="credential-input-row">
+                      <div class="secret-field-wrap">
+                        <input
+                          id={`provider-${provider.provider}`}
+                          type={showPassword[provider.provider]
+                            ? "text"
+                            : "password"}
+                          autocomplete="off"
+                          placeholder={provider.provider === "tmdb"
+                            ? "Enter TMDB API Read Access Token or API Key"
+                            : "Enter API key or access token"}
+                          value={editing[provider.provider] ?? ""}
+                          oninput={(event) =>
+                            (editing = {
+                              ...editing,
+                              [provider.provider]: event.currentTarget.value,
+                            })}
+                          disabled={busyProvider === provider.provider}
+                        />
+                        <button
+                          type="button"
+                          class="toggle-reveal-btn"
+                          title={showPassword[provider.provider]
+                            ? "Hide secret"
+                            : "Show secret"}
+                          aria-label={showPassword[provider.provider]
+                            ? "Hide secret"
+                            : "Show secret"}
+                          onclick={() =>
+                            (showPassword = {
+                              ...showPassword,
+                              [provider.provider]:
+                                !showPassword[provider.provider],
+                            })}
+                        >
+                          {#if showPassword[provider.provider]}
+                            <IconEyeOff size={16} aria-hidden="true" />
+                          {:else}
+                            <IconEye size={16} aria-hidden="true" />
+                          {/if}
+                        </button>
+                      </div>
+
                       <button
                         type="submit"
                         class="primary"
@@ -569,6 +882,24 @@
                       {#if provider.configured}
                         <button
                           type="button"
+                          class="secondary test-conn-btn"
+                          onclick={() =>
+                            void testProviderConnection(provider.provider)}
+                          disabled={Boolean(busyProvider) ||
+                            testingProvider === provider.provider}
+                        >
+                          {#if testingProvider === provider.provider}
+                            <IconRefresh
+                              size={16}
+                              class="spinning"
+                              aria-hidden="true"
+                            /> Testing…
+                          {:else}
+                            Test Connection
+                          {/if}
+                        </button>
+                        <button
+                          type="button"
                           class="danger"
                           onclick={() => void deleteProvider(provider.provider)}
                           disabled={Boolean(busyProvider)}
@@ -578,6 +909,22 @@
                       {/if}
                     </div>
                   </form>
+
+                  {#if testResults[provider.provider]}
+                    <div
+                      class="test-result-alert"
+                      class:success={testResults[provider.provider]?.ok}
+                      class:failure={!testResults[provider.provider]?.ok}
+                      role="status"
+                    >
+                      {#if testResults[provider.provider]?.ok}
+                        <IconCheck size={16} aria-hidden="true" />
+                      {:else}
+                        <IconAlertCircle size={16} aria-hidden="true" />
+                      {/if}
+                      <span>{testResults[provider.provider]?.message}</span>
+                    </div>
+                  {/if}
                 {:else}
                   <p class="managed-note">
                     This distribution does not accept a secret for this
@@ -1057,6 +1404,128 @@
                 <IconTrash size={16} aria-hidden="true" /> Clear saved document
               </button>
             </div>
+
+            <!-- Preset Catalog Packs -->
+            <div class="nuvio-preset-section">
+              <h3 class="preset-title">Curated Collection Packs</h3>
+              <p class="preset-desc">
+                Instantly install pre-configured collection feeds (Kaptain's
+                Collection & AIO Metadata format).
+              </p>
+              <div class="preset-grid">
+                <div class="preset-card">
+                  <div class="preset-info">
+                    <strong>Kaptain's Mega Collection</strong>
+                    <span
+                      >Trending Box Office, Streaming Hits, and Sci-Fi
+                      Essentials</span
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    class="secondary btn-install-pack"
+                    disabled={nuvioLoading}
+                    onclick={() =>
+                      void installPresetPack(
+                        KAPTAIN_COLLECTION_PRESET,
+                        "Kaptain's Mega Collection",
+                      )}
+                  >
+                    Install pack
+                  </button>
+                </div>
+                <div class="preset-card">
+                  <div class="preset-info">
+                    <strong>AIO Curated Metadata Lists</strong>
+                    <span>Academy Award Winners & Acclaimed Documentaries</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="secondary btn-install-pack"
+                    disabled={nuvioLoading}
+                    onclick={() =>
+                      void installPresetPack(
+                        AIO_METADATA_PRESET,
+                        "AIO Curated Lists",
+                      )}
+                  >
+                    Install pack
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Saved Collections Explorer -->
+            {#if Array.isArray(nuvioDocument) && nuvioDocument.length > 0}
+              <div class="nuvio-tree-section">
+                <h3 class="tree-title">Saved Collections Explorer</h3>
+                <div class="collection-tree">
+                  {#each nuvioDocument as col, cIndex}
+                    {@const colName =
+                      typeof col === "object" && col !== null
+                        ? (col as any).title ||
+                          (col as any).name ||
+                          `Collection ${cIndex + 1}`
+                        : `Collection ${cIndex + 1}`}
+                    {@const folders =
+                      typeof col === "object" &&
+                      col !== null &&
+                      Array.isArray((col as any).folders)
+                        ? (col as any).folders
+                        : []}
+                    <div class="tree-collection-card">
+                      <div class="tree-collection-header">
+                        <span class="tree-badge">Collection</span>
+                        <strong>{colName}</strong>
+                        <span class="tree-count"
+                          >({folders.length} folders)</span
+                        >
+                      </div>
+                      {#if folders.length > 0}
+                        <div class="tree-folders-list">
+                          {#each folders as folder, fIndex}
+                            {@const folderName =
+                              typeof folder === "object" && folder !== null
+                                ? (folder as any).title ||
+                                  (folder as any).name ||
+                                  `Folder ${fIndex + 1}`
+                                : `Folder ${fIndex + 1}`}
+                            {@const sources =
+                              typeof folder === "object" &&
+                              folder !== null &&
+                              Array.isArray((folder as any).sources)
+                                ? (folder as any).sources
+                                : []}
+                            <div class="tree-folder-item">
+                              <div class="tree-folder-header">
+                                <span class="folder-dot">•</span>
+                                <span class="folder-title">{folderName}</span>
+                                <span class="tree-source-count"
+                                  >{sources.length} sources</span
+                                >
+                              </div>
+                              {#if sources.length > 0}
+                                <div class="tree-sources-row">
+                                  {#each sources as src}
+                                    {@const srcLabel =
+                                      typeof src === "object" && src !== null
+                                        ? (src as any).name ||
+                                          (src as any).provider ||
+                                          "source"
+                                        : "source"}
+                                    <span class="source-pill">{srcLabel}</span>
+                                  {/each}
+                                </div>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
           {:else}
             <p class="managed-note">
               This host does not provide profile-scoped Nuvio Collections
@@ -1197,9 +1666,10 @@
 
 <style>
   .settings-container {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 32px 24px 64px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: clamp(20px, 2vw, 32px) clamp(16px, 2.5vw, 40px) 64px;
   }
 
   header {
@@ -1234,45 +1704,52 @@
 
   .settings-layout {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 24px;
+    grid-template-columns: minmax(12rem, 14rem) minmax(0, 1fr);
+    gap: clamp(20px, 2.5vw, 40px);
   }
 
-  nav {
+  .settings-nav {
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
 
-  nav button {
+  .settings-nav a {
     min-height: 44px;
     display: flex;
     align-items: center;
     gap: 8px;
-    border: 0;
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 9px 12px;
     text-align: left;
-    background: transparent;
     color: var(--fasti-text-muted);
-    cursor: pointer;
+    text-decoration: none;
   }
 
-  nav button:hover,
-  nav button.active {
+  .settings-nav a:hover,
+  .settings-nav a.active {
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
   }
 
-  nav button.active {
+  .settings-nav a.active {
     font-weight: 700;
     box-shadow: inset 3px 0 0 var(--fasti-action-primary);
+  }
+
+  .settings-section-selector {
+    display: none;
+    width: min(100%, 28rem);
+  }
+
+  .settings-panel {
+    min-width: 0;
   }
 
   button:focus-visible,
   a:focus-visible,
   input:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -1285,6 +1762,138 @@
     gap: 12px;
   }
 
+  .provider-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+
+  .provider-title-row h3 {
+    margin-bottom: 0;
+  }
+
+  .category-pill {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: var(--fasti-surface-raised, rgba(125, 125, 125, 0.1));
+    color: var(--fasti-text-muted);
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+  }
+
+  .status-badge.configured {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #2fb344) 15%,
+      transparent
+    );
+    color: var(--fasti-state-success, #2fb344);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-success, #2fb344) 40%, transparent);
+  }
+
+  .status-badge.not-configured {
+    background: color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+    color: var(--fasti-text-muted);
+  }
+
+  .credential-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .secret-field-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 260px;
+  }
+
+  .secret-field-wrap input {
+    width: 100%;
+    padding-right: 44px;
+  }
+
+  .toggle-reveal-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+  }
+
+  .toggle-reveal-btn:hover {
+    color: var(--fasti-text-primary);
+  }
+
+  .test-result-alert {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+    font-size: 0.875rem;
+  }
+
+  .test-result-alert.success {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #2fb344) 10%,
+      transparent
+    );
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-success, #2fb344) 30%, transparent);
+    color: var(--fasti-text-primary);
+  }
+
+  .test-result-alert.failure {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-danger, #d63939) 10%,
+      transparent
+    );
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-danger, #d63939) 30%, transparent);
+    color: var(--fasti-text-primary);
+  }
+
+  :global(.spinning) {
+    animation: fasti-spin 1s linear infinite;
+  }
+
+  @keyframes fasti-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .provider-list {
     display: grid;
     gap: 12px;
@@ -1294,7 +1903,7 @@
   .provider-card {
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     padding: 16px;
     background: var(--fasti-surface-paper);
   }
@@ -1331,7 +1940,7 @@
     min-width: 0;
     min-height: 44px;
     border: 1px solid var(--fasti-border, currentColor);
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 8px 10px;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
@@ -1348,7 +1957,7 @@
     padding: 12px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-state-attention) 45%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-state-attention) 9%,
@@ -1405,7 +2014,7 @@
     padding: 16px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 12px;
   }
 
@@ -1427,7 +2036,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     font-size: 0.88rem;
   }
 
@@ -1461,7 +2070,7 @@
     margin: 20px 0;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
 
@@ -1507,7 +2116,7 @@
     padding: 16px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -1537,7 +2146,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 8px 13px;
     font-weight: 650;
     cursor: pointer;
@@ -1586,7 +2195,7 @@
     margin: 20px 0 0;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
 
@@ -1607,6 +2216,176 @@
     color: var(--fasti-text-muted);
   }
 
+  /* Nuvio Presets & Tree Explorer */
+  .nuvio-preset-section {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .preset-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+    color: var(--fasti-text-primary);
+  }
+
+  .preset-desc {
+    font-size: 0.85rem;
+    color: var(--fasti-text-muted);
+    margin: 0 0 16px;
+  }
+
+  .preset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .preset-card {
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .preset-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .preset-info strong {
+    font-size: 0.92rem;
+    color: var(--fasti-text-primary);
+  }
+
+  .preset-info span {
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+    line-height: 1.3;
+  }
+
+  .btn-install-pack {
+    align-self: flex-start;
+    font-size: 0.82rem;
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .nuvio-tree-section {
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+
+  .tree-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 16px;
+    color: var(--fasti-text-primary);
+  }
+
+  .collection-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .tree-collection-card {
+    background: var(--fasti-surface-paper);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    padding: 14px 16px;
+  }
+
+  .tree-collection-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.92rem;
+    color: var(--fasti-text-primary);
+  }
+
+  .tree-badge {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    background: var(--fasti-surface-archive);
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    color: var(--fasti-text-muted);
+  }
+
+  .tree-count {
+    font-size: 0.8rem;
+    color: var(--fasti-text-muted);
+  }
+
+  .tree-folders-list {
+    margin-top: 10px;
+    padding-left: 12px;
+    border-left: 2px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tree-folder-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .tree-folder-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+  }
+
+  .folder-dot {
+    color: var(--fasti-action-primary);
+    font-weight: bold;
+  }
+
+  .folder-title {
+    font-weight: 600;
+    color: var(--fasti-text-primary);
+  }
+
+  .tree-source-count {
+    font-size: 0.75rem;
+    color: var(--fasti-text-muted);
+  }
+
+  .tree-sources-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-left: 14px;
+  }
+
+  .source-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    background: var(--fasti-surface-archive);
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+    color: var(--fasti-text-muted);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+  }
+
   @media (max-width: 64rem) {
     .settings-container {
       padding: 24px 16px 48px;
@@ -1616,21 +2395,13 @@
       grid-template-columns: minmax(0, 1fr);
     }
 
-    nav {
-      flex-direction: row;
-      overflow-x: auto;
-      padding-block-end: 4px;
-      scroll-snap-type: inline proximity;
+    .settings-section-selector {
+      display: grid;
+      gap: 6px;
     }
 
-    nav button {
-      flex: 0 0 auto;
-      white-space: nowrap;
-      scroll-snap-align: start;
-    }
-
-    nav button.active {
-      box-shadow: inset 0 -3px 0 var(--fasti-action-primary);
+    .settings-nav {
+      display: none;
     }
 
     .section-heading,

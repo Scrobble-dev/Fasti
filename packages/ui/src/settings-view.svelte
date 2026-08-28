@@ -1866,7 +1866,7 @@
     padding: 12px 16px;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     font-weight: 600;
     color: var(--fasti-text-muted);
@@ -1890,7 +1890,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     padding: 28px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
   }
@@ -1936,7 +1936,7 @@
     padding: 14px;
     background: var(--fasti-surface-archive);
     border: 2px solid transparent;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
     text-align: left;
   }
@@ -1950,7 +1950,7 @@
   .preview-swatch {
     width: 100%;
     height: 36px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
   }
@@ -2022,7 +2022,7 @@
     gap: 10px;
     padding: 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   .cache-card-header {
     display: flex;
@@ -2046,7 +2046,7 @@
   .custom-field-form {
     padding: 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 12px;
   }
   .custom-entry-list {
@@ -2064,7 +2064,7 @@
     gap: 12px;
     padding: 10px 14px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.88rem;
   }
   .entry-meta {
@@ -2097,7 +2097,7 @@
   .provider-key-card {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
 
   .provider-key-header {
@@ -2127,7 +2127,7 @@
     font-family: var(--fasti-font-mono);
     font-size: 0.75rem;
     padding: 2px 8px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.1);
   }
   .prov-status-chip.configured {
@@ -2151,7 +2151,7 @@
     padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-family: var(--fasti-font-mono);
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
@@ -2162,7 +2162,7 @@
     min-height: 44px;
     padding: 8px 18px;
     font-weight: 600;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
   }
 
@@ -2199,7 +2199,7 @@
     .save-key-btn,
     .remove-key-btn
   ):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -2212,7 +2212,7 @@
   .token-form-card {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 20px;
   }
   .form-row {
@@ -2226,7 +2226,7 @@
     padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
   .create-token-btn {
@@ -2237,7 +2237,7 @@
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -2271,7 +2271,7 @@
     font-family: var(--fasti-font-mono);
     padding: 2px 6px;
     background: var(--fasti-surface-archive);
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     margin-right: 4px;
   }
   .delete-tok-btn {
@@ -2290,7 +2290,7 @@
   .importer-card {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -2311,7 +2311,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     font-size: 0.85rem;
     cursor: pointer;
@@ -2341,7 +2341,7 @@
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
   }
@@ -2350,7 +2350,7 @@
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
     align-self: flex-start;
@@ -2363,7 +2363,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
