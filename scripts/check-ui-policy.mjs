@@ -89,6 +89,15 @@ if (brandSvg.split("\n").filter(Boolean).length !== 1) {
     "packages/ui/src/nav-sidebar.svelte must contain exactly one documented brand SVG",
   );
 }
+// eslint-disable-next-line xss/no-mixed-html -- static repository search; this script does not generate HTML
+const tmdbBrandSvg = gitGrep([
+  "-n",
+  "-o",
+  "-F",
+  "<svg",
+  "--",
+  "packages/ui/src/tmdb-attribution.svelte",
+]);
 if (
   !gitGrep([
     "-nF",
@@ -96,16 +105,7 @@ if (
     "--",
     "packages/ui/src/tmdb-attribution.svelte",
   ]) ||
-  gitGrep([
-    "-n",
-    "-o",
-    "-F",
-    "<svg",
-    "--",
-    "packages/ui/src/tmdb-attribution.svelte",
-  ])
-    .split("\n")
-    .filter(Boolean).length !== 1
+  tmdbBrandSvg.split("\n").filter(Boolean).length !== 1
 ) {
   failures.push(
     "packages/ui/src/tmdb-attribution.svelte must contain one documented provider-brand SVG",

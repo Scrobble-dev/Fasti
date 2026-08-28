@@ -313,8 +313,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "browser_session",
     "credential_bearer",
   ]);
-  for (const name of ["bootstrap_bearer", "credential_bearer"]) {
-    const scheme = openapi.components.securitySchemes[name];
+  for (const scheme of [
+    openapi.components.securitySchemes.bootstrap_bearer,
+    openapi.components.securitySchemes.credential_bearer,
+  ]) {
     assert.equal(scheme.type, "http");
     assert.equal(scheme.scheme, "bearer");
   }
