@@ -19,7 +19,7 @@
 
   let { show, host, session, onClose, onSessionChange }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
-  let username = $state("testadmin");
+  let username = $state("");
   let password = $state("");
   let sessionTimeoutMinutes = $state(60);
   let users = $state<BrowserUser[]>([]);
@@ -32,6 +32,7 @@
   let busy = $state(false);
   let problem = $state("");
   let notice = $state("");
+  let signInInvalid = $state(false);
   const usernamePattern = "[a-z0-9][a-z0-9._\\-]{2,63}";
 
   const selectedUser = $derived(
@@ -48,15 +49,36 @@
     if (show && session?.user.is_admin) void loadUsers();
   });
 
+  function problemDetails(error: unknown):
+    | {
+        code?: unknown;
+        violations?: ReadonlyArray<{ code?: unknown }>;
+      }
+    | undefined {
+    if (error && typeof error === "object" && "problem" in error) {
+      return (
+        error as {
+          problem?: {
+            code?: unknown;
+            violations?: ReadonlyArray<{ code?: unknown }>;
+          };
+        }
+      ).problem;
+    }
+    return undefined;
+  }
+
   function messageFor(error: unknown): string {
-    if (
-      error &&
-      typeof error === "object" &&
-      "problem" in error &&
-      (error as { problem?: { code?: unknown } }).problem?.code ===
-        "authentication_failed"
-    ) {
+    const details = problemDetails(error);
+    if (details?.code === "authentication_failed") {
       return "The username or password is incorrect.";
+    }
+    if (
+      details?.violations?.some(
+        (violation) => violation.code === "last_active_administrator_required",
+      )
+    ) {
+      return "This is the only active administrator. Keep the account active.";
     }
     return error instanceof Error
       ? error.message
@@ -88,6 +110,7 @@
     busy = true;
     problem = "";
     notice = "";
+    signInInvalid = false;
     try {
       const result = await host.createBrowserSession(
         username.trim(),
@@ -99,6 +122,7 @@
       notice = `Signed in as ${result.user.username}.`;
       if (result.user.is_admin) await loadUsers();
     } catch (error) {
+      signInInvalid = problemDetails(error)?.code === "authentication_failed";
       problem = messageFor(error);
     } finally {
       busy = false;
@@ -239,7 +263,7 @@
         <p class="notice" role="status">{notice}</p>
       {/if}
       {#if problem}
-        <p class="problem" role="alert">{problem}</p>
+        <p id="auth-problem" class="problem" role="alert">{problem}</p>
       {/if}
 
       {#if !session}
@@ -253,7 +277,10 @@
               minlength="3"
               maxlength="64"
               pattern={usernamePattern}
+              aria-invalid={signInInvalid}
+              aria-describedby={signInInvalid ? "auth-problem" : undefined}
               bind:value={username}
+              oninput={() => (signInInvalid = false)}
               required
             />
           </div>
@@ -265,7 +292,10 @@
               autocomplete="current-password"
               minlength="8"
               maxlength="128"
+              aria-invalid={signInInvalid}
+              aria-describedby={signInInvalid ? "auth-problem" : undefined}
               bind:value={password}
+              oninput={() => (signInInvalid = false)}
               required
             />
           </div>
@@ -281,9 +311,6 @@
               <option value={1440}>24 hours</option>
             </select>
           </div>
-          {#if host.developmentTestAccountHint}
-            <p class="hint"><code>{host.developmentTestAccountHint}</code></p>
-          {/if}
           <button
             type="submit"
             class="primary-button"
@@ -740,7 +767,8 @@
   }
   .check-row {
     display: flex;
-    align-items: flex-start;
+    min-height: 44px;
+    align-items: center;
     gap: 10px;
     line-height: 1.4;
   }
@@ -761,10 +789,6 @@
     padding-top: 16px;
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-state-error, #b42318) 35%, transparent);
-  }
-  code {
-    font-family: var(--fasti-font-mono);
-    overflow-wrap: anywhere;
   }
   @media (max-width: 36rem) {
     .modal-card {

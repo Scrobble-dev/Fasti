@@ -40,7 +40,7 @@ Stop the daemon with `Ctrl-C`. This health call does not prove any B1 fixture ro
 
 ## Durable local setup
 
-Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. Debug builds seed the one-time `testadmin` browser account unless `FASTI_DEVELOPMENT_TEST_ACCOUNT=false`; disable the seed when testing manual bootstrap.
+Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. Browser test accounts are disabled by default. An isolated loopback-only data root can opt in with `FASTI_DEVELOPMENT_TEST_ACCOUNT=true`; remote listeners reject that setting.
 
 The initialization proof and bearer credential exist only in JSON bodies. A trusted local host shell must store them in permission-restricted credential storage. Do not print them or put them in URLs, command arguments, logs, `localStorage`, or `sessionStorage`.
 

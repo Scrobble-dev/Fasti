@@ -161,10 +161,24 @@ test("a rejected browser sign-in stays disconnected and recoverable", async ({
     .getByRole("button", { name: "Sign in", exact: true })
     .click();
   const dialog = page.getByRole("dialog", { name: "Account access" });
-  await dialog.getByLabel("Password").fill("incorrect-password");
+  const username = dialog.getByLabel("Username");
+  const password = dialog.getByLabel("Password");
+  await expect(username).toHaveValue("");
+  await expect(dialog).not.toContainText("testadmin / testadmin");
+  await username.fill("testadmin");
+  await password.fill("incorrect-password");
   await dialog.getByRole("button", { name: "Sign in" }).click();
 
   await expect(dialog.getByRole("alert")).toContainText("username or password");
+  await expect(username).toHaveAttribute("aria-invalid", "true");
+  await expect(password).toHaveAttribute("aria-invalid", "true");
+  await username.fill("editedadmin");
+  await expect(username).toHaveAttribute("aria-invalid", "false");
+  await expect(password).toHaveAttribute("aria-invalid", "false");
+  await expect(username).not.toHaveAttribute(
+    "aria-describedby",
+    "auth-problem",
+  );
   await expect(
     page
       .locator("#main-content")
