@@ -1,6 +1,6 @@
 <script lang="ts">
   import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
-  import type { WorkbenchHost } from "@fasti/ui";
+  import type { NetworkConfiguration, WorkbenchHost } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
     type SetupViewState,
@@ -57,6 +57,8 @@
   let status: StatusPanelState = $state({ view: "loading" });
   let theme: Theme = $state(resolveTheme());
   let request: AbortController | undefined;
+  let networkConfigurationRevision = 0;
+  let requestConfigurationRevision: number | undefined;
   let refreshHealthAfterCurrent = false;
   let setupState: SetupViewState = $state("loading");
   let setupProblem: DesktopProblem | undefined = $state();
@@ -108,6 +110,7 @@
     if (request && !request.signal.aborted) return;
     const currentRequest = new AbortController();
     request = currentRequest;
+    requestConfigurationRevision = networkConfigurationRevision;
     status = { view: "loading" };
     try {
       const configuration = await host.loadNetworkConfiguration();
@@ -143,6 +146,7 @@
     } finally {
       if (request === currentRequest) {
         request = undefined;
+        requestConfigurationRevision = undefined;
         if (refreshHealthAfterCurrent) {
           refreshHealthAfterCurrent = false;
           if (activeSurface === "status") void inspectHealth();
@@ -181,8 +185,21 @@
       host = {
         networkConfigurationScope: "node",
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
-        saveNetworkConfiguration: (input) =>
-          invoke("save_network_configuration", { input }),
+        saveNetworkConfiguration: async (input) => {
+          const configuration = await invoke<NetworkConfiguration>(
+            "save_network_configuration",
+            { input },
+          );
+          networkConfigurationRevision += 1;
+          if (activeSurface === "status") {
+            if (request && !request.signal.aborted) {
+              refreshHealthAfterCurrent = true;
+            } else {
+              void inspectHealth();
+            }
+          }
+          return configuration;
+        },
         testEndpointConnection: (endpoint) =>
           invoke("test_endpoint_connection", { input: { endpoint } }),
         providerCredentialStatus: () => invoke("provider_credential_status"),
@@ -244,7 +261,8 @@
 
   function inspectHealthOnRouteEntry(): void {
     if (isTauri && request && !request.signal.aborted) {
-      refreshHealthAfterCurrent = true;
+      refreshHealthAfterCurrent =
+        requestConfigurationRevision !== networkConfigurationRevision;
       return;
     }
     void inspectHealth();

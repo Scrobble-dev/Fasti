@@ -446,6 +446,28 @@ test("packaged retry starts one native health check", async ({ page }) => {
   ).toBeVisible();
 });
 
+test("packaged navigation reuses an unchanged native health check", async ({
+  page,
+}) => {
+  await installTrustedHost(page, "status-navigation-single-flight");
+  await page.goto("/status");
+  await expect
+    .poll(() => page.evaluate(() => window.__ENDPOINT_CALLS__?.()))
+    .toBe(1);
+
+  await page.getByRole("button", { name: "Open Media Workbench" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.getByRole("link", { name: "Service status" }).click();
+  await expect(page.getByText("Checking the local service")).toBeVisible();
+  expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(1);
+
+  await page.evaluate(() => window.__RESOLVE_ENDPOINT__?.());
+  await expect(
+    page.getByRole("heading", { name: "Local service available" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(1);
+});
+
 test("packaged navigation checks a changed service URL after the current native check", async ({
   page,
 }) => {
