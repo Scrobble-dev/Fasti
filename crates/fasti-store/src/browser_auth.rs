@@ -869,14 +869,16 @@ mod tests {
     fn expired_lockout_restarts_the_failed_login_count() {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        let password = BrowserUserId::new_v7().to_string();
+        let wrong_password = BrowserUserId::new_v7().to_string();
         kernel
             .ensure_development_browser_user(
                 BrowserUsername::try_new("testadmin").expect("username"),
-                BrowserPassword::try_new("testadmin").expect("password"),
+                BrowserPassword::try_new(&password).expect("password"),
             )
             .expect("seed user");
         for _ in 0..MAX_FAILED_LOGINS {
-            assert!(login(&kernel, "testadmin", "wrongpass").is_err());
+            assert!(login(&kernel, "testadmin", &wrong_password).is_err());
         }
 
         let connection = Connection::open(kernel.database_path()).expect("database");
@@ -887,7 +889,7 @@ mod tests {
             )
             .expect("expire lockout");
 
-        assert!(login(&kernel, "testadmin", "wrongpass").is_err());
+        assert!(login(&kernel, "testadmin", &wrong_password).is_err());
         let (failed_count, locked_until): (i64, Option<String>) = connection
             .query_row(
                 "SELECT failed_login_count, locked_until FROM browser_users WHERE username = 'testadmin'",
@@ -903,13 +905,14 @@ mod tests {
     fn browser_user_administration_is_workspace_scoped() {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        let password = BrowserUserId::new_v7().to_string();
         kernel
             .ensure_development_browser_user(
                 BrowserUsername::try_new("testadmin").expect("username"),
-                BrowserPassword::try_new("testadmin").expect("password"),
+                BrowserPassword::try_new(&password).expect("password"),
             )
             .expect("seed user");
-        let login = login(&kernel, "testadmin", "testadmin").expect("login");
+        let login = login(&kernel, "testadmin", &password).expect("login");
         let session = login.session().expose_hex();
         let csrf = login.csrf().expose_hex();
         let foreign_workspace = WorkspaceId::new_v7();
@@ -975,7 +978,7 @@ mod tests {
                     fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
                     fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
                     foreign_user,
-                    BrowserPassword::try_new("testadmin").expect("current password"),
+                    BrowserPassword::try_new(&password).expect("current password"),
                     Some(BrowserUsername::try_new("renamedforeign").expect("new username")),
                     None,
                     None,
@@ -991,7 +994,7 @@ mod tests {
                 fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
                 fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
                 foreign_user,
-                BrowserPassword::try_new("testadmin").expect("current password"),
+                BrowserPassword::try_new(&password).expect("current password"),
             ))
             .expect_err("foreign delete must fail");
         assert_eq!(delete.code(), ProblemCode::ValidationFailed);
