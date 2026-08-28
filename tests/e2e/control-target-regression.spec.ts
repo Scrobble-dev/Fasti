@@ -68,8 +68,11 @@ test("metadata documentation links keep contrast in the default dark theme", asy
   await page.goto("/settings/metadata");
 
   const documentationLinks = page.locator(".provider-card .docs-link");
-  expect(await documentationLinks.count()).toBeGreaterThan(0);
-  await expect(documentationLinks.first()).toBeVisible();
+  const documentationLinkCount = await documentationLinks.count();
+  expect(documentationLinkCount).toBeGreaterThan(0);
+  for (let index = 0; index < documentationLinkCount; index += 1) {
+    await expect(documentationLinks.nth(index)).toBeVisible();
+  }
   expect(
     (await new AxeBuilder({ page }).withRules(["color-contrast"]).analyze())
       .violations,
