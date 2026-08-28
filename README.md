@@ -19,13 +19,52 @@
 
 <br/>
 
-[Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b4-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
+[Quick start](#quick-start) · [Purpose](#purpose) · [Current status](#current-status) · [Architecture](#current-b0-b4-review-architecture) · [Contracts](#contract-gates) · [Development](#development) · [Roadmap](#roadmap) · [Contributing](#contributing)
 
 <br/>
 
 <img src="brand/assets/fasti-brand-board.jpg" alt="Fasti Living Media Chronicle Brand Board" width="100%">
 
 </div>
+
+## Quick start
+
+This runs `fastid`, the Fasti daemon, on your machine. It takes about 2 minutes with a warm build cache. A first, cold build takes longer.
+
+**You need:**
+
+- Rust `1.97.1` or later (check with `rustc --version`)
+- Git
+
+**Steps:**
+
+1. Clone the repo and enter it.
+
+   ```bash
+   git clone https://github.com/Scrobble-dev/Fasti.git
+   cd Fasti
+   ```
+
+2. Start the daemon.
+
+   ```bash
+   cargo run --locked -p fastid
+   ```
+
+3. In a second terminal, check that it answers.
+
+   ```bash
+   curl --fail --silent http://127.0.0.1:8420/api/v1/health
+   ```
+
+   You should see: `{"status":"healthy","version":"0.1.0"}`
+
+**If step 2 fails with "Address already in use":** something else already holds port 8420. Fix it one of two ways:
+
+- Set `FASTI_PORT_FALLBACK=auto` and run step 2 again. `fastid` then picks a free port (check logs for the port number to use in step 3).
+- Find and stop the other process: `ss -ltnp 'sport = :8420'` shows it; `kill <pid>` stops it.
+
+For the full day-to-day dev loop -- hot rebuilds, Podman/Docker, and the web QA harness -- see [docs/dev-loop.md](docs/dev-loop.md).
 
 ## Purpose
 
