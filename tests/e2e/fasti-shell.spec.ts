@@ -121,7 +121,14 @@ async function mockRecords(page: Page, credential: string) {
               source: null,
               is_stale: false,
             },
-            latest_activity: null,
+            latest_activity: {
+              interpretation_state: "resolved",
+              occurred_at: {
+                original: "2026-08-27T12:00:00Z",
+                precision: "second",
+                trust: "device_observed",
+              },
+            },
           },
         ],
       }),
@@ -346,9 +353,9 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         page
           .locator("#network-settings dd")
-          .filter({ hasText: "http://127.0.0.1:8420" }),
+          .filter({ hasText: "http://127.0.0.1:4173" }),
       ).toBeVisible();
-      await expect(page.getByText("http://localhost:8420")).toBeVisible();
+      await expect(page.getByText("http://localhost:4173")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute(
         "data-bs-theme",
         theme,

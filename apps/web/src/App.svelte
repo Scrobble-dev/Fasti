@@ -39,9 +39,11 @@
     throw new TypeError("VITE_FASTI_PORT_FALLBACK must be auto or fail");
   }
 
-  const endpoint = connectionEndpoint(
-    buildApiUrl || "http://127.0.0.1:8420",
-    buildApiUrl ? "build" : "default",
+  let endpoint = $state(
+    connectionEndpoint(
+      buildApiUrl || "http://127.0.0.1:8420",
+      buildApiUrl ? "build" : "default",
+    ),
   );
   const publicEndpoint = buildPublicUrl
     ? connectionEndpoint(buildPublicUrl, "build")
@@ -49,16 +51,6 @@
 
   const isTauri =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-  const client = new FastiClient({
-    baseUrl:
-      buildApiUrl ||
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "http://127.0.0.1:8420"),
-    timeoutMs: 3_000,
-    retryPolicy: { maxAttempts: 1 },
-  });
-
   function computeInitialSurface(): "status" | "workbench" {
     return typeof window !== "undefined" &&
       window.location.pathname === "/status"
@@ -114,7 +106,14 @@
     request = currentRequest;
     status = { view: "loading" };
     try {
-      const response = await client.health({ signal: currentRequest.signal });
+      const configuration = await host.loadNetworkConfiguration();
+      const serviceUrl = configuration.connection.service_url;
+      endpoint = connectionEndpoint(serviceUrl.value, serviceUrl.source);
+      const response = await new FastiClient({
+        baseUrl: endpoint.url,
+        timeoutMs: 3_000,
+        retryPolicy: { maxAttempts: 1 },
+      }).health({ signal: currentRequest.signal });
       if (request !== currentRequest) return;
       status = { view: "healthy", health: response };
     } catch (error) {
@@ -194,7 +193,21 @@
 
   function openWorkbench(): void {
     activeSurface = "workbench";
+    request?.abort();
+    request = undefined;
     if (typeof window !== "undefined") window.history.pushState({}, "", "/");
+  }
+
+  function syncSurfaceFromLocation(): void {
+    const nextSurface = computeInitialSurface();
+    if (nextSurface === activeSurface) return;
+    activeSurface = nextSurface;
+    if (nextSurface === "status") {
+      void inspectHealth();
+    } else {
+      request?.abort();
+      request = undefined;
+    }
   }
 
   async function setup(): Promise<void> {
@@ -220,8 +233,13 @@
       void inspectDesktop();
       return;
     }
+    window.addEventListener("popstate", syncSurfaceFromLocation);
     if (activeSurface === "status") void inspectHealth();
-    return () => request?.abort();
+    return () => {
+      window.removeEventListener("popstate", syncSurfaceFromLocation);
+      request?.abort();
+      request = undefined;
+    };
   });
 </script>
 

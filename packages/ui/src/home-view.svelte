@@ -69,6 +69,7 @@
 
   const recentlyRecorded = $derived(
     [...records]
+      .filter((record) => Boolean(record.lastActivityAt))
       .sort((a, b) =>
         (b.lastActivityAt || "").localeCompare(a.lastActivityAt || ""),
       )

@@ -131,6 +131,7 @@
   const recordOccurrences = $derived(
     occurrences.filter((occ) => occ.recordId === record.id),
   );
+  const isSummary = $derived(record.detailLevel === "summary");
   const hasRecordMutations = $derived(
     Boolean(
       onUpdateStatus ||
@@ -440,7 +441,10 @@
 
       <!-- Synopsis -->
       <p class="synopsis-prose">
-        {record.overview ?? "No synopsis available for this record."}
+        {record.overview ??
+          (isSummary
+            ? "A synopsis is not included in this record summary."
+            : "No synopsis is recorded for this record.")}
       </p>
     </div>
   </header>
@@ -525,27 +529,41 @@
       <!-- External Links -->
       <div class="sidebar-section">
         <h4 class="sidebar-subheading">External Identifiers</h4>
-        <div class="xid-links">
-          {#each record.externalIds as xid}
-            <a
-              href={xid.url ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="xid-link"
-              title="Open in {xid.namespace}"
-            >
-              <span class="ns-tag">{xid.namespace}</span>
-              <span class="ns-val">{xid.value}</span>
-              <IconExternalLink size={12} class="link-icon" />
-            </a>
-          {/each}
-        </div>
+        {#if isSummary}
+          <p class="empty-custom-fields-hint">
+            External identifiers are not included in this record summary.
+          </p>
+        {:else if record.externalIds.length === 0}
+          <p class="empty-custom-fields-hint">
+            No external identifiers are recorded.
+          </p>
+        {:else}
+          <div class="xid-links">
+            {#each record.externalIds as xid}
+              <a
+                href={xid.url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="xid-link"
+                title="Open in {xid.namespace}"
+              >
+                <span class="ns-tag">{xid.namespace}</span>
+                <span class="ns-val">{xid.value}</span>
+                <IconExternalLink size={12} class="link-icon" />
+              </a>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- Custom Fields -->
       <div class="sidebar-section">
         <h4 class="sidebar-subheading">Custom Fields</h4>
-        {#if record.customFields && Object.keys(record.customFields).length > 0}
+        {#if isSummary}
+          <p class="empty-custom-fields-hint">
+            Custom fields are not included in this record summary.
+          </p>
+        {:else if record.customFields && Object.keys(record.customFields).length > 0}
           <dl class="sidebar-meta-list">
             {#each Object.entries(record.customFields) as [key, value]}
               <div class="meta-pair">
@@ -555,9 +573,7 @@
             {/each}
           </dl>
         {:else}
-          <p class="empty-custom-fields-hint">
-            No custom fields. Add some in Settings → Custom Fields.
-          </p>
+          <p class="empty-custom-fields-hint">No custom fields are recorded.</p>
         {/if}
       </div>
     </aside>
@@ -571,6 +587,7 @@
           class="tab-btn"
           class:active={activeTab === "overview"}
           onclick={() => (activeTab = "overview")}
+          aria-pressed={activeTab === "overview"}
         >
           <IconListNumbers size={16} /> Overview & Seasons
         </button>
@@ -580,6 +597,7 @@
           class="tab-btn"
           class:active={activeTab === "actions"}
           onclick={() => (activeTab = "actions")}
+          aria-pressed={activeTab === "actions"}
         >
           <IconAdjustments size={16} /> Actions & Progress
         </button>
@@ -589,8 +607,11 @@
           class="tab-btn"
           class:active={activeTab === "history"}
           onclick={() => (activeTab = "history")}
+          aria-pressed={activeTab === "history"}
         >
-          <IconHistory size={16} /> History ({recordOccurrences.length})
+          <IconHistory size={16} /> History{isSummary
+            ? ""
+            : ` (${recordOccurrences.length})`}
         </button>
 
         <button
@@ -598,9 +619,11 @@
           class="tab-btn"
           class:active={activeTab === "sources"}
           onclick={() => (activeTab = "sources")}
+          aria-pressed={activeTab === "sources"}
         >
-          <IconShieldCheck size={16} /> Sources & Identity ({record.externalIds
-            .length})
+          <IconShieldCheck size={16} /> Sources & Identity{isSummary
+            ? ""
+            : ` (${record.externalIds.length})`}
         </button>
 
         <button
@@ -608,6 +631,7 @@
           class="tab-btn"
           class:active={activeTab === "reviews"}
           onclick={() => (activeTab = "reviews")}
+          aria-pressed={activeTab === "reviews"}
         >
           <IconNotes size={16} /> Notes & Reviews
         </button>
@@ -625,6 +649,7 @@
                   class="season-card-btn"
                   class:active={selectedSeasonIndex === sIdx}
                   onclick={() => (selectedSeasonIndex = sIdx)}
+                  aria-pressed={selectedSeasonIndex === sIdx}
                 >
                   {#if season.posterUrl}
                     <img src={season.posterUrl} alt="" class="season-thumb" />
@@ -852,10 +877,18 @@
         <section class="tab-pane">
           <h3 class="pane-heading">Chronicle History for this Entity</h3>
           <p class="pane-sub">
-            Every recorded observation, rewatch, and device scrobble for {record.title}.
+            {isSummary
+              ? "History is not included in the Records summary."
+              : `Every recorded occurrence available for ${record.title}.`}
           </p>
 
-          {#if recordOccurrences.length === 0}
+          {#if isSummary}
+            <div class="empty-history-box">
+              <IconClock size={32} class="empty-icon" />
+              <h4>History is unavailable in this view</h4>
+              <p>The active host returned only record summary fields.</p>
+            </div>
+          {:else if recordOccurrences.length === 0}
             <div class="empty-history-box">
               <IconClock size={32} class="empty-icon" />
               <h4>No occurrences recorded yet</h4>
@@ -927,30 +960,41 @@
             </div>
           </div>
 
-          <table class="assertions-table">
-            <thead>
-              <tr>
-                <th scope="col">Namespace</th>
-                <th scope="col">Identifier</th>
-                <th scope="col">Status</th>
-                <th scope="col">Provenance Route</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each record.externalIds as xid}
+          {#if isSummary}
+            <div class="empty-history-box">
+              <h4>Identity claims are unavailable in this view</h4>
+              <p>The active host returned only record summary fields.</p>
+            </div>
+          {:else if record.externalIds.length === 0}
+            <div class="empty-history-box">
+              <h4>No external identity claims are recorded</h4>
+            </div>
+          {:else}
+            <table class="assertions-table">
+              <thead>
                 <tr>
-                  <td class="mono">{xid.namespace}</td>
-                  <td class="mono"><strong>{xid.value}</strong></td>
-                  <td
-                    ><span class="status-pill matched"
-                      >{xid.status.replaceAll("_", " ")}</span
-                    ></td
-                  >
-                  <td>{xid.source}</td>
+                  <th scope="col">Namespace</th>
+                  <th scope="col">Identifier</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Provenance Route</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each record.externalIds as xid}
+                  <tr>
+                    <td class="mono">{xid.namespace}</td>
+                    <td class="mono"><strong>{xid.value}</strong></td>
+                    <td
+                      ><span class="status-pill matched"
+                        >{xid.status.replaceAll("_", " ")}</span
+                      ></td
+                    >
+                    <td>{xid.source}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
         </section>
 
         <!-- TAB 5: PERSONAL REVIEWS & NOTES -->

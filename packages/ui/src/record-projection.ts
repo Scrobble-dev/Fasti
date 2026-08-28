@@ -46,17 +46,15 @@ export function projectRecordSummary(summary: RecordSummary): MediaRecord {
     summary.title.tier !== "empty" && summary.title.value
       ? summary.title.value
       : `Untitled record (${summary.record_id})`;
-  const posterValue =
-    summary.poster.tier !== "empty" && summary.poster.value
-      ? summary.poster.value
-      : undefined;
-
   return {
     id: summary.record_id,
     title: titleValue,
+    detailLevel: "summary",
     mediaKind: mediaKindForGrain(summary.grain),
     status: "unknown",
-    posterUrl: posterValue,
+    // Record summaries carry an untrusted poster claim, not a governed local
+    // media URL. Keep the typographic fallback until a host media path exists.
+    posterUrl: undefined,
     externalIds: [],
     displaySource: "Fasti local record",
     tags: [],

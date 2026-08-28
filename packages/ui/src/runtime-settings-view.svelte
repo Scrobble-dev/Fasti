@@ -31,6 +31,8 @@
     onUpdateWorkbenchPreferences?: (
       patch: Partial<WorkbenchPreferences>,
     ) => void;
+    onClientEndpointChanged?: () => void;
+    onProviderCredentialsChanged?: () => void;
     onClearCache?: (
       cache: "search" | "history" | "statistics" | "discover" | "all",
     ) => void;
@@ -40,6 +42,8 @@
     host,
     workbenchPreferences,
     onUpdateWorkbenchPreferences,
+    onClientEndpointChanged,
+    onProviderCredentialsChanged,
     onClearCache,
   }: Props = $props();
 
@@ -75,8 +79,15 @@
   async function saveNetwork(
     input: SaveNetworkConfigurationRequest,
   ): Promise<NetworkConfiguration> {
+    const previousServiceUrl = network?.connection.service_url.value;
     const saved = await host.saveNetworkConfiguration(input);
     network = saved;
+    if (
+      host.networkConfigurationScope === "client" &&
+      previousServiceUrl !== saved.connection.service_url.value
+    ) {
+      onClientEndpointChanged?.();
+    }
     return saved;
   }
 
@@ -105,6 +116,7 @@
     try {
       providers = await host.saveProviderCredential(provider, credential);
       providerNotice = "Credential saved in the platform credential store.";
+      onProviderCredentialsChanged?.();
     } catch (error) {
       providerProblem = hostProblemText(
         error,
@@ -124,6 +136,7 @@
     try {
       providers = await host.deleteProviderCredential(provider);
       providerNotice = "Credential removed from the platform credential store.";
+      onProviderCredentialsChanged?.();
     } catch (error) {
       providerProblem = hostProblemText(
         error,

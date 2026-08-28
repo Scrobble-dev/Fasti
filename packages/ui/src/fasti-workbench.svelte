@@ -147,14 +147,18 @@
     const mergeById = <T extends { id: string }>(
       storedItems: T[],
       defaultItems: T[],
-    ): T[] => [
-      ...(Array.isArray(storedItems) ? storedItems : []),
-      ...defaultItems.filter(
-        (d) =>
-          !Array.isArray(storedItems) ||
-          !storedItems.some((s) => s?.id === d.id),
-      ),
-    ];
+    ): T[] => {
+      const supportedIds = new Set(defaultItems.map((item) => item.id));
+      const supportedStored = Array.isArray(storedItems)
+        ? storedItems.filter((item) => supportedIds.has(item?.id))
+        : [];
+      return [
+        ...supportedStored,
+        ...defaultItems.filter(
+          (item) => !supportedStored.some((stored) => stored.id === item.id),
+        ),
+      ];
+    };
     // `defaults` spreads first so a preference field added since a browser's
     // stored copy was last written (e.g. `customFields`) is backfilled
     // instead of coming back `undefined` and crashing the first read.
@@ -277,6 +281,11 @@
     }
   }
 
+  function invalidateDiscoverProviders(): void {
+    discoverLoaded = false;
+    discoverProviders = undefined;
+  }
+
   // --- Reconciliation: review inbox, lazily loaded on first visit ---
   let reviews = $state<ReviewItem[]>([]);
   let reviewsLoading = $state(false);
@@ -322,20 +331,22 @@
   let recordsProblem = $state<string | undefined>(undefined);
   let recordsLoaded = false;
 
-  async function loadRecords(): Promise<void> {
+  async function loadRecords(): Promise<boolean> {
     if (!host.listRecords) {
       recordsProblem = "This host does not support record listing yet.";
-      return;
+      return false;
     }
     recordsLoading = true;
     recordsProblem = undefined;
     try {
       mediaRecords = (await host.listRecords()).map(projectRecordSummary);
+      return true;
     } catch (error) {
       recordsProblem = hostProblemText(
         error,
         "Could not load records from the host.",
       );
+      return false;
     } finally {
       recordsLoading = false;
     }
@@ -346,9 +357,16 @@
       throw new Error("This host does not accept browser session credentials.");
     }
     host.setSessionCredential(credential);
-    sessionCredentialActive = true;
     recordsLoaded = true;
-    await loadRecords();
+    if (!(await loadRecords())) {
+      const problem =
+        recordsProblem ?? "The host rejected this browser credential.";
+      host.clearSessionCredential?.();
+      sessionCredentialActive = false;
+      mediaRecords = [];
+      throw new Error(problem);
+    }
+    sessionCredentialActive = true;
   }
 
   function clearSessionCredential(): void {
@@ -629,6 +647,8 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          onClientEndpointChanged={clearSessionCredential}
+          onProviderCredentialsChanged={invalidateDiscoverProviders}
           onUpdateWorkbenchPreferences={(patch) =>
             (workbenchPreferences = { ...workbenchPreferences, ...patch })}
         />
@@ -679,6 +699,8 @@
         {@render recordStatus()}
         <CalendarView
           watchingRecords={recordsProblem ? [] : watchingRecords}
+          stateUnavailable={!recordsProblem &&
+            mediaRecords.some((record) => record.status === "unknown")}
           onSelectRecord={openRecord}
         />
       {:else if activeSection === "detail"}

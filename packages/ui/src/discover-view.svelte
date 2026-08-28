@@ -37,6 +37,46 @@
   let trackingId = $state("");
   let trackedIds = $state<Set<string>>(new Set());
   let trackProblem = $state("");
+  let selectedProviderId = $state("");
+  let selectionExplicit = $state(false);
+
+  const supportedProviders = $derived(
+    (providerCredentials ?? []).filter((provider) =>
+      ["google-books", "tmdb"].includes(provider.provider),
+    ),
+  );
+  const selectedProvider = $derived(
+    supportedProviders.find(
+      (provider) => provider.provider === selectedProviderId,
+    ),
+  );
+
+  $effect(() => {
+    if (supportedProviders.length === 0) return;
+    if (
+      selectionExplicit &&
+      supportedProviders.some(
+        (provider) => provider.provider === selectedProviderId,
+      )
+    ) {
+      return;
+    }
+    selectedProviderId =
+      supportedProviders.find((provider) => provider.configured)?.provider ??
+      supportedProviders[0].provider;
+  });
+
+  function selectProvider(provider: string): void {
+    selectionExplicit = true;
+    selectedProviderId = provider;
+    results = [];
+    problem = "";
+    searched = false;
+    completedQuery = "";
+    trackingId = "";
+    trackedIds = new Set();
+    trackProblem = "";
+  }
 
   async function trackRecord(
     candidate: ProviderSearchCandidate,
@@ -56,26 +96,22 @@
       trackingId = "";
     }
   }
-  const googleBooks = $derived(
-    providerCredentials?.find((item) => item.provider === "google-books"),
-  );
-
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (!value || !googleBooks?.configured || searching) return;
+    if (!value || !selectedProvider?.configured || searching) return;
     searching = true;
     problem = "";
     searched = false;
     try {
-      results = await onSearch("google-books", value);
+      results = await onSearch(selectedProvider.provider, value);
       completedQuery = value;
       searched = true;
     } catch (error) {
       results = [];
       problem = hostProblemText(
         error,
-        "Google Books search failed. Check the provider key and network policy.",
+        `${selectedProvider.label} search failed. Check the provider credential and network policy.`,
       );
     } finally {
       searching = false;
@@ -90,7 +126,8 @@
       <h1 id="discover-title" class="view-title" tabindex="-1">Discover</h1>
     </div>
     <p class="view-subtitle">
-      Search Google Books through the trusted Fasti desktop host.
+      Search configured metadata providers through the trusted Fasti desktop
+      host.
     </p>
   </header>
 
@@ -108,108 +145,138 @@
         Retry host connection
       </button>
     </div>
-  {:else if !googleBooks?.configured}
+  {:else if supportedProviders.length === 0 || !selectedProvider}
     <section class="unavailable" aria-labelledby="discover-setup-title">
-      <h2 id="discover-setup-title">Google Books needs an API key</h2>
-      <p>
-        Add a key in Settings. Fasti stores it in the platform credential store.
-      </p>
-      <button type="button" class="btn btn-primary" onclick={onOpenSettings}
-        >Open provider settings</button
+      <h2 id="discover-setup-title">No search provider is available</h2>
+      <p>The active host did not return a supported provider status.</p>
+      <button type="button" class="btn btn-outline-secondary" onclick={onRetry}
+        >Refresh provider status</button
       >
     </section>
   {:else}
-    <form class="search-form" onsubmit={search} role="search">
-      <label for="provider-search">Search books</label>
-      <div class="search-row">
-        <input
-          id="provider-search"
-          type="search"
-          class="form-control"
-          required
-          maxlength="256"
-          bind:value={query}
-          disabled={searching}
-          placeholder="Title, author, or ISBN"
-          autocomplete="off"
-        />
-        <button
-          type="submit"
-          class="btn btn-primary"
-          disabled={searching || !query.trim()}
-        >
-          <IconSearch size={18} aria-hidden="true" />
-          {searching ? "Searching…" : "Search"}
-        </button>
-      </div>
-    </form>
+    <div class="provider-choice">
+      <label for="discover-provider">Metadata provider</label>
+      <select
+        id="discover-provider"
+        class="form-select"
+        value={selectedProviderId}
+        onchange={(event) => selectProvider(event.currentTarget.value)}
+      >
+        {#each supportedProviders as provider (provider.provider)}
+          <option value={provider.provider}>
+            {provider.label}{provider.configured ? "" : " — setup required"}
+          </option>
+        {/each}
+      </select>
+    </div>
 
-    <section
-      class="results"
-      aria-labelledby="search-results-title"
-      aria-busy={searching}
-    >
-      <h2 id="search-results-title">Search results</h2>
-      {#if searching}
-        <p role="status">Searching Google Books…</p>
-      {:else if problem}
-        <p class="problem" role="alert">{problem}</p>
-      {:else if searched && results.length === 0}
-        <p role="status">No matching books found for {completedQuery}.</p>
-      {:else if results.length > 0}
-        <p role="status">
-          {results.length}
-          {results.length === 1 ? "result" : "results"} for
-          {completedQuery}.
+    {#if !selectedProvider.configured}
+      <section class="unavailable" aria-labelledby="discover-setup-title">
+        <h2 id="discover-setup-title">
+          {selectedProvider.label} needs a credential
+        </h2>
+        <p>
+          Add one in Settings. Fasti stores it in the platform credential store.
         </p>
-        <ol>
-          {#each results as result (result.provider_id)}
-            <li>
-              <h3>{result.title}</h3>
-              {#if result.authors.length > 0}
-                <p>By {result.authors.join(", ")}</p>
-              {/if}
-              <dl>
-                <div>
-                  <dt>Provider</dt>
-                  <dd>{result.provider}</dd>
-                </div>
-                <div>
-                  <dt>Type</dt>
-                  <dd>{result.kind}</dd>
-                </div>
-                <div>
-                  <dt>Provider ID</dt>
-                  <dd><code>{result.provider_id}</code></dd>
-                </div>
-              </dl>
-              {#if onTrackRecord}
-                <button
-                  type="button"
-                  class="track-btn"
-                  disabled={Boolean(trackingId) ||
-                    trackedIds.has(result.provider_id)}
-                  onclick={() => trackRecord(result)}
-                >
-                  {#if trackedIds.has(result.provider_id)}
-                    Added to library
-                  {:else if trackingId === result.provider_id}
-                    Adding…
-                  {:else}
-                    Track Now
-                  {/if}
-                </button>
-              {/if}
-            </li>
-          {/each}
-        </ol>
-        {#if trackProblem}
-          <p class="problem" role="alert">{trackProblem}</p>
+        <button type="button" class="btn btn-primary" onclick={onOpenSettings}
+          >Open provider settings</button
+        >
+      </section>
+    {:else}
+      <form class="search-form" onsubmit={search} role="search">
+        <label for="provider-search">Search {selectedProvider.label}</label>
+        <div class="search-row">
+          <input
+            id="provider-search"
+            type="search"
+            class="form-control"
+            required
+            maxlength="256"
+            bind:value={query}
+            disabled={searching}
+            placeholder={selectedProvider.provider === "google-books"
+              ? "Title, author, or ISBN"
+              : "Movie or series title"}
+            autocomplete="off"
+          />
+          <button
+            type="submit"
+            class="btn btn-primary"
+            disabled={searching || !query.trim()}
+          >
+            <IconSearch size={18} aria-hidden="true" />
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </div>
+      </form>
+
+      <section
+        class="results"
+        aria-labelledby="search-results-title"
+        aria-busy={searching}
+      >
+        <h2 id="search-results-title">Search results</h2>
+        {#if searching}
+          <p role="status">Searching {selectedProvider.label}…</p>
+        {:else if problem}
+          <p class="problem" role="alert">{problem}</p>
+        {:else if searched && results.length === 0}
+          <p role="status">No matching results found for {completedQuery}.</p>
+        {:else if results.length > 0}
+          <p role="status">
+            {results.length}
+            {results.length === 1 ? "result" : "results"} for
+            {completedQuery}.
+          </p>
+          <ol>
+            {#each results as result (result.provider_id)}
+              <li>
+                <h3>{result.title}</h3>
+                {#if result.authors.length > 0}
+                  <p>By {result.authors.join(", ")}</p>
+                {/if}
+                <dl>
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{result.provider}</dd>
+                  </div>
+                  <div>
+                    <dt>Type</dt>
+                    <dd>{result.kind}</dd>
+                  </div>
+                  <div>
+                    <dt>Provider ID</dt>
+                    <dd><code>{result.provider_id}</code></dd>
+                  </div>
+                </dl>
+                {#if onTrackRecord}
+                  <button
+                    type="button"
+                    class="track-btn"
+                    disabled={Boolean(trackingId) ||
+                      trackedIds.has(result.provider_id)}
+                    onclick={() => trackRecord(result)}
+                  >
+                    {#if trackedIds.has(result.provider_id)}
+                      Added to library
+                    {:else if trackingId === result.provider_id}
+                      Adding…
+                    {:else}
+                      Track Now
+                    {/if}
+                  </button>
+                {/if}
+              </li>
+            {/each}
+          </ol>
+          {#if trackProblem}
+            <p class="problem" role="alert">{trackProblem}</p>
+          {/if}
+        {:else}
+          <p>Enter a title or provider identifier.</p>
         {/if}
-      {:else}
-        <p>Enter a title, author, or ISBN.</p>
-      {/if}
-    </section>
+      </section>
+    {/if}
   {/if}
 </div>
 
@@ -257,6 +324,7 @@
   }
 
   .unavailable,
+  .provider-choice,
   .search-form,
   .results {
     padding: 24px;
@@ -264,6 +332,14 @@
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     border-radius: 6px;
     background: var(--fasti-surface-paper);
+  }
+
+  .provider-choice {
+    max-width: 32rem;
+  }
+
+  .provider-choice label {
+    font-weight: 700;
   }
 
   .unavailable h2,
@@ -292,7 +368,8 @@
   }
 
   button,
-  input {
+  input,
+  select {
     min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
@@ -319,7 +396,7 @@
     opacity: 0.68;
   }
 
-  :is(button, input):focus-visible {
+  :is(button, input, select):focus-visible {
     outline: 3px solid var(--fasti-action-primary);
     outline-offset: 2px;
   }

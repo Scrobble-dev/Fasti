@@ -64,6 +64,8 @@ export interface SeasonItem {
 export interface MediaRecord {
   readonly id: string;
   readonly title: string;
+  /** Declares whether optional detail collections are authoritative. */
+  readonly detailLevel?: "summary" | "complete";
   readonly originalTitle?: string;
   readonly mediaKind: MediaKind;
   readonly customTypeName?: string;

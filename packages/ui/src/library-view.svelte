@@ -219,7 +219,8 @@
     <div>
       <h1 class="view-title">Library</h1>
       <p class="view-subtitle">
-        Your unified media collection across all providers and formats.
+        Review up to 500 records returned by the active Fasti host. More records
+        can exist until pagination is active.
       </p>
     </div>
 
@@ -231,6 +232,7 @@
         class:active={viewMode === "grid"}
         onclick={() => (viewMode = "grid")}
         aria-label="Grid view"
+        aria-pressed={viewMode === "grid"}
       >
         <IconLayoutGrid size={18} stroke={1.75} />
       </button>
@@ -240,6 +242,7 @@
         class:active={viewMode === "list"}
         onclick={() => (viewMode = "list")}
         aria-label="List view"
+        aria-pressed={viewMode === "list"}
       >
         <IconList size={18} stroke={1.75} />
       </button>

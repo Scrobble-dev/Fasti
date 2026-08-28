@@ -190,8 +190,9 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     }
     return sessionCredential;
   };
+  let network = loadNetworkConfiguration(defaultApiUrl);
   let client = new FastiClient({
-    baseUrl: defaultApiUrl,
+    baseUrl: network.connection.service_url.value,
     credential: requireCredential,
   });
 
@@ -213,7 +214,7 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     },
 
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
-      return loadNetworkConfiguration(defaultApiUrl);
+      return network;
     },
 
     async saveNetworkConfiguration(
@@ -221,10 +222,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     ): Promise<NetworkConfiguration> {
       const serviceUrl = validatedEndpoint(input.service_url).normalized;
       const config = defaultNetworkConfiguration(serviceUrl, "saved");
-      const nextClient = new FastiClient({
-        baseUrl: serviceUrl,
-        credential: requireCredential,
-      });
       if (typeof localStorage === "undefined") {
         throw unavailable("Browser storage is unavailable.");
       }
@@ -238,9 +235,14 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
           "The browser could not save the Fasti service URL. Check site storage permissions and try again.",
         );
       }
-      // Recreate the client with the saved service URL so subsequent SDK
-      // calls use the new endpoint rather than the original defaultApiUrl.
-      client = nextClient;
+      if (network.connection.service_url.value !== serviceUrl) {
+        sessionCredential = undefined;
+      }
+      network = config;
+      client = new FastiClient({
+        baseUrl: serviceUrl,
+        credential: requireCredential,
+      });
       return config;
     },
 
@@ -248,21 +250,16 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       endpoint: string,
     ): Promise<EndpointConnectionStatus> {
       const { normalized, parsed } = validatedEndpoint(endpoint);
-      const response = await fetch(`${normalized}/api/v1/health`, {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok) {
-        throw unavailable(`The endpoint returned status ${response.status}.`);
-      }
-      const data = (await response.json()) as {
-        status?: string;
-        version?: string;
-      };
+      const health = await new FastiClient({
+        baseUrl: normalized,
+        timeoutMs: 3_000,
+        retryPolicy: { maxAttempts: 1 },
+      }).health();
       return {
         endpoint: normalized,
         scheme: parsed.protocol === "https:" ? "https" : "http",
-        status: data.status ?? "healthy",
-        version: data.version ?? "unknown",
+        status: health.status,
+        version: health.version,
       };
     },
 

@@ -60,6 +60,34 @@
       submitting = false;
     }
   }
+
+  function handleMethodKeydown(
+    event: KeyboardEvent,
+    currentIndex: number,
+  ): void {
+    let nextIndex: number;
+    switch (event.key) {
+      case "ArrowRight":
+        nextIndex = (currentIndex + 1) % methods.length;
+        break;
+      case "ArrowLeft":
+        nextIndex = (currentIndex - 1 + methods.length) % methods.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = methods.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const nextMethod = methods[nextIndex]?.id;
+    if (!nextMethod) return;
+    activeMethod = nextMethod;
+    document.getElementById(`auth-tab-${nextMethod}`)?.focus();
+  }
 </script>
 
 <dialog
@@ -90,15 +118,18 @@
         role="tablist"
         aria-label="Authentication method"
       >
-        {#each methods as method}
+        {#each methods as method, index}
           <button
+            id={`auth-tab-${method.id}`}
             type="button"
             role="tab"
             class="nav-link method-tab"
             class:active={activeMethod === method.id}
             aria-selected={activeMethod === method.id}
             aria-controls="auth-panel"
+            tabindex={activeMethod === method.id ? 0 : -1}
             onclick={() => (activeMethod = method.id)}
+            onkeydown={(event) => handleMethodKeydown(event, index)}
           >
             <method.icon size={16} aria-hidden="true" />
             {method.label}
@@ -106,7 +137,13 @@
         {/each}
       </div>
 
-      <div id="auth-panel" class="modal-body" role="tabpanel">
+      <div
+        id="auth-panel"
+        class="modal-body"
+        role="tabpanel"
+        aria-labelledby={`auth-tab-${activeMethod}`}
+        tabindex="0"
+      >
         {#if activeMethod === "token"}
           <p id="credential-help">
             Paste an active 64-character scoped API credential. Record access
