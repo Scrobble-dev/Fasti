@@ -65,7 +65,7 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
-- Mount durable local routes only for direct loopback access or an explicitly declared loopback-only container port forward, with an explicit `FASTI_DATA_ROOT`. Keep bootstrap routes on those local exposures. Require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
+- Mount durable local routes only for direct loopback access or an explicitly declared loopback-only port forward inside a detected container boundary, with an explicit `FASTI_DATA_ROOT`. Keep bootstrap routes on those local exposures. Require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Treat `TMDB_API_READ_ACCESS_TOKEN` as a TMDB API Read Access Token. Send it only in a sensitive `Authorization: Bearer` header; never fall back to the v3 `api_key` URL parameter.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.

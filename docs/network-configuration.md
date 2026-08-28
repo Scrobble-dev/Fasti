@@ -16,7 +16,7 @@ reverse-proxy address from changing the daemon bind address.
 | `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
 | `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
 | `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
-| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP is accepted.                                        |
+| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP inside a detected container boundary is accepted.   |
 | `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
@@ -42,8 +42,10 @@ The container always listens on port `8420` internally. The launcher maps the
 configured host port to it on `127.0.0.1` and sets
 `FASTI_EXTERNAL_BIND_IP=127.0.0.1`. That explicit assertion lets `fastid`
 mount the durable API through the wildcard container socket. A wildcard
-listener without the assertion stays health-only. A non-loopback assertion is
-rejected. Do not set this variable when the outer published address is public.
+listener without the assertion stays health-only. A native process cannot
+replay the assertion because `fastid` also requires the container isolation
+boundary. A non-loopback assertion is rejected. Do not set this variable when
+the outer published address is public.
 The launcher runs the container process as the invoking non-root user so its
 worktree-owned data directory remains writable. Podman uses `keep-id` for the
 rootless user namespace. The image default remains the non-root `fasti` user.

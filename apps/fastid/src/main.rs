@@ -113,13 +113,22 @@ fn external_bind_ip() -> Result<Option<IpAddr>> {
     parse_external_bind_ip(env::var("FASTI_EXTERNAL_BIND_IP").ok().as_deref())
 }
 
+fn has_container_boundary() -> bool {
+    Path::new("/run/.containerenv").is_file() || Path::new("/.dockerenv").is_file()
+}
+
 fn local_api_exposure_addr(
     listen_addr: SocketAddr,
     external_bind_ip: Option<IpAddr>,
+    container_boundary: bool,
 ) -> Result<Option<SocketAddr>> {
     let Some(external_bind_ip) = external_bind_ip else {
         return Ok((!is_remote_listener(listen_addr)).then_some(listen_addr));
     };
+    anyhow::ensure!(
+        container_boundary,
+        "FASTI_EXTERNAL_BIND_IP requires a container isolation boundary"
+    );
     anyhow::ensure!(
         listen_addr.ip().is_unspecified(),
         "FASTI_EXTERNAL_BIND_IP is valid only when FASTI_LISTEN uses a wildcard address"
@@ -197,7 +206,11 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let requested_addr = listen_addr()?;
-    let local_api_addr = local_api_exposure_addr(requested_addr, external_bind_ip()?)?;
+    let local_api_addr = local_api_exposure_addr(
+        requested_addr,
+        external_bind_ip()?,
+        has_container_boundary(),
+    )?;
     let remote_listener = local_api_addr.is_none();
     let (listener, used_fallback) = bind_listener(requested_addr, port_fallback()?).await?;
     let addr = listener.local_addr()?;
@@ -300,18 +313,24 @@ mod tests {
         let loopback = IpAddr::from([127, 0, 0, 1]);
 
         assert_eq!(
-            local_api_exposure_addr(wildcard, Some(loopback)).expect("trusted port forward"),
+            local_api_exposure_addr(wildcard, Some(loopback), true)
+                .expect("trusted container port forward"),
             Some(SocketAddr::new(loopback, 8420))
         );
         assert_eq!(
-            local_api_exposure_addr(wildcard, None).expect("health-only wildcard"),
+            local_api_exposure_addr(wildcard, None, false).expect("health-only wildcard"),
             None
         );
-        assert!(local_api_exposure_addr(wildcard, Some(IpAddr::from([192, 0, 2, 1]))).is_err());
+        assert!(local_api_exposure_addr(wildcard, Some(loopback), false).is_err());
         assert!(
-            local_api_exposure_addr(SocketAddr::from(([192, 0, 2, 1], 8420)), Some(loopback))
-                .is_err()
+            local_api_exposure_addr(wildcard, Some(IpAddr::from([192, 0, 2, 1])), true).is_err()
         );
+        assert!(local_api_exposure_addr(
+            SocketAddr::from(([192, 0, 2, 1], 8420)),
+            Some(loopback),
+            true,
+        )
+        .is_err());
     }
 
     #[test]
