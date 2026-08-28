@@ -1,4 +1,4 @@
-use crate::{access::FULL_ADMIN_SCOPES, kernel::scope_storage_key};
+use crate::{access::V8_NODE_OWNER_SCOPE_BACKFILL, kernel::scope_storage_key};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
@@ -749,7 +749,7 @@ fn migrate_v8(connection: &Connection) -> Result<()> {
 
         "#,
     )?;
-    for scope in FULL_ADMIN_SCOPES {
+    for scope in V8_NODE_OWNER_SCOPE_BACKFILL {
         transaction.execute(
             r#"
             INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
@@ -830,6 +830,7 @@ pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::FULL_ADMIN_SCOPES;
     use rusqlite::params;
     use std::fs;
 
@@ -1017,8 +1018,6 @@ mod tests {
                     'grt_seed', 'wsp_seed', 'prf_seed', 'cli_seed', 'active',
                     '2026-08-24T00:00:05Z'
                 );
-                INSERT INTO grant_scopes(grant_id, scope_key)
-                    VALUES ('grt_seed', 'capability_read');
                 INSERT INTO node_state(
                     singleton, initialized, workspace_id, profile_id, client_id, created_at
                 ) VALUES (
@@ -1028,6 +1027,17 @@ mod tests {
                 "#,
             )
             .expect("seed enrolled version-six node");
+        for scope in FULL_ADMIN_SCOPES
+            .iter()
+            .filter(|scope| !V8_NODE_OWNER_SCOPE_BACKFILL.contains(scope))
+        {
+            connection
+                .execute(
+                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES ('grt_seed', ?1)",
+                    [scope_storage_key(*scope)],
+                )
+                .expect("seed version-six scope");
+        }
 
         migrate(&connection).expect("upgrade version-six database");
 

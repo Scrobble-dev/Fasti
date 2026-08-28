@@ -610,15 +610,23 @@ impl BrowserAccountPort for SqliteKernel {
         if !session.user().is_admin() {
             return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
         }
+        let workspace_id = session.access().workspace_id().to_string();
         let mut statement = map_sql(
             connection.prepare(
-                "SELECT user_id, username, is_admin, is_test_account, active, created_at, updated_at FROM browser_users ORDER BY username",
+                r#"
+                SELECT u.user_id, u.username, u.is_admin, u.is_test_account,
+                       u.active, u.created_at, u.updated_at
+                FROM browser_users u
+                JOIN clients c ON c.client_id = u.client_id
+                WHERE c.workspace_id = ?1
+                ORDER BY u.username
+                "#,
             ),
             capability,
             correlation_id,
         )?;
         let rows = map_sql(
-            statement.query_map([], |row| {
+            statement.query_map([workspace_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -681,6 +689,7 @@ impl BrowserAccountPort for SqliteKernel {
         if !caller.user().is_admin() {
             return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
         }
+        let workspace_id = caller.access().workspace_id().to_string();
         let caller_hash: String = map_sql(
             transaction.query_row(
                 "SELECT password_hash FROM browser_users WHERE user_id = ?1",
@@ -711,13 +720,17 @@ impl BrowserAccountPort for SqliteKernel {
                 r#"UPDATE browser_users
                SET username = COALESCE(?1, username), password_hash = COALESCE(?2, password_hash),
                    active = COALESCE(?3, active), updated_at = ?4
-               WHERE user_id = ?5"#,
+               WHERE user_id = ?5
+                 AND client_id IN (
+                     SELECT client_id FROM clients WHERE workspace_id = ?6
+                 )"#,
                 params![
                     username.as_ref().map(BrowserUsername::as_str),
                     password_hash,
                     active.map(i64::from),
                     updated_at,
-                    target_user_id.to_string()
+                    target_user_id.to_string(),
+                    workspace_id
                 ],
             ),
             capability,
@@ -740,10 +753,31 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             )?;
         }
-        let row = map_sql(transaction.query_row(
-            "SELECT user_id, username, is_admin, is_test_account, active, created_at, updated_at FROM browser_users WHERE user_id = ?1",
-            [target_user_id.to_string()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, String>(5)?, row.get::<_, String>(6)?))),
-            capability, correlation_id)?;
+        let row = map_sql(
+            transaction.query_row(
+                r#"
+            SELECT u.user_id, u.username, u.is_admin, u.is_test_account,
+                   u.active, u.created_at, u.updated_at
+            FROM browser_users u
+            JOIN clients c ON c.client_id = u.client_id
+            WHERE u.user_id = ?1 AND c.workspace_id = ?2
+            "#,
+                params![target_user_id.to_string(), workspace_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            ),
+            capability,
+            correlation_id,
+        )?;
         map_sql(transaction.commit(), capability, correlation_id)?;
         user_view(row, capability, correlation_id)
     }
@@ -771,6 +805,7 @@ impl BrowserAccountPort for SqliteKernel {
         if !caller.user().is_admin() {
             return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
         }
+        let workspace_id = caller.access().workspace_id().to_string();
         let caller_hash: String = map_sql(
             transaction.query_row(
                 "SELECT password_hash FROM browser_users WHERE user_id = ?1",
@@ -786,8 +821,14 @@ impl BrowserAccountPort for SqliteKernel {
         let deleted_self = caller.user().user_id() == target_user_id;
         let changed = map_sql(
             transaction.execute(
-                "DELETE FROM browser_users WHERE user_id = ?1",
-                [target_user_id.to_string()],
+                r#"
+                DELETE FROM browser_users
+                WHERE user_id = ?1
+                  AND client_id IN (
+                      SELECT client_id FROM clients WHERE workspace_id = ?2
+                  )
+                "#,
+                params![target_user_id.to_string(), workspace_id],
             ),
             capability,
             correlation_id,
@@ -856,6 +897,113 @@ mod tests {
             .expect("read failed login state");
         assert_eq!(failed_count, 1);
         assert_eq!(locked_until, None);
+    }
+
+    #[test]
+    fn browser_user_administration_is_workspace_scoped() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        kernel
+            .ensure_development_browser_user(
+                BrowserUsername::try_new("testadmin").expect("username"),
+                BrowserPassword::try_new("testadmin").expect("password"),
+            )
+            .expect("seed user");
+        let login = login(&kernel, "testadmin", "testadmin").expect("login");
+        let session = login.session().expose_hex();
+        let csrf = login.csrf().expose_hex();
+        let foreign_workspace = WorkspaceId::new_v7();
+        let foreign_profile = ProfileId::new_v7();
+        let foreign_client = ClientId::new_v7();
+        let foreign_user = BrowserUserId::new_v7();
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, '2026-08-28T00:00:00Z')",
+                [foreign_workspace.to_string()],
+            )
+            .expect("seed foreign workspace");
+        connection
+            .execute(
+                "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES (?1, ?2, '2026-08-28T00:00:00Z')",
+                params![foreign_profile.to_string(), foreign_workspace.to_string()],
+            )
+            .expect("seed foreign profile");
+        connection
+            .execute(
+                r#"
+                INSERT INTO clients(
+                    client_id, workspace_id, status, current_credential_epoch, created_at
+                ) VALUES (?1, ?2, 'active', 0, '2026-08-28T00:00:00Z')
+                "#,
+                params![foreign_client.to_string(), foreign_workspace.to_string()],
+            )
+            .expect("seed foreign client");
+        connection
+            .execute(
+                r#"
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, created_at, updated_at
+                )
+                SELECT ?1, 'foreignadmin', password_hash, ?2, ?3,
+                       1, 0, 1, created_at, updated_at
+                FROM browser_users WHERE username = 'testadmin'
+                "#,
+                params![
+                    foreign_user.to_string(),
+                    foreign_client.to_string(),
+                    foreign_profile.to_string()
+                ],
+            )
+            .expect("seed foreign browser user");
+        drop(connection);
+
+        let users = kernel
+            .list_browser_users(ListBrowserUsersQuery::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+            ))
+            .expect("list users");
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].username(), "testadmin");
+
+        let update = kernel
+            .update_browser_user(
+                UpdateBrowserUserCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                    fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
+                    foreign_user,
+                    BrowserPassword::try_new("testadmin").expect("current password"),
+                    Some(BrowserUsername::try_new("renamedforeign").expect("new username")),
+                    None,
+                    None,
+                )
+                .expect("update command"),
+            )
+            .expect_err("foreign update must fail");
+        assert_eq!(update.code(), ProblemCode::ValidationFailed);
+
+        let delete = kernel
+            .delete_browser_user(DeleteBrowserUserCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
+                foreign_user,
+                BrowserPassword::try_new("testadmin").expect("current password"),
+            ))
+            .expect_err("foreign delete must fail");
+        assert_eq!(delete.code(), ProblemCode::ValidationFailed);
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        let username: String = connection
+            .query_row(
+                "SELECT username FROM browser_users WHERE user_id = ?1",
+                [foreign_user.to_string()],
+                |row| row.get(0),
+            )
+            .expect("foreign user survives");
+        assert_eq!(username, "foreignadmin");
     }
 
     #[test]

@@ -827,7 +827,7 @@ fn google_candidate(item: GoogleVolume) -> Option<ProviderCandidate> {
     let provider_id = item.id?;
     let volume_info = item.volume_info?;
     let title = volume_info.title?;
-    if !valid_candidate_text(&provider_id, 256)
+    if validate_provider_id(&provider_id).is_err()
         || !valid_candidate_text(&title, 512)
         || volume_info.authors.len() > 10
         || volume_info
@@ -983,6 +983,7 @@ mod tests {
         let body = br#"{
           "items": [
             {"id":"valid","volumeInfo":{"title":"A Book","authors":["An Author"]}},
+            {"id":"../other-path","volumeInfo":{"title":"Unsafe ID","authors":[]}},
             {"id":"missing-title","volumeInfo":{"authors":[]}},
             {"id":"control","volumeInfo":{"title":"Bad\nTitle","authors":[]}}
           ]
