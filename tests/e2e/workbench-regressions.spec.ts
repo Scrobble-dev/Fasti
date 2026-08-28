@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expectNoHorizontalOverflow } from "./test-helpers";
 
 const mobileViewports = [
   { width: 320, height: 900 },
@@ -12,16 +13,6 @@ const desktopViewports = [
   { width: 1440, height: 900 },
   { width: 1920, height: 1080 },
 ] as const;
-
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
-}
 
 async function expectAxeClean(page: Page): Promise<void> {
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

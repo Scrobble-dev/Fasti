@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { expectNoHorizontalOverflow } from "./test-helpers";
 
 const browserOrigin = "http://127.0.0.1:4173";
 
@@ -7,16 +8,6 @@ async function openWorkbenchSection(page: Page, name: string): Promise<void> {
   const trigger = page.getByRole("button", { name: "Open navigation" });
   if (await trigger.isVisible()) await trigger.click();
   await page.getByRole("link", { name, exact: true }).click();
-}
-
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
 }
 
 function recordResponse(
