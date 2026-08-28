@@ -412,28 +412,33 @@
       <button
         type="button"
         class:active={active === "network"}
+        aria-current={active === "network" ? "page" : undefined}
         onclick={() => (active = "network")}>Network</button
       >
       <button
         type="button"
         class:active={active === "providers"}
+        aria-current={active === "providers" ? "page" : undefined}
         onclick={() => (active = "providers")}>Metadata credentials</button
       >
       <button
         type="button"
         class:active={active === "preferences"}
+        aria-current={active === "preferences" ? "page" : undefined}
         onclick={() => (active = "preferences")}
         ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</button
       >
       <button
         type="button"
         class:active={active === "custom_fields"}
+        aria-current={active === "custom_fields" ? "page" : undefined}
         onclick={() => (active = "custom_fields")}
         ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
       >
       <button
         type="button"
         class:active={active === "nuvio_collections"}
+        aria-current={active === "nuvio_collections" ? "page" : undefined}
         onclick={() => {
           active = "nuvio_collections";
           void loadNuvioCollections();
@@ -442,6 +447,7 @@
       <button
         type="button"
         class:active={active === "system"}
+        aria-current={active === "system" ? "page" : undefined}
         onclick={() => (active = "system")}>Capability status</button
       >
     </nav>
@@ -1537,8 +1543,20 @@
     }
 
     nav {
-      display: grid;
-      grid-template-columns: 1fr;
+      flex-direction: row;
+      overflow-x: auto;
+      padding-block-end: 4px;
+      scroll-snap-type: inline proximity;
+    }
+
+    nav button {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      scroll-snap-align: start;
+    }
+
+    nav button.active {
+      box-shadow: inset 0 -3px 0 var(--fasti-action-primary);
     }
 
     .section-heading,

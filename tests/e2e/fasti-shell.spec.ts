@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 const health = { status: "healthy", version: "0.1.0" };
 const healthEndpoint = /\/api\/v1\/health$/;
@@ -51,6 +52,7 @@ async function mockTrustedHost(page: Page) {
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
     ];
+    let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
       __TAURI_INTERNALS__: {
@@ -66,6 +68,16 @@ async function mockTrustedHost(page: Page) {
             return networkConfiguration;
           case "provider_credential_status":
             return providerStatus;
+          case "get_nuvio_collections":
+            return { document: nuvioDocument };
+          case "replace_nuvio_collections": {
+            const candidate = arguments_ as { document?: unknown };
+            nuvioDocument = candidate.document;
+            return { document: nuvioDocument };
+          }
+          case "clear_nuvio_collections":
+            nuvioDocument = null;
+            return { document: null };
           case "test_endpoint_connection":
             return {
               endpoint: "http://127.0.0.1:8420",
@@ -914,4 +926,75 @@ test("trusted-host provider settings clear a rejected secret", async ({
     fullPage: true,
     animations: "disabled",
   });
+});
+
+test("profile Nuvio Collections import, export, and clear stay local", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await mockTrustedHost(page);
+  const externalOrigins = new Set<string>();
+  page.on("request", (request) => {
+    const origin = new URL(request.url()).origin;
+    if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
+  });
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Nuvio Collections" }).click();
+
+  await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
+  const input = [
+    {
+      id: "collection",
+      title: "Collection",
+      folders: [
+        {
+          id: "folder",
+          title: "Folder",
+          coverImageUrl: "https://example.invalid/never-requested.jpg",
+          sources: [
+            {
+              id: "source",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { vote_count_gte: 10 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  await page.getByLabel("Nuvio JSON file").setInputFiles({
+    name: "nuvio.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(input)),
+  });
+  await page.getByRole("button", { name: "Import and replace" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Imported 1 collections, 1 folders, and 1 sources",
+  );
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("nuvio-collections-imported-320.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(download.suggestedFilename()).toMatch(
+    /^fasti-nuvio-collections-\d{4}-\d{2}-\d{2}\.json$/,
+  );
+  expect(JSON.parse(await readFile(downloadPath!, "utf8"))).toEqual(input);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Clear saved document" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "This profile's Nuvio Collections document was cleared.",
+  );
+  await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
+  expect(externalOrigins).toEqual(new Set());
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });
