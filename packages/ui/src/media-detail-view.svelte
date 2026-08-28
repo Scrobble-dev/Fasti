@@ -2008,6 +2008,11 @@
   .assertions-scroll {
     overflow-x: auto;
   }
+
+  .assertions-scroll:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
+  }
   .assertions-table th,
   .assertions-table td {
     padding: 10px 14px;

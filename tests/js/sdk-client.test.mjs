@@ -898,7 +898,7 @@ test("profile tracking disposition SDK is authenticated, exact, and record-bound
       const body = String(url).endsWith(
         "/api/v1/profile/record-tracking-dispositions",
       )
-        ? { states: [], truncated: false }
+        ? { states: [], truncated: true }
         : { record_id: contractIds.record, disposition: "watching" };
       return new Response(JSON.stringify(body), {
         headers: { "content-type": "application/json" },
@@ -908,7 +908,7 @@ test("profile tracking disposition SDK is authenticated, exact, and record-bound
 
   assert.deepEqual(await client.listTrackingDispositions(), {
     states: [],
-    truncated: false,
+    truncated: true,
   });
   assert.deepEqual(
     await client.setTrackingDisposition(contractIds.record, {
