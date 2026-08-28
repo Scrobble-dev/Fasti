@@ -21,7 +21,7 @@ use network_config::{NetworkConfigStore, NetworkConfiguration, SaveNetworkConfig
 #[cfg(feature = "desktop-runtime")]
 use providers::{
     DeleteProviderCredentialInput, ProviderCandidate, ProviderCredentialStatus,
-    ProviderSearchInput, SaveProviderCredentialInput,
+    ProviderSearchInput, ProviderSelectionInput, SaveProviderCredentialInput,
 };
 #[cfg(feature = "desktop-runtime")]
 use setup::{DesktopProblem, KeyringSetupSecretStore, SetupStatus};
@@ -192,6 +192,57 @@ async fn search_provider(
         kernel.data_root_identity(),
     )
     .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn track_provider_candidate(
+    state: tauri::State<'_, DesktopState>,
+    input: ProviderSelectionInput,
+) -> Result<records::CreateRecordView, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let configuration = state.network.load()?;
+    let candidate = providers::fetch_selection(
+        input,
+        configuration.outbound_policy(),
+        kernel.data_root_identity(),
+    )
+    .await?;
+    records::create_provider_record(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        candidate,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplyProviderMetadataInput {
+    record_id: String,
+    selection: ProviderSelectionInput,
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn apply_provider_metadata(
+    state: tauri::State<'_, DesktopState>,
+    input: ApplyProviderMetadataInput,
+) -> Result<(), DesktopProblem> {
+    let kernel = state.kernel()?;
+    let configuration = state.network.load()?;
+    let candidate = providers::fetch_selection(
+        input.selection,
+        configuration.outbound_policy(),
+        kernel.data_root_identity(),
+    )
+    .await?;
+    records::apply_provider_metadata(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        &input.record_id,
+        candidate,
+    )
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -381,6 +432,8 @@ pub fn run() {
             save_provider_credential,
             delete_provider_credential,
             search_provider,
+            track_provider_candidate,
+            apply_provider_metadata,
             list_records,
             create_record,
             attach_identifier,

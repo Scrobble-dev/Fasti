@@ -563,11 +563,37 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "RecordIdentifierDto": {
+    "additionalProperties": false,
+    "properties": {
+      "grain": {
+        "type": "string"
+      },
+      "namespace": {
+        "type": "string"
+      },
+      "value": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "namespace",
+      "grain",
+      "value"
+    ],
+    "type": "object"
+  },
   "RecordSummaryDto": {
     "additionalProperties": false,
     "properties": {
       "grain": {
         "type": "string"
+      },
+      "identifiers": {
+        "items": {
+          "$ref": "#/components/schemas/RecordIdentifierDto"
+        },
+        "type": "array"
       },
       "latest_activity": {
         "oneOf": [
@@ -579,11 +605,41 @@ const PRODUCTION_SCHEMAS = {
           }
         ]
       },
+      "original_title": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        ]
+      },
+      "overview": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        ]
+      },
       "poster": {
         "$ref": "#/components/schemas/ResolvedFieldDto"
       },
       "record_id": {
         "type": "string"
+      },
+      "release_year": {
+        "oneOf": [
+          {
+            "type": "null"
+          },
+          {
+            "$ref": "#/components/schemas/ResolvedFieldDto"
+          }
+        ]
       },
       "status": {
         "type": "string"
@@ -1064,11 +1120,21 @@ export interface RecordActivityDto {
   readonly occurred_at?: OccurredTimeDto | null;
 }
 
+export interface RecordIdentifierDto {
+  readonly grain: string;
+  readonly namespace: string;
+  readonly value: string;
+}
+
 export interface RecordSummaryDto {
   readonly grain: string;
+  readonly identifiers?: ReadonlyArray<RecordIdentifierDto>;
   readonly latest_activity?: RecordActivityDto | null;
+  readonly original_title?: ResolvedFieldDto | null;
+  readonly overview?: ResolvedFieldDto | null;
   readonly poster: ResolvedFieldDto;
   readonly record_id: string;
+  readonly release_year?: ResolvedFieldDto | null;
   readonly status: string;
   readonly title: ResolvedFieldDto;
 }

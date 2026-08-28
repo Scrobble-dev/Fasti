@@ -17,6 +17,10 @@
     onOpenSettings: () => void;
     onRetry: () => void;
     onTrackRecord?: (candidate: ProviderSearchCandidate) => Promise<void>;
+    embedded?: boolean;
+    actionLabel?: string;
+    completedLabel?: string;
+    actionProblemFallback?: string;
   }
 
   let {
@@ -27,6 +31,10 @@
     onOpenSettings,
     onRetry,
     onTrackRecord,
+    embedded = false,
+    actionLabel = "Track Now",
+    completedLabel = "Added to library",
+    actionProblemFallback = "Fasti could not add this title to your library.",
   }: Props = $props();
   let query = $state("");
   let results: ProviderSearchCandidate[] = $state([]);
@@ -37,6 +45,7 @@
   let trackingId = $state("");
   let trackedIds = $state<Set<string>>(new Set());
   let trackProblem = $state("");
+  let selectedProvider = $state("");
 
   async function trackRecord(
     candidate: ProviderSearchCandidate,
@@ -48,34 +57,39 @@
       await onTrackRecord(candidate);
       trackedIds = new Set([...trackedIds, candidate.provider_id]);
     } catch (error) {
-      trackProblem = hostProblemText(
-        error,
-        "Fasti could not add this title to your library.",
-      );
+      trackProblem = hostProblemText(error, actionProblemFallback);
     } finally {
       trackingId = "";
     }
   }
-  const googleBooks = $derived(
-    providerCredentials?.find((item) => item.provider === "google-books"),
+  const configuredProviders = $derived(
+    (providerCredentials ?? []).filter((item) => item.configured),
   );
+  const activeProvider = $derived(
+    configuredProviders.find((item) => item.provider === selectedProvider),
+  );
+
+  $effect(() => {
+    if (!activeProvider)
+      selectedProvider = configuredProviders[0]?.provider ?? "";
+  });
 
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (!value || !googleBooks?.configured || searching) return;
+    if (!value || !activeProvider || searching) return;
     searching = true;
     problem = "";
     searched = false;
     try {
-      results = await onSearch("google-books", value);
+      results = await onSearch(activeProvider.provider, value);
       completedQuery = value;
       searched = true;
     } catch (error) {
       results = [];
       problem = hostProblemText(
         error,
-        "Google Books search failed. Check the provider key and network policy.",
+        `${activeProvider.label} search failed. Check the provider credential and network policy.`,
       );
     } finally {
       searching = false;
@@ -83,16 +97,18 @@
   }
 </script>
 
-<div class="discover-container">
-  <header class="discover-header">
-    <div class="heading-row">
-      <IconCompass size={28} class="discover-icon" />
-      <h1 id="discover-title" class="view-title" tabindex="-1">Discover</h1>
-    </div>
-    <p class="view-subtitle">
-      Search Google Books through the trusted Fasti desktop host.
-    </p>
-  </header>
+<div class="discover-container" class:embedded>
+  {#if !embedded}
+    <header class="discover-header">
+      <div class="heading-row">
+        <IconCompass size={28} class="discover-icon" />
+        <h1 id="discover-title" class="view-title" tabindex="-1">Discover</h1>
+      </div>
+      <p class="view-subtitle">
+        Search configured metadata providers through the trusted Fasti host.
+      </p>
+    </header>
+  {/if}
 
   {#if loading}
     <p role="status">Loading provider status…</p>
@@ -108,11 +124,14 @@
         Retry host connection
       </button>
     </div>
-  {:else if !googleBooks?.configured}
+  {:else if configuredProviders.length === 0}
     <section class="unavailable" aria-labelledby="discover-setup-title">
-      <h2 id="discover-setup-title">Google Books needs an API key</h2>
+      <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
+        Add a metadata provider credential
+      </svelte:element>
       <p>
-        Add a key in Settings. Fasti stores it in the platform credential store.
+        Configure Google Books or a TMDB API Read Access Token in Settings.
+        Fasti stores app-managed credentials in the platform credential store.
       </p>
       <button type="button" class="btn btn-primary" onclick={onOpenSettings}
         >Open provider settings</button
@@ -120,7 +139,23 @@
     </section>
   {:else}
     <form class="search-form" onsubmit={search} role="search">
-      <label for="provider-search">Search books</label>
+      <label for="provider-choice">Metadata provider</label>
+      <select
+        id="provider-choice"
+        class="form-select"
+        bind:value={selectedProvider}
+        disabled={searching}
+        onchange={() => {
+          results = [];
+          problem = "";
+          searched = false;
+        }}
+      >
+        {#each configuredProviders as provider (provider.provider)}
+          <option value={provider.provider}>{provider.label}</option>
+        {/each}
+      </select>
+      <label for="provider-search">Search title, creator, or identifier</label>
       <div class="search-row">
         <input
           id="provider-search"
@@ -130,7 +165,9 @@
           maxlength="256"
           bind:value={query}
           disabled={searching}
-          placeholder="Title, author, or ISBN"
+          placeholder={selectedProvider === "google-books"
+            ? "Title, author, or ISBN"
+            : "Movie or TV title"}
           autocomplete="off"
         />
         <button
@@ -149,13 +186,15 @@
       aria-labelledby="search-results-title"
       aria-busy={searching}
     >
-      <h2 id="search-results-title">Search results</h2>
+      <svelte:element this={embedded ? "h4" : "h2"} id="search-results-title">
+        Search results
+      </svelte:element>
       {#if searching}
-        <p role="status">Searching Google Books…</p>
+        <p role="status">Searching {activeProvider?.label ?? "provider"}…</p>
       {:else if problem}
         <p class="problem" role="alert">{problem}</p>
       {:else if searched && results.length === 0}
-        <p role="status">No matching books found for {completedQuery}.</p>
+        <p role="status">No compatible titles found for {completedQuery}.</p>
       {:else if results.length > 0}
         <p role="status">
           {results.length}
@@ -165,9 +204,20 @@
         <ol>
           {#each results as result (result.provider_id)}
             <li>
-              <h3>{result.title}</h3>
+              <svelte:element
+                this={embedded ? "h5" : "h3"}
+                class="result-title"
+              >
+                {result.title}
+              </svelte:element>
+              {#if result.original_title}
+                <p>Original title: {result.original_title}</p>
+              {/if}
               {#if result.authors.length > 0}
                 <p>By {result.authors.join(", ")}</p>
+              {/if}
+              {#if result.overview}
+                <p class="result-overview">{result.overview}</p>
               {/if}
               <dl>
                 <div>
@@ -178,6 +228,12 @@
                   <dt>Type</dt>
                   <dd>{result.kind}</dd>
                 </div>
+                {#if result.release_year}
+                  <div>
+                    <dt>Year</dt>
+                    <dd>{result.release_year}</dd>
+                  </div>
+                {/if}
                 <div>
                   <dt>Provider ID</dt>
                   <dd><code>{result.provider_id}</code></dd>
@@ -192,11 +248,11 @@
                   onclick={() => trackRecord(result)}
                 >
                   {#if trackedIds.has(result.provider_id)}
-                    Added to library
+                    {completedLabel}
                   {:else if trackingId === result.provider_id}
                     Adding…
                   {:else}
-                    Track Now
+                    {actionLabel}
                   {/if}
                 </button>
               {/if}
@@ -207,7 +263,7 @@
           <p class="problem" role="alert">{trackProblem}</p>
         {/if}
       {:else}
-        <p>Enter a title, author, or ISBN.</p>
+        <p>Select a provider, then enter a title, creator, or identifier.</p>
       {/if}
     </section>
   {/if}
@@ -221,6 +277,12 @@
     display: flex;
     flex-direction: column;
     gap: 28px;
+  }
+  .discover-container.embedded {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    gap: 16px;
   }
 
   .discover-header {
@@ -266,8 +328,8 @@
     background: var(--fasti-surface-paper);
   }
 
-  .unavailable h2,
-  .results h2 {
+  .unavailable :is(h2, h4),
+  .results :is(h2, h4) {
     margin: 0 0 8px;
     font-family: var(--fasti-font-display);
   }
@@ -285,14 +347,16 @@
     font-weight: 700;
   }
 
-  input {
+  input,
+  select {
     flex: 1;
     min-width: 0;
     padding: 10px 12px;
   }
 
   button,
-  input {
+  input,
+  select {
     min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
@@ -319,7 +383,7 @@
     opacity: 0.68;
   }
 
-  :is(button, input):focus-visible {
+  :is(button, input, select):focus-visible {
     outline: 3px solid var(--fasti-action-primary);
     outline-offset: 2px;
   }
@@ -338,8 +402,13 @@
       color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
   }
 
-  li h3 {
+  .result-title {
     margin: 0 0 6px;
+  }
+
+  .result-overview {
+    margin-top: 8px;
+    max-width: 72ch;
   }
 
   dl {

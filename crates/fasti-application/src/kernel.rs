@@ -722,6 +722,35 @@ impl RecordActivity {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordIdentifier {
+    namespace: fasti_domain::NamespaceKey,
+    grain: Grain,
+    value: String,
+}
+
+impl RecordIdentifier {
+    pub fn new(namespace: fasti_domain::NamespaceKey, grain: Grain, value: String) -> Self {
+        Self {
+            namespace,
+            grain,
+            value,
+        }
+    }
+
+    pub const fn namespace(&self) -> &fasti_domain::NamespaceKey {
+        &self.namespace
+    }
+
+    pub const fn grain(&self) -> Grain {
+        self.grain
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
 /// One Record projected for display: its identity, its resolved display
 /// fields, and its most recent Chronicle activity.
 ///
@@ -737,16 +766,25 @@ pub struct RecordSummary {
     status: RecordStatus,
     title: ResolvedField,
     poster: ResolvedField,
+    original_title: ResolvedField,
+    overview: ResolvedField,
+    release_year: ResolvedField,
+    identifiers: Vec<RecordIdentifier>,
     latest_activity: Option<RecordActivity>,
 }
 
 impl RecordSummary {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         record_id: RecordId,
         grain: Grain,
         status: RecordStatus,
         title: ResolvedField,
         poster: ResolvedField,
+        original_title: ResolvedField,
+        overview: ResolvedField,
+        release_year: ResolvedField,
+        identifiers: Vec<RecordIdentifier>,
         latest_activity: Option<RecordActivity>,
     ) -> Self {
         Self {
@@ -755,6 +793,10 @@ impl RecordSummary {
             status,
             title,
             poster,
+            original_title,
+            overview,
+            release_year,
+            identifiers,
             latest_activity,
         }
     }
@@ -777,6 +819,22 @@ impl RecordSummary {
 
     pub const fn poster(&self) -> &ResolvedField {
         &self.poster
+    }
+
+    pub const fn original_title(&self) -> &ResolvedField {
+        &self.original_title
+    }
+
+    pub const fn overview(&self) -> &ResolvedField {
+        &self.overview
+    }
+
+    pub const fn release_year(&self) -> &ResolvedField {
+        &self.release_year
+    }
+
+    pub fn identifiers(&self) -> &[RecordIdentifier] {
+        &self.identifiers
     }
 
     pub const fn latest_activity(&self) -> Option<&RecordActivity> {

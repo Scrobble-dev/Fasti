@@ -2,13 +2,13 @@
 
 ## Current status
 
-This document describes the read path that lists Records for display: `metadata_field_claims`/`metadata_field_overrides` persistence in `fasti-store`, the `IdentityPort::list_records` query, and its two surfaces -- the `list_records` Tauri command, and the bearer-authenticated `GET /api/v1/records` HTTP route (`crates/fasti-api/src/records.rs`, merged into the local router in `crates/fasti-api/src/local.rs`). No provider adapter exists yet to write real claims -- every Record currently resolves with empty title/poster fields unless a test or a future adapter writes claims directly.
+This document describes the Record metadata write and read paths. The trusted Desktop host can search Google Books or TMDB, fetch the selected provider item again, and submit provider-neutral claims through `ProviderMetadataPort`. The SQLite store commits the Record, external identifier, and initial claims atomically, or appends refreshed claims to an existing Record. `IdentityPort::list_records` projects that state through the `list_records` Tauri command and the bearer-authenticated `GET /api/v1/records` HTTP route.
 
 ## 1. Why this exists
 
 `Record` (`fasti-domain::identity`) is pure identity: a `RecordId`, a `Grain`, and a status. It never carries a title, poster, or provider coordinate -- that is deliberate, not an omission. Display fields live in `fasti-domain::metadata` as `FieldClaim` (one provider's claim about one field) and `FieldOverride` (a user-owned value), resolved deterministically by `resolve_field()` into a `ResolvedField` with a `FieldResolutionTier` explaining which claim won.
 
-Before this work, `metadata.rs` was pure domain logic with no SQLite persistence, and `IdentityPort` had no read method at all -- there was no way to list Records for a UI. This document covers the layer that closes that gap.
+Provider calls remain outside the local write transaction. A network failure cannot partially create a Record or remove existing Chronicle state.
 
 ## 2. Persistence
 
@@ -19,29 +19,32 @@ Two tables, added in `schema.rs`'s `migrate_v6`:
 
 Both tables carry `workspace_id` directly (matching `external_identifiers`'s convention) so queries scope without an extra join, and both participate in the existing `workspace_revisions` trigger machinery.
 
-Store functions (`fasti-store::metadata`, private to the crate): `write_field_claim`, `write_field_override`, `load_field_claims`, `load_field_override`. The write functions have no production caller yet -- writing real claims is a provider adapter's job, and building a provider adapter that fetches metadata over the network is explicitly a separate, later task. The read functions are the ones `list_records` uses today.
+`fasti-store::metadata` owns `write_field_claim`, `write_field_override`, `load_field_claims`, and `load_field_override`. Its `ProviderMetadataPort` implementation validates a bounded set of unique field keys, requires every claim source to match the attached provider namespace, and writes through one immediate transaction. An invalid field, identifier, namespace, or authorization proof rolls back the complete mutation.
+
+The trusted Desktop adapter is the current production caller. Google Books supplies book title, description, publication year, and thumbnail claims. TMDB supplies movie or TV title, original title, overview, release year, and poster claims. Search responses are only choices: the host fetches the exact provider ID again before it constructs claims or opens the transaction.
 
 ## 3. The query capability
 
 `IdentityPort::list_records` (`fasti-application::kernel`) takes a `ListRecordsQuery` (workspace-scoped access, no filters yet) and returns `Vec<RecordSummary>`. For each active Record in the workspace (bounded to 500 rows, no cursor pagination yet):
 
-1. Resolve `core.title` and `core.poster_url` via `resolve_field()`, using each Record's persisted claims and override. No preferred-provider/locale configuration exists yet, so resolution always falls through to `FallbackProviderClaim` -> `LastKnownGood` -> `Empty`.
-2. Load the most recent `Occurrence` touching the Record (by insertion order) and its latest `Interpretation` state, if any, as `RecordActivity`.
+1. Resolve `core.title`, `core.original_title`, `core.overview`, `core.release_year`, and `core.poster_url` via `resolve_field()`, using each Record's persisted claims and override. No preferred-provider/locale configuration exists yet, so resolution falls through to `FallbackProviderClaim` -> `LastKnownGood` -> `Empty`.
+2. Load external identifiers in deterministic namespace/grain/value order.
+3. Load the most recent `Occurrence` touching the Record (by insertion order) and its latest `Interpretation` state, if any, as `RecordActivity`.
 
-A Record with zero claims and zero occurrences still returns a valid `RecordSummary` row: `title`/`poster` resolve to the `Empty` tier (not an error, not a skipped row), and `latest_activity` is `None`. A local-only Record with no metadata is a first-class, valid case.
+A Record with zero claims and zero occurrences still returns a valid `RecordSummary` row: resolved fields use the `Empty` tier, identifiers are empty, and `latest_activity` is `None`. A local-only Record with no metadata is a first-class, valid case.
 
-`core.title` and `core.poster_url` are the two canonical `FieldKey` values this read path resolves (`fasti_domain::{TITLE_FIELD_KEY, POSTER_FIELD_KEY}`). `metadata.rs`'s own doc comment cites `core.title` as the canonical example; `core.poster_url` follows the same convention.
+The canonical field keys are owned once in `fasti-domain::metadata`; provider adapters do not invent UI-specific field names.
 
 ## 4. Tauri and HTTP surfaces
 
-`apps/desktop/src-tauri/src/records.rs` exposes `list_records`, following `reviews.rs`'s exact shape: `authenticate()`/`require_access()` from `setup.rs`, `DesktopProblem` error mapping, no HTTP round-trip. Registered in `lib.rs`'s `invoke_handler!`.
+`apps/desktop/src-tauri/src/records.rs` exposes `list_records`, `create_provider_record`, and `apply_provider_metadata`, following the same authenticated local-kernel pattern as the other Desktop commands. `track_provider_candidate` and `apply_provider_metadata` first perform the authorized provider read in `providers.rs`, then call these local operations. They make no daemon HTTP round-trip.
 
 `crates/fasti-api/src/records.rs` exposes the same query as `GET /api/v1/records`, bearer-authenticated the same way as every other production-runtime route. This is the surface the browser-hosted web app uses -- the Tauri command above is desktop-only and never reachable from a browser tab.
 
-The wire `RecordSummary` view carries `grain: Grain` unchanged -- `Grain` is identity granularity (Work/Series/Release/Season/Episode/Film/...), distinct from the frontend's display-oriented `MediaKind` (movie/show/anime/book/...). A later frontend-wiring pass owns the `Grain` -> `MediaKind` projection; this task deliberately does not invent one.
+The wire `RecordSummary` view carries `grain: Grain` unchanged -- `Grain` is identity granularity (Work/Series/Release/Season/Episode/Film/...), distinct from the frontend's display-oriented `MediaKind` (movie/show/anime/book/...). `record-projection.ts` owns that presentation mapping and keeps provider identifiers separate from Fasti Record IDs.
 
-No `get_record` detail-view command exists yet -- the current frontend need is list views (Library/Discover/Chronicle), not a per-record detail fetch. Add one when a detail view actually needs a single-record lookup that `list_records` doesn't already cover.
+No public metadata mutation route or `get_record` detail command exists. The Workbench reloads the bounded list after a trusted-host mutation. Add a single-record query only when the list contract becomes measurably insufficient.
 
 ## 5. Capability registry
 
-`identity.record.list` is registered in `contracts/registry/v1/capabilities.yaml` as `contract_body: b1`, `lifecycle.contract_state: finalized`, `lifecycle.runtime_availability: implemented`, under `surface_profile: b1_records`. That profile declares `http_openapi: required`, so an OpenAPI path is required and present -- `GET /api/v1/records` is real, routed, and covered by `cargo xtask contract verify`, not a reserved-for-later binding.
+`identity.record.list` is registered in `contracts/registry/v1/capabilities.yaml` as `contract_body: b1`, `lifecycle.contract_state: finalized`, `lifecycle.runtime_availability: implemented`, under `surface_profile: b1_records`. That profile declares `http_openapi: required`, so the additive resolved fields and identifier array are generated into the production OpenAPI and TypeScript SDK. The Desktop-only provider mutations do not create a public HTTP route, event, JSON-LD entity, or public capability.

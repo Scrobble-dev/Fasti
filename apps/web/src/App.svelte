@@ -183,6 +183,12 @@
           invoke("delete_provider_credential", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
+        trackProviderCandidate: (selection) =>
+          invoke("track_provider_candidate", { input: selection }),
+        applyProviderMetadata: (recordId, selection) =>
+          invoke("apply_provider_metadata", {
+            input: { record_id: recordId, selection },
+          }),
         listApiClients: () => invoke("list_api_clients"),
         createApiClient: (scopes) =>
           invoke("create_api_client", { input: { scopes } }),

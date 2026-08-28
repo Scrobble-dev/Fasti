@@ -80,6 +80,7 @@ pub async fn health_check() -> Json<HealthResponse> {
         fasti_contracts::ObservationIdentifierInput,
         fasti_contracts::ObservationIngressKind,
         fasti_contracts::RecordActivityDto,
+        fasti_contracts::RecordIdentifierDto,
         fasti_contracts::RecordSummaryDto,
         fasti_contracts::RegisterNamespaceRequest,
         fasti_contracts::RegisterNamespaceResponse,
@@ -300,6 +301,7 @@ mod tests {
             "ListRecordsResponse",
             "ListTrackingDispositionsResponse",
             "RecordActivityDto",
+            "RecordIdentifierDto",
             "RecordSummaryDto",
             "RegisterNamespaceRequest",
             "RegisterNamespaceResponse",
@@ -1093,6 +1095,15 @@ mod tests {
         .expect("list response");
         assert_eq!(populated_list.records.len(), 1);
         assert_eq!(populated_list.records[0].record_id, created.record_id);
+        assert_eq!(populated_list.records[0].identifiers.len(), 1);
+        assert_eq!(populated_list.records[0].identifiers[0].value, "abc123");
+        assert_eq!(
+            populated_list.records[0]
+                .overview
+                .as_ref()
+                .and_then(|field| field.value.as_deref()),
+            None,
+        );
     }
 
     #[cfg(target_os = "linux")]

@@ -13,6 +13,8 @@ reverse-proxy address from changing the daemon bind address.
 | `FASTI_PUBLIC_URL`               | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
 | `FASTI_REMOTE_TRUSTED_PROXY`     | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
 | `FASTI_DEVELOPMENT_TEST_ACCOUNT` | `fastid`                 | Exact `true` seeds the one-time `testadmin` development account. Debug default: `true`; release default: `false`.                 |
+| `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
+| `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
 | `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
 | `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
@@ -159,13 +161,31 @@ lookup. Provider credentials must use headers or a platform credential store.
 They must not enter URLs, arguments, logs, browser storage, screenshots,
 fixtures, or proof bundles.
 
-The Google Books review runtime requires `GOOGLE_BOOKS_API_KEY` or a credential
-saved by the trusted Tauri host. An environment credential takes precedence and
-is read-only in Settings. The host loads the key only after outbound access is
-authorized and sends it as the sensitive `X-Goog-Api-Key` header. Discover
-returns at most ten neutral book candidates and does not create or modify a
-local media record. The browser does not receive credentials or execute
-provider requests.
+The Google Books adapter requires `GOOGLE_BOOKS_API_KEY` or a credential saved
+by the trusted Tauri host. The TMDB adapter uses the corresponding
+`TMDB_API_READ_ACCESS_TOKEN` or stored credential. Environment credentials take
+precedence and are read-only in Settings. The host loads a credential only
+after outbound access is authorized. It sends Google Books keys in the
+sensitive `X-Goog-Api-Key` header and TMDB tokens in the sensitive
+`Authorization: Bearer` header.
+
+Search returns at most ten neutral candidates. Selecting a candidate does not
+trust the earlier search body: the host performs a bounded `metadata.read` for
+the exact provider ID, then passes validated identifiers and field claims to
+the local application port. Creating a provider record commits the Record,
+identifier, and claims atomically. Refresh attaches or verifies the selected
+identifier and appends claims without rewriting earlier provider evidence.
+Provider failure leaves existing identity and Chronicle state unchanged. The
+browser does not receive credentials or execute provider requests.
+
+TMDB's [API FAQ](https://developer.themoviedb.org/docs/faq) requires attribution
+for applications that use its API. The Workbench
+includes the approved TMDB mark and required non-endorsement notice in Provider
+credits. Commercial deployments need the appropriate TMDB licence; configuring
+a token does not grant one. Poster URLs are stored as provider claims, but the
+Desktop CSP continues to reject remote images until Fasti has an authorized,
+bounded local asset cache. Do not relax `img-src` or bypass outbound policy to
+display them.
 
 An app-managed provider credential is scoped to the identity of the opened
 physical Fasti data root. Fasti derives that identity from the retained root
@@ -184,8 +204,10 @@ real authenticated profile context.
 
 ## Contract disposition
 
-These values and provider searches use local Tauri IPC. They do not add a
-public Fasti HTTP route, event, domain entity, or linked-data term. OpenAPI,
-AsyncAPI, JSON Schema, and JSON-LD therefore remain unchanged. The Tauri command
-types and this document own the local app contract until a public capability is
-authorized.
+Provider credentials, search, exact-item fetch, and metadata mutations use
+local Tauri IPC. They do not add a public Fasti HTTP route, event, domain
+entity, or linked-data term. The existing public Record read response gains
+additive resolved metadata fields and external identifiers, so production
+OpenAPI and the generated TypeScript SDK change. AsyncAPI and JSON-LD remain
+unchanged. The Tauri command types and this document own the local mutation
+contract until a public capability is authorized.

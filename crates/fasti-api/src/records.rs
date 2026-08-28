@@ -13,8 +13,8 @@ use fasti_application::{
 use fasti_contracts::{
     AttachIdentifierRequest, AttachIdentifierResponse, ClaimedPrecisionDto, ClaimedTrustDto,
     CreateRecordRequest, CreateRecordResponse, ListRecordsResponse, OccurredTimeDto,
-    ProblemDetails, RecordActivityDto, RecordSummaryDto, RegisterNamespaceRequest,
-    RegisterNamespaceResponse, ResolvedFieldDto,
+    ProblemDetails, RecordActivityDto, RecordIdentifierDto, RecordSummaryDto,
+    RegisterNamespaceRequest, RegisterNamespaceResponse, ResolvedFieldDto,
 };
 use fasti_domain::{
     ClaimedPrecision, ClaimedTime, ClaimedTrust, ExternalIdentifierClaim, Grain,
@@ -248,6 +248,18 @@ pub(crate) async fn list_records(
                     .unwrap_or_else(|| "active".to_owned()),
                 title: resolved_field_dto(summary.title()),
                 poster: resolved_field_dto(summary.poster()),
+                original_title: Some(resolved_field_dto(summary.original_title())),
+                overview: Some(resolved_field_dto(summary.overview())),
+                release_year: Some(resolved_field_dto(summary.release_year())),
+                identifiers: summary
+                    .identifiers()
+                    .iter()
+                    .map(|identifier| RecordIdentifierDto {
+                        namespace: identifier.namespace().to_string(),
+                        grain: identifier.grain().as_str().to_owned(),
+                        value: identifier.value().to_owned(),
+                    })
+                    .collect(),
                 latest_activity: summary.latest_activity().map(|activity| RecordActivityDto {
                     occurred_at: activity
                         .occurred_at()

@@ -248,6 +248,12 @@ export interface ProviderSearchCandidate {
   readonly external_ids?: ExternalId[];
 }
 
+export interface ProviderSelection {
+  readonly provider: string;
+  readonly provider_id: string;
+  readonly kind: string;
+}
+
 export interface BrowserUser {
   readonly user_id: string;
   readonly username: string;
@@ -289,6 +295,13 @@ export interface WorkbenchHost {
     provider: string,
     query: string,
   ): Promise<ProviderSearchCandidate[]>;
+  trackProviderCandidate?(
+    selection: ProviderSelection,
+  ): Promise<CreateRecordResult>;
+  applyProviderMetadata?(
+    recordId: string,
+    selection: ProviderSelection,
+  ): Promise<void>;
   listApiClients?(): Promise<ApiClientCredentialSummary[]>;
   createApiClient?(scopes: string[]): Promise<CreatedApiClientCredential>;
   revokeApiClient?(credentialId: string): Promise<ApiClientCredentialSummary[]>;
@@ -397,6 +410,12 @@ export interface RecordActivityView {
   readonly interpretation_state: "unresolved" | "resolved" | "conflicted";
 }
 
+export interface RecordIdentifierView {
+  readonly namespace: string;
+  readonly grain: string;
+  readonly value: string;
+}
+
 /** Wire shape of the desktop host's `list_records` command output
  * (`apps/desktop/src-tauri/src/records.rs`'s `RecordSummary`). `grain` is
  * identity granularity (`fasti_domain::Grain`), not the frontend's display
@@ -408,6 +427,10 @@ export interface RecordSummary {
   readonly status: "active";
   readonly title: ResolvedFieldView;
   readonly poster: ResolvedFieldView;
+  readonly original_title?: ResolvedFieldView;
+  readonly overview?: ResolvedFieldView;
+  readonly release_year?: ResolvedFieldView;
+  readonly identifiers?: RecordIdentifierView[];
   readonly latest_activity: RecordActivityView | null;
 }
 

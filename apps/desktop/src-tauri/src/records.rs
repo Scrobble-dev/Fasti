@@ -1,7 +1,9 @@
+use crate::providers::ProviderCandidate;
 use crate::setup::{authenticate, DesktopProblem, SetupSecretStore};
 use fasti_application::{
-    AttachIdentifierCommand, CreateRecordCommand, IdentityPort, ListRecordsQuery,
-    ListTrackingDispositionsQuery, ProfileRecordStatePort, RegisterNamespaceDefinitionCommand,
+    ApplyProviderMetadataCommand, AttachIdentifierCommand, CreateProviderRecordCommand,
+    CreateRecordCommand, IdentityPort, ListRecordsQuery, ListTrackingDispositionsQuery,
+    ProfileRecordStatePort, ProviderMetadataPort, RegisterNamespaceDefinitionCommand,
     SetTrackingDispositionCommand,
 };
 use fasti_contracts::{
@@ -44,6 +46,13 @@ pub(crate) struct RecordActivityView {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct RecordIdentifierView {
+    namespace: String,
+    grain: Grain,
+    value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct RecordSummary {
     record_id: String,
     /// Identity granularity, not the frontend's display `MediaKind`. A later
@@ -52,6 +61,10 @@ pub(crate) struct RecordSummary {
     status: RecordStatus,
     title: ResolvedFieldView,
     poster: ResolvedFieldView,
+    original_title: ResolvedFieldView,
+    overview: ResolvedFieldView,
+    release_year: ResolvedFieldView,
+    identifiers: Vec<RecordIdentifierView>,
     latest_activity: Option<RecordActivityView>,
 }
 
@@ -79,6 +92,18 @@ pub(crate) fn list_records(
             status: summary.status(),
             title: summary.title().into(),
             poster: summary.poster().into(),
+            original_title: summary.original_title().into(),
+            overview: summary.overview().into(),
+            release_year: summary.release_year().into(),
+            identifiers: summary
+                .identifiers()
+                .iter()
+                .map(|identifier| RecordIdentifierView {
+                    namespace: identifier.namespace().to_string(),
+                    grain: identifier.grain(),
+                    value: identifier.value().to_owned(),
+                })
+                .collect(),
             latest_activity: summary
                 .latest_activity()
                 .map(|activity| RecordActivityView {
@@ -201,6 +226,71 @@ pub(crate) fn register_namespace(
         namespace: outcome.namespace().to_string(),
         created: outcome.created(),
     })
+}
+
+fn register_provider_namespace(
+    kernel: &SqliteKernel,
+    access: fasti_application::RequestAccessContext,
+    candidate: &ProviderCandidate,
+) -> Result<(), DesktopProblem> {
+    let definition = candidate.namespace_definition()?;
+    kernel
+        .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+            RequestCorrelationId::new_v7(),
+            access,
+            definition,
+        ))
+        .map(|_| ())
+        .map_err(|problem| DesktopProblem::application(&problem))
+}
+
+pub(crate) fn create_provider_record(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    candidate: ProviderCandidate,
+) -> Result<CreateRecordView, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    register_provider_namespace(kernel, access, &candidate)?;
+    let grain = candidate.grain()?;
+    let identifier = candidate.identifier()?;
+    let fields = candidate.metadata_fields()?;
+    let outcome = kernel
+        .create_provider_record(CreateProviderRecordCommand::new(
+            RequestCorrelationId::new_v7(),
+            access,
+            grain,
+            identifier,
+            fields,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(CreateRecordView {
+        record_id: outcome.record_id().to_string(),
+        grain: outcome.grain(),
+    })
+}
+
+pub(crate) fn apply_provider_metadata(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    record_id: &str,
+    candidate: ProviderCandidate,
+) -> Result<(), DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let record_id = record_id
+        .parse::<RecordId>()
+        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
+    register_provider_namespace(kernel, access, &candidate)?;
+    let identifier = candidate.identifier()?;
+    let fields = candidate.metadata_fields()?;
+    kernel
+        .apply_provider_metadata(ApplyProviderMetadataCommand::new(
+            RequestCorrelationId::new_v7(),
+            access,
+            record_id,
+            identifier,
+            fields,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))
 }
 
 fn disposition_dto(disposition: TrackingDisposition) -> TrackingDispositionDto {

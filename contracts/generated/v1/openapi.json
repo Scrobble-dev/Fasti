@@ -497,11 +497,37 @@
         ],
         "type": "object"
       },
+      "RecordIdentifierDto": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "grain",
+          "value"
+        ],
+        "type": "object"
+      },
       "RecordSummaryDto": {
         "additionalProperties": false,
         "properties": {
           "grain": {
             "type": "string"
+          },
+          "identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/RecordIdentifierDto"
+            },
+            "type": "array"
           },
           "latest_activity": {
             "oneOf": [
@@ -513,11 +539,41 @@
               }
             ]
           },
+          "original_title": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedFieldDto"
+              }
+            ]
+          },
+          "overview": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedFieldDto"
+              }
+            ]
+          },
           "poster": {
             "$ref": "#/components/schemas/ResolvedFieldDto"
           },
           "record_id": {
             "type": "string"
+          },
+          "release_year": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedFieldDto"
+              }
+            ]
           },
           "status": {
             "type": "string"

@@ -1123,6 +1123,7 @@ name = "fasti-desktop"
 version = "0.1.0"
 dependencies = [
  "android-native-keyring-store",
+ "chrono",
  "fasti-application",
  "fasti-contracts",
  "fasti-domain",

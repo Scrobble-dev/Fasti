@@ -355,6 +355,169 @@ test("global search and configured record actions use durable tracking state", a
   expect(accessibility.violations).toEqual([]);
 });
 
+test("record metadata can refresh or switch through a configured provider", async ({
+  page,
+}) => {
+  const recordId = "rec_01991f588e0070008000000000000003";
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.addInitScript((id) => {
+    let title = "Dune";
+    let overview = "A noble family becomes involved in a war for Arrakis.";
+    let identifiers = [{ namespace: "tmdb", grain: "film", value: "438631" }];
+    const browserWindow = window as typeof window & {
+      __METADATA_CALLS__?: unknown[];
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+      };
+    };
+    browserWindow.__METADATA_CALLS__ = [];
+    browserWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command, arguments_) => {
+        switch (command) {
+          case "setup_status":
+            return { phase: "ready", proof_cleanup_pending: false };
+          case "provider_credential_status":
+            return [
+              {
+                provider: "tmdb",
+                label: "TMDB",
+                configured: true,
+                source: "credential_store",
+                writable: true,
+                docs_url: "https://developer.themoviedb.org/",
+              },
+            ];
+          case "list_tracking_dispositions":
+            return [];
+          case "list_records":
+            return [
+              {
+                grain: "film",
+                identifiers,
+                latest_activity: null,
+                original_title: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: title,
+                  source: "tmdb",
+                },
+                overview: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: overview,
+                  source: "tmdb",
+                },
+                poster: {
+                  is_stale: false,
+                  tier: "empty",
+                  value: null,
+                  source: null,
+                },
+                record_id: id,
+                release_year: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: "2021",
+                  source: "tmdb",
+                },
+                status: "active",
+                title: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: title,
+                  source: "tmdb",
+                },
+              },
+            ];
+          case "search_provider":
+            return [
+              {
+                provider: "tmdb",
+                provider_id: "693134",
+                title: "Dune: Part Two",
+                original_title: "Dune: Part Two",
+                kind: "movie",
+                release_year: 2024,
+                authors: [],
+                image_url: null,
+                overview: "Paul Atreides unites with Chani and the Fremen.",
+              },
+            ];
+          case "apply_provider_metadata": {
+            const call = (arguments_ as { input: unknown }).input as {
+              record_id: string;
+              selection: {
+                provider: string;
+                provider_id: string;
+                kind: string;
+              };
+            };
+            browserWindow.__METADATA_CALLS__?.push(call);
+            if (call.selection.provider_id === "693134") {
+              title = "Dune: Part Two";
+              overview = "Paul Atreides unites with Chani and the Fremen.";
+              identifiers = [
+                ...identifiers,
+                { namespace: "tmdb", grain: "film", value: "693134" },
+              ];
+            }
+            return undefined;
+          }
+          default:
+            throw new Error(`Unexpected trusted-host command: ${command}`);
+        }
+      },
+    };
+  }, recordId);
+
+  await page.goto(`/records/${recordId}`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Dune" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Refreshed metadata from tmdb.")).toBeVisible();
+  await page
+    .getByRole("searchbox", { name: "Search title, creator, or identifier" })
+    .fill("Dune Part Two");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText("Dune: Part Two", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Use metadata" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
+  ).toBeVisible();
+
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __METADATA_CALLS__?: unknown[];
+          }
+        ).__METADATA_CALLS__,
+    ),
+  ).toEqual([
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "438631", kind: "movie" },
+    },
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
+    },
+  ]);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
     test(`${theme} theme at ${viewport.width}px is truthful, reflowable, and accessible`, async ({

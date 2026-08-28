@@ -18,6 +18,7 @@ default = ["desktop-runtime"]
 desktop-runtime = ["dep:tauri", "dep:tauri-build", "tauri/wry"]
 
 [dependencies]
+chrono = "0.4"
 fasti-application = { path = "../../../crates/fasti-application" }
 fasti-contracts = { path = "../../../crates/fasti-contracts" }
 fasti-domain = { path = "../../../crates/fasti-domain" }

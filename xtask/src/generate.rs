@@ -2040,6 +2040,7 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "CreateRecordResponse",
         "ResolvedFieldDto",
         "RecordActivityDto",
+        "RecordIdentifierDto",
         "RecordSummaryDto",
         "ListRecordsResponse",
         "AttachIdentifierRequest",

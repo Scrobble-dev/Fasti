@@ -5,6 +5,9 @@
     ExternalId,
     ChronicleOccurrence,
     ContextMenuItemConfig,
+    ProviderCredentialStatus,
+    ProviderSearchCandidate,
+    ProviderSelection,
     TrackingDispositionUpdate,
   } from "./types.js";
   import {
@@ -28,12 +31,16 @@
     IconClock,
     IconDeviceTv,
     IconPhoto,
+    IconRefresh,
   } from "@tabler/icons-svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
   import ArtworkModal, { type ArtworkCandidate } from "./artwork-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import DiscoverView from "./discover-view.svelte";
+  import { hostProblemText } from "./host-problem.js";
+  import TmdbAttribution from "./tmdb-attribution.svelte";
   import { recordContextMenuItems } from "./record-actions.js";
 
   /** Namespaces whose external ID value is a real key an image CDN can
@@ -59,7 +66,20 @@
     occurrences?: ChronicleOccurrence[];
     initialTab?: "overview" | "sources";
     contextMenuConfigs?: ContextMenuItemConfig[];
+    providerCredentials?: ProviderCredentialStatus[];
+    providerLoading?: boolean;
+    providerHostProblem?: string;
     onBack: () => void;
+    onSearchMetadata?: (
+      provider: string,
+      query: string,
+    ) => Promise<ProviderSearchCandidate[]>;
+    onApplyMetadata?: (
+      recordId: string,
+      selection: ProviderSelection,
+    ) => Promise<void>;
+    onOpenProviderSettings?: () => void;
+    onRetryProviders?: () => void;
     onSetTrackingDisposition?: (
       recordId: string,
       disposition: TrackingDispositionUpdate,
@@ -92,7 +112,14 @@
     occurrences = [],
     initialTab = "overview",
     contextMenuConfigs,
+    providerCredentials,
+    providerLoading = false,
+    providerHostProblem,
     onBack,
+    onSearchMetadata,
+    onApplyMetadata,
+    onOpenProviderSettings,
+    onRetryProviders,
     onSetTrackingDisposition,
     onOpenReconciliation,
     onUpdateStatus,
@@ -121,6 +148,10 @@
   let showCollectionModal = $state(false);
   let showArtworkModal = $state(false);
 
+  let metadataRefreshingId = $state("");
+  let metadataProblem = $state("");
+  let metadataNotice = $state("");
+
   // Context Menu State
   let contextMenuState = $state<{
     x: number;
@@ -134,6 +165,8 @@
       activeTab = initialTab;
       editedNotesText = record.userNotes ?? "";
       isEditingNotes = false;
+      metadataProblem = "";
+      metadataNotice = "";
     }
     const seasonCount = record.seasons?.length ?? 0;
     if (seasonCount === 0) {
@@ -180,6 +213,66 @@
   function handleSaveNotes(): void {
     onUpdateNotes?.(record.id, editedNotesText);
     isEditingNotes = false;
+  }
+
+  function providerKindForRecord(): "book" | "movie" | "show" | null {
+    if (record.mediaKind === "book") return "book";
+    if (record.mediaKind === "movie") return "movie";
+    if (record.mediaKind === "show" || record.mediaKind === "anime") {
+      return "show";
+    }
+    return null;
+  }
+
+  function refreshSelection(xid: ExternalId): ProviderSelection | null {
+    const provider = xid.namespace.toLowerCase();
+    const kind = providerKindForRecord();
+    if (
+      (provider === "google-books" && kind === "book") ||
+      (provider === "tmdb" && (kind === "movie" || kind === "show"))
+    ) {
+      return { provider, provider_id: xid.value, kind };
+    }
+    return null;
+  }
+
+  async function searchCompatibleMetadata(
+    provider: string,
+    query: string,
+  ): Promise<ProviderSearchCandidate[]> {
+    if (!onSearchMetadata) return [];
+    const kind = providerKindForRecord();
+    if (!kind) return [];
+    const candidates = await onSearchMetadata(provider, query);
+    return candidates.filter((candidate) => candidate.kind === kind);
+  }
+
+  async function chooseMetadata(
+    candidate: ProviderSearchCandidate,
+  ): Promise<void> {
+    if (!onApplyMetadata) return;
+    await onApplyMetadata(record.id, {
+      provider: candidate.provider,
+      provider_id: candidate.provider_id,
+      kind: candidate.kind,
+    });
+    metadataNotice = `Applied metadata from ${candidate.title}.`;
+  }
+
+  async function refreshMetadata(xid: ExternalId): Promise<void> {
+    const selection = refreshSelection(xid);
+    if (!selection || !onApplyMetadata || metadataRefreshingId) return;
+    metadataRefreshingId = `${xid.namespace}:${xid.value}`;
+    metadataProblem = "";
+    metadataNotice = "";
+    try {
+      await onApplyMetadata(record.id, selection);
+      metadataNotice = `Refreshed metadata from ${xid.namespace}.`;
+    } catch (error) {
+      metadataProblem = hostProblemText(error, "Metadata refresh failed.");
+    } finally {
+      metadataRefreshingId = "";
+    }
   }
 
   function handleAddTagSubmit(e: Event): void {
@@ -562,7 +655,7 @@
     </aside>
 
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
-    <main class="main-content-pane">
+    <section class="main-content-pane" aria-label="Media record sections">
       <!-- Section Tabs -->
       <nav class="content-tabs" aria-label="Media section tabs">
         <button
@@ -901,36 +994,107 @@
                 Fasti maintains a stable, immutable identity (<code
                   >{record.id}</code
                 >) independent of TMDB, TVDB, or MyAnimeList. Provider claims
-                remain evidence. Metadata projection switching is not active in
-                this build.
+                remain evidence. Refresh appends a new provider claim; it does
+                not replace the record identity.
               </p>
             </div>
           </div>
 
-          <table class="assertions-table">
-            <thead>
-              <tr>
-                <th scope="col">Namespace</th>
-                <th scope="col">Identifier</th>
-                <th scope="col">Status</th>
-                <th scope="col">Provenance Route</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each record.externalIds as xid}
+          <div
+            class="assertions-scroll"
+            role="region"
+            aria-label="External identifiers"
+          >
+            <table class="assertions-table">
+              <thead>
                 <tr>
-                  <td class="mono">{xid.namespace}</td>
-                  <td class="mono"><strong>{xid.value}</strong></td>
-                  <td
-                    ><span class="status-pill matched"
-                      >{xid.status.replaceAll("_", " ")}</span
-                    ></td
-                  >
-                  <td>{xid.source}</td>
+                  <th scope="col">Namespace</th>
+                  <th scope="col">Identifier</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Provenance Route</th>
+                  <th scope="col">Action</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each record.externalIds as xid}
+                  {@const selection = refreshSelection(xid)}
+                  <tr>
+                    <td class="mono">{xid.namespace}</td>
+                    <td class="mono"><strong>{xid.value}</strong></td>
+                    <td
+                      ><span class="status-pill matched"
+                        >{xid.status.replaceAll("_", " ")}</span
+                      ></td
+                    >
+                    <td>{xid.source}</td>
+                    <td>
+                      {#if selection && onApplyMetadata}
+                        <button
+                          type="button"
+                          class="metadata-action"
+                          disabled={Boolean(metadataRefreshingId)}
+                          onclick={() => refreshMetadata(xid)}
+                        >
+                          <IconRefresh size={16} aria-hidden="true" />
+                          {metadataRefreshingId ===
+                          `${xid.namespace}:${xid.value}`
+                            ? "Refreshing…"
+                            : "Refresh"}
+                        </button>
+                      {:else}
+                        <span class="muted">No live adapter</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {:else}
+                  <tr>
+                    <td colspan="5" class="muted"
+                      >No external identifiers are attached.</td
+                    >
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+
+          <section
+            class="metadata-chooser"
+            aria-labelledby="metadata-chooser-title"
+          >
+            <div>
+              <h3 id="metadata-chooser-title">Choose metadata</h3>
+              <p>
+                Search a configured provider. The trusted host fetches the
+                selected item again before it stores claims.
+              </p>
+            </div>
+
+            {#key record.id}
+              <DiscoverView
+                embedded
+                {providerCredentials}
+                loading={providerLoading}
+                hostProblem={providerHostProblem}
+                onSearch={searchCompatibleMetadata}
+                onOpenSettings={onOpenProviderSettings ?? (() => {})}
+                onRetry={onRetryProviders ?? (() => {})}
+                onTrackRecord={onApplyMetadata ? chooseMetadata : undefined}
+                actionLabel="Use metadata"
+                completedLabel="Metadata applied"
+                actionProblemFallback="Fasti could not apply metadata to this record."
+              />
+            {/key}
+
+            {#if metadataNotice}
+              <p class="metadata-notice" role="status">{metadataNotice}</p>
+            {/if}
+            {#if metadataProblem}
+              <p class="metadata-problem" role="alert">{metadataProblem}</p>
+            {/if}
+            {#if record.externalIds.some((identifier) => identifier.namespace.toLowerCase() === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
+              <TmdbAttribution />
+            {/if}
+          </section>
         </section>
 
         <!-- TAB 5: PERSONAL REVIEWS & NOTES -->
@@ -1021,7 +1185,7 @@
           </div>
         </section>
       {/if}
-    </main>
+    </section>
   </div>
 </div>
 
@@ -1072,6 +1236,9 @@
 
 <style>
   .detail-container {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     max-width: 1200px;
     margin: 0 auto;
     padding: 24px;
@@ -1084,20 +1251,25 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
   }
   .back-btn {
     display: inline-flex;
     align-items: center;
+    min-height: 44px;
     gap: 6px;
     background: transparent;
     border: none;
-    color: var(--fasti-action-primary);
+    color: var(--fasti-text-primary);
     font-weight: 600;
     font-size: 0.92rem;
     cursor: pointer;
     padding: 6px 0;
   }
   .top-id-badge {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
     font-family: var(--fasti-font-mono);
     font-size: 0.78rem;
     color: var(--fasti-text-muted);
@@ -1354,6 +1526,7 @@
   }
 
   .main-content-pane {
+    min-width: 0;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -1717,6 +1890,12 @@
     border-radius: 4px;
     margin-bottom: 20px;
   }
+  .provider-banner > div {
+    min-width: 0;
+  }
+  .provider-banner code {
+    overflow-wrap: anywhere;
+  }
   .banner-title {
     font-size: 0.95rem;
     font-weight: 700;
@@ -1730,9 +1909,13 @@
 
   .assertions-table {
     width: 100%;
+    min-width: 720px;
     border-collapse: collapse;
     font-size: 0.88rem;
     text-align: left;
+  }
+  .assertions-scroll {
+    overflow-x: auto;
   }
   .assertions-table th,
   .assertions-table td {
@@ -1755,6 +1938,50 @@
       transparent
     );
     color: var(--fasti-state-verified);
+  }
+  .metadata-chooser {
+    display: grid;
+    gap: 16px;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+  .metadata-chooser h3,
+  .metadata-chooser p {
+    margin: 0;
+  }
+  .metadata-chooser > div > p,
+  .muted {
+    color: var(--fasti-text-muted);
+  }
+  .metadata-action {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .metadata-action {
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px 12px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+    border-radius: 4px;
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .metadata-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  .metadata-notice {
+    color: var(--fasti-state-verified);
+  }
+  .metadata-problem {
+    color: var(--fasti-state-problem, #b42318);
   }
 
   .notes-header-row {

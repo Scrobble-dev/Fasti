@@ -25,7 +25,7 @@ Those commands report contract state. They do not activate later-body runtime be
 | Identity review (inspect, defer, resume, resolve)                           | Implemented behind internal B2 ports for review; no production route exists                                                   |
 | Corrections and portability                                                 | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards               |
 | Browser Workbench                                                           | Pre-production browser session and implemented data surfaces; not a supported installation or release                         |
-| Trusted desktop network settings and Google Books search                    | Local Tauri IPC review body; no public HTTP route, event, record write, or browser provider execution                         |
+| Trusted desktop network settings and provider metadata                      | Local Tauri IPC search/read and atomic Google Books/TMDB claim writes; no public mutation route or browser provider execution |
 | Product packaging and release behavior                                      | Later bodies; absent now                                                                                                      |
 
 The fixture separates contract proof from availability claims. Its finite routes are generated into a dedicated conformance OpenAPI document. `receipt.stream` is governed as an AsyncAPI 3.x SSE operation. Successful fixture responses identify `fixture_only` availability and `none` durability; problem-only routes cannot imply a false success. The production router mounts health, durable node setup (initialize/enroll), observation acceptance, and the identity records/identifiers/namespaces routes above. All other fixture paths return `404` in production.
@@ -35,11 +35,13 @@ Required surfaces are generated or validated from the registry across domain/app
 The browser Workbench consumes generated production DTO parsers and browser-session cookies. Its global search uses loaded records and valid navigation commands. Its shared, configurable record-action registry mutates only active host capabilities; unsupported completion, progress, watchlist, collection, review, and tag operations stay disabled. Profile tracking disposition uses the governed profile-state route on web and the same application port on Desktop. Integration clients continue to use separately revocable scoped bearer credentials. The local Vite proxy is QA tooling, not an endpoint-configuration authority. Browser account request/response operations are OpenAPI-owned; they do not add an AsyncAPI event channel or JSON-LD domain entity.
 
 The trusted Tauri host can persist non-secret network preferences, test a
-configured Fasti service, store a Google Books key in the platform credential
-store, and return bounded neutral search candidates. These review commands are
-not daemon HTTP routes and do not activate public provider or media-record
-capabilities. OpenAPI, AsyncAPI, JSON Schema, and JSON-LD remain not applicable
-to this local IPC body.
+configured Fasti service, store Google Books and TMDB credentials in the
+platform credential store, and return bounded neutral search candidates. It
+refetches the exact selected item before the application atomically creates a
+Record with its identifier and claims or appends refreshed claims to an
+existing Record. These mutations are not daemon HTTP routes. The additive
+Record read projection is generated into OpenAPI and the TypeScript SDK;
+AsyncAPI and JSON-LD remain not applicable to this local IPC body.
 
 `cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1. The mandatory headless QA and developer-experience gates also pass on this branch. Closure requires the exact-head aggregate manifest, including the governed Tauri package and same-workflow-attempt x86_64/aarch64 low-hardware envelope packages from one exact `dev` push. Until `cargo xtask test milestone --body B1` passes, B1 remains in progress and B2 is not authorized.
 

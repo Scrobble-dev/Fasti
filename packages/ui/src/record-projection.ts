@@ -66,15 +66,38 @@ export function projectRecordSummary(
     summary.poster.tier !== "empty" && summary.poster.value
       ? summary.poster.value
       : undefined;
+  const originalTitle =
+    summary.original_title?.tier !== "empty"
+      ? (summary.original_title?.value ?? undefined)
+      : undefined;
+  const overview =
+    summary.overview?.tier !== "empty"
+      ? (summary.overview?.value ?? undefined)
+      : undefined;
+  const releaseYearValue =
+    summary.release_year?.tier !== "empty"
+      ? summary.release_year?.value
+      : undefined;
+  const releaseYear = releaseYearValue?.match(/^\d{4}$/)
+    ? Number(releaseYearValue)
+    : undefined;
 
   return {
     id: summary.record_id,
     title: titleValue,
+    originalTitle,
     mediaKind: mediaKindForGrain(summary.grain),
+    releaseYear,
+    overview,
     status,
     trackingDisposition: disposition ?? null,
     posterUrl: posterValue,
-    externalIds: [],
+    externalIds: (summary.identifiers ?? []).map((identifier) => ({
+      namespace: identifier.namespace,
+      value: identifier.value,
+      status: "matched",
+      source: identifier.namespace,
+    })),
     displaySource: "Fasti local record",
     tags: [],
     genres: [],

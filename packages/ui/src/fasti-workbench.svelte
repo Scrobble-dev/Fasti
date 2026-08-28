@@ -34,6 +34,7 @@
     MediaRecord,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
+    ProviderSelection,
     ResolveReviewInput,
     ReviewItem,
     ThemeSettings,
@@ -316,7 +317,8 @@
       recordsProblem = "This host does not support record listing yet.";
       return;
     }
-    recordsLoading = true;
+    const showLoading = mediaRecords.length === 0;
+    if (showLoading) recordsLoading = true;
     recordsProblem = undefined;
     try {
       const statesPromise = host.listTrackingDispositions
@@ -342,7 +344,7 @@
         "Could not load records from the host.",
       );
     } finally {
-      recordsLoading = false;
+      if (showLoading) recordsLoading = false;
     }
   }
 
@@ -412,6 +414,16 @@
   async function trackRecordFromDiscover(
     candidate: ProviderSearchCandidate,
   ): Promise<void> {
+    if (host.trackProviderCandidate) {
+      await host.trackProviderCandidate({
+        provider: candidate.provider,
+        provider_id: candidate.provider_id,
+        kind: candidate.kind,
+      });
+      recordsLoaded = false;
+      await loadRecords();
+      return;
+    }
     if (
       !host.createRecord ||
       !host.attachIdentifier ||
@@ -441,6 +453,30 @@
     await loadRecords();
   }
 
+  async function applyProviderMetadata(
+    recordId: string,
+    selection: ProviderSelection,
+  ): Promise<void> {
+    if (!host.applyProviderMetadata) {
+      throw new Error(
+        "Metadata refresh is only available in the trusted desktop host.",
+      );
+    }
+    recordActionProblem = undefined;
+    recordActionNotice = undefined;
+    try {
+      await host.applyProviderMetadata(recordId, selection);
+      await loadRecords();
+      recordActionNotice = `Metadata refreshed from ${selection.provider}.`;
+    } catch (error) {
+      recordActionProblem = hostProblemText(
+        error,
+        "Could not refresh metadata for this record.",
+      );
+      throw error;
+    }
+  }
+
   const watchingRecords = $derived(
     mediaRecords.filter((record) => record.status === "watching"),
   );
@@ -455,7 +491,10 @@
   );
 
   $effect(() => {
-    if (activeSection === "discover" && !discoverLoaded) {
+    if (
+      (activeSection === "discover" || activeSection === "detail") &&
+      !discoverLoaded
+    ) {
       discoverLoaded = true;
       void loadDiscover();
     }
@@ -644,9 +683,8 @@
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
-          onTrackRecord={host.createRecord &&
-          host.attachIdentifier &&
-          host.registerNamespace
+          onTrackRecord={host.trackProviderCandidate ||
+          (host.createRecord && host.attachIdentifier && host.registerNamespace)
             ? trackRecordFromDiscover
             : undefined}
         />
@@ -711,7 +749,17 @@
             availableCollections={[]}
             initialTab={selectedRecordTab}
             contextMenuConfigs={workbenchPreferences.contextMenuItems}
+            providerCredentials={discoverProviders}
+            providerLoading={discoverLoading}
+            providerHostProblem={discoverHostProblem}
             onBack={() => select("library")}
+            onSearchMetadata={(provider, query) =>
+              host.searchProvider(provider, query)}
+            onApplyMetadata={host.applyProviderMetadata
+              ? applyProviderMetadata
+              : undefined}
+            onOpenProviderSettings={() => select("settings")}
+            onRetryProviders={() => loadDiscover()}
             onSetTrackingDisposition={(recordId, disposition) =>
               void setTrackingDisposition(recordId, disposition)}
             onOpenReconciliation={() => select("reconciliation")}
