@@ -334,6 +334,7 @@ fn prune_cache(root: &Path, current: &Path) -> Result<(), DesktopProblem> {
     let entries = fs::read_dir(root)
         .map_err(|_| DesktopProblem::storage("Fasti could not inspect the artwork cache."))?;
     let mut files = Vec::new();
+    let own_temporary_prefix = format!(".tmp-{}-", std::process::id());
     for entry in entries {
         let entry = entry
             .map_err(|_| DesktopProblem::storage("Fasti could not inspect the artwork cache."))?;
@@ -342,9 +343,12 @@ fn prune_cache(root: &Path, current: &Path) -> Result<(), DesktopProblem> {
             continue;
         };
         if name.starts_with(".tmp-") {
-            fs::remove_file(entry.path()).map_err(|_| {
-                DesktopProblem::storage("Fasti could not clear staged provider artwork.")
-            })?;
+            if name.starts_with(&own_temporary_prefix) {
+                remove_cache_file(
+                    &entry.path(),
+                    "Fasti could not clear staged provider artwork.",
+                )?;
+            }
             continue;
         }
         if name.len() != 64 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -367,10 +371,17 @@ fn prune_cache(root: &Path, current: &Path) -> Result<(), DesktopProblem> {
         .filter(|(_, path)| path != current)
         .take(remove_count)
     {
-        fs::remove_file(path)
-            .map_err(|_| DesktopProblem::storage("Fasti could not prune the artwork cache."))?;
+        remove_cache_file(&path, "Fasti could not prune the artwork cache.")?;
     }
     Ok(())
+}
+
+fn remove_cache_file(path: &Path, message: &'static str) -> Result<(), DesktopProblem> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(DesktopProblem::storage(message)),
+    }
 }
 
 fn ensure_private_directory(path: &Path) -> Result<(), DesktopProblem> {
@@ -500,5 +511,23 @@ mod tests {
                 .count(),
             CACHE_FILE_LIMIT
         );
+    }
+
+    #[test]
+    fn cache_pruning_does_not_remove_another_process_temporary_file() {
+        let root = tempfile::tempdir().expect("cache root");
+        let current = root.path().join(format!("{:064x}", 1));
+        let own_temporary = root
+            .path()
+            .join(format!(".tmp-{}-stale", std::process::id()));
+        let foreign_temporary = root.path().join(".tmp-foreign-process-active");
+        fs::write(&current, b"cached artwork").expect("write cache entry");
+        fs::write(&own_temporary, b"stale").expect("write own temporary");
+        fs::write(&foreign_temporary, b"active").expect("write foreign temporary");
+
+        prune_cache(root.path(), &current).expect("prune cache");
+
+        assert!(!own_temporary.exists());
+        assert!(foreign_temporary.is_file());
     }
 }
