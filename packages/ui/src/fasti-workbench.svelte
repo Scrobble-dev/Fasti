@@ -981,26 +981,28 @@
       {#if activeSection === "connections"}
         <ConnectionsView {host} />
       {:else if activeSection === "settings"}
-        <RuntimeSettingsView
-          {host}
-          {workbenchPreferences}
-          canAccessProfileData={!host.currentBrowserSession ||
-            (browserSessionChecked && browserSession !== null)}
-          activeTab={settingsTab}
-          onTabChange={(tab: SettingsTab) => {
-            settingsTab = tab;
-            if (typeof window !== "undefined") {
-              const newPath = pathForSettingsTab(tab);
-              if (window.location.pathname !== newPath) {
-                window.history.pushState(null, "", newPath);
+        {#key host.currentBrowserSession ? (browserSession?.user.user_id ?? "signed-out") : "trusted-host"}
+          <RuntimeSettingsView
+            {host}
+            {workbenchPreferences}
+            canAccessProfileData={!host.currentBrowserSession ||
+              (browserSessionChecked && browserSession !== null)}
+            activeTab={settingsTab}
+            onTabChange={(tab: SettingsTab) => {
+              settingsTab = tab;
+              if (typeof window !== "undefined") {
+                const newPath = pathForSettingsTab(tab);
+                if (window.location.pathname !== newPath) {
+                  window.history.pushState(null, "", newPath);
+                }
               }
-            }
-          }}
-          onClientEndpointChanged={resetClientEndpoint}
-          onProviderCredentialsChanged={invalidateDiscoverProviders}
-          onUpdateWorkbenchPreferences={(patch) =>
-            (workbenchPreferences = { ...workbenchPreferences, ...patch })}
-        />
+            }}
+            onClientEndpointChanged={resetClientEndpoint}
+            onProviderCredentialsChanged={invalidateDiscoverProviders}
+            onUpdateWorkbenchPreferences={(patch) =>
+              (workbenchPreferences = { ...workbenchPreferences, ...patch })}
+          />
+        {/key}
       {:else if activeSection === "discover"}
         <DiscoverView
           providerCredentials={discoverProviders}
