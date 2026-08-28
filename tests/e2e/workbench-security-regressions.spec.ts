@@ -186,6 +186,131 @@ test("a rejected browser sign-in stays disconnected and recoverable", async ({
   ).toBeVisible();
 });
 
+test("profile settings discard the previous browser account state", async ({
+  page,
+  context,
+}) => {
+  const csrf = "a".repeat(64);
+  const users = {
+    a: {
+      user_id: "usr_01991f58-8e00-7000-8000-000000000001",
+      username: "account-a",
+      is_admin: true,
+      is_test_account: false,
+      active: true,
+      created_at: "2026-08-28T00:00:00Z",
+      updated_at: "2026-08-28T00:00:00Z",
+    },
+    b: {
+      user_id: "usr_01991f58-8e00-7000-8000-000000000002",
+      username: "account-b",
+      is_admin: true,
+      is_test_account: false,
+      active: true,
+      created_at: "2026-08-28T00:00:00Z",
+      updated_at: "2026-08-28T00:00:00Z",
+    },
+  } as const;
+  let currentUser: (typeof users)[keyof typeof users] | null = users.a;
+  let releaseAccountB: (() => void) | undefined;
+  let accountBRequests = 0;
+
+  await context.addCookies([
+    {
+      name: "fasti_csrf",
+      value: csrf,
+      url: browserOrigin,
+      sameSite: "Strict",
+    },
+  ]);
+  await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
+    const method = route.request().method();
+    if (method === "DELETE") {
+      currentUser = null;
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    if (method === "POST") currentUser = users.b;
+    if (!currentUser) {
+      await route.fulfill({ status: 401 });
+      return;
+    }
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        expires_at: "2026-08-28T23:00:00Z",
+        user: currentUser,
+      }),
+    });
+  });
+  await page.route(/\/api\/v1\/browser\/users$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ users: currentUser ? [currentUser] : [] }),
+    }),
+  );
+  await page.route(/\/api\/v1\/profile\/nuvio-collections$/, async (route) => {
+    if (currentUser?.user_id === users.a.user_id) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          document: [
+            {
+              id: "account-a-private",
+              title: "Account A private",
+              folders: [],
+            },
+          ],
+        }),
+      });
+      return;
+    }
+    accountBRequests += 1;
+    await new Promise<void>((resolve) => (releaseAccountB = resolve));
+    await route.fulfill({
+      status: 403,
+      contentType: "application/problem+json",
+      body: JSON.stringify({
+        type: "https://fasti.scrobble.dev/v1/problems/forbidden",
+        title: "Forbidden",
+        status: 403,
+        detail: "request is not authorized for this capability",
+        code: "forbidden",
+        capability_id: "profile.nuvio_collections.get",
+        safe_state: "no_mutation",
+        retryability: "not_retryable",
+        next_actions: [
+          {
+            id: "verify_request_authorization",
+            label: "Verify the request context and local grant",
+          },
+        ],
+        correlation_id: "req_01991f588e0070008000000000000002",
+        param: null,
+        actual: null,
+        violations: [],
+      }),
+    });
+  });
+
+  await page.goto("/settings/collections");
+  await expect(page.getByText("Account A private")).toBeVisible();
+  await page.getByRole("button", { name: "Manage account account-a" }).click();
+  const dialog = page.getByRole("dialog", { name: "Account access" });
+  await dialog.getByRole("button", { name: "Sign out" }).click();
+  await dialog.getByLabel("Username").fill("account-b");
+  await dialog.getByLabel("Password").fill("account-b-password");
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+
+  await expect.poll(() => accountBRequests).toBe(1);
+  await expect(page.getByText("Account A private")).toHaveCount(0);
+  releaseAccountB?.();
+  await expect(page.getByRole("alert")).toContainText(
+    "request is not authorized for this capability",
+  );
+  await expect(page.getByText("Account A private")).toHaveCount(0);
+});
+
 test("endpoint testing rejects a contract-invalid health response", async ({
   page,
 }) => {

@@ -984,6 +984,11 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          canAccessProfileData={!host.currentBrowserSession ||
+            (browserSessionChecked && browserSession !== null)}
+          profileDataIdentity={host.currentBrowserSession
+            ? (browserSession?.user.user_id ?? "signed-out")
+            : "trusted-host"}
           activeTab={settingsTab}
           onTabChange={(tab: SettingsTab) => {
             settingsTab = tab;
