@@ -53,6 +53,11 @@ Do not add optimistic stories for a capability that has no real host command.
 Add its states when its bounded context, contract or IPC adapter, typed recovery,
 and end-to-end evidence land together.
 
+Browser navigation aborts its active fetch. Tauri IPC has no `AbortSignal`
+channel, so the shared status controller prevents concurrent retry commands and
+ignores stale results. A native check that already started remains bounded by
+the desktop host's 15-second timeout.
+
 ## Non-negotiable boundaries
 
 - Headless daemon and contract gates remain independent of browser packaging.

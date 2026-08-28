@@ -7,6 +7,7 @@ type Scenario =
   | "status-route"
   | "status-setup-error"
   | "status-invalid-response"
+  | "status-single-flight"
   | "credential-delete"
   | "review-resolution"
   | "record-retry"
@@ -25,6 +26,7 @@ declare global {
   interface Window {
     __DELETE_CALLS__?: () => number;
     __ENDPOINT_CALLS__?: () => number;
+    __RESOLVE_ENDPOINT__?: () => void;
     __RECORD_CALLS__?: () => number;
     __REVIEW_CALLS__?: () => number;
     __RESOLVE_REVIEW__?: () => void;
@@ -94,6 +96,7 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     const browserWindow = window as typeof window & {
       __DELETE_CALLS__?: () => number;
       __ENDPOINT_CALLS__?: () => number;
+      __RESOLVE_ENDPOINT__?: () => void;
       __RECORD_CALLS__?: () => number;
       __REVIEW_CALLS__?: () => number;
       __RESOLVE_REVIEW__?: () => void;
@@ -115,6 +118,8 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     browserWindow.__REVIEW_CALLS__ = () => reviewCalls;
     browserWindow.__SEARCH_CALLS__ = () => searchResolvers.length;
     browserWindow.__STATUS_CALLS__ = () => statusResolvers.length;
+    let resolveEndpoint: (() => void) | undefined;
+    browserWindow.__RESOLVE_ENDPOINT__ = () => resolveEndpoint?.();
     browserWindow.__RESOLVE_SEARCH__ = (index, result) =>
       searchResolvers[index]?.([result]);
     browserWindow.__RESOLVE_STATUS__ = (index, google, tmdb) =>
@@ -143,6 +148,19 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
             return networkConfiguration;
           case "test_endpoint_connection":
             endpointCalls += 1;
+            if (activeScenario === "status-single-flight") {
+              if (endpointCalls === 1) {
+                throw {
+                  code: "connection_failed",
+                  title: "Connection failed",
+                  detail: "Fasti could not reach the endpoint.",
+                  next_action: "Check the address, then retry.",
+                };
+              }
+              await new Promise<void>((resolve) => {
+                resolveEndpoint = resolve;
+              });
+            }
             if (activeScenario === "status-invalid-response") {
               throw {
                 code: "invalid_response",
@@ -365,6 +383,27 @@ test("packaged invalid health uses contract recovery", async ({ page }) => {
     }),
   ).toBeVisible();
   await expect(page.getByText("generated health contract")).toBeVisible();
+});
+
+test("packaged retry starts one native health check", async ({ page }) => {
+  await installTrustedHost(page, "status-single-flight");
+  await page.goto("/status");
+  const retry = page.getByRole("button", { name: "Try again" });
+  await expect(retry).toBeVisible();
+
+  await retry.evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__ENDPOINT_CALLS__?.()))
+    .toBe(2);
+  await expect(page.getByText("Checking the local service")).toBeVisible();
+
+  await page.evaluate(() => window.__RESOLVE_ENDPOINT__?.());
+  await expect(
+    page.getByRole("heading", { name: "Local service available" }),
+  ).toBeVisible();
 });
 
 test("provider credential removal requires confirmation", async ({ page }) => {

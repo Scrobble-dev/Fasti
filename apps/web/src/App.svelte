@@ -104,12 +104,13 @@
   }
 
   async function inspectHealth(restoreRetryFocus = false): Promise<void> {
-    request?.abort();
+    if (request && !request.signal.aborted) return;
     const currentRequest = new AbortController();
     request = currentRequest;
     status = { view: "loading" };
     try {
       const configuration = await host.loadNetworkConfiguration();
+      if (currentRequest.signal.aborted || request !== currentRequest) return;
       const serviceUrl = configuration.connection.service_url;
       endpoint = connectionEndpoint(serviceUrl.value, serviceUrl.source);
       const response = await host.testEndpointConnection(
@@ -133,6 +134,8 @@
           document.getElementById("retry-health")?.focus();
         }
       }
+    } finally {
+      if (request === currentRequest) request = undefined;
     }
   }
 
