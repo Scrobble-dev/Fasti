@@ -242,6 +242,21 @@ forbidText(
   "aria-pressed={active ===",
   "URL-backed Settings destinations must be links with aria-current",
 );
+forbidText(
+  "apps/web/src/web-host.ts",
+  "await fetch(",
+  "route provider requests through the governed trusted host, never the browser host",
+);
+forbidText(
+  "apps/web/src/web-host.ts",
+  "fasti-provider-credentials",
+  "never place provider credentials in browser storage",
+);
+requireText(
+  "apps/web/src/web-host.ts",
+  "The browser host never accepts or stores provider secrets.",
+  "the browser host must preserve the provider credential trust boundary",
+);
 
 for (const rule of [
   [

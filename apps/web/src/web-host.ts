@@ -23,26 +23,6 @@ import type {
 } from "@fasti/ui";
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
-const CREDENTIALS_STORAGE_KEY = "fasti-provider-credentials";
-
-function loadSavedCredentials(): Record<string, string> {
-  if (typeof localStorage === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(CREDENTIALS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveStoredCredentials(creds: Record<string, string>): void {
-  if (typeof localStorage === "undefined") return;
-  try {
-    localStorage.setItem(CREDENTIALS_STORAGE_KEY, JSON.stringify(creds));
-  } catch {
-    // Best-effort storage
-  }
-}
 
 const PROVIDERS: ReadonlyArray<{
   provider: string;
@@ -219,7 +199,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     });
   let network = loadNetworkConfiguration(defaultApiUrl);
   let client = createClient(network.connection.service_url.value);
-  let savedCredentials = loadSavedCredentials();
 
   return {
     networkConfigurationScope: "client",
@@ -288,178 +267,38 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     },
 
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
-      return PROVIDERS.map((provider) => {
-        const hasCred = Boolean(savedCredentials[provider.provider]);
-        return {
-          provider: provider.provider,
-          label: provider.label,
-          configured: hasCred,
-          source: hasCred ? "credential_store" : "none",
-          writable: true,
-          docs_url: provider.docs_url,
-        };
-      });
+      return PROVIDERS.map((provider) => ({
+        provider: provider.provider,
+        label: provider.label,
+        configured: false,
+        source: "none",
+        writable: false,
+        docs_url: provider.docs_url,
+      }));
     },
 
     async saveProviderCredential(
       provider: string,
-      credential: string,
     ): Promise<ProviderCredentialStatus[]> {
-      if (!credential || !credential.trim()) {
-        throw new Error("Credential cannot be empty.");
-      }
-      savedCredentials = {
-        ...savedCredentials,
-        [provider]: credential.trim(),
-      };
-      saveStoredCredentials(savedCredentials);
-      return this.providerCredentialStatus();
+      throw unavailable(
+        `${provider} credentials require the trusted native or server host. The browser host never accepts or stores provider secrets.`,
+      );
     },
 
     async deleteProviderCredential(
       provider: string,
     ): Promise<ProviderCredentialStatus[]> {
-      const next = { ...savedCredentials };
-      delete next[provider];
-      savedCredentials = next;
-      saveStoredCredentials(savedCredentials);
-      return this.providerCredentialStatus();
+      throw unavailable(
+        `${provider} credentials are not managed by the browser host.`,
+      );
     },
 
     async searchProvider(
       provider: string,
-      query: string,
+      _query: string,
     ): Promise<ProviderSearchCandidate[]> {
-      const cred = savedCredentials[provider];
-      if (provider === "tmdb") {
-        if (!cred) {
-          throw new Error("TMDB Read Access Token is required to search TMDB.");
-        }
-        const isV3Key = cred.length === 32 && /^[0-9a-fA-F]+$/.test(cred);
-        const url = isV3Key
-          ? `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(cred)}&query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`
-          : `https://api.themoviedb.org/3/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=1`;
-        const headers: Record<string, string> = isV3Key
-          ? { Accept: "application/json" }
-          : { Accept: "application/json", Authorization: `Bearer ${cred}` };
-        const response = await fetch(url, { headers });
-        if (!response.ok) {
-          throw new Error(
-            `TMDB returned HTTP ${response.status}: ${response.statusText}`,
-          );
-        }
-        const data = await response.json();
-        const results = Array.isArray(data.results) ? data.results : [];
-        return results
-          .filter(
-            (item: any) =>
-              item.media_type === "movie" || item.media_type === "tv",
-          )
-          .map((item: any) => {
-            const isMovie = item.media_type === "movie";
-            const title = isMovie
-              ? item.title || item.original_title
-              : item.name || item.original_name;
-            const releaseDate = isMovie
-              ? item.release_date
-              : item.first_air_date;
-            const year = releaseDate ? releaseDate.slice(0, 4) : undefined;
-            const posterPath = item.poster_path
-              ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
-              : null;
-            return {
-              provider: "tmdb",
-              provider_id: String(item.id),
-              title: title || "Untitled",
-              kind: isMovie ? "movie" : "show",
-              release_year: year ? parseInt(year, 10) : undefined,
-              authors: [],
-              image_url: posterPath,
-            } satisfies ProviderSearchCandidate;
-          });
-      }
-
-      if (provider === "google-books") {
-        const url = cred
-          ? `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&key=${encodeURIComponent(cred)}`
-          : `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}`;
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error(`Google Books API returned HTTP ${response.status}`);
-        }
-        const data = await response.json();
-        const items = Array.isArray(data.items) ? data.items : [];
-        return items.map((item: any) => {
-          const info = item.volumeInfo || {};
-          const imageLinks = info.imageLinks || {};
-          const img = imageLinks.thumbnail || imageLinks.smallThumbnail || null;
-          const year = info.publishedDate
-            ? info.publishedDate.slice(0, 4)
-            : undefined;
-          return {
-            provider: "google-books",
-            provider_id: String(item.id),
-            title: info.title || "Untitled Book",
-            kind: "book",
-            release_year: year ? parseInt(year, 10) : undefined,
-            authors: Array.isArray(info.authors) ? info.authors : [],
-            image_url: img ? img.replace(/^http:/, "https:") : null,
-          } satisfies ProviderSearchCandidate;
-        });
-      }
-
-      if (provider === "open-library") {
-        const response = await fetch(
-          `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=20`,
-        );
-        if (!response.ok) throw new Error("Open Library search failed");
-        const data = await response.json();
-        const docs = Array.isArray(data.docs) ? data.docs : [];
-        return docs.map(
-          (doc: any) =>
-            ({
-              provider: "open-library",
-              provider_id:
-                doc.key?.replace("/works/", "") ||
-                String(doc.cover_i || Math.random()),
-              title: doc.title || "Untitled",
-              kind: "book",
-              release_year: doc.first_publish_year,
-              authors: Array.isArray(doc.author_name) ? doc.author_name : [],
-              image_url: doc.cover_i
-                ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
-                : null,
-            }) satisfies ProviderSearchCandidate,
-        );
-      }
-
-      if (provider === "kitsu") {
-        const response = await fetch(
-          `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(query)}`,
-        );
-        if (!response.ok) throw new Error("Kitsu search failed");
-        const data = await response.json();
-        const items = Array.isArray(data.data) ? data.data : [];
-        return items.map((item: any) => {
-          const attr = item.attributes || {};
-          const titles = attr.titles || {};
-          return {
-            provider: "kitsu",
-            provider_id: String(item.id),
-            title: titles.en || titles.en_jp || attr.canonicalTitle || "Anime",
-            kind: "anime",
-            release_year: attr.startDate
-              ? parseInt(attr.startDate.slice(0, 4), 10)
-              : undefined,
-            authors: [],
-            image_url:
-              attr.posterImage?.medium || attr.posterImage?.small || null,
-          } satisfies ProviderSearchCandidate;
-        });
-      }
-
-      throw new Error(
-        `Provider ${provider} does not support live browser search yet.`,
+      throw unavailable(
+        `${provider} search is not active in the browser host. Provider requests must use the governed native or server host.`,
       );
     },
 

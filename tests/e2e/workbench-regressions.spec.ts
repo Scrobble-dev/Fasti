@@ -442,7 +442,7 @@ test("direct canonical and compatibility Settings routes preserve one active sec
     ["/settings/system", "Capability status"],
   ] as const) {
     await page.goto(path);
-    await expect(page).toHaveURL(new RegExp(`${path.replace("-", "\\-")}$`));
+    expect(new URL(page.url()).pathname).toBe(path);
     const navigation = page.getByRole("navigation", {
       name: "Settings sections",
     });
