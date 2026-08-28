@@ -23,6 +23,14 @@ Both tables carry `workspace_id` directly (matching `external_identifiers`'s con
 
 The trusted Desktop adapter is the current production caller. Google Books supplies book title, description, publication year, and thumbnail claims. TMDB supplies movie or TV title, original title, overview, release year, and poster claims. Search responses are only choices: the host fetches the exact provider ID again before it constructs claims or opens the transaction.
 
+When the exact item contains a poster, the Desktop host downloads it through a
+separate `metadata.artwork` policy grant before the metadata write. It retains
+the remote URL as provider evidence, but the Desktop read projection adds an
+optional owner-only cache path only after revalidating the cached file. The web
+adapter converts that path to Tauri's narrowly scoped local asset URL and
+replaces the remote poster value before any component renders it. The public
+HTTP projection remains provider-claim data and has no filesystem field.
+
 ## 3. The query capability
 
 `IdentityPort::list_records` (`fasti-application::kernel`) takes a `ListRecordsQuery` (workspace-scoped access, no filters yet) and returns `Vec<RecordSummary>`. For each active Record in the workspace (bounded to 500 rows, no cursor pagination yet):
@@ -37,7 +45,7 @@ The canonical field keys are owned once in `fasti-domain::metadata`; provider ad
 
 ## 4. Tauri and HTTP surfaces
 
-`apps/desktop/src-tauri/src/records.rs` exposes `list_records`, `create_provider_record`, and `apply_provider_metadata`, following the same authenticated local-kernel pattern as the other Desktop commands. `track_provider_candidate` and `apply_provider_metadata` first perform the authorized provider read in `providers.rs`, then call these local operations. They make no daemon HTTP round-trip.
+`apps/desktop/src-tauri/src/records.rs` exposes `list_records`, `create_provider_record`, and `apply_provider_metadata`, following the same authenticated local-kernel pattern as the other Desktop commands. `track_provider_candidate` and `apply_provider_metadata` first perform the authorized provider read in `providers.rs`, cache validated artwork when present, then call these local operations. They make no daemon HTTP round-trip.
 
 `crates/fasti-api/src/records.rs` exposes the same query as `GET /api/v1/records`, bearer-authenticated the same way as every other production-runtime route. This is the surface the browser-hosted web app uses -- the Tauri command above is desktop-only and never reachable from a browser tab.
 

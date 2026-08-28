@@ -427,6 +427,9 @@ export interface RecordSummary {
   readonly status: "active";
   readonly title: ResolvedFieldView;
   readonly poster: ResolvedFieldView;
+  /** Trusted Desktop-only cache path. The host converts it to a scoped asset
+   * URL and never passes the provider URL to the Desktop webview. */
+  readonly poster_asset_path?: string;
   readonly original_title?: ResolvedFieldView;
   readonly overview?: ResolvedFieldView;
   readonly release_year?: ResolvedFieldView;

@@ -1,3 +1,4 @@
+use crate::artwork::ArtworkCache;
 use crate::providers::ProviderCandidate;
 use crate::setup::{authenticate, DesktopProblem, SetupSecretStore};
 use fasti_application::{
@@ -61,6 +62,7 @@ pub(crate) struct RecordSummary {
     status: RecordStatus,
     title: ResolvedFieldView,
     poster: ResolvedFieldView,
+    poster_asset_path: Option<String>,
     original_title: ResolvedFieldView,
     overview: ResolvedFieldView,
     release_year: ResolvedFieldView,
@@ -78,6 +80,7 @@ fn require_access(
 pub(crate) fn list_records(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
+    artwork: &ArtworkCache,
 ) -> Result<Vec<RecordSummary>, DesktopProblem> {
     let access = require_access(kernel, store)?;
     let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
@@ -86,30 +89,38 @@ pub(crate) fn list_records(
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(summaries
         .into_iter()
-        .map(|summary| RecordSummary {
-            record_id: summary.record_id().to_string(),
-            grain: summary.grain(),
-            status: summary.status(),
-            title: summary.title().into(),
-            poster: summary.poster().into(),
-            original_title: summary.original_title().into(),
-            overview: summary.overview().into(),
-            release_year: summary.release_year().into(),
-            identifiers: summary
-                .identifiers()
-                .iter()
-                .map(|identifier| RecordIdentifierView {
-                    namespace: identifier.namespace().to_string(),
-                    grain: identifier.grain(),
-                    value: identifier.value().to_owned(),
-                })
-                .collect(),
-            latest_activity: summary
-                .latest_activity()
-                .map(|activity| RecordActivityView {
-                    occurred_at: activity.occurred_at().cloned(),
-                    interpretation_state: activity.interpretation_state(),
-                }),
+        .map(|summary| {
+            let poster_asset_path = summary
+                .poster()
+                .source()
+                .zip(summary.poster().value())
+                .and_then(|(source, url)| artwork.local_path(source.as_str(), url));
+            RecordSummary {
+                record_id: summary.record_id().to_string(),
+                grain: summary.grain(),
+                status: summary.status(),
+                title: summary.title().into(),
+                poster: summary.poster().into(),
+                poster_asset_path,
+                original_title: summary.original_title().into(),
+                overview: summary.overview().into(),
+                release_year: summary.release_year().into(),
+                identifiers: summary
+                    .identifiers()
+                    .iter()
+                    .map(|identifier| RecordIdentifierView {
+                        namespace: identifier.namespace().to_string(),
+                        grain: identifier.grain(),
+                        value: identifier.value().to_owned(),
+                    })
+                    .collect(),
+                latest_activity: summary
+                    .latest_activity()
+                    .map(|activity| RecordActivityView {
+                        occurred_at: activity.occurred_at().cloned(),
+                        interpretation_state: activity.interpretation_state(),
+                    }),
+            }
         })
         .collect())
 }
@@ -366,22 +377,24 @@ mod tests {
 
     #[test]
     fn list_records_refuses_before_setup_completes() {
-        let (_root, kernel) = new_kernel();
+        let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
 
         assert!(matches!(
-            list_records(&kernel, &store),
+            list_records(&kernel, &store, &artwork),
             Err(problem) if problem.code() == "not_authenticated"
         ));
     }
 
     #[test]
     fn list_records_is_honestly_empty_on_a_fresh_node() {
-        let (_root, kernel) = new_kernel();
+        let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
         complete_setup(&kernel, &store).expect("complete setup");
 
-        let records = list_records(&kernel, &store).expect("list records");
+        let records = list_records(&kernel, &store, &artwork).expect("list records");
         assert!(records.is_empty());
     }
 
@@ -398,14 +411,15 @@ mod tests {
 
     #[test]
     fn create_record_makes_the_new_record_listable() {
-        let (_root, kernel) = new_kernel();
+        let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
         complete_setup(&kernel, &store).expect("complete setup");
 
         let created = create_record(&kernel, &store, Grain::Film).expect("create record");
         assert_eq!(created.grain, Grain::Film);
 
-        let records = list_records(&kernel, &store).expect("list records");
+        let records = list_records(&kernel, &store, &artwork).expect("list records");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record_id, created.record_id);
     }

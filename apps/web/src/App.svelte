@@ -4,7 +4,7 @@
     FastiProtocolError,
     connectionEndpoint,
   } from "@fasti/sdk";
-  import type { WorkbenchHost } from "@fasti/ui";
+  import type { RecordSummary, WorkbenchHost } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
     type SetupViewState,
@@ -167,7 +167,7 @@
 
   async function inspectDesktop(): Promise<void> {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
+      const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
       host = {
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
         saveNetworkConfiguration: (input) =>
@@ -198,7 +198,17 @@
           }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
-        listRecords: () => invoke("list_records"),
+        listRecords: async () =>
+          (await invoke<RecordSummary[]>("list_records")).map((record) => {
+            const { poster_asset_path: path, ...summary } = record;
+            return {
+              ...summary,
+              poster: {
+                ...record.poster,
+                value: path ? convertFileSrc(path) : null,
+              },
+            };
+          }),
         createRecord: (grain) => invoke("create_record", { grain }),
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),

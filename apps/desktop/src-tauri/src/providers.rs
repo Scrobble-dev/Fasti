@@ -17,14 +17,14 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use zeroize::Zeroize;
 
-const GOOGLE_BOOKS_PROVIDER: &str = "google-books";
+pub(crate) const GOOGLE_BOOKS_PROVIDER: &str = "google-books";
 const GOOGLE_BOOKS_LABEL: &str = "Google Books";
 const GOOGLE_BOOKS_HOST: &str = "www.googleapis.com";
 const GOOGLE_BOOKS_URL: &str = "https://www.googleapis.com/books/v1/volumes";
 const GOOGLE_BOOKS_ENV: &str = "GOOGLE_BOOKS_API_KEY";
 const GOOGLE_BOOKS_ACCOUNT: &str = "provider/google-books/api-key";
 const GOOGLE_BOOKS_DOCS: &str = "https://developers.google.com/books/docs/v1/using";
-const TMDB_PROVIDER: &str = "tmdb";
+pub(crate) const TMDB_PROVIDER: &str = "tmdb";
 const TMDB_LABEL: &str = "The Movie Database (TMDB)";
 const TMDB_HOST: &str = "api.themoviedb.org";
 const TMDB_SEARCH_URL: &str = "https://api.themoviedb.org/3/search/multi";

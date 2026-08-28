@@ -171,21 +171,35 @@ sensitive `X-Goog-Api-Key` header and TMDB tokens in the sensitive
 
 Search returns at most ten neutral candidates. Selecting a candidate does not
 trust the earlier search body: the host performs a bounded `metadata.read` for
-the exact provider ID, then passes validated identifiers and field claims to
-the local application port. Creating a provider record commits the Record,
-identifier, and claims atomically. Refresh attaches or verifies the selected
-identifier and appends claims without rewriting earlier provider evidence.
-Provider failure leaves existing identity and Chronicle state unchanged. The
-browser does not receive credentials or execute provider requests.
+the exact provider ID. If that exact response contains artwork, the host then
+authorizes a separate `metadata.artwork` request to `image.tmdb.org`,
+`books.google.com`, or `books.googleusercontent.com`. It resolves and
+authorizes every address, pins a proxy-free and redirect-free client, sends no
+provider credential, and accepts only JPEG, PNG, or WebP content up to 2 MB and
+4096 pixels per dimension. A failure occurs before the metadata write.
+
+Validated artwork is written atomically to an owner-only app cache. The cache
+keeps at most 128 content-addressed files. `list_records` exposes a local path
+only when the file is regular, bounded, and still has safe image dimensions.
+The Desktop adapter converts that path through Tauri's asset protocol, whose
+runtime scope contains only the artwork cache directory. Remote provider URLs
+remain provenance claims and never reach a Desktop image element.
+
+After network work succeeds, the host passes validated identifiers and field
+claims to the local application port. Creating a provider record commits the
+Record, identifier, and claims atomically. Refresh attaches or verifies the
+selected identifier and appends claims without rewriting earlier provider
+evidence. Provider failure leaves existing identity and Chronicle state
+unchanged. The browser does not receive credentials or execute provider
+requests.
 
 TMDB's [API FAQ](https://developer.themoviedb.org/docs/faq) requires attribution
 for applications that use its API. The Workbench
 includes the approved TMDB mark and required non-endorsement notice in Provider
 credits. Commercial deployments need the appropriate TMDB licence; configuring
-a token does not grant one. Poster URLs are stored as provider claims, but the
-Desktop CSP continues to reject remote images until Fasti has an authorized,
-bounded local asset cache. Do not relax `img-src` or bypass outbound policy to
-display them.
+a token does not grant one. Poster URLs are stored as provider claims. The
+Desktop CSP still rejects remote images; it permits only the narrowly scoped
+local Tauri asset protocol in addition to self-contained image sources.
 
 An app-managed provider credential is scoped to the identity of the opened
 physical Fasti data root. Fasti derives that identity from the retained root

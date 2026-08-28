@@ -3,6 +3,7 @@
 #![cfg_attr(not(feature = "desktop-runtime"), allow(dead_code))]
 
 mod api_clients;
+mod artwork;
 mod endpoint;
 mod network_config;
 mod outbound_http;
@@ -39,6 +40,7 @@ struct DesktopState {
     kernel: Mutex<Option<Arc<SqliteKernel>>>,
     setup_gate: Mutex<()>,
     network: NetworkConfigStore,
+    artwork: artwork::ArtworkCache,
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -208,6 +210,10 @@ async fn track_provider_candidate(
         kernel.data_root_identity(),
     )
     .await?;
+    state
+        .artwork
+        .cache_candidate(&candidate, configuration.outbound_policy())
+        .await?;
     records::create_provider_record(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
@@ -237,6 +243,10 @@ async fn apply_provider_metadata(
         kernel.data_root_identity(),
     )
     .await?;
+    state
+        .artwork
+        .cache_candidate(&candidate, configuration.outbound_policy())
+        .await?;
     records::apply_provider_metadata(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
@@ -254,6 +264,7 @@ fn list_records(
     records::list_records(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        &state.artwork,
     )
 }
 
@@ -410,12 +421,20 @@ pub fn run() {
                 io::Error::other("Fasti could not initialize the platform credential store")
             })?;
             let config_root = app.path().app_config_dir()?;
+            let artwork_root = app.path().app_cache_dir()?.join("provider-artwork");
             let data_root = data_root(app)?;
+            let artwork = artwork::ArtworkCache::new(artwork_root);
+            artwork.prepare().map_err(|_| {
+                io::Error::other("Fasti could not prepare its private artwork cache")
+            })?;
+            app.asset_protocol_scope()
+                .allow_directory(artwork.root(), false)?;
             app.manage(DesktopState {
                 data_root,
                 kernel: Mutex::new(None),
                 setup_gate: Mutex::new(()),
                 network: NetworkConfigStore::new(&config_root),
+                artwork,
             });
             Ok(())
         })
