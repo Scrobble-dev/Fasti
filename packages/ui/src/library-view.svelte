@@ -2,6 +2,7 @@
   import type {
     MediaRecord,
     MediaKind,
+    TrackingDispositionUpdate,
     WatchStatus,
     ContextMenuItemConfig,
   } from "./types.js";
@@ -10,26 +11,28 @@
     IconLayoutGrid,
     IconList,
     IconStarFilled,
-    IconCheck,
     IconBookmark,
     IconEye,
     IconEyeCheck,
     IconFolder,
-    IconMessage,
-    IconDotsVertical,
-    IconAdjustments,
-    IconRepeat,
   } from "@tabler/icons-svelte";
   import FastActionBar from "./fast-action-bar.svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
+  import { recordProgressPercent } from "./progress.js";
 
   interface Props {
     records: MediaRecord[];
     availableCollections: string[];
-    onSelectRecord: (recordId: string) => void;
+    onSelectRecord: (recordId: string, tab?: "overview" | "sources") => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
     onUpdateProgress?: (
@@ -47,6 +50,8 @@
     records,
     availableCollections,
     onSelectRecord,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
     onUpdateStatus,
     onUpdateRating,
     onUpdateProgress,
@@ -107,15 +112,17 @@
   ];
 
   function handleToggleWatched(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
     const nextStatus: WatchStatus =
       rec.status === "completed" ? "watching" : "completed";
-    onUpdateStatus?.(rec.id, nextStatus);
+    onUpdateStatus(rec.id, nextStatus);
   }
 
   function handleToggleWatchlist(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
     const nextStatus: WatchStatus =
       rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
-    onUpdateStatus?.(rec.id, nextStatus);
+    onUpdateStatus(rec.id, nextStatus);
   }
 
   function handleOpenCollection(rec: MediaRecord): void {
@@ -130,76 +137,49 @@
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
     e.preventDefault();
-    const allItems: Record<string, ContextMenuItem> = {
-      view: {
-        id: "view",
-        label: "View Details...",
-        icon: IconEye,
-        action: () => onSelectRecord(rec.id),
-      },
-      progress: {
-        id: "progress",
-        label: "Update Progress...",
-        icon: IconAdjustments,
-        action: () => {
-          activeModalRecord = rec;
-          showProgressModal = true;
-        },
-      },
-      review: {
-        id: "review",
-        label: "Post a Review...",
-        icon: IconMessage,
-        action: () => {
-          activeModalRecord = rec;
-          showReviewModal = true;
-        },
-      },
-      collection: {
-        id: "collection",
-        label: "Add to Collection...",
-        icon: IconFolder,
-        action: () => {
-          activeModalRecord = rec;
-          showCollectionModal = true;
-        },
-      },
-      watched: {
-        id: "watched",
-        label: "Log Occurrence (Rewatch)",
-        icon: IconRepeat,
-        action: () => onUpdateStatus?.(rec.id, "completed"),
-      },
-      watchlist: {
-        id: "watchlist",
-        label:
-          rec.status === "plan_to_watch"
-            ? "Remove from Watchlist"
-            : "Add to Watchlist",
-        icon: IconBookmark,
-        action: () => handleToggleWatchlist(rec),
-      },
-      manage_ids: {
-        id: "manage_ids",
-        label: `Copy Fasti ID (${rec.id})`,
-        action: () => navigator.clipboard.writeText(rec.id),
-      },
-    };
-
-    let items: ContextMenuItem[] = [];
-    if (contextMenuConfigs && contextMenuConfigs.length > 0) {
-      items = [...contextMenuConfigs]
-        .filter((cfg) => cfg.visible && allItems[cfg.id])
-        .sort((a, b) => a.order - b.order)
-        .map((cfg) => allItems[cfg.id]);
-    } else {
-      items = Object.values(allItems);
-    }
-
     contextMenuState = {
       x: e.clientX,
       y: e.clientY,
-      items,
+      items: recordContextMenuItems(
+        rec,
+        {
+          onView: () => onSelectRecord(rec.id),
+          onSetTrackingDisposition: onSetTrackingDisposition
+            ? (disposition) => onSetTrackingDisposition(rec.id, disposition)
+            : undefined,
+          onMarkCompleted: onUpdateStatus
+            ? () => handleToggleWatched(rec)
+            : undefined,
+          onUpdateProgress: onUpdateProgress
+            ? () => {
+                activeModalRecord = rec;
+                showProgressModal = true;
+              }
+            : undefined,
+          onToggleWatchlist: onUpdateStatus
+            ? () => handleToggleWatchlist(rec)
+            : undefined,
+          onOpenCollection: onSaveCollection
+            ? () => {
+                activeModalRecord = rec;
+                showCollectionModal = true;
+              }
+            : undefined,
+          onOpenReview: onSaveReview
+            ? () => {
+                activeModalRecord = rec;
+                showReviewModal = true;
+              }
+            : undefined,
+          onInspectIds: () => onSelectRecord(rec.id, "sources"),
+          onReconcile: onOpenReconciliation,
+          onCopyId:
+            typeof navigator !== "undefined" && navigator.clipboard
+              ? () => void navigator.clipboard.writeText(rec.id).catch(() => {})
+              : undefined,
+        },
+        contextMenuConfigs,
+      ),
     };
   }
 </script>
@@ -209,7 +189,8 @@
     <div>
       <h1 class="view-title">Library</h1>
       <p class="view-subtitle">
-        Your unified media collection across all providers and formats.
+        Review up to 500 records returned by the active Fasti host. More records
+        can exist until pagination is active.
       </p>
     </div>
 
@@ -221,6 +202,7 @@
         class:active={viewMode === "grid"}
         onclick={() => (viewMode = "grid")}
         aria-label="Grid view"
+        aria-pressed={viewMode === "grid"}
       >
         <IconLayoutGrid size={18} stroke={1.75} />
       </button>
@@ -230,6 +212,7 @@
         class:active={viewMode === "list"}
         onclick={() => (viewMode = "list")}
         aria-label="List view"
+        aria-pressed={viewMode === "list"}
       >
         <IconList size={18} stroke={1.75} />
       </button>
@@ -309,6 +292,7 @@
   {:else if viewMode === "grid"}
     <div class="media-grid">
       {#each filteredRecords as rec (rec.id)}
+        {@const pct = recordProgressPercent(rec)}
         <div
           class="card-wrapper"
           role="group"
@@ -334,6 +318,14 @@
 
               <span class="kind-badge {rec.mediaKind}">{rec.mediaKind}</span>
 
+              {#if pct > 0}
+                <div class="top-badge-pct" title="{pct}% completed">
+                  {pct}%
+                </div>
+                <div class="progress-bar-track">
+                  <div class="progress-bar-fill" style="width: {pct}%"></div>
+                </div>
+              {/if}
               {#if rec.userRating}
                 <div class="card-rating">
                   <IconStarFilled size={12} class="star-icon" />
@@ -353,10 +345,14 @@
           <div class="fast-action-toolbar-wrap">
             <FastActionBar
               record={rec}
-              onToggleWatched={handleToggleWatched}
-              onToggleWatchlist={handleToggleWatchlist}
-              onOpenCollection={handleOpenCollection}
-              onOpenReview={handleOpenReview}
+              onToggleWatched={onUpdateStatus ? handleToggleWatched : undefined}
+              onToggleWatchlist={onUpdateStatus
+                ? handleToggleWatchlist
+                : undefined}
+              onOpenCollection={onSaveCollection
+                ? handleOpenCollection
+                : undefined}
+              onOpenReview={onSaveReview ? handleOpenReview : undefined}
               onOpenContextMenu={handleOpenContextMenu}
             />
           </div>
@@ -367,12 +363,14 @@
               class="title-link"
               onclick={() => onSelectRecord(rec.id)}
             >
-              <h3 class="card-title">{rec.title}</h3>
+              <h2 class="card-title">{rec.title}</h2>
             </button>
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
               <span class="status-indicator {rec.status}"
-                >{rec.status.replaceAll("_", " ")}</span
+                >{rec.status === "unknown"
+                  ? "tracking state unavailable"
+                  : rec.status.replaceAll("_", " ")}</span
               >
             </div>
           </div>
@@ -419,7 +417,9 @@
               >
               <td
                 ><span class="status-pill {rec.status}"
-                  >{rec.status.replaceAll("_", " ")}</span
+                  >{rec.status === "unknown"
+                    ? "Unavailable"
+                    : rec.status.replaceAll("_", " ")}</span
                 ></td
               >
               <td>
@@ -443,9 +443,14 @@
                   <button
                     type="button"
                     class="table-btn"
-                    class:active={rec.status === "completed"}
+                    class:active={Boolean(
+                      onUpdateStatus && rec.status === "completed",
+                    )}
+                    disabled={!onUpdateStatus}
                     onclick={() => handleToggleWatched(rec)}
-                    title="Toggle Seen"
+                    title={onUpdateStatus
+                      ? "Toggle Seen"
+                      : "Completion needs Chronicle progress history"}
                   >
                     {#if rec.status === "completed"}
                       <IconEyeCheck size={16} />
@@ -456,17 +461,25 @@
                   <button
                     type="button"
                     class="table-btn"
-                    class:active={rec.status === "plan_to_watch"}
+                    class:active={Boolean(
+                      onUpdateStatus && rec.status === "plan_to_watch",
+                    )}
+                    disabled={!onUpdateStatus}
                     onclick={() => handleToggleWatchlist(rec)}
-                    title="Toggle Watchlist"
+                    title={onUpdateStatus
+                      ? "Toggle Watchlist"
+                      : "Watchlist membership is not active on this host"}
                   >
                     <IconBookmark size={16} />
                   </button>
                   <button
                     type="button"
                     class="table-btn"
+                    disabled={!onSaveCollection}
                     onclick={() => handleOpenCollection(rec)}
-                    title="Collection"
+                    title={onSaveCollection
+                      ? "Collection"
+                      : "Collections are not active on this host"}
                   >
                     <IconFolder size={16} />
                   </button>
@@ -481,7 +494,7 @@
 </div>
 
 <!-- Modal Dialogs -->
-{#if showProgressModal && activeModalRecord}
+{#if showProgressModal && activeModalRecord && onUpdateProgress}
   <ProgressModal
     record={activeModalRecord}
     onClose={() => {
@@ -489,22 +502,22 @@
       activeModalRecord = null;
     }}
     onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
+      onUpdateProgress(recId, eps, sec, st)}
   />
 {/if}
 
-{#if showReviewModal && activeModalRecord}
+{#if showReviewModal && activeModalRecord && onSaveReview}
   <RatingReviewModal
     record={activeModalRecord}
     onClose={() => {
       showReviewModal = false;
       activeModalRecord = null;
     }}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
   />
 {/if}
 
-{#if showCollectionModal && activeModalRecord}
+{#if showCollectionModal && activeModalRecord && onSaveCollection}
   <CollectionModal
     record={activeModalRecord}
     collections={availableCollections}
@@ -512,7 +525,7 @@
       showCollectionModal = false;
       activeModalRecord = null;
     }}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
   />
 {/if}
 
@@ -564,25 +577,27 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 2px;
   }
 
   .mode-btn {
     display: grid;
     place-items: center;
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     border: none;
     background: transparent;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     color: var(--fasti-text-muted);
     cursor: pointer;
   }
 
   .mode-btn.active {
     background: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
   }
 
   .toolbar {
@@ -608,12 +623,12 @@
 
   .search-input {
     width: 100%;
-    height: 38px;
+    min-height: 44px;
     padding: 8px 14px 8px 36px;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     color: var(--fasti-text-primary);
   }
@@ -624,7 +639,12 @@
   }
 
   .filter-pill {
-    padding: 6px 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 14px;
     border-radius: 20px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -638,7 +658,7 @@
   .filter-pill.active {
     background: var(--fasti-brand-mark);
     border-color: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
     font-weight: 600;
   }
 
@@ -646,18 +666,20 @@
     text-align: center;
     padding: 48px 24px;
     background: var(--fasti-surface-paper);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     border: 1px dashed
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
   }
 
   .reset-btn {
     margin-top: 12px;
+    min-height: 44px;
+    min-width: 44px;
     padding: 8px 16px;
     background: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -687,7 +709,7 @@
     position: relative;
     width: 100%;
     aspect-ratio: 2 / 3;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     background: var(--fasti-surface-archive);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -723,9 +745,38 @@
     font-weight: 700;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.75);
-    color: white;
+    color: var(--fasti-overlay-contrast);
+  }
+
+  .top-badge-pct {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-family: var(--fasti-font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
+    background: rgba(0, 0, 0, 0.75);
+    color: var(--fasti-overlay-contrast);
+    letter-spacing: -0.02em;
+  }
+
+  .progress-bar-track {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 2;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--fasti-action-primary);
   }
 
   .card-rating {
@@ -739,7 +790,7 @@
     font-size: 0.72rem;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.8);
     color: var(--fasti-brand-gold);
   }
@@ -752,9 +803,9 @@
     font-size: 0.7rem;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.8);
-    color: white;
+    color: var(--fasti-overlay-contrast);
   }
 
   .fast-action-toolbar-wrap {
@@ -765,6 +816,10 @@
     background: transparent;
     border: none;
     padding: 0;
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
     text-align: left;
     cursor: pointer;
   }
@@ -809,7 +864,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
 
@@ -840,7 +895,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
   }
 
@@ -849,7 +904,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
 
   .status-pill.watching {
@@ -875,14 +930,16 @@
   }
 
   .table-btn {
-    width: 28px;
-    height: 28px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     display: grid;
     place-items: center;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
     color: var(--fasti-text-muted);
   }
@@ -890,5 +947,10 @@
   .table-btn.active {
     color: var(--fasti-action-primary);
     border-color: var(--fasti-action-primary);
+  }
+
+  .table-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
 </style>

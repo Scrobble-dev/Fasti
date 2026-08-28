@@ -28,11 +28,24 @@
 
   interface Props {
     items: ReviewItem[];
-    onResolveExisting?: (reviewItemId: string, recordId: string) => void;
-    onResolveNew?: (reviewItemId: string, grain: string) => void;
+    loading?: boolean;
+    unavailableReason?: string;
+    resolvingReviewId?: string;
+    onResolveExisting?: (
+      reviewItemId: string,
+      recordId: string,
+    ) => Promise<void>;
+    onResolveNew?: (reviewItemId: string, grain: string) => Promise<void>;
   }
 
-  let { items, onResolveExisting, onResolveNew }: Props = $props();
+  let {
+    items,
+    loading = false,
+    unavailableReason,
+    resolvingReviewId,
+    onResolveExisting,
+    onResolveNew,
+  }: Props = $props();
   const openItems = $derived(items.filter((item) => item.status === "open"));
   let newGrainByItem = $state<Record<string, string>>({});
 
@@ -52,21 +65,36 @@
     <div class="safe-banner">
       <IconShieldCheck size={20} class="verified-icon" />
       <span
-        ><strong>Zero Silent Merges:</strong> Unresolved records remain safe and usable.</span
+        ><strong>Safe by default:</strong> Fasti does not merge unresolved records.</span
       >
     </div>
   </header>
 
-  {#if openItems.length === 0}
+  {#if loading}
+    <div class="empty-inbox" role="status">
+      <IconClock size={48} class="empty-icon" />
+      <h2>Loading review inbox</h2>
+      <p>Fasti is checking for open identity reviews.</p>
+    </div>
+  {:else if unavailableReason}
+    <div class="empty-inbox" role="alert">
+      <IconClock size={48} class="empty-icon" />
+      <h2>Review listing is unavailable</h2>
+      <p>{unavailableReason}</p>
+    </div>
+  {:else if openItems.length === 0}
     <div class="empty-inbox">
       <IconShieldCheck size={48} class="empty-icon" />
-      <h2>All caught up!</h2>
-      <p>No open reviews right now.</p>
+      <h2>No open reviews</h2>
+      <p>Fasti has no open identity reviews.</p>
     </div>
   {:else}
     <div class="cases-list">
       {#each openItems as item (item.review_item_id)}
-        <article class="case-card">
+        <article
+          class="case-card"
+          aria-busy={resolvingReviewId === item.review_item_id}
+        >
           <div class="case-header">
             <span class="case-badge">Needs review</span>
             <h2 class="case-subject">
@@ -94,14 +122,18 @@
                       <button
                         type="button"
                         class="action-btn accept"
-                        disabled={!onResolveExisting}
+                        disabled={!onResolveExisting ||
+                          Boolean(resolvingReviewId)}
                         onclick={() =>
                           onResolveExisting?.(item.review_item_id, recordId)}
                         title={!onResolveExisting
                           ? "Resolving is unavailable until a resolve command is implemented"
                           : undefined}
                       >
-                        <IconCheck size={16} stroke={2.5} /> Accept as this record
+                        <IconCheck size={16} stroke={2.5} />
+                        {resolvingReviewId === item.review_item_id
+                          ? "Resolving…"
+                          : "Accept as this record"}
                         <IconArrowRight size={14} />
                       </button>
                     </li>
@@ -134,7 +166,7 @@
               <button
                 type="button"
                 class="action-btn not-same"
-                disabled={!onResolveNew}
+                disabled={!onResolveNew || Boolean(resolvingReviewId)}
                 onclick={() =>
                   onResolveNew?.(
                     item.review_item_id,
@@ -142,8 +174,12 @@
                   )}
                 title={!onResolveNew
                   ? "Resolving is unavailable until a resolve command is implemented"
-                  : undefined}>Create new record</button
+                  : undefined}
               >
+                {resolvingReviewId === item.review_item_id
+                  ? "Resolving…"
+                  : "Create new record"}
+              </button>
             </div>
           </div>
         </article>
@@ -193,7 +229,7 @@
       var(--fasti-state-verified) 12%,
       transparent
     );
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.85rem;
     color: var(--fasti-text-primary);
   }
@@ -206,7 +242,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   :global(.empty-icon) {
     color: var(--fasti-state-verified);
@@ -230,7 +266,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
   }
@@ -249,7 +285,7 @@
     font-weight: 700;
     text-transform: uppercase;
     padding: 3px 8px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-state-attention) 20%,
@@ -304,7 +340,7 @@
     gap: 12px;
     padding: 10px 12px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     overflow-wrap: anywhere;
   }
   .no-candidates {
@@ -328,7 +364,7 @@
   .new-record-form select {
     min-height: 44px;
     padding: 6px 10px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
     background: var(--fasti-surface-paper);
@@ -340,7 +376,7 @@
     gap: 6px;
     min-height: 44px;
     padding: 9px 18px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.88rem;
     font-weight: 600;
     cursor: pointer;
@@ -358,7 +394,7 @@
   }
   .action-btn.accept {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
   .action-btn.not-same {
     background: transparent;

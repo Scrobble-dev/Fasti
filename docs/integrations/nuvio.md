@@ -1,8 +1,14 @@
 # Nuvio and Fasti integration status
 
-## Current Fasti-side status
+Fasti and Nuvio do not have a complete tracking or synchronization integration yet.
 
-Fasti now mounts a dedicated Nuvio occurrence-ingress route:
+Fasti has two separate integration primitives: authenticated complete-occurrence ingress, and profile-scoped custom Collections file interchange. Collections configuration is not tracking state, list membership, or Fasti record identity.
+
+Current upstream Nuvio still needs a Fasti tracking provider before it can call that endpoint directly. Its tracking provider registry currently contains Trakt and SIMKL.
+
+## What Fasti implements now
+
+The local Fasti API exposes:
 
 ```text
 POST /api/v1/integrations/nuvio/webhook
@@ -10,11 +16,48 @@ POST /api/v1/integrations/nuvio/webhook
 
 It is part of the isolated production integration router and uses the same authenticated, durable observation service as the local observation API. The route does not bypass Fasti identity, authorization, evidence, receipt, or idempotency rules.
 
+- requires a scoped bearer credential;
+- accepts requests on the local loopback API, the dedicated integration listener, or through Fasti's explicit trusted HTTPS proxy boundary;
+- stores the normalized request as immutable content-addressed evidence;
+- authenticates and authorizes the client before mutation;
+- derives the Fasti operation identity from the authenticated client, source, and source event identity;
+- returns the same durable receipt when the same source event is retried with the same evidence;
+- rejects reuse of the same source event identity with different evidence;
+- keeps unresolved identity as a valid durable state.
+
 Current upstream Nuvio still needs a Fasti tracking provider before it can submit events directly. Fasti therefore reports this integration as `setup_required`, not `active`, until a compatible Nuvio client is configured and has successfully delivered an event.
 
 ## Fasti contract
 
-A Nuvio client sends the provider template below as JSON and supplies one scoped Fasti bearer credential in the `Authorization` header.
+A Nuvio client sends the provider template below as JSON and supplies one scoped Fasti bearer credential in the `Authorization` header. The current observer credential grants only:
+
+```text
+observation_accept
+```
+
+The browser workbench cannot create these credentials.
+
+## Custom Collections file interchange
+
+The Workbench can import, export, replace, and clear one Nuvio custom Collections document for the authenticated profile. Both the browser host and trusted Desktop host use the same application contract.
+
+```text
+GET    /api/v1/profile/nuvio-collections
+PUT    /api/v1/profile/nuvio-collections
+DELETE /api/v1/profile/nuvio-collections
+```
+
+`PUT` accepts NuvioTV's bare top-level JSON array. Fasti normalizes the document before a transactional upsert and returns the stored array in a response wrapper. The import is bounded to 4 MiB, 64 collections, 1,024 folders, 4,096 sources, 200,000 JSON nodes, depth 16, and 8 KiB strings. Invalid source entries are dropped under Nuvio's source-selection rules; duplicate collection IDs keep the final value at the first position. Unknown extension fields are retained.
+
+The document belongs to `(workspace_id, profile_id)`. Reading, replacing, and clearing it requires the corresponding `profile_state_read` or `profile_state_write` scope. Workspace revision changes only when the stored document changes. Imported image, add-on, and catalog URLs are inert data: Fasti does not request them or render remote content from them.
+
+Compatibility is pinned to [`NuvioMedia/NuvioTV` commit `3f44c404`](https://github.com/NuvioMedia/NuvioTV/tree/3f44c404a73a6152992bffa4538fcf8d42427183). The implementation follows its collection model and `CollectionsDataStore` decode behavior. A supplied 2026-08-27 export (SHA-256 `30d4e4c3041def5f9d280a1bf47e5f6ac3499290e7b07c5709f64e63bef00242`) verified the full path with 16 collections, 601 folders, and 3,059 sources.
+
+Custom Collections interchange does not pair a Nuvio device, send progress, publish a Fasti catalog, or promote Nuvio provider IDs into Fasti identity. Export the document separately before clearing it; archive v2 remains unchanged for compatibility.
+
+## Request example
+
+Use a stable `source_event_id` for the source event. Reuse it when delivery is retried.
 
 ```http
 POST /api/v1/integrations/nuvio/webhook HTTP/1.1
@@ -53,11 +96,11 @@ Create one scoped API client per Nuvio installation or device through **Connecti
 
 Create the Nuvio `event_id` before the first send and keep it stable until the event is acknowledged.
 
-| Delivery | Fasti result |
-|---|---|
-| First valid delivery | `committed` plus a durable receipt |
-| Same event and same evidence | `replayed` with the original receipt |
-| Same event ID with different evidence | `409 idempotency_conflict`; previous state remains |
+| Delivery                                 | Result                                          |
+| ---------------------------------------- | ----------------------------------------------- |
+| First valid delivery                     | `committed` and a durable receipt               |
+| Same source event and same evidence      | `replayed` with the original receipt            |
+| Same source event and different evidence | `409 idempotency_conflict`; prior state remains |
 
 A transport retry does not create another Chronicle occurrence. A genuinely separate consumption occurrence needs a new source event identity.
 
@@ -67,7 +110,7 @@ This route records complete consumption occurrences. It does not treat transient
 
 ## Network boundary
 
-The general non-loopback listener remains health-only. Production integrations use the dedicated `integration_router`, which exposes only:
+The general non-loopback listener remains health-only. Production integrations use either the loopback listener, the trusted HTTPS reverse-proxy boundary, or the dedicated `integration_router`, which exposes only:
 
 - health;
 - integration status;
@@ -103,6 +146,8 @@ Source files checked during this implementation:
 
 - `app/src/main/java/com/nuvio/tv/core/tracking/TrackingProvider.kt`
 - `app/src/main/java/com/nuvio/tv/core/tracking/TrackingScrobbleCoordinator.kt`
+- `app/src/main/java/com/nuvio/tv/domain/model/Collection.kt`
+- `app/src/main/java/com/nuvio/tv/data/local/CollectionsDataStore.kt`
 
 Repository:
 
@@ -137,7 +182,7 @@ These are separate implementation gates, not properties of the current route:
 - deletion tombstones;
 - snapshot and ordered delta recovery;
 - reconciliation and diagnostics;
-- catalogues and Collections;
+- catalog publication and collection/list membership synchronization;
 - metadata projections;
 - two-way synchronization.
 

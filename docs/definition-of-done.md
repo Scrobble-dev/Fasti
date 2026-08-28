@@ -14,6 +14,8 @@ A Fasti body is complete only when all applicable evidence below is current and 
 - Mandatory QA completes with a report and regression evidence for each defect fixed.
 - Rendered UI or UX changes must complete design review with:
   - Tabler-first component hierarchy compliance: Use Fasti token-skinned `@tabler/core` and `@tabler/icons`; custom Svelte components only when Tabler has zero equivalent, with documented rationale for each exception;
+  - `pnpm lint:ui` passes and no change weakens its Tabler, icon, stylesheet, or managed-policy checks;
+  - Chesterton's fence evidence for every removed, hidden, or replaced control: callers, history, intended capability, replacement or migration, and explicit approval. An unavailable capability stays visible with an owned completion gate;
   - Impeccable craft floor verification (CLS = 0, no AI gradients/bubble cards/generic SaaS card walls, 44px min touch targets, no continuous decorative animations);
   - Automated `@axe-core/playwright` accessibility scans with zero violations and visual reflow checks at 320px, 768px, and 1440px in Light and Dark themes (coverage limited to automated tooling; for WCAG 2.2 AA and EN 301 549 full compliance claims, provide documented manual keyboard navigation and screen-reader testing with Orca/NVDA/VoiceOver);
   - Screenshots demonstrating visual conformance across tested viewports.
@@ -41,6 +43,7 @@ This section applies to user-facing UI/UX capabilities. Visual evidence, touch-t
 The primary action is obvious without instructional dashboard copy. Status is persistent where losing it would break trust. Users can safely defer and resume ambiguous work ("Resolve later").
 
 Acceptance evidence requires verified compliance against:
+
 1. **Tabler-First Component Ladder**: Upstream `@tabler/core` & `@tabler/icons` elements used first; custom CSS/Svelte only when no viable alternative exists.
 2. **AskTog Interaction Principles**: Anticipation, Fitts's Law (44px hitboxes), latency reduction, data loss protection, state continuity (no element shifting under cursor).
 3. **Gestalt Grouping**: Proximity, similarity, common region, continuity, closure, figure/ground, and deliberate focal points.

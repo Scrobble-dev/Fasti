@@ -1,5 +1,8 @@
 use crate::{
-    local::{bearer_secret, run_kernel, LocalApiState},
+    local::{
+        authenticate_request, request_authentication, run_kernel, LocalApiState,
+        RequestAuthentication,
+    },
     problem::{application_problem, json_rejection, HttpProblem},
 };
 use axum::{
@@ -9,8 +12,8 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    derive_deterministic_operation_id, AcceptObservationCommand, AuthenticateCredentialQuery,
-    CapabilityKey, EvidenceUploadRequest, FastiProblem, LocalKernel, SecretMaterial, Violation,
+    derive_deterministic_operation_id, AcceptObservationCommand, CapabilityKey,
+    EvidenceUploadRequest, FastiProblem, LocalKernel, Violation,
 };
 use fasti_contracts::{ProblemDetails, SubmitObservationRequest, SubmitObservationResponse};
 use fasti_domain::{
@@ -123,13 +126,9 @@ fn resolution_name(value: ObservationResolution) -> &'static str {
     }
 }
 
-/// Shared authenticated occurrence boundary used by the generic observation
-/// route and provider adapters. The adapter can pass the original bounded
-/// provider payload as `evidence_bytes`, while the normalized request supplies
-/// the canonical semantics and identity clues.
 pub(crate) async fn accept_observation_request(
     state: LocalApiState,
-    secret: SecretMaterial,
+    authentication: RequestAuthentication,
     request: SubmitObservationRequest,
     evidence_bytes: Vec<u8>,
     correlation_id: RequestCorrelationId,
@@ -218,11 +217,13 @@ pub(crate) async fn accept_observation_request(
         CapabilityKey::AcceptObservation,
         correlation_id,
         move || {
-            let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-                correlation_id,
+            let access = authenticate_request(
+                kernel.as_ref(),
+                authentication,
                 CapabilityKey::AcceptObservation,
-                secret,
-            ))?;
+                correlation_id,
+                true,
+            )?;
             let operation_material = serde_json::to_string(&(
                 "observation",
                 access.client_id().to_string(),
@@ -286,12 +287,13 @@ pub(crate) async fn accept_observation_request(
     post,
     path = "/api/v1/observations",
     tag = "observations",
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = SubmitObservationRequest,
     responses(
         (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks observation acceptance scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Source event identity was reused with different evidence", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request or evidence exceeds a bounded limit", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
@@ -307,17 +309,22 @@ pub(crate) async fn submit_observation(
     request: Result<Json<SubmitObservationRequest>, JsonRejection>,
 ) -> HttpResult<SubmitObservationResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
-    let secret = bearer_secret(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
+    let authentication = request_authentication(
+        &headers,
+        CapabilityKey::AcceptObservation,
+        correlation_id,
+        true,
+    )?;
     let evidence_bytes = serde_json::to_vec(&request).map_err(|_| {
         application_problem(Box::new(FastiProblem::integrity_failed(
             CapabilityKey::AcceptObservation,
             correlation_id,
         )))
     })?;
-    accept_observation_request(state, secret, request, evidence_bytes, correlation_id).await
+    accept_observation_request(state, authentication, request, evidence_bytes, correlation_id).await
 }
 
 pub(crate) fn router() -> Router<LocalApiState> {

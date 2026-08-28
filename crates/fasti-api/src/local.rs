@@ -6,8 +6,9 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    ApplicationResult, CapabilityKey, EnrollFirstClientCommand, FastiProblem,
-    InitializeNodeCommand, LocalKernel, SecretMaterial,
+    ApplicationResult, AuthenticateBrowserSessionQuery, AuthenticateCredentialQuery, CapabilityKey,
+    EnrollFirstClientCommand, FastiProblem, InitializeNodeCommand, LocalKernel,
+    RequestAccessContext, SecretMaterial,
 };
 use fasti_contracts::{
     ClientEnrollmentResponse, CredentialSchemeDto, EnrollFirstClientRequest, InitializeNodeRequest,
@@ -18,11 +19,22 @@ use std::sync::Arc;
 
 const MAX_BOOTSTRAP_JSON_BODY_BYTES: usize = 4 * 1024;
 const MAX_OBSERVATION_JSON_BODY_BYTES: usize = 64 * 1024;
+const MAX_NUVIO_COLLECTIONS_JSON_BODY_BYTES: usize =
+    fasti_application::MAX_NUVIO_COLLECTIONS_JSON_BYTES;
 const MAX_RECORDS_JSON_BODY_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct LocalApiState {
     pub(crate) kernel: Arc<dyn LocalKernel>,
+    pub(crate) secure_cookies: bool,
+}
+
+pub(crate) enum RequestAuthentication {
+    Bearer(SecretMaterial),
+    Browser {
+        session: SecretMaterial,
+        csrf: Option<SecretMaterial>,
+    },
 }
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
@@ -85,11 +97,107 @@ pub(crate) fn bearer_secret(
         )))
     })
 }
+pub(crate) fn cookie_secret(
+    headers: &HeaderMap,
+    name: &str,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<SecretMaterial, HttpProblem> {
+    let mut values = headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|part| part.trim().split_once('='))
+        .filter_map(|(key, value)| (key == name).then_some(value));
+    let value = values
+        .next()
+        .filter(|_| values.next().is_none())
+        .ok_or_else(|| {
+            application_problem(Box::new(FastiProblem::authentication_failed(
+                capability,
+                correlation_id,
+            )))
+        })?;
+    SecretMaterial::try_from_hex(value).map_err(|_| {
+        application_problem(Box::new(FastiProblem::authentication_failed(
+            capability,
+            correlation_id,
+        )))
+    })
+}
+
+fn csrf_secret(
+    headers: &HeaderMap,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Result<SecretMaterial, HttpProblem> {
+    let cookie = cookie_secret(headers, "fasti_csrf", capability, correlation_id)?;
+    let header = headers
+        .get("x-fasti-csrf")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| SecretMaterial::try_from_hex(value).ok())
+        .ok_or_else(|| {
+            application_problem(Box::new(FastiProblem::forbidden(
+                capability,
+                correlation_id,
+            )))
+        })?;
+    if !cookie.constant_time_eq(&header) {
+        return Err(application_problem(Box::new(FastiProblem::forbidden(
+            capability,
+            correlation_id,
+        ))));
+    }
+    Ok(header)
+}
+
+pub(crate) fn request_authentication(
+    headers: &HeaderMap,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    mutation: bool,
+) -> Result<RequestAuthentication, HttpProblem> {
+    if headers.contains_key(header::AUTHORIZATION) {
+        return bearer_secret(headers, capability, correlation_id)
+            .map(RequestAuthentication::Bearer);
+    }
+    Ok(RequestAuthentication::Browser {
+        session: cookie_secret(headers, "fasti_session", capability, correlation_id)?,
+        csrf: mutation
+            .then(|| csrf_secret(headers, capability, correlation_id))
+            .transpose()?,
+    })
+}
+
+pub(crate) fn authenticate_request(
+    kernel: &dyn LocalKernel,
+    authentication: RequestAuthentication,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+    mutation: bool,
+) -> ApplicationResult<RequestAccessContext> {
+    match authentication {
+        RequestAuthentication::Bearer(secret) => kernel.authenticate_credential(
+            AuthenticateCredentialQuery::new(correlation_id, capability, secret),
+        ),
+        RequestAuthentication::Browser { session, csrf } => kernel
+            .authenticate_browser_session(AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                csrf,
+                mutation,
+            ))
+            .map(|authenticated| *authenticated.access()),
+    }
+}
 
 #[utoipa::path(
     post,
     path = "/api/v1/node/initialization",
     tag = "node",
+    security(("bootstrap_bearer" = [])),
     request_body = InitializeNodeRequest,
     responses(
         (status = 200, description = "One-time durable initialization proof", body = NodeInitializationResponse),
@@ -192,15 +300,15 @@ where
         .map_err(application_problem)
 }
 
-pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
-    // Prime the host-only bootstrap secret before any local bootstrap route can
-    // be called. This makes possession of the data-root file, not loopback
-    // reachability, the first-client authorization proof.
-    kernel
-        .ensure_bootstrap_secret()
-        .expect("bootstrap secret must be preparable before serving local routes");
-
-    let state = LocalApiState { kernel };
+pub(crate) fn router(
+    kernel: Arc<dyn LocalKernel>,
+    include_bootstrap: bool,
+    secure_cookies: bool,
+) -> Router {
+    let state = LocalApiState {
+        kernel,
+        secure_cookies,
+    };
     let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))
         .route("/api/v1/client-enrollments", post(enroll_first_client))
@@ -209,9 +317,20 @@ pub(crate) fn router(kernel: Arc<dyn LocalKernel>) -> Router {
         crate::observation::router().layer(DefaultBodyLimit::max(MAX_OBSERVATION_JSON_BODY_BYTES));
     let records =
         crate::records::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
+    let profile_state =
+        crate::profile_state::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
+    let nuvio_collections = crate::nuvio_collections::router()
+        .layer(DefaultBodyLimit::max(MAX_NUVIO_COLLECTIONS_JSON_BODY_BYTES));
 
-    bootstrap
+    let routes = Router::new()
+        .merge(crate::browser_auth::router())
         .merge(observation)
         .merge(records)
-        .with_state(state)
+        .merge(profile_state)
+        .merge(nuvio_collections);
+    if include_bootstrap {
+        bootstrap.merge(routes).with_state(state)
+    } else {
+        routes.with_state(state)
+    }
 }

@@ -3,12 +3,13 @@ use crate::metadata::{load_field_claims, load_field_override};
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
     CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ListRecordsQuery,
-    ProblemCode, RecordActivity, RecordSummary, RegisterNamespaceDefinitionCommand,
-    RegisterNamespaceDefinitionOutcome,
+    ProblemCode, RecordActivity, RecordIdentifier, RecordSummary,
+    RegisterNamespaceDefinitionCommand, RegisterNamespaceDefinitionOutcome,
 };
 use fasti_domain::{
     resolve_field, ExternalIdentifierClaim, ExternalIdentifierId, FieldKey, Grain,
-    InterpretationState, OccurredAt, RecordId, RecordStatus, WorkspaceId, POSTER_FIELD_KEY,
+    InterpretationState, NamespaceKey, OccurredAt, RecordId, RecordStatus, WorkspaceId,
+    ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
     TITLE_FIELD_KEY,
 };
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -358,6 +359,12 @@ fn load_record_summary(
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let poster_key = FieldKey::try_new(POSTER_FIELD_KEY)
         .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let original_title_key = FieldKey::try_new(ORIGINAL_TITLE_FIELD_KEY)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let overview_key = FieldKey::try_new(OVERVIEW_FIELD_KEY)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+    let release_year_key = FieldKey::try_new(RELEASE_YEAR_FIELD_KEY)
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
     let title = resolved_field(
         connection,
         workspace_id,
@@ -374,6 +381,37 @@ fn load_record_summary(
         capability,
         correlation_id,
     )?;
+    let original_title = resolved_field(
+        connection,
+        workspace_id,
+        record_id,
+        &original_title_key,
+        capability,
+        correlation_id,
+    )?;
+    let overview = resolved_field(
+        connection,
+        workspace_id,
+        record_id,
+        &overview_key,
+        capability,
+        correlation_id,
+    )?;
+    let release_year = resolved_field(
+        connection,
+        workspace_id,
+        record_id,
+        &release_year_key,
+        capability,
+        correlation_id,
+    )?;
+    let identifiers = load_record_identifiers(
+        connection,
+        workspace_id,
+        record_id,
+        capability,
+        correlation_id,
+    )?;
     let latest_activity = load_latest_activity(
         connection,
         workspace_id,
@@ -387,8 +425,57 @@ fn load_record_summary(
         RecordStatus::Active,
         title,
         poster,
+        original_title,
+        overview,
+        release_year,
+        identifiers,
         latest_activity,
     ))
+}
+
+fn load_record_identifiers(
+    connection: &Connection,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<Vec<RecordIdentifier>> {
+    let mut statement = map_sql(
+        connection.prepare(
+            r#"
+            SELECT namespace, grain, value FROM external_identifiers
+            WHERE workspace_id = ?1 AND record_id = ?2
+            ORDER BY namespace, grain, value
+            "#,
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let rows = map_sql(
+        statement.query_map(
+            params![workspace_id.to_string(), record_id.to_string()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        ),
+        capability,
+        correlation_id,
+    )?;
+    let mut identifiers = Vec::new();
+    for row in rows {
+        let (namespace, grain, value) = map_sql(row, capability, correlation_id)?;
+        let namespace = NamespaceKey::try_new(namespace)
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        let grain = grain
+            .parse::<Grain>()
+            .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))?;
+        identifiers.push(RecordIdentifier::new(namespace, grain, value));
+    }
+    Ok(identifiers)
 }
 
 pub(crate) fn insert_record(

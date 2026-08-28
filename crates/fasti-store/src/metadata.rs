@@ -6,19 +6,22 @@
 //! ever supplied (history, never overwritten in place) and the single
 //! current override per field, then read them back for resolution.
 
-use crate::kernel::{map_sql, now, parse_timestamp, timestamp};
-use fasti_application::{ApplicationResult, CapabilityKey, FastiProblem};
+use crate::identity::{attach_identifier_tx, insert_record};
+use crate::kernel::{
+    authorize_transaction, map_sql, now, parse_timestamp, timestamp, SqliteKernel,
+};
+use fasti_application::{
+    ApplicationResult, ApplyProviderMetadataCommand, CapabilityKey, CreateProviderRecordCommand,
+    CreateProviderRecordOutcome, FastiProblem, ProblemCode, ProviderMetadataField,
+    ProviderMetadataPort, MAX_PROVIDER_METADATA_FIELDS,
+};
 use fasti_domain::{
     FieldClaim, FieldClaimError, FieldKey, FieldOverride, NamespaceKey, ReceivedAt, RecordId,
     RequestCorrelationId, WorkspaceId,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use std::collections::BTreeSet;
 
-// ponytail: no production caller yet -- the provider adapter that fetches
-// and writes real claims is a separate, later task (see the read-model doc).
-// These are the persistence primitives it will call; tests exercise them
-// directly in the meantime.
-#[allow(dead_code)]
 pub(crate) fn write_field_claim(
     connection: &Connection,
     workspace_id: WorkspaceId,
@@ -57,6 +60,131 @@ pub(crate) fn write_field_claim(
         correlation_id,
     )?;
     Ok(())
+}
+
+fn invalid_provider_metadata(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Box<FastiProblem> {
+    Box::new(FastiProblem::from_code(
+        ProblemCode::ValidationFailed,
+        capability,
+        correlation_id,
+    ))
+}
+
+fn write_provider_fields(
+    transaction: &Transaction<'_>,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    identifier: &fasti_domain::ExternalIdentifierClaim,
+    fields: &[ProviderMetadataField],
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<()> {
+    if fields.is_empty() || fields.len() > MAX_PROVIDER_METADATA_FIELDS {
+        return Err(invalid_provider_metadata(capability, correlation_id));
+    }
+    let mut keys = BTreeSet::new();
+    for field in fields {
+        if field.claim().source().as_str() != identifier.namespace()
+            || !keys.insert(field.field_key().as_str())
+        {
+            return Err(invalid_provider_metadata(capability, correlation_id));
+        }
+        write_field_claim(
+            transaction,
+            workspace_id,
+            record_id,
+            field.field_key(),
+            field.claim(),
+            capability,
+            correlation_id,
+        )?;
+    }
+    Ok(())
+}
+
+impl ProviderMetadataPort for SqliteKernel {
+    fn create_provider_record(
+        &self,
+        command: CreateProviderRecordCommand,
+    ) -> ApplicationResult<CreateProviderRecordOutcome> {
+        let correlation_id = command.correlation_id();
+        let capability = CapabilityKey::AttachIdentifier;
+        if command.grain() != command.identifier().grain() {
+            return Err(invalid_provider_metadata(capability, correlation_id));
+        }
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let workspace_id = command.access().workspace_id();
+        let record_id = insert_record(
+            &transaction,
+            workspace_id,
+            command.grain(),
+            capability,
+            correlation_id,
+        )?;
+        attach_identifier_tx(
+            &transaction,
+            workspace_id,
+            record_id,
+            command.identifier(),
+            capability,
+            correlation_id,
+        )?;
+        write_provider_fields(
+            &transaction,
+            workspace_id,
+            record_id,
+            command.identifier(),
+            command.fields(),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(CreateProviderRecordOutcome::new(record_id, command.grain()))
+    }
+
+    fn apply_provider_metadata(
+        &self,
+        command: ApplyProviderMetadataCommand,
+    ) -> ApplicationResult<()> {
+        let correlation_id = command.correlation_id();
+        let capability = CapabilityKey::AttachIdentifier;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let workspace_id = command.access().workspace_id();
+        attach_identifier_tx(
+            &transaction,
+            workspace_id,
+            command.record_id(),
+            command.identifier(),
+            capability,
+            correlation_id,
+        )?;
+        write_provider_fields(
+            &transaction,
+            workspace_id,
+            command.record_id(),
+            command.identifier(),
+            command.fields(),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(())
+    }
 }
 
 #[allow(dead_code)]
@@ -201,8 +329,15 @@ pub(crate) fn load_field_override(
 mod tests {
     use super::*;
     use crate::test_support::TestNode;
-    use fasti_application::{CreateRecordCommand, IdentityPort};
-    use fasti_domain::{Grain, ReceivedAt};
+    use fasti_application::{
+        ApplyProviderMetadataCommand, CreateProviderRecordCommand, CreateRecordCommand,
+        IdentityPort, ListRecordsQuery, ProviderMetadataField, ProviderMetadataPort,
+        RegisterNamespaceDefinitionCommand,
+    };
+    use fasti_domain::{
+        ExternalIdentifierClaim, Grain, NamespaceDefinition, NamespaceLicencePosture, ReceivedAt,
+        TITLE_FIELD_KEY,
+    };
 
     fn field_key(value: &str) -> FieldKey {
         FieldKey::try_new(value).expect("valid field key")
@@ -231,6 +366,150 @@ mod tests {
             ))
             .expect("create record")
             .record_id()
+    }
+
+    fn register_books(node: &TestNode) {
+        let definition = NamespaceDefinition::try_new(
+            "google-books",
+            "Google Books",
+            [Grain::Chapter],
+            "[A-Za-z0-9_-]+",
+            "identity",
+            NamespaceLicencePosture::IdentifiersOnly,
+        )
+        .expect("namespace");
+        node.kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                definition,
+            ))
+            .expect("register namespace");
+    }
+
+    fn provider_field(source: &str, key: &str, value: &str) -> ProviderMetadataField {
+        ProviderMetadataField::new(
+            field_key(key),
+            FieldClaim::try_new(ns(source), value, None, received(100), None)
+                .expect("provider claim"),
+        )
+    }
+
+    #[test]
+    fn provider_record_identity_and_metadata_commit_together() {
+        let node = TestNode::new();
+        register_books(&node);
+        let identifier = ExternalIdentifierClaim::try_new("google-books", Grain::Chapter, "book-1")
+            .expect("identifier");
+        let outcome = node
+            .kernel
+            .create_provider_record(CreateProviderRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Chapter,
+                identifier,
+                vec![provider_field(
+                    "google-books",
+                    TITLE_FIELD_KEY,
+                    "A real provider title",
+                )],
+            ))
+            .expect("create enriched record");
+
+        let records = node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].record_id(), outcome.record_id());
+        assert_eq!(records[0].title().value(), Some("A real provider title"));
+        assert_eq!(records[0].identifiers().len(), 1);
+        assert_eq!(records[0].identifiers()[0].value(), "book-1");
+    }
+
+    #[test]
+    fn invalid_provider_fields_roll_back_the_new_record() {
+        let node = TestNode::new();
+        register_books(&node);
+        let identifier = ExternalIdentifierClaim::try_new("google-books", Grain::Chapter, "book-1")
+            .expect("identifier");
+        let result = node
+            .kernel
+            .create_provider_record(CreateProviderRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                Grain::Chapter,
+                identifier,
+                vec![provider_field("tmdb", TITLE_FIELD_KEY, "Wrong source")],
+            ));
+        assert!(result.is_err());
+        assert!(node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records")
+            .is_empty());
+    }
+
+    #[test]
+    fn provider_refresh_attaches_identity_and_metadata_together() {
+        let node = TestNode::new();
+        let record_id = a_record(&node);
+        let definition = NamespaceDefinition::try_new(
+            "tmdb",
+            "TMDB",
+            [Grain::Film],
+            "[0-9]+",
+            "identity",
+            NamespaceLicencePosture::IdentifiersOnly,
+        )
+        .expect("namespace");
+        node.kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                definition,
+            ))
+            .expect("register namespace");
+
+        let identifier =
+            || ExternalIdentifierClaim::try_new("tmdb", Grain::Film, "438631").expect("identifier");
+        let invalid = node
+            .kernel
+            .apply_provider_metadata(ApplyProviderMetadataCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                record_id,
+                identifier(),
+                vec![provider_field("other", TITLE_FIELD_KEY, "Wrong source")],
+            ));
+        assert!(invalid.is_err());
+
+        node.kernel
+            .apply_provider_metadata(ApplyProviderMetadataCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                record_id,
+                identifier(),
+                vec![provider_field("tmdb", TITLE_FIELD_KEY, "Dune")],
+            ))
+            .expect("refresh provider metadata");
+
+        let records = node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records");
+        assert_eq!(records[0].title().value(), Some("Dune"));
+        assert_eq!(records[0].identifiers().len(), 1);
+        assert_eq!(records[0].identifiers()[0].value(), "438631");
     }
 
     #[test]

@@ -1,11 +1,14 @@
 use anyhow::{Context, Result};
-use fasti_api::{api_router, health_router, integration_router};
+use fasti_api::{
+    api_router, ensure_development_test_account, health_router, integration_router,
+    remote_api_router,
+};
 use fasti_store::SqliteKernel;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
@@ -120,8 +123,53 @@ fn publish_bound_addr(variable: &str, addr: SocketAddr) -> Result<()> {
     write_bound_addr(Path::new(&path), addr)
 }
 
-fn uses_remote_health_surface(addr: SocketAddr) -> bool {
+fn is_remote_listener(addr: SocketAddr) -> bool {
     !addr.ip().is_loopback()
+}
+
+fn parse_external_bind_ip(value: Option<&str>) -> Result<Option<IpAddr>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        !value.is_empty(),
+        "FASTI_EXTERNAL_BIND_IP must be a loopback IP address when it is set"
+    );
+    value
+        .parse()
+        .map(Some)
+        .with_context(|| format!("FASTI_EXTERNAL_BIND_IP must be an IP address, got {value:?}"))
+}
+
+fn external_bind_ip() -> Result<Option<IpAddr>> {
+    parse_external_bind_ip(env::var("FASTI_EXTERNAL_BIND_IP").ok().as_deref())
+}
+
+fn has_container_boundary() -> bool {
+    Path::new("/run/.containerenv").is_file() || Path::new("/.dockerenv").is_file()
+}
+
+fn local_api_exposure_addr(
+    listen_addr: SocketAddr,
+    external_bind_ip: Option<IpAddr>,
+    container_boundary: bool,
+) -> Result<Option<SocketAddr>> {
+    let Some(external_bind_ip) = external_bind_ip else {
+        return Ok((!is_remote_listener(listen_addr)).then_some(listen_addr));
+    };
+    anyhow::ensure!(
+        container_boundary,
+        "FASTI_EXTERNAL_BIND_IP requires a container isolation boundary"
+    );
+    anyhow::ensure!(
+        listen_addr.ip().is_unspecified(),
+        "FASTI_EXTERNAL_BIND_IP is valid only when FASTI_LISTEN uses a wildcard address"
+    );
+    anyhow::ensure!(
+        external_bind_ip.is_loopback(),
+        "FASTI_EXTERNAL_BIND_IP must be a loopback IP address"
+    );
+    Ok(Some(SocketAddr::new(external_bind_ip, listen_addr.port())))
 }
 
 fn parse_data_root(value: Option<OsString>) -> Result<Option<PathBuf>> {
@@ -139,12 +187,63 @@ fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
 }
 
+fn parse_boolean(name: &str, value: Option<String>, default: bool) -> Result<bool> {
+    match value.as_deref() {
+        None => Ok(default),
+        Some("true") => Ok(true),
+        Some("false") => Ok(false),
+        Some(value) => anyhow::bail!("{name} must be true or false, got {value:?}"),
+    }
+}
+
+fn remote_proxy_is_trusted() -> Result<bool> {
+    parse_boolean(
+        "FASTI_REMOTE_TRUSTED_PROXY",
+        env::var("FASTI_REMOTE_TRUSTED_PROXY").ok(),
+        false,
+    )
+}
+
+fn parse_development_test_account(value: Option<String>, remote_listener: bool) -> Result<bool> {
+    let enabled = parse_boolean("FASTI_DEVELOPMENT_TEST_ACCOUNT", value, false)?;
+    anyhow::ensure!(
+        !enabled || !remote_listener,
+        "FASTI_DEVELOPMENT_TEST_ACCOUNT is allowed only on a loopback durable listener"
+    );
+    Ok(enabled)
+}
+
+fn development_test_account_enabled(remote_listener: bool) -> Result<bool> {
+    parse_development_test_account(
+        env::var("FASTI_DEVELOPMENT_TEST_ACCOUNT").ok(),
+        remote_listener,
+    )
+}
+
+fn require_https_public_url() -> Result<()> {
+    let value = env::var("FASTI_PUBLIC_URL")
+        .context("FASTI_PUBLIC_URL is required for a remote durable listener")?;
+    let uri = value
+        .parse::<axum::http::Uri>()
+        .context("FASTI_PUBLIC_URL must be an absolute HTTPS URL")?;
+    anyhow::ensure!(
+        uri.scheme_str() == Some("https") && uri.authority().is_some(),
+        "FASTI_PUBLIC_URL must be an absolute HTTPS URL"
+    );
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let requested_addr = listen_addr()?;
-    let remote_health_only = uses_remote_health_surface(requested_addr);
+    let local_api_addr = local_api_exposure_addr(
+        requested_addr,
+        external_bind_ip()?,
+        has_container_boundary(),
+    )?;
+    let remote_listener = local_api_addr.is_none();
     let (listener, used_fallback) = bind_listener(requested_addr, port_fallback()?).await?;
     let addr = listener.local_addr()?;
 
@@ -158,18 +257,52 @@ async fn main() -> Result<()> {
         })
         .transpose()?;
 
-    let app = if remote_health_only {
-        info!("Fasti health-only listener starting on http://{}", addr);
-        health_router()
-    } else if let (Some(data_root), Some(kernel)) = (&configured_data_root, &kernel) {
-        info!(
-            "Fasti durable local listener starting on http://{} with data root {:?}",
-            addr, data_root
-        );
-        api_router(kernel.clone(), addr, data_root)
-    } else {
-        warn!("Fasti local capability routes are disabled because FASTI_DATA_ROOT is not set");
-        health_router()
+    let app = match (&configured_data_root, &kernel) {
+        (Some(data_root), Some(kernel)) => {
+            if remote_listener {
+                anyhow::ensure!(
+                    remote_proxy_is_trusted()?,
+                    "remote durable routes require FASTI_REMOTE_TRUSTED_PROXY=true"
+                );
+                require_https_public_url()?;
+            }
+            let seed_development_account = development_test_account_enabled(remote_listener)?;
+            if seed_development_account {
+                ensure_development_test_account(kernel.as_ref()).map_err(|problem| {
+                    anyhow::anyhow!(
+                        "failed to seed the one-time development browser account: {}",
+                        problem.message()
+                    )
+                })?;
+            }
+            if remote_listener {
+                info!(
+                    "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
+                    addr, data_root
+                );
+                remote_api_router(kernel.clone(), addr, data_root)
+            } else {
+                info!(
+                    "Fasti durable local listener starting on http://{} with data root {:?}",
+                    addr, data_root
+                );
+                api_router(
+                    kernel.clone(),
+                    local_api_addr.expect("configured durable local routes require local exposure"),
+                    data_root,
+                )
+            }
+        }
+        _ => {
+            if remote_listener {
+                info!("Fasti health-only listener starting on http://{}", addr);
+            } else {
+                warn!(
+                    "Fasti local capability routes are disabled because FASTI_DATA_ROOT is not set"
+                );
+            }
+            health_router()
+        }
     };
 
     publish_bound_addr("FASTI_BOUND_ADDR_FILE", addr)?;
@@ -228,19 +361,16 @@ mod tests {
     }
 
     #[test]
-    fn selects_the_health_only_surface_for_non_loopback_listeners() {
-        assert!(!uses_remote_health_surface(SocketAddr::from((
+    fn identifies_non_loopback_listeners() {
+        assert!(!is_remote_listener(SocketAddr::from((
             [127, 0, 0, 1],
             8420
         ))));
-        assert!(!uses_remote_health_surface(
+        assert!(!is_remote_listener(
             "[::1]:8420".parse().expect("IPv6 loopback")
         ));
-        assert!(uses_remote_health_surface(SocketAddr::from((
-            [0, 0, 0, 0],
-            8420
-        ))));
-        assert!(uses_remote_health_surface(SocketAddr::from((
+        assert!(is_remote_listener(SocketAddr::from(([0, 0, 0, 0], 8420))));
+        assert!(is_remote_listener(SocketAddr::from((
             [192, 0, 2, 10],
             8420
         ))));
@@ -253,6 +383,42 @@ mod tests {
         assert!(integration_transport_allowed(loopback, false));
         assert!(!integration_transport_allowed(private, false));
         assert!(integration_transport_allowed(private, true));
+    }
+
+    #[test]
+    fn permits_durable_routes_through_an_explicit_loopback_port_forward() {
+        let wildcard = SocketAddr::from(([0, 0, 0, 0], 8420));
+        let loopback = IpAddr::from([127, 0, 0, 1]);
+
+        assert_eq!(
+            local_api_exposure_addr(wildcard, Some(loopback), true)
+                .expect("trusted container port forward"),
+            Some(SocketAddr::new(loopback, 8420))
+        );
+        assert_eq!(
+            local_api_exposure_addr(wildcard, None, false).expect("health-only wildcard"),
+            None
+        );
+        assert!(local_api_exposure_addr(wildcard, Some(loopback), false).is_err());
+        assert!(
+            local_api_exposure_addr(wildcard, Some(IpAddr::from([192, 0, 2, 1])), true).is_err()
+        );
+        assert!(local_api_exposure_addr(
+            SocketAddr::from(([192, 0, 2, 1], 8420)),
+            Some(loopback),
+            true,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn validates_the_external_bind_ip() {
+        assert_eq!(
+            parse_external_bind_ip(Some("127.0.0.1")).expect("loopback IP"),
+            Some(IpAddr::from([127, 0, 0, 1]))
+        );
+        assert!(parse_external_bind_ip(Some("")).is_err());
+        assert!(parse_external_bind_ip(Some("localhost")).is_err());
     }
 
     #[test]
@@ -269,6 +435,28 @@ mod tests {
             parse_data_root(Some(OsString::from("/tmp/fasti-data"))).expect("data root"),
             Some(PathBuf::from("/tmp/fasti-data"))
         );
+    }
+
+    #[test]
+    fn remote_security_flags_are_strict_booleans() {
+        assert!(parse_boolean("TEST", None, true).expect("default"));
+        assert!(!parse_boolean("TEST", Some("false".to_owned()), true).expect("false"));
+        assert!(parse_boolean("TEST", Some("yes".to_owned()), false).is_err());
+    }
+
+    #[test]
+    fn development_account_is_explicit_and_loopback_only() {
+        assert!(!parse_development_test_account(None, false).expect("default off"));
+        assert!(
+            parse_development_test_account(Some("true".to_owned()), false)
+                .expect("explicit loopback development account")
+        );
+        assert!(
+            !parse_development_test_account(Some("false".to_owned()), true)
+                .expect("remote listener without development account")
+        );
+        assert!(parse_development_test_account(Some("true".to_owned()), true).is_err());
+        assert!(parse_development_test_account(Some("yes".to_owned()), false).is_err());
     }
 
     #[test]

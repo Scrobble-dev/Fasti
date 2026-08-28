@@ -11,6 +11,10 @@ dist/
 !benchmarks/b1/tauri-shell/dist/index.html
 gen/
 !benchmarks/b1/tauri-shell/src-tauri/gen/
+!apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/gen/*
+!apps/desktop/src-tauri/gen/android/
+!apps/desktop/src-tauri/gen/android/**
 .pnpm-store/
 .next/
 .turbo/

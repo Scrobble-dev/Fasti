@@ -6,6 +6,7 @@ export default defineConfig({
   testDir: "./tests/e2e",
   outputDir: "test-results",
   fullyParallel: false,
+  workers: process.env.CI ? 2 : 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
@@ -23,10 +24,13 @@ export default defineConfig({
     },
     {
       command:
-        "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/web exec vite --port 4173",
+        "pnpm --filter @fasti/tokens build && pnpm --filter @fasti/sdk build && pnpm --filter @fasti/ui build && pnpm --filter @fasti/web exec vite --port 4173",
       url: "http://127.0.0.1:4173",
       reuseExistingServer: false,
       timeout: 120_000,
+      env: {
+        FASTI_QA_PROXY_TARGET: "http://127.0.0.1:18422",
+      },
     },
   ],
   projects: [{ name: "chrome", use: { browserName: "chromium" } }],

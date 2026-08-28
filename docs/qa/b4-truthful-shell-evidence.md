@@ -1,10 +1,17 @@
-# Truthful browser harness QA evidence
+# Superseded status-only browser QA evidence
 
 Checked: 2026-08-25
 
+> Historical evidence only. This report describes the earlier status-only
+> checkpoint that rendered the diagnostic at `/`. The current product root is
+> the Workbench, and the diagnostic now lives at `/status`. Do not use the
+> capability or bundle claims below as current product truth. See the
+> [B4 Workbench Impeccable audit](b4-workbench-impeccable-audit.md).
+
 ## Scope and disposition
 
-This report covers the local Fasti browser harness at `http://127.0.0.1:5173/`.
+This report covered the earlier local Fasti status harness at
+`http://127.0.0.1:5173/`.
 The harness consumes the generated `system.health` SDK binding. It adds no
 product capability, API shape, desktop behavior, domain state, or release claim.
 
@@ -19,7 +26,7 @@ token controls, overlays, stock imagery, and client-owned media state. Those
 surfaces cannot return until their bounded contexts and generated contracts are
 active.
 
-## Automated evidence
+## Historical automated evidence
 
 Run from a clean checkout:
 
@@ -31,13 +38,16 @@ pnpm test
 pnpm test:ui
 ```
 
-The 17 Playwright tests use the installed Chrome channel locally and a pinned
-Playwright Chromium build in CI. Isolated generated-contract fixtures cover
+At this status-only checkpoint, 17 Playwright tests used the installed Chrome
+channel locally and a pinned Playwright Chromium build in CI. Isolated
+generated-contract fixtures covered
 healthy, invalid, and network-unavailable responses. A bounded loopback stub
 also proves the Vite proxy path. The native and OCI smoke gates own live-daemon
-health proof. OCI smoke also proves that the staged node-initialization route
-remains absent from production with a `404` response. The UI suite retains light
-and dark screenshots at 320, 768, and 1440 CSS pixels. It also checks:
+health proof. OCI smoke also proved that the staged node-initialization route
+remained absent from production with a `404` response. That historical suite
+retained light and dark screenshots at 320, 768, and 1440 CSS pixels. The
+current Workbench matrix is recorded in the linked B4 Workbench audit. This
+checkpoint also checked:
 
 - zero Axe violations in each tested state;
 - one H1 and a descriptive document title;

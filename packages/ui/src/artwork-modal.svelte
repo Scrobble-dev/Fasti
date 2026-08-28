@@ -186,7 +186,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     width: 100%;
     max-width: 560px;
     max-height: 85vh;
@@ -241,7 +241,7 @@
   .candidate-thumb {
     position: relative;
     aspect-ratio: 2 / 3;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     border: 2px solid transparent;
     padding: 0;
@@ -264,7 +264,7 @@
     height: 20px;
     border-radius: 50%;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     display: grid;
     place-items: center;
   }
@@ -293,7 +293,7 @@
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
@@ -312,7 +312,7 @@
     width: 60px;
     height: 90px;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
   }
 
@@ -337,7 +337,7 @@
     background: transparent;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -348,9 +348,9 @@
     gap: 6px;
     padding: 8px 18px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }

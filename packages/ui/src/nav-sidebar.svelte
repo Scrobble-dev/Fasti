@@ -2,35 +2,36 @@
   import type { ActiveNavSection, NavItemConfig } from "./types.js";
   import { DEFAULT_NAV_ITEMS } from "./defaults.js";
   import {
-    IconHome,
-    IconCompass,
-    IconDeviceTv,
-    IconStack2,
-    IconMovie,
-    IconBook2,
-    IconDeviceGamepad2,
-    IconBook,
-    IconBookmarks,
-    IconDice,
-    IconHeadphones,
-    IconMicrophone,
-    IconCalendar,
-    IconBox,
     IconAdjustments,
-    IconClock,
-    IconListDetails,
+    IconBook,
+    IconBook2,
+    IconBookmarks,
+    IconBox,
+    IconCalendar,
     IconChartBar,
-    IconTag,
-    IconShieldCheck,
-    IconDatabase,
-    IconSettings,
     IconChevronLeft,
     IconChevronRight,
-    IconPin,
+    IconClock,
+    IconCompass,
+    IconDatabase,
+    IconDeviceGamepad2,
+    IconDeviceTv,
+    IconDice,
     IconEyeOff,
-    IconPlugConnected,
-    IconLibrary,
     IconFileText,
+    IconHeadphones,
+    IconHome,
+    IconLibrary,
+    IconListDetails,
+    IconMicrophone,
+    IconMovie,
+    IconPin,
+    IconPlugConnected,
+    IconSettings,
+    IconShieldCheck,
+    IconStack2,
+    IconTag,
+    IconX,
   } from "@tabler/icons-svelte";
 
   interface Props {
@@ -39,8 +40,12 @@
     openReviewCount?: number;
     collapsed?: boolean;
     hidden?: boolean;
+    narrowViewport?: boolean;
+    mobileOpen?: boolean;
     onToggleCollapse?: () => void;
     onToggleHide?: () => void;
+    onCloseMobile?: () => void;
+    hrefForSection: (section: ActiveNavSection) => string;
     onSelectSection: (section: ActiveNavSection) => void;
   }
 
@@ -50,10 +55,16 @@
     openReviewCount = 0,
     collapsed = false,
     hidden = false,
+    narrowViewport = false,
+    mobileOpen = false,
     onToggleCollapse,
     onToggleHide,
+    onCloseMobile,
+    hrefForSection,
     onSelectSection,
   }: Props = $props();
+
+  let sidebar: HTMLElement | undefined;
 
   const ICON_MAP: Record<string, any> = {
     home: IconHome,
@@ -85,47 +96,135 @@
   };
 
   const visibleItems = $derived(
-    [...navItems].filter((i) => i.visible).sort((a, b) => a.order - b.order),
+    [...navItems]
+      .filter((item) => item.visible)
+      .sort((a, b) => a.order - b.order),
   );
+  const desktopCollapsed = $derived(collapsed && !narrowViewport);
+  const navGroups = $derived.by(() => [
+    {
+      id: "pinned",
+      label: "Pinned",
+      items: visibleItems.filter((item) => item.pinned),
+    },
+    {
+      id: "primary",
+      label: "Main",
+      items: visibleItems.filter(
+        (item) => !item.pinned && item.category === "primary",
+      ),
+    },
+    {
+      id: "media",
+      label: "Media",
+      items: visibleItems.filter(
+        (item) => !item.pinned && item.category === "media",
+      ),
+    },
+    {
+      id: "library",
+      label: "Library",
+      items: visibleItems.filter(
+        (item) => !item.pinned && item.category === "library",
+      ),
+    },
+    {
+      id: "utilities",
+      label: "Utilities",
+      items: visibleItems.filter(
+        (item) => !item.pinned && item.category === "utilities",
+      ),
+    },
+  ]);
 
-  const pinnedItems = $derived(visibleItems.filter((i) => i.pinned));
-  const primaryItems = $derived(
-    visibleItems.filter((i) => !i.pinned && i.category === "primary"),
-  );
-  const mediaItems = $derived(
-    visibleItems.filter((i) => !i.pinned && i.category === "media"),
-  );
-  const libraryItems = $derived(
-    visibleItems.filter((i) => !i.pinned && i.category === "library"),
-  );
-  const utilityItems = $derived(
-    visibleItems.filter((i) => !i.pinned && i.category === "utilities"),
-  );
+  function isCurrent(item: NavItemConfig): boolean {
+    return activeSection === item.id;
+  }
 
-  function getItemIcon(id: string) {
-    return ICON_MAP[id] || IconDeviceTv;
+  function select(event: MouseEvent, item: NavItemConfig): void {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    onSelectSection(item.id);
+  }
+
+  function focusableControls(): HTMLElement[] {
+    if (!sidebar) return [];
+    return Array.from(
+      sidebar.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.offsetParent !== null);
+  }
+
+  function handleKeydown(event: KeyboardEvent): void {
+    if (!narrowViewport || !mobileOpen) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCloseMobile?.();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const controls = focusableControls();
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 </script>
 
-{#if !hidden}
-  <aside
-    class="navbar navbar-vertical navbar-expand-lg fasti-sidebar-vertical"
-    class:navbar-vertical-collapsed={collapsed}
-    aria-label="Main Navigation"
-  >
-    <div
-      class="container-fluid flex-column align-items-stretch px-2 py-3 h-100"
+<div
+  id="fasti-main-navigation"
+  bind:this={sidebar}
+  class="navbar navbar-vertical navbar-expand-lg offcanvas-lg offcanvas-start fasti-sidebar-vertical"
+  class:show={mobileOpen}
+  class:navbar-vertical-collapsed={desktopCollapsed}
+  class:desktop-hidden={hidden}
+  aria-label="Main navigation"
+  aria-modal={narrowViewport && mobileOpen ? "true" : undefined}
+  aria-hidden={narrowViewport && !mobileOpen ? "true" : undefined}
+  role={narrowViewport ? "dialog" : "navigation"}
+  inert={narrowViewport && !mobileOpen}
+  onkeydown={handleKeydown}
+>
+  <div class="offcanvas-header">
+    <span class="navbar-brand m-0">Fasti</span>
+    <button
+      type="button"
+      class="btn btn-icon btn-ghost-secondary"
+      onclick={onCloseMobile}
+      aria-label="Close navigation"
     >
-      <!-- Brand & Collapsible Controls Header -->
+      <IconX size={20} />
+    </button>
+  </div>
+
+  <div class="offcanvas-body">
+    <div class="container-fluid flex-column align-items-stretch h-100">
       <div
-        class="brand-header-row d-flex align-items-center justify-content-between mb-3 px-2"
+        class="brand-header-row d-flex align-items-center justify-content-between px-2"
       >
-        {#if !collapsed}
-          <button
-            type="button"
-            class="btn p-0 border-0 bg-transparent text-reset d-flex align-items-center gap-2 brand-button"
-            onclick={() => onSelectSection("home")}
-            aria-label="Fasti Home"
+        {#if !desktopCollapsed}
+          <a
+            class="navbar-brand brand-button"
+            href="/"
+            onclick={(event) => {
+              event.preventDefault();
+              onSelectSection("home");
+            }}
+            aria-label="Fasti home"
           >
             <svg
               class="brand-mark text-danger"
@@ -153,32 +252,34 @@
               <rect x="20" y="4" width="4" height="24" fill="currentColor" />
               <rect x="28" y="4" width="4" height="24" fill="currentColor" />
             </svg>
-            <span class="navbar-brand-title fw-bold fs-3 tracking-tight"
-              >Fasti</span
-            >
-          </button>
+            <span class="navbar-brand-title">Fasti</span>
+          </a>
         {/if}
 
-        <div class="d-flex align-items-center gap-1">
-          {#if !collapsed}
+        <div class="desktop-sidebar-actions d-flex align-items-center gap-1">
+          {#if !desktopCollapsed}
             <button
               type="button"
               class="btn btn-icon btn-sm btn-ghost-secondary"
               onclick={onToggleHide}
-              title="Hide sidebar"
-              aria-label="Hide sidebar"
+              title="Hide navigation"
+              aria-label="Hide navigation"
             >
               <IconEyeOff size={16} />
             </button>
           {/if}
           <button
             type="button"
-            class="btn btn-icon btn-sm btn-ghost-secondary"
+            class="btn btn-icon btn-sm btn-ghost-secondary sidebar-collapse-toggle"
             onclick={onToggleCollapse}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={desktopCollapsed
+              ? "Expand navigation"
+              : "Collapse navigation"}
+            aria-label={desktopCollapsed
+              ? "Expand navigation"
+              : "Collapse navigation"}
           >
-            {#if collapsed}
+            {#if desktopCollapsed}
               <IconChevronRight size={16} />
             {:else}
               <IconChevronLeft size={16} />
@@ -187,301 +288,226 @@
         </div>
       </div>
 
-      <!-- Navigation Items List (Tabler .navbar-nav) -->
       <div class="navbar-collapse show flex-grow-1 overflow-y-auto">
-        <ul class="navbar-nav pt-lg-1 d-flex flex-column gap-1">
-          <!-- 1. Pinned Section (if any) -->
-          {#if pinnedItems.length > 0}
-            {#if !collapsed}
-              <li class="nav-section-title">
-                <span
-                  class="text-uppercase text-muted fw-bold d-flex align-items-center gap-1 fs-6"
-                >
-                  <IconPin size={12} /> Pinned
-                </span>
-              </li>
-            {/if}
-            {#each pinnedItems as item (item.id)}
-              {@const Icon = getItemIcon(item.id)}
-              <li class="nav-item">
-                <button
-                  type="button"
-                  class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "home" &&
-                      (activeSection === "chronicle" ||
-                        activeSection === "library"))}
-                  onclick={() => onSelectSection(item.id)}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed
-                    ? item.id === "reconciliation" && openReviewCount > 0
-                      ? `${item.label}, ${openReviewCount} open reviews`
-                      : item.label
-                    : undefined}
-                >
-                  <span
-                    class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
-                  >
-                    <Icon size={18} />
-                  </span>
-                  {#if !collapsed}
-                    <span class="nav-link-title flex-grow-1 text-truncate"
-                      >{item.label}</span
-                    >
-                    {#if item.id === "reconciliation" && openReviewCount > 0}
-                      <span class="badge bg-warning text-dark ms-auto"
-                        >{openReviewCount}</span
-                      >
+        <ul class="navbar-nav pt-lg-1">
+          {#each navGroups as group (group.id)}
+            {#if group.items.length > 0}
+              {#if !desktopCollapsed && group.id !== "primary"}
+                <li class="nav-section-title">
+                  <span class="section-label">
+                    {#if group.id === "pinned"}
+                      <IconPin size={12} aria-hidden="true" />
                     {/if}
-                  {:else if item.id === "reconciliation" && openReviewCount > 0}
-                    <span
-                      class="badge bg-warning badge-dot position-absolute top-1 end-1"
-                    ></span>
-                  {/if}
-                </button>
-              </li>
-            {/each}
-          {/if}
-
-          <!-- 2. Primary Items (Home / Discover) -->
-          {#if primaryItems.length > 0}
-            {#each primaryItems as item (item.id)}
-              {@const Icon = getItemIcon(item.id)}
-              <li class="nav-item">
-                <button
-                  type="button"
-                  class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "home" &&
-                      (activeSection === "chronicle" ||
-                        activeSection === "library"))}
-                  onclick={() => onSelectSection(item.id)}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                >
-                  <span
-                    class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
-                  >
-                    <Icon size={18} />
+                    {group.label}
                   </span>
-                  {#if !collapsed}
-                    <span class="nav-link-title flex-grow-1 text-truncate"
-                      >{item.label}</span
-                    >
-                  {/if}
-                </button>
-              </li>
-            {/each}
-          {/if}
-
-          <!-- 3. MEDIA Section -->
-          {#if mediaItems.length > 0}
-            {#if !collapsed}
-              <li class="nav-section-title mt-2">
-                <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
-                  >Media</span
-                >
-              </li>
-            {/if}
-            {#each mediaItems as item (item.id)}
-              {@const Icon = getItemIcon(item.id)}
-              <li class="nav-item">
-                <button
-                  type="button"
-                  class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id}
-                  onclick={() => onSelectSection(item.id)}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                >
-                  <span
-                    class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
+                </li>
+              {/if}
+              {#each group.items as item (item.id)}
+                {@const Icon = ICON_MAP[item.id] || IconDeviceTv}
+                <li class="nav-item" class:active={isCurrent(item)}>
+                  <a
+                    class="nav-link"
+                    class:active={isCurrent(item)}
+                    href={hrefForSection(item.id)}
+                    aria-current={isCurrent(item) ? "page" : undefined}
+                    onclick={(event) => select(event, item)}
+                    title={desktopCollapsed ? item.label : undefined}
+                    aria-label={desktopCollapsed
+                      ? item.id === "reconciliation" && openReviewCount > 0
+                        ? `${item.label}, ${openReviewCount} open reviews`
+                        : item.label
+                      : undefined}
                   >
-                    <Icon size={18} />
-                  </span>
-                  {#if !collapsed}
-                    <span class="nav-link-title flex-grow-1 text-truncate"
-                      >{item.label}</span
-                    >
-                  {/if}
-                </button>
-              </li>
-            {/each}
-          {/if}
-
-          <!-- 4. LIBRARY Section -->
-          {#if libraryItems.length > 0}
-            {#if !collapsed}
-              <li class="nav-section-title mt-2">
-                <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
-                  >Library</span
-                >
-              </li>
-            {/if}
-            {#each libraryItems as item (item.id)}
-              {@const Icon = getItemIcon(item.id)}
-              <li class="nav-item">
-                <button
-                  type="button"
-                  class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id}
-                  onclick={() => onSelectSection(item.id)}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed ? item.label : undefined}
-                >
-                  <span
-                    class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
-                  >
-                    <Icon size={18} />
-                  </span>
-                  {#if !collapsed}
-                    <span class="nav-link-title flex-grow-1 text-truncate"
-                      >{item.label}</span
-                    >
-                  {/if}
-                </button>
-              </li>
-            {/each}
-          {/if}
-
-          <!-- 5. UTILITIES Section -->
-          {#if utilityItems.length > 0}
-            {#if !collapsed}
-              <li class="nav-section-title mt-2">
-                <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
-                  >Utilities</span
-                >
-              </li>
-            {/if}
-            {#each utilityItems as item (item.id)}
-              {@const Icon = getItemIcon(item.id)}
-              <li class="nav-item">
-                <button
-                  type="button"
-                  class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "sources" && activeSection === "connections")}
-                  onclick={() => onSelectSection(item.id)}
-                  title={collapsed ? item.label : undefined}
-                  aria-label={collapsed
-                    ? item.id === "reconciliation" && openReviewCount > 0
-                      ? `${item.label}, ${openReviewCount} open reviews`
-                      : item.label
-                    : undefined}
-                >
-                  <span
-                    class="nav-link-icon d-inline-flex align-items-center justify-content-center me-2"
-                  >
-                    <Icon size={18} />
-                  </span>
-                  {#if !collapsed}
-                    <span class="nav-link-title flex-grow-1 text-truncate"
-                      >{item.label}</span
-                    >
-                    {#if item.id === "reconciliation" && openReviewCount > 0}
-                      <span class="badge bg-warning text-dark ms-auto"
-                        >{openReviewCount}</span
-                      >
+                    <span class="nav-link-icon">
+                      <Icon size={18} aria-hidden="true" />
+                    </span>
+                    {#if !desktopCollapsed}
+                      <span class="nav-link-title">{item.label}</span>
+                      {#if item.id === "reconciliation" && openReviewCount > 0}
+                        <span class="badge bg-warning text-dark ms-auto"
+                          >{openReviewCount}</span
+                        >
+                      {/if}
+                    {:else if item.id === "reconciliation" && openReviewCount > 0}
+                      <span
+                        class="badge bg-warning badge-dot position-absolute top-1 end-1"
+                      ></span>
                     {/if}
-                  {:else if item.id === "reconciliation" && openReviewCount > 0}
-                    <span
-                      class="badge bg-warning badge-dot position-absolute top-1 end-1"
-                    ></span>
-                  {/if}
-                </button>
-              </li>
-            {/each}
-          {/if}
+                  </a>
+                </li>
+              {/each}
+            {/if}
+          {/each}
         </ul>
       </div>
     </div>
-  </aside>
+  </div>
+</div>
+
+{#if narrowViewport && mobileOpen}
+  <button
+    type="button"
+    class="offcanvas-backdrop fade show navigation-backdrop"
+    tabindex="-1"
+    aria-label="Close navigation"
+    onclick={onCloseMobile}
+  ></button>
 {/if}
 
 <style>
   .fasti-sidebar-vertical {
-    position: static !important;
-    width: 240px;
+    --tblr-offcanvas-width: min(20rem, 100vw);
+    --tblr-offcanvas-transition: transform 200ms ease-in-out;
     background: var(--fasti-surface-paper);
-    border-right: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    transition: width 150ms cubic-bezier(0.16, 1, 0.3, 1);
-    flex-shrink: 0;
+    color: var(--fasti-text-primary);
   }
 
-  .fasti-sidebar-vertical.navbar-vertical-collapsed {
-    width: 64px;
+  .offcanvas-body,
+  .offcanvas-body > .container-fluid {
+    min-height: 100%;
   }
 
-  .brand-button:hover .navbar-brand-title {
-    color: var(--fasti-action-primary);
+  .offcanvas-body > .container-fluid {
+    display: flex;
+    padding: 0.75rem 0.5rem;
   }
 
-  .brand-button,
-  .brand-header-row :global(.btn-icon),
+  .brand-header-row {
+    min-height: 3.25rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .brand-button {
+    min-height: 44px;
+    color: var(--fasti-text-primary);
+    text-decoration: none;
+  }
+
+  .desktop-sidebar-actions :global(.btn-icon),
+  .offcanvas-header :global(.btn-icon),
   .nav-link {
-    min-height: 44px !important;
-  }
-
-  .brand-header-row :global(.btn-icon) {
-    min-width: 44px !important;
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .nav-section-title {
-    padding: 6px 8px 2px;
+    padding: 0.75rem 0.75rem 0.25rem;
+  }
+
+  .section-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: var(--fasti-text-muted);
+    font-family: var(--fasti-font-mono);
     font-size: 0.7rem;
+    font-weight: 700;
     letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
   .nav-link {
     position: relative;
+    gap: 0.5rem;
     color: var(--fasti-text-muted);
     font-size: 0.86rem;
     font-weight: 500;
-    transition:
-      background-color 100ms ease,
-      color 100ms ease;
-    border: none;
-    background: transparent;
-    cursor: pointer;
   }
 
-  .nav-link:hover {
-    background-color: var(--fasti-surface-archive);
+  .fasti-sidebar-vertical .navbar-nav .nav-link {
+    min-height: 44px;
+  }
+
+  .nav-link:hover,
+  .nav-link.active {
     color: var(--fasti-text-primary);
+    background: color-mix(
+      in srgb,
+      var(--fasti-action-primary) 12%,
+      transparent
+    );
   }
 
   .nav-link.active {
-    background-color: color-mix(
-      in srgb,
-      var(--fasti-action-primary) 14%,
-      transparent
-    ) !important;
-    color: var(--fasti-text-primary) !important;
-    font-weight: 600;
+    font-weight: 700;
   }
 
-  .navbar-vertical-collapsed .nav-link {
+  .nav-link-icon {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    padding: 10px 0 !important;
-    width: 44px;
-    min-width: 44px !important;
-    margin-inline: auto;
+    flex: 0 0 1.5rem;
+    margin: 0;
   }
 
-  .navbar-vertical-collapsed .nav-link-icon {
-    margin-right: 0 !important;
+  .nav-link-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  @media (max-width: 47.99rem) {
+  .navigation-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--tblr-offcanvas-zindex) - 1);
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+  }
+
+  @media (min-width: 62rem) {
+    .fasti-sidebar-vertical.desktop-hidden {
+      display: none;
+    }
+
+    .fasti-sidebar-vertical.navbar-vertical-collapsed {
+      width: var(--fasti-collapsed-navigation-width);
+    }
+
+    .navbar-vertical-collapsed .brand-header-row {
+      justify-content: center !important;
+      padding-inline: 0 !important;
+    }
+
+    .navbar-vertical-collapsed .nav-link {
+      justify-content: center;
+      width: 44px;
+      margin-inline: auto;
+      padding-inline: 0;
+    }
+  }
+
+  @media (max-width: 61.99rem) {
     .fasti-sidebar-vertical {
-      position: fixed !important;
-      inset: 0 auto 0 0;
-      z-index: 30;
-      box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+      flex-wrap: nowrap;
+    }
+
+    .offcanvas-header,
+    .offcanvas-body {
+      width: 100%;
+    }
+
+    .fasti-sidebar-vertical.show > .offcanvas-header,
+    .fasti-sidebar-vertical.show > .offcanvas-body {
+      visibility: visible;
+    }
+
+    .offcanvas-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    .offcanvas-body > .container-fluid,
+    .navbar-collapse,
+    .navbar-nav {
+      width: 100%;
+    }
+
+    .brand-header-row {
+      display: none !important;
     }
   }
 </style>

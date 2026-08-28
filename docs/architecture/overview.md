@@ -2,7 +2,7 @@
 
 Fasti is an identity-first local system of record for media activity. It is not a media player.
 
-## Current B0-B3 review spine
+## Current B0-B4 review spine
 
 ```text
 fasti-domain
@@ -10,12 +10,12 @@ fasti-domain
     └── fasti-application ──> use cases, ports, authorization, typed problems
               ^
               ├── fasti-contracts ──> shared public DTOs
-              ├── fasti-api ──> production health and durable-setup router
+              ├── fasti-api ──> local bootstrap plus authenticated local/remote durable routers
               │                 └── feature-gated loopback conformance router
               ├── fasti CLI ──> capability list/show; guarded B3 commands
               ├── fasti-store ──> staged B2 kernel and B3 portability adapters
               └── generated TypeScript HTTP/SSE SDK
-                        └── apps/web local health QA harness
+                        └── apps/web pre-production Workbench
                                   ├── packages/ui presentation
                                   └── packages/tokens design projection
 
@@ -29,7 +29,7 @@ authored capability registry
 
 Dependencies point inward. Domain meaning is owned once and projected outward; HTTP, CLI, SDK, provider, storage, and later presentation types cannot become domain primitives. The retired `fasti-core`, `fasti-activity`, and `fasti-auth` scaffolds are not compatibility layers. Their raw IDs, collapsed activity envelope, caller-controlled server times, and token claims were not proven domain primitives.
 
-`fasti-store` contains the B2 local kernel and staged B3 correction/portability adapters. Production `fastid` opens one SQLite kernel only when the operator supplies `FASTI_DATA_ROOT` and binds to loopback. That composition mounts health, node initialization, and first-client enrollment. Missing data-root configuration or a non-loopback bind remains health-only. B1’s separate conformance server is compile-time feature-gated, binds only to IPv4 loopback, holds bounded data in memory, and labels every success as fixture-only with no durability. Neither composition activates durable observation acceptance, identity resolution, review, export, restore, or recovery through a supported production surface.
+`fasti-store` contains the B2 local kernel and staged B3 correction/portability adapters. Production `fastid` opens one SQLite kernel only when the operator supplies `FASTI_DATA_ROOT`. Direct loopback or an explicitly declared loopback-only container port forward mounts bootstrap, browser-session, observation, identity-record, and profile-state routes. A non-loopback bind mounts the authenticated durable subset only after explicit trusted-proxy and HTTPS-public-origin configuration; bootstrap routes stay absent. Browser accounts reuse the existing profile, client, grant, and credential authorization state instead of creating a second access model. Missing data-root configuration remains health-only. B1’s separate conformance server is compile-time feature-gated, binds only to IPv4 loopback, holds bounded data in memory, and labels every success as fixture-only with no durability. Identity review, export, restore, and recovery remain outside the supported production surface.
 
 ## Target bounded contexts
 
@@ -59,8 +59,8 @@ Any failure before the durability boundary returns a typed problem and cannot re
 
 ## Distribution
 
-The native daemon and CLI are the current executable product shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. The native loopback daemon mounts only the durable setup slice when an explicit data root is present. `apps/web` is a local, private, unpackaged QA harness over the generated `system.health` binding. `apps/desktop` remains a trusted-host review candidate, not a supported package. Neither interface activates a product capability or presentation milestone. There is no supported installation, release, player, or product web application.
+The native daemon and CLI are the current executable product shapes. OCI wraps the same binaries and does not add a web build or hidden static fallback. The native daemon mounts bootstrap plus authenticated durable routes when an explicit data root is present. The loopback-only container launcher also requires `FASTI_EXTERNAL_BIND_IP` to declare the outer loopback-only port forward. The non-loopback daemon mounts only the authenticated subset behind explicit trusted HTTPS proxy configuration. `apps/web` is the private, unpackaged pre-production Workbench over generated contracts. `apps/desktop` remains a trusted-host review candidate, not a supported package. There is no supported installation, release, player, or deployed web application.
 
-B1 cannot close on software checks alone. Its milestone manifest binds contract, QA, Tauri, raw-gate, and retained performance artifacts. The two performance receipts must declare one exact `dev` push and workflow attempt, cover x86_64 and aarch64, complete the 600-second warm-up and 900-second route-less idle window, and bind the kernel-applied 192 MiB, one-vCPU, zero-swap envelope. The verifier recomputes memory, CPU, architecture, and applicable artifact-size results. Optional Pi 5 and J4125 specifications remain useful comparison targets but do not gate the milestone. B4 adds the product browser presentation only after B0-B3 prove the headless kernel; the earlier health harness gathers interface-quality evidence without changing that sequence. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
+B1 cannot close on software checks alone. Its milestone manifest binds contract, QA, Tauri, raw-gate, and retained performance artifacts. The two performance receipts must declare one exact `dev` push and workflow attempt, cover x86_64 and aarch64, complete the 600-second warm-up and 900-second route-less idle window, and bind the kernel-applied 192 MiB, one-vCPU, zero-swap envelope. The verifier recomputes memory, CPU, architecture, and applicable artifact-size results. Optional Pi 5 and J4125 specifications remain useful comparison targets but do not gate the milestone. B4 matures the existing Workbench without promoting incomplete capabilities or removing established interaction paths. B8 owns supported packages, signing, non-Linux restore activation, formal TV support, and public releases.
 
 See [the constitution](../constitution.md), [capability ledger](../capability-ledger.md), and [contract ownership](../../contracts/README.md).

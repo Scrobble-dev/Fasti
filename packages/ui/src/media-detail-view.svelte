@@ -4,6 +4,11 @@
     WatchStatus,
     ExternalId,
     ChronicleOccurrence,
+    ContextMenuItemConfig,
+    ProviderCredentialStatus,
+    ProviderSearchCandidate,
+    ProviderSelection,
+    TrackingDispositionUpdate,
   } from "./types.js";
   import {
     IconArrowLeft,
@@ -26,12 +31,17 @@
     IconClock,
     IconDeviceTv,
     IconPhoto,
+    IconRefresh,
   } from "@tabler/icons-svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
   import ArtworkModal, { type ArtworkCandidate } from "./artwork-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import DiscoverView from "./discover-view.svelte";
+  import { hostProblemText } from "./host-problem.js";
+  import TmdbAttribution from "./tmdb-attribution.svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
 
   /** Namespaces whose external ID value is a real key an image CDN can
    * resolve directly, and the resolver for that namespace. Providers whose
@@ -54,7 +64,27 @@
     record: MediaRecord;
     availableCollections: string[];
     occurrences?: ChronicleOccurrence[];
+    initialTab?: "overview" | "sources";
+    contextMenuConfigs?: ContextMenuItemConfig[];
+    providerCredentials?: ProviderCredentialStatus[];
+    providerLoading?: boolean;
+    providerHostProblem?: string;
     onBack: () => void;
+    onSearchMetadata?: (
+      provider: string,
+      query: string,
+    ) => Promise<ProviderSearchCandidate[]>;
+    onApplyMetadata?: (
+      recordId: string,
+      selection: ProviderSelection,
+    ) => Promise<void>;
+    onOpenProviderSettings?: () => void;
+    onRetryProviders?: () => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
     onToggleEpisode?: (recordId: string, episodeId: string) => void;
@@ -80,7 +110,18 @@
     record,
     availableCollections,
     occurrences = [],
+    initialTab = "overview",
+    contextMenuConfigs,
+    providerCredentials,
+    providerLoading = false,
+    providerHostProblem,
     onBack,
+    onSearchMetadata,
+    onApplyMetadata,
+    onOpenProviderSettings,
+    onRetryProviders,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
     onUpdateStatus,
     onUpdateRating,
     onToggleEpisode,
@@ -107,6 +148,10 @@
   let showCollectionModal = $state(false);
   let showArtworkModal = $state(false);
 
+  let metadataRefreshingId = $state("");
+  let metadataProblem = $state("");
+  let metadataNotice = $state("");
+
   // Context Menu State
   let contextMenuState = $state<{
     x: number;
@@ -117,8 +162,11 @@
   $effect(() => {
     if (record.id !== syncedRecordId) {
       syncedRecordId = record.id;
+      activeTab = initialTab;
       editedNotesText = record.userNotes ?? "";
       isEditingNotes = false;
+      metadataProblem = "";
+      metadataNotice = "";
     }
     const seasonCount = record.seasons?.length ?? 0;
     if (seasonCount === 0) {
@@ -130,6 +178,21 @@
 
   const recordOccurrences = $derived(
     occurrences.filter((occ) => occ.recordId === record.id),
+  );
+  const isSummary = $derived(record.detailLevel === "summary");
+  const hasRecordMutations = $derived(
+    Boolean(
+      onUpdateStatus ||
+      onUpdateRating ||
+      onToggleEpisode ||
+      onUpdateProgress ||
+      onSaveReview ||
+      onSaveCollection ||
+      onUpdateNotes ||
+      onAddTag ||
+      onRemoveTag ||
+      onUpdatePoster,
+    ),
   );
 
   const candidatePosters = $derived(
@@ -148,40 +211,109 @@
       .filter((c): c is ArtworkCandidate => c !== null),
   );
 
-  const statusOptions: Array<{ id: WatchStatus; label: string }> = [
+  const trackingOptions: Array<{
+    id: TrackingDispositionUpdate;
+    label: string;
+  }> = [
+    { id: "unset", label: "Automatic from activity" },
     { id: "watching", label: "In Progress / Watching" },
-    { id: "completed", label: "Completed" },
-    { id: "plan_to_watch", label: "Plan to Watch" },
     { id: "on_hold", label: "On Hold" },
     { id: "dropped", label: "Dropped" },
   ];
 
+  const selectedTrackingDisposition = $derived<TrackingDispositionUpdate>(
+    record.trackingDisposition ?? "unset",
+  );
+
   function handleSaveNotes(): void {
-    onUpdateNotes?.(record.id, editedNotesText);
+    if (!onUpdateNotes) return;
+    onUpdateNotes(record.id, editedNotesText);
     isEditingNotes = false;
+  }
+
+  function providerKindForRecord(): "book" | "movie" | "show" | null {
+    if (record.mediaKind === "book") return "book";
+    if (record.mediaKind === "movie") return "movie";
+    if (record.mediaKind === "show" || record.mediaKind === "anime") {
+      return "show";
+    }
+    return null;
+  }
+
+  function refreshSelection(xid: ExternalId): ProviderSelection | null {
+    const provider = xid.namespace.toLowerCase();
+    const kind = providerKindForRecord();
+    if (
+      (provider === "google-books" && kind === "book") ||
+      (provider === "tmdb" && (kind === "movie" || kind === "show"))
+    ) {
+      return { provider, provider_id: xid.value, kind };
+    }
+    return null;
+  }
+
+  async function searchCompatibleMetadata(
+    provider: string,
+    query: string,
+  ): Promise<ProviderSearchCandidate[]> {
+    if (!onSearchMetadata) return [];
+    const kind = providerKindForRecord();
+    if (!kind) return [];
+    const candidates = await onSearchMetadata(provider, query);
+    return candidates.filter((candidate) => candidate.kind === kind);
+  }
+
+  async function chooseMetadata(
+    candidate: ProviderSearchCandidate,
+  ): Promise<void> {
+    if (!onApplyMetadata) return;
+    await onApplyMetadata(record.id, {
+      provider: candidate.provider,
+      provider_id: candidate.provider_id,
+      kind: candidate.kind,
+    });
+    metadataNotice = `Applied metadata from ${candidate.title}.`;
+  }
+
+  async function refreshMetadata(xid: ExternalId): Promise<void> {
+    const selection = refreshSelection(xid);
+    if (!selection || !onApplyMetadata || metadataRefreshingId) return;
+    metadataRefreshingId = `${xid.namespace}:${xid.value}`;
+    metadataProblem = "";
+    metadataNotice = "";
+    try {
+      await onApplyMetadata(record.id, selection);
+      metadataNotice = `Refreshed metadata from ${xid.namespace}.`;
+    } catch (error) {
+      metadataProblem = hostProblemText(error, "Metadata refresh failed.");
+    } finally {
+      metadataRefreshingId = "";
+    }
   }
 
   function handleAddTagSubmit(e: Event): void {
     e.preventDefault();
-    if (newTagInput.trim().length > 0) {
-      onAddTag?.(record.id, newTagInput.trim());
+    if (onAddTag && newTagInput.trim().length > 0) {
+      onAddTag(record.id, newTagInput.trim());
       newTagInput = "";
     }
   }
 
   function handleMarkSeasonWatched(seasonIndex: number): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
-      if (!ep.watched) onToggleEpisode?.(record.id, ep.id);
+      if (!ep.watched) onToggleEpisode(record.id, ep.id);
     }
   }
 
   function handleMarkSeasonUnwatched(seasonIndex: number): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
-      if (ep.watched) onToggleEpisode?.(record.id, ep.id);
+      if (ep.watched) onToggleEpisode(record.id, ep.id);
     }
   }
 
@@ -189,11 +321,12 @@
     seasonIndex: number,
     upToEpisodeNumber: number,
   ): void {
+    if (!onToggleEpisode) return;
     const season = record.seasons?.[seasonIndex];
     if (!season) return;
     for (const ep of season.episodes ?? []) {
       if (ep.number < upToEpisodeNumber && !ep.watched) {
-        onToggleEpisode?.(record.id, ep.id);
+        onToggleEpisode(record.id, ep.id);
       }
     }
   }
@@ -203,32 +336,52 @@
     contextMenuState = {
       x: e.clientX,
       y: e.clientY,
-      items: [
+      items: recordContextMenuItems(
+        record,
         {
-          id: "prog",
-          label: "Update Progress...",
-          icon: IconAdjustments,
-          action: () => (showProgressModal = true),
+          onView: () => (activeTab = "overview"),
+          onSetTrackingDisposition: onSetTrackingDisposition
+            ? (disposition) => onSetTrackingDisposition(record.id, disposition)
+            : undefined,
+          onMarkCompleted: onUpdateStatus
+            ? () =>
+                onUpdateStatus(
+                  record.id,
+                  record.status === "completed" ? "watching" : "completed",
+                )
+            : undefined,
+          onUpdateProgress: onUpdateProgress
+            ? () => (showProgressModal = true)
+            : undefined,
+          onToggleWatchlist: onUpdateStatus
+            ? () =>
+                onUpdateStatus(
+                  record.id,
+                  record.status === "plan_to_watch"
+                    ? "watching"
+                    : "plan_to_watch",
+                )
+            : undefined,
+          onOpenCollection: onSaveCollection
+            ? () => (showCollectionModal = true)
+            : undefined,
+          onOpenReview: onSaveReview
+            ? () => (showReviewModal = true)
+            : undefined,
+          onEditTags:
+            onAddTag || onRemoveTag
+              ? () => (activeTab = "overview")
+              : undefined,
+          onInspectIds: () => (activeTab = "sources"),
+          onReconcile: onOpenReconciliation,
+          onCopyId:
+            typeof navigator !== "undefined" && navigator.clipboard
+              ? () =>
+                  void navigator.clipboard.writeText(record.id).catch(() => {})
+              : undefined,
         },
-        {
-          id: "review",
-          label: "Post a Review...",
-          icon: IconMessage,
-          action: () => (showReviewModal = true),
-        },
-        {
-          id: "coll",
-          label: "Add to Collection...",
-          icon: IconFolderPlus,
-          action: () => (showCollectionModal = true),
-        },
-        { id: "d1", label: "", divider: true, action: () => {} },
-        {
-          id: "copy_id",
-          label: `Copy Fasti ID (${record.id})`,
-          action: () => navigator.clipboard.writeText(record.id),
-        },
-      ],
+        contextMenuConfigs,
+      ),
     };
   }
 </script>
@@ -318,9 +471,15 @@
           <select
             class="rating-select"
             value={record.userRating ?? 0}
+            disabled={!onUpdateRating}
             onchange={(e) =>
               onUpdateRating?.(record.id, Number(e.currentTarget.value))}
-            aria-label="User Rating"
+            aria-label={onUpdateRating
+              ? "User rating"
+              : "User rating unavailable"}
+            title={onUpdateRating
+              ? "User rating"
+              : "Ratings are not available on this host"}
           >
             <option value="0">Unrated</option>
             {#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as num}
@@ -329,16 +488,21 @@
           </select>
         </div>
 
-        <!-- Status Selector Dropdown -->
+        <!-- Profile-owned tracking state. Completion and watchlist intent are
+             separate domains and are not folded into this selector. -->
         <div class="status-select-wrap">
           <select
             class="status-select {record.status}"
-            value={record.status}
+            value={selectedTrackingDisposition}
+            disabled={!onSetTrackingDisposition}
             onchange={(e) =>
-              onUpdateStatus?.(record.id, e.currentTarget.value as WatchStatus)}
-            aria-label="Watch Status"
+              onSetTrackingDisposition?.(
+                record.id,
+                e.currentTarget.value as TrackingDispositionUpdate,
+              )}
+            aria-label="Profile tracking state"
           >
-            {#each statusOptions as opt}
+            {#each trackingOptions as opt}
               <option value={opt.id}>{opt.label}</option>
             {/each}
           </select>
@@ -348,8 +512,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onSaveCollection}
           onclick={() => (showCollectionModal = true)}
-          title="Add to Collection"
+          title={onSaveCollection
+            ? "Add to Collection"
+            : "Collections are not active on this host"}
         >
           <IconBookmark size={18} />
         </button>
@@ -357,8 +524,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onUpdatePoster}
           onclick={() => (showArtworkModal = true)}
-          title="Edit Artwork"
+          title={onUpdatePoster
+            ? "Edit Artwork"
+            : "Artwork editing is not active on this host"}
         >
           <IconPhoto size={18} />
         </button>
@@ -366,8 +536,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onUpdateProgress}
           onclick={() => (showProgressModal = true)}
-          title="Update Progress"
+          title={onUpdateProgress
+            ? "Update Progress"
+            : "Progress editing is not active on this host"}
         >
           <IconAdjustments size={18} />
         </button>
@@ -376,7 +549,8 @@
           type="button"
           class="icon-action-btn"
           onclick={handleOpenContextMenu}
-          title="More Actions..."
+          title="More actions"
+          aria-label="More actions"
         >
           <IconDotsVertical size={18} />
         </button>
@@ -384,7 +558,10 @@
 
       <!-- Synopsis -->
       <p class="synopsis-prose">
-        {record.overview ?? "No synopsis available for this record."}
+        {record.overview ??
+          (isSummary
+            ? "A synopsis is not included in this record summary."
+            : "No synopsis is recorded for this record.")}
       </p>
     </div>
   </header>
@@ -469,27 +646,41 @@
       <!-- External Links -->
       <div class="sidebar-section">
         <h4 class="sidebar-subheading">External Identifiers</h4>
-        <div class="xid-links">
-          {#each record.externalIds as xid}
-            <a
-              href={xid.url ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              class="xid-link"
-              title="Open in {xid.namespace}"
-            >
-              <span class="ns-tag">{xid.namespace}</span>
-              <span class="ns-val">{xid.value}</span>
-              <IconExternalLink size={12} class="link-icon" />
-            </a>
-          {/each}
-        </div>
+        {#if isSummary}
+          <p class="empty-custom-fields-hint">
+            External identifiers are not included in this record summary.
+          </p>
+        {:else if record.externalIds.length === 0}
+          <p class="empty-custom-fields-hint">
+            No external identifiers are recorded.
+          </p>
+        {:else}
+          <div class="xid-links">
+            {#each record.externalIds as xid}
+              <a
+                href={xid.url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="xid-link"
+                title="Open in {xid.namespace}"
+              >
+                <span class="ns-tag">{xid.namespace}</span>
+                <span class="ns-val">{xid.value}</span>
+                <IconExternalLink size={12} class="link-icon" />
+              </a>
+            {/each}
+          </div>
+        {/if}
       </div>
 
       <!-- Custom Fields -->
       <div class="sidebar-section">
         <h4 class="sidebar-subheading">Custom Fields</h4>
-        {#if record.customFields && Object.keys(record.customFields).length > 0}
+        {#if isSummary}
+          <p class="empty-custom-fields-hint">
+            Custom fields are not included in this record summary.
+          </p>
+        {:else if record.customFields && Object.keys(record.customFields).length > 0}
           <dl class="sidebar-meta-list">
             {#each Object.entries(record.customFields) as [key, value]}
               <div class="meta-pair">
@@ -499,15 +690,13 @@
             {/each}
           </dl>
         {:else}
-          <p class="empty-custom-fields-hint">
-            No custom fields. Add some in Settings → Custom Fields.
-          </p>
+          <p class="empty-custom-fields-hint">No custom fields are recorded.</p>
         {/if}
       </div>
     </aside>
 
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
-    <main class="main-content-pane">
+    <section class="main-content-pane" aria-label="Media record sections">
       <!-- Section Tabs -->
       <nav class="content-tabs" aria-label="Media section tabs">
         <button
@@ -515,6 +704,7 @@
           class="tab-btn"
           class:active={activeTab === "overview"}
           onclick={() => (activeTab = "overview")}
+          aria-pressed={activeTab === "overview"}
         >
           <IconListNumbers size={16} /> Overview & Seasons
         </button>
@@ -524,6 +714,7 @@
           class="tab-btn"
           class:active={activeTab === "actions"}
           onclick={() => (activeTab = "actions")}
+          aria-pressed={activeTab === "actions"}
         >
           <IconAdjustments size={16} /> Actions & Progress
         </button>
@@ -533,8 +724,11 @@
           class="tab-btn"
           class:active={activeTab === "history"}
           onclick={() => (activeTab = "history")}
+          aria-pressed={activeTab === "history"}
         >
-          <IconHistory size={16} /> History ({recordOccurrences.length})
+          <IconHistory size={16} /> History{isSummary
+            ? ""
+            : ` (${recordOccurrences.length})`}
         </button>
 
         <button
@@ -542,9 +736,11 @@
           class="tab-btn"
           class:active={activeTab === "sources"}
           onclick={() => (activeTab = "sources")}
+          aria-pressed={activeTab === "sources"}
         >
-          <IconShieldCheck size={16} /> Sources & Identity ({record.externalIds
-            .length})
+          <IconShieldCheck size={16} /> Sources & Identity{isSummary
+            ? ""
+            : ` (${record.externalIds.length})`}
         </button>
 
         <button
@@ -552,6 +748,7 @@
           class="tab-btn"
           class:active={activeTab === "reviews"}
           onclick={() => (activeTab = "reviews")}
+          aria-pressed={activeTab === "reviews"}
         >
           <IconNotes size={16} /> Notes & Reviews
         </button>
@@ -569,6 +766,7 @@
                   class="season-card-btn"
                   class:active={selectedSeasonIndex === sIdx}
                   onclick={() => (selectedSeasonIndex = sIdx)}
+                  aria-pressed={selectedSeasonIndex === sIdx}
                 >
                   {#if season.posterUrl}
                     <img src={season.posterUrl} alt="" class="season-thumb" />
@@ -596,6 +794,10 @@
                       class="btn-secondary-sm"
                       onclick={() =>
                         handleMarkSeasonWatched(selectedSeasonIndex)}
+                      title={onToggleEpisode
+                        ? "Mark season watched"
+                        : "Episode changes are not available on this host"}
+                      disabled={!onToggleEpisode}
                     >
                       Mark Watched
                     </button>
@@ -604,6 +806,10 @@
                       class="btn-secondary-sm"
                       onclick={() =>
                         handleMarkSeasonUnwatched(selectedSeasonIndex)}
+                      title={onToggleEpisode
+                        ? "Mark season unwatched"
+                        : "Episode changes are not available on this host"}
+                      disabled={!onToggleEpisode}
                     >
                       Mark Unwatched
                     </button>
@@ -617,7 +823,13 @@
                         class="ep-check-btn"
                         class:checked={ep.watched}
                         onclick={() => onToggleEpisode?.(record.id, ep.id)}
-                        aria-label="Toggle watched for Episode {ep.number}"
+                        aria-label={onToggleEpisode
+                          ? `Toggle watched for episode ${ep.number}`
+                          : `Episode ${ep.number} changes unavailable`}
+                        title={onToggleEpisode
+                          ? `Toggle watched for episode ${ep.number}`
+                          : "Episode changes are not available on this host"}
+                        disabled={!onToggleEpisode}
                       >
                         {#if ep.watched}
                           <IconCheck size={16} stroke={3} />
@@ -661,6 +873,10 @@
                               selectedSeasonIndex,
                               ep.number,
                             )}
+                          title={onToggleEpisode
+                            ? `Mark episodes 1 to ${ep.number - 1} seen`
+                            : "Episode changes are not available on this host"}
+                          disabled={!onToggleEpisode}
                         >
                           Mark 1–{ep.number - 1} Seen
                         </button>
@@ -704,14 +920,19 @@
         <section class="tab-pane">
           <h3 class="pane-heading">Media Action Center</h3>
           <p class="pane-sub">
-            Execute state changes, log manual occurrences, or re-organize
-            collections.
+            {hasRecordMutations
+              ? "Use the changes supported by the active host."
+              : "This host exposes this record as read-only. Each unavailable action is disabled."}
           </p>
 
           <div class="ryot-actions-grid">
             <button
               type="button"
               class="ryot-action-btn"
+              disabled={!onUpdateProgress}
+              title={onUpdateProgress
+                ? "Update progress"
+                : "Progress editing is not active on this host"}
               onclick={() => (showProgressModal = true)}
             >
               <div class="action-btn-icon"><IconAdjustments size={22} /></div>
@@ -724,6 +945,10 @@
             <button
               type="button"
               class="ryot-action-btn"
+              disabled={!onSaveReview}
+              title={onSaveReview
+                ? "Post a review"
+                : "Personal ratings and reviews are not active on this host"}
               onclick={() => (showReviewModal = true)}
             >
               <div class="action-btn-icon"><IconMessage size={22} /></div>
@@ -736,6 +961,10 @@
             <button
               type="button"
               class="ryot-action-btn"
+              disabled={!onSaveCollection}
+              title={onSaveCollection
+                ? "Add to collection"
+                : "Collections are not active on this host"}
               onclick={() => (showCollectionModal = true)}
             >
               <div class="action-btn-icon"><IconFolderPlus size={22} /></div>
@@ -765,10 +994,18 @@
         <section class="tab-pane">
           <h3 class="pane-heading">Chronicle History for this Entity</h3>
           <p class="pane-sub">
-            Every recorded observation, rewatch, and device scrobble for {record.title}.
+            {isSummary
+              ? "History is not included in the Records summary."
+              : `Every recorded occurrence available for ${record.title}.`}
           </p>
 
-          {#if recordOccurrences.length === 0}
+          {#if isSummary}
+            <div class="empty-history-box">
+              <IconClock size={32} class="empty-icon" />
+              <h4>History is unavailable in this view</h4>
+              <p>The active host returned only record summary fields.</p>
+            </div>
+          {:else if recordOccurrences.length === 0}
             <div class="empty-history-box">
               <IconClock size={32} class="empty-icon" />
               <h4>No occurrences recorded yet</h4>
@@ -834,36 +1071,109 @@
                 Fasti maintains a stable, immutable identity (<code
                   >{record.id}</code
                 >) independent of TMDB, TVDB, or MyAnimeList. Provider claims
-                remain evidence. Metadata projection switching is not active in
-                this build.
+                remain evidence. Refresh appends a new provider claim; it does
+                not replace the record identity.
               </p>
             </div>
           </div>
 
-          <table class="assertions-table">
-            <thead>
-              <tr>
-                <th scope="col">Namespace</th>
-                <th scope="col">Identifier</th>
-                <th scope="col">Status</th>
-                <th scope="col">Provenance Route</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each record.externalIds as xid}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (the overflow region must accept keyboard scrolling) -->
+          <div
+            class="assertions-scroll"
+            role="region"
+            tabindex="0"
+            aria-label="External identifiers"
+          >
+            <table class="assertions-table">
+              <thead>
                 <tr>
-                  <td class="mono">{xid.namespace}</td>
-                  <td class="mono"><strong>{xid.value}</strong></td>
-                  <td
-                    ><span class="status-pill matched"
-                      >{xid.status.replaceAll("_", " ")}</span
-                    ></td
-                  >
-                  <td>{xid.source}</td>
+                  <th scope="col">Namespace</th>
+                  <th scope="col">Identifier</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Provenance Route</th>
+                  <th scope="col">Action</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each record.externalIds as xid}
+                  {@const selection = refreshSelection(xid)}
+                  <tr>
+                    <td class="mono">{xid.namespace}</td>
+                    <td class="mono"><strong>{xid.value}</strong></td>
+                    <td
+                      ><span class="status-pill matched"
+                        >{xid.status.replaceAll("_", " ")}</span
+                      ></td
+                    >
+                    <td>{xid.source}</td>
+                    <td>
+                      {#if selection && onApplyMetadata}
+                        <button
+                          type="button"
+                          class="metadata-action"
+                          disabled={Boolean(metadataRefreshingId)}
+                          onclick={() => refreshMetadata(xid)}
+                        >
+                          <IconRefresh size={16} aria-hidden="true" />
+                          {metadataRefreshingId ===
+                          `${xid.namespace}:${xid.value}`
+                            ? "Refreshing…"
+                            : "Refresh"}
+                        </button>
+                      {:else}
+                        <span class="muted">No live adapter</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {:else}
+                  <tr>
+                    <td colspan="5" class="muted"
+                      >No external identifiers are attached.</td
+                    >
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+
+          <section
+            class="metadata-chooser"
+            aria-labelledby="metadata-chooser-title"
+          >
+            <div>
+              <h3 id="metadata-chooser-title">Choose metadata</h3>
+              <p>
+                Search a configured provider. The trusted host fetches the
+                selected item again before it stores claims.
+              </p>
+            </div>
+
+            {#key record.id}
+              <DiscoverView
+                embedded
+                {providerCredentials}
+                loading={providerLoading}
+                hostProblem={providerHostProblem}
+                onSearch={searchCompatibleMetadata}
+                onOpenSettings={onOpenProviderSettings ?? (() => {})}
+                onRetry={onRetryProviders ?? (() => {})}
+                onTrackRecord={onApplyMetadata ? chooseMetadata : undefined}
+                actionLabel="Use metadata"
+                completedLabel="Metadata applied"
+                actionProblemFallback="Fasti could not apply metadata to this record."
+              />
+            {/key}
+
+            {#if metadataNotice}
+              <p class="metadata-notice" role="status">{metadataNotice}</p>
+            {/if}
+            {#if metadataProblem}
+              <p class="metadata-problem" role="alert">{metadataProblem}</p>
+            {/if}
+            {#if record.externalIds.some((identifier) => identifier.namespace.toLowerCase() === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
+              <TmdbAttribution />
+            {/if}
+          </section>
         </section>
 
         <!-- TAB 5: PERSONAL REVIEWS & NOTES -->
@@ -875,6 +1185,10 @@
               <button
                 type="button"
                 class="edit-notes-btn"
+                disabled={!onUpdateNotes}
+                title={onUpdateNotes
+                  ? "Edit notes"
+                  : "Personal notes are not active on this host"}
                 onclick={() => {
                   editedNotesText = record.userNotes ?? "";
                   isEditingNotes = true;
@@ -912,8 +1226,9 @@
                 <p class="notes-text">{record.userNotes}</p>
               {:else}
                 <p class="empty-notes-hint">
-                  No personal notes recorded yet. Click 'Edit Notes' to add your
-                  thoughts.
+                  {onUpdateNotes
+                    ? "No personal notes are recorded. Select Edit Notes to add one."
+                    : "No personal notes are available. This host exposes notes as read-only."}
                 </p>
               {/if}
             </div>
@@ -928,8 +1243,12 @@
                 <button
                   type="button"
                   class="tag-delete-btn"
+                  disabled={!onRemoveTag}
                   onclick={() => onRemoveTag?.(record.id, tag)}
                   aria-label="Remove tag {tag}"
+                  title={onRemoveTag
+                    ? `Remove tag ${tag}`
+                    : "Tags are not editable on this host"}
                 >
                   <IconX size={12} />
                 </button>
@@ -939,47 +1258,51 @@
             <form onsubmit={handleAddTagSubmit} class="add-tag-form">
               <input
                 type="text"
+                disabled={!onAddTag}
                 placeholder="+ Add tag..."
                 bind:value={newTagInput}
                 class="add-tag-input"
                 aria-label="New tag name"
+                title={onAddTag
+                  ? "Add tag"
+                  : "Tags are not editable on this host"}
               />
             </form>
           </div>
         </section>
       {/if}
-    </main>
+    </section>
   </div>
 </div>
 
 <!-- Modal Dialogs -->
-{#if showProgressModal}
+{#if showProgressModal && onUpdateProgress}
   <ProgressModal
     {record}
     onClose={() => (showProgressModal = false)}
     onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
+      onUpdateProgress(recId, eps, sec, st)}
   />
 {/if}
 
-{#if showReviewModal}
+{#if showReviewModal && onSaveReview}
   <RatingReviewModal
     {record}
     onClose={() => (showReviewModal = false)}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
   />
 {/if}
 
-{#if showCollectionModal}
+{#if showCollectionModal && onSaveCollection}
   <CollectionModal
     {record}
     collections={availableCollections}
     onClose={() => (showCollectionModal = false)}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
   />
 {/if}
 
-{#if showArtworkModal}
+{#if showArtworkModal && onUpdatePoster}
   <ArtworkModal
     {record}
     candidates={candidatePosters}
@@ -999,6 +1322,9 @@
 
 <style>
   .detail-container {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     max-width: 1200px;
     margin: 0 auto;
     padding: 24px;
@@ -1011,20 +1337,25 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
   }
   .back-btn {
     display: inline-flex;
     align-items: center;
+    min-height: 44px;
     gap: 6px;
     background: transparent;
     border: none;
-    color: var(--fasti-action-primary);
+    color: var(--fasti-text-primary);
     font-weight: 600;
     font-size: 0.92rem;
     cursor: pointer;
     padding: 6px 0;
   }
   .top-id-badge {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
     font-family: var(--fasti-font-mono);
     font-size: 0.78rem;
     color: var(--fasti-text-muted);
@@ -1037,7 +1368,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     padding: 28px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
   }
@@ -1045,7 +1376,7 @@
   .poster-frame {
     width: 100%;
     aspect-ratio: 2 / 3;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     background: var(--fasti-surface-archive);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
@@ -1086,7 +1417,7 @@
   }
   .collection-pill {
     padding: 2px 8px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(in srgb, var(--fasti-brand-gold) 20%, transparent);
     color: var(--fasti-brand-gold);
     font-weight: 700;
@@ -1110,7 +1441,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: #eab308;
     color: #1c1917;
     font-family: var(--fasti-font-mono);
@@ -1129,7 +1460,7 @@
     align-items: center;
     background: var(--fasti-surface-archive);
     border: 1px solid var(--fasti-brand-gold);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     padding: 4px 8px;
   }
   .user-star {
@@ -1148,7 +1479,7 @@
 
   .status-select {
     padding: 7px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     font-size: 0.88rem;
     cursor: pointer;
@@ -1156,17 +1487,17 @@
   }
   .status-select.watching {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
   .status-select.completed {
     background: var(--fasti-state-verified);
-    color: white;
+    color: var(--fasti-verified-contrast);
   }
 
   .icon-action-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 4px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     background: var(--fasti-surface-archive);
@@ -1178,6 +1509,11 @@
   .icon-action-btn.active {
     color: #e11d48;
     border-color: #e11d48;
+  }
+
+  :is(button, select, input, textarea):disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .synopsis-prose {
@@ -1197,7 +1533,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -1243,7 +1579,7 @@
   }
   .genre-chip {
     padding: 3px 8px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     font-size: 0.8rem;
     font-weight: 500;
@@ -1265,7 +1601,7 @@
     gap: 6px;
     padding: 6px 10px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-family: var(--fasti-font-mono);
     font-size: 0.78rem;
     color: var(--fasti-text-primary);
@@ -1281,10 +1617,11 @@
   }
 
   .main-content-pane {
+    min-width: 0;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
   .content-tabs {
@@ -1332,7 +1669,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
     text-align: left;
     transition: all 120ms ease;
@@ -1344,7 +1681,7 @@
   .action-btn-icon {
     width: 44px;
     height: 44px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     display: grid;
     place-items: center;
@@ -1373,7 +1710,7 @@
     justify-content: space-between;
     padding: 12px 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   .history-left {
     display: flex;
@@ -1422,7 +1759,7 @@
     padding: 2px 6px;
     background: var(--fasti-brand-gold);
     color: black;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     font-weight: 700;
   }
   .hist-star {
@@ -1435,7 +1772,7 @@
     text-align: center;
     padding: 40px 20px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   :global(.empty-icon) {
     color: var(--fasti-text-muted);
@@ -1456,7 +1793,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
   }
   .season-card-btn.active {
@@ -1471,7 +1808,7 @@
     width: 36px;
     height: 52px;
     object-fit: cover;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
   .season-name {
     font-weight: 700;
@@ -1501,7 +1838,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
@@ -1518,15 +1855,15 @@
     gap: 14px;
     padding: 12px 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
   }
   .episode-item-row.watched {
     opacity: 0.75;
   }
   .ep-check-btn {
-    width: 28px;
-    height: 28px;
-    border-radius: 4px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 2px solid var(--fasti-text-muted);
     background: transparent;
     display: grid;
@@ -1537,7 +1874,7 @@
   .ep-check-btn.checked {
     background: var(--fasti-state-verified);
     border-color: var(--fasti-state-verified);
-    color: white;
+    color: var(--fasti-verified-contrast);
   }
   .ep-num {
     font-family: var(--fasti-font-mono);
@@ -1574,7 +1911,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.72rem;
     font-weight: 600;
     color: var(--fasti-text-muted);
@@ -1587,7 +1924,7 @@
   }
 
   :is(.btn-secondary-sm, .mark-prev-btn):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -1604,7 +1941,7 @@
     text-align: center;
     padding: 12px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   .cast-avatar {
     width: 72px;
@@ -1639,9 +1976,16 @@
       var(--fasti-state-verified) 12%,
       transparent
     );
-    border-left: 4px solid var(--fasti-state-verified);
-    border-radius: 4px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-verified) 32%, transparent);
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 20px;
+  }
+  .provider-banner > div {
+    min-width: 0;
+  }
+  .provider-banner code {
+    overflow-wrap: anywhere;
   }
   .banner-title {
     font-size: 0.95rem;
@@ -1656,9 +2000,18 @@
 
   .assertions-table {
     width: 100%;
+    min-width: 720px;
     border-collapse: collapse;
     font-size: 0.88rem;
     text-align: left;
+  }
+  .assertions-scroll {
+    overflow-x: auto;
+  }
+
+  .assertions-scroll:focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
   }
   .assertions-table th,
   .assertions-table td {
@@ -1674,13 +2027,57 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-state-verified) 15%,
       transparent
     );
     color: var(--fasti-state-verified);
+  }
+  .metadata-chooser {
+    display: grid;
+    gap: 16px;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+  .metadata-chooser h3,
+  .metadata-chooser p {
+    margin: 0;
+  }
+  .metadata-chooser > div > p,
+  .muted {
+    color: var(--fasti-text-muted);
+  }
+  .metadata-action {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .metadata-action {
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px 12px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .metadata-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  .metadata-notice {
+    color: var(--fasti-state-verified);
+  }
+  .metadata-problem {
+    color: var(--fasti-state-problem, #b42318);
   }
 
   .notes-header-row {
@@ -1694,7 +2091,7 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -1705,7 +2102,7 @@
   .notes-textarea {
     width: 100%;
     padding: 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     font-family: var(--fasti-font-body);
@@ -1721,9 +2118,9 @@
   .btn-primary {
     padding: 8px 16px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -1732,13 +2129,13 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
   }
   .notes-display-box {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-size: 0.95rem;
     line-height: 1.6;
   }

@@ -10,9 +10,20 @@ import { readStrictJson } from "./lib/strict-json.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/**
+ * Reads and parses a strict JSON file from a repository path.
+ * @param {string} root - The repository root directory.
+ * @param {string} relativePath - The path relative to the repository root.
+ * @returns {Promise<*>} The parsed JSON content.
+ */
 const readJson = async (root, relativePath) =>
   readStrictJson(resolve(root, relativePath));
 
+/**
+ * Recursively visits all $ref references in a JSON Schema or OpenAPI document.
+ * @param {*} value - The value to traverse (object, array, or primitive).
+ * @param {Function} visit - Callback function invoked for each $ref value.
+ */
 const visitReferences = (value, visit) => {
   if (Array.isArray(value)) {
     value.forEach((item) => visitReferences(item, visit));
@@ -25,6 +36,12 @@ const visitReferences = (value, visit) => {
   }
 };
 
+/**
+ * Validates generated OpenAPI, JSON Schema, capability registry, and problem catalog contracts.
+ * @param {string} [root=repositoryRoot] - The repository root directory containing the generated contracts.
+ * @returns {Object} Validation counts for capabilities, OpenAPI paths, problems, and schemas.
+ * @throws {AssertionError} If a generated contract fails validation.
+ */
 export async function validateGeneratedContracts(root = repositoryRoot) {
   const [
     openapi,
@@ -63,6 +80,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     SwaggerParser.validate(conformanceOpenapi),
   ]);
   assert.deepEqual(Object.keys(openapi.paths), [
+    "/api/v1/browser/session",
+    "/api/v1/browser/users",
+    "/api/v1/browser/users/{user_id}",
     "/api/v1/client-enrollments",
     "/api/v1/health",
     "/api/v1/integrations",
@@ -74,9 +94,30 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/namespaces",
     "/api/v1/node/initialization",
     "/api/v1/observations",
+    "/api/v1/profile/nuvio-collections",
+    "/api/v1/profile/record-tracking-dispositions",
+    "/api/v1/profile/record-tracking-dispositions/{record_id}",
     "/api/v1/records",
     "/api/v1/records/identifiers",
   ]);
+  assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
+    "bootstrap_bearer",
+    "browser_session",
+    "credential_bearer",
+  ]);
+  assert.deepEqual(openapi.paths["/api/v1/browser/session"].get.security, [
+    { browser_session: [] },
+  ]);
+  assert.deepEqual(
+    openapi.paths["/api/v1/records"].get.security,
+    [{ credential_bearer: [] }, { browser_session: [] }],
+    "list_records security must match scoped authorization",
+  );
+  const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
+  const profileSecurity = [{ credential_bearer: [] }, { browser_session: [] }];
+  assert.deepEqual(nuvioCollections.delete.security, profileSecurity);
+  assert.deepEqual(nuvioCollections.get.security, profileSecurity);
+  assert.deepEqual(nuvioCollections.put.security, profileSecurity);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   ajv.addFormat("uint16", {
@@ -125,7 +166,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 25);
+  assert.equal(registry.capabilities.length, 36);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -144,6 +185,18 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     if (capability.id === "observation.accept") return "b1_observation_accept";
     if (capability.id === "receipt.replay") return "b1_receipt_replay";
     if (capability.id === "receipt.stream") return "b1_receipt_stream";
+    if (
+      capability.id.startsWith("browser.session.") ||
+      capability.id.startsWith("browser.user.")
+    ) {
+      return "b2_browser_auth";
+    }
+    if (
+      capability.id.startsWith("profile.record.tracking_disposition.") ||
+      capability.id.startsWith("profile.nuvio_collections.")
+    ) {
+      return "b2_profile_state";
+    }
     if (
       [
         "identity.record.create",
@@ -263,6 +316,24 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   const healthOperation = openapi.paths["/api/v1/health"].get;
   const healthCapability = capabilities.get("system.health");
+  assert.deepEqual(Object.keys(openapi.components.securitySchemes).sort(), [
+    "bootstrap_bearer",
+    "browser_session",
+    "credential_bearer",
+  ]);
+  for (const scheme of [
+    openapi.components.securitySchemes.bootstrap_bearer,
+    openapi.components.securitySchemes.credential_bearer,
+  ]) {
+    assert.equal(scheme.type, "http");
+    assert.equal(scheme.scheme, "bearer");
+  }
+  assert.deepEqual(openapi.components.securitySchemes.browser_session, {
+    type: "apiKey",
+    name: "fasti_session",
+    in: "cookie",
+    description: "Opaque HttpOnly browser session cookie",
+  });
   assert.equal(healthOperation["x-fasti-capability-id"], healthCapability.id);
   assert.equal(
     healthOperation["x-fasti-authorization"],
@@ -280,6 +351,40 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     healthOperation["x-fasti-example-ids"],
     healthCapability.examples,
   );
+  assert.equal(healthOperation.security, undefined);
+
+  for (const pathItem of Object.values(openapi.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      const capability = capabilities.get(operation["x-fasti-capability-id"]);
+      assert.ok(
+        capability,
+        `production operation ${operation.operationId} has no capability`,
+      );
+      const security =
+        operation.operationId === "initialize_node"
+          ? [{ bootstrap_bearer: [] }]
+          : [
+                "read_session",
+                "end_session",
+                "list_users",
+                "update_user",
+                "delete_user",
+              ].includes(operation.operationId)
+            ? [{ browser_session: [] }]
+            : [
+                  "health_check",
+                  "enroll_first_client",
+                  "create_session",
+                ].includes(operation.operationId)
+              ? undefined
+              : [{ credential_bearer: [] }, { browser_session: [] }];
+      assert.deepEqual(
+        operation.security,
+        security,
+        `production operation ${operation.operationId} security must match ${capability.authorization} authorization`,
+      );
+    }
+  }
 
   const httpOperations = new Map(
     operations.map(({ operation }) => [
@@ -307,8 +412,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   }
   httpOperations.set("system.health", healthOperation);
   for (const capability of registry.capabilities.filter(
-    ({ contract_body: contractBody, lifecycle }) =>
-      contractBody === "b1" && lifecycle.contract_state === "finalized",
+    ({ lifecycle }) => lifecycle.contract_state === "finalized",
   )) {
     const profile = registry.surface_profiles[capability.surface_profile];
     for (const [surface, disposition] of Object.entries(profile)) {
@@ -379,6 +483,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
                 ? "package-smoke:production-bootstrap"
                 : "package-smoke:b1-conformance-fixture",
           );
+          break;
+        case "ui":
+          assert.equal(binding, `ui:${capability.id}`);
           break;
         default:
           assert.fail(`unresolved required surface ${surface}`);

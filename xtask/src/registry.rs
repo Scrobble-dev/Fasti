@@ -9,7 +9,7 @@ use std::fs;
 use std::path::Path;
 
 const REGISTRY_PATH: &str = "contracts/registry/v1/capabilities.yaml";
-const EXPECTED_PROFILES: [&str; 10] = [
+const EXPECTED_PROFILES: [&str; 12] = [
     "b1_durable_bootstrap",
     "b1_http_fixture",
     "b1_integration_status",
@@ -17,6 +17,8 @@ const EXPECTED_PROFILES: [&str; 10] = [
     "b1_receipt_replay",
     "b1_receipt_stream",
     "b1_records",
+    "b2_profile_state",
+    "b2_browser_auth",
     "health",
     "later_b2",
     "later_b3",
@@ -613,6 +615,17 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         | CapabilityKey::AttachIdentifier
         | CapabilityKey::ListRecords
         | CapabilityKey::RegisterNamespace => "b1_records",
+        CapabilityKey::ClearNuvioCollections
+        | CapabilityKey::GetNuvioCollections
+        | CapabilityKey::ReplaceNuvioCollections
+        | CapabilityKey::ListTrackingDispositions
+        | CapabilityKey::SetTrackingDisposition => "b2_profile_state",
+        CapabilityKey::CreateBrowserSession
+        | CapabilityKey::ReadBrowserSession
+        | CapabilityKey::EndBrowserSession
+        | CapabilityKey::ListBrowserUsers
+        | CapabilityKey::UpdateBrowserUser
+        | CapabilityKey::DeleteBrowserUser => "b2_browser_auth",
         _ => match key.contract_body() {
             CapabilityBody::B1 => "b1_http_fixture",
             CapabilityBody::B2 => "later_b2",

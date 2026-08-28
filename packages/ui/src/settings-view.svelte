@@ -17,6 +17,7 @@
   } from "./types.js";
   import { createDefaultWorkbenchPreferences } from "./defaults.js";
   import NetworkSettings from "./network-settings.svelte";
+  import TmdbAttribution from "./tmdb-attribution.svelte";
   import { hostProblemText } from "./host-problem.js";
   import {
     IconKey,
@@ -324,7 +325,13 @@
   }
 
   function handleResetNavPreferences(): void {
-    onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
+    const defaults = createDefaultWorkbenchPreferences();
+    onUpdateWorkbenchPreferences?.({
+      sidebarCollapsed: defaults.sidebarCollapsed,
+      sidebarHidden: defaults.sidebarHidden,
+      navItems: defaults.navItems,
+      contextMenuItems: defaults.contextMenuItems,
+    });
   }
 
   async function saveProviderKey(provider: string): Promise<void> {
@@ -1365,9 +1372,11 @@
                     Source: platform credential store. This value is shared by
                     all profiles on this Fasti node.
                   {:else}
-                    No key is saved for this Fasti node.
+                    No credential is saved for this Fasti node.
                   {/if}
-                  Google Books is required for Discover book search.
+                  {prov.provider === "tmdb"
+                    ? "TMDB enables movie and TV metadata search and refresh. Use an API Read Access Token."
+                    : "Google Books enables book metadata search and refresh."}
                 </p>
                 <form
                   class="key-input-row"
@@ -1379,13 +1388,15 @@
                   <input
                     type="password"
                     placeholder={prov.writable
-                      ? "Enter a new API key"
+                      ? prov.provider === "tmdb"
+                        ? "Enter an API Read Access Token"
+                        : "Enter a new API key"
                       : "Managed by the environment"}
                     value={editingKeyMap[prov.provider] ?? ""}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
-                    aria-label="API Key for {prov.label}"
+                    aria-label="Provider credential for {prov.label}"
                     autocomplete="off"
                     spellcheck="false"
                     disabled={!prov.writable || providerBusy === prov.provider}
@@ -1397,7 +1408,9 @@
                       !editingKeyMap[prov.provider]?.trim() ||
                       !!providerBusy}
                   >
-                    {providerBusy === prov.provider ? "Saving…" : "Save key"}
+                    {providerBusy === prov.provider
+                      ? "Saving…"
+                      : "Save credential"}
                   </button>
                   {#if prov.writable && prov.configured}
                     <button
@@ -1406,7 +1419,7 @@
                       disabled={!!providerBusy}
                       onclick={() => confirmProviderDelete(prov.provider)}
                     >
-                      Remove key
+                      Remove credential
                     </button>
                   {/if}
                 </form>
@@ -1419,10 +1432,12 @@
           {#if providerProblem}
             <p class="provider-problem" role="alert">{providerProblem}</p>
           {/if}
+          <TmdbAttribution />
         </section>
       {:else if activeSettingsSection === "advanced"}
         {#if onSaveNetworkConfiguration && onTestEndpoint}
           <NetworkSettings
+            scope="node"
             configuration={networkConfiguration}
             loading={networkLoading}
             loadProblem={networkLoadProblem}
@@ -1851,7 +1866,7 @@
     padding: 12px 16px;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     font-weight: 600;
     color: var(--fasti-text-muted);
@@ -1875,7 +1890,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     padding: 28px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
   }
@@ -1921,7 +1936,7 @@
     padding: 14px;
     background: var(--fasti-surface-archive);
     border: 2px solid transparent;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
     text-align: left;
   }
@@ -1935,7 +1950,7 @@
   .preview-swatch {
     width: 100%;
     height: 36px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
   }
@@ -2007,7 +2022,7 @@
     gap: 10px;
     padding: 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   .cache-card-header {
     display: flex;
@@ -2031,7 +2046,7 @@
   .custom-field-form {
     padding: 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 12px;
   }
   .custom-entry-list {
@@ -2049,7 +2064,7 @@
     gap: 12px;
     padding: 10px 14px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.88rem;
   }
   .entry-meta {
@@ -2082,7 +2097,7 @@
   .provider-key-card {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
 
   .provider-key-header {
@@ -2112,7 +2127,7 @@
     font-family: var(--fasti-font-mono);
     font-size: 0.75rem;
     padding: 2px 8px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.1);
   }
   .prov-status-chip.configured {
@@ -2136,7 +2151,7 @@
     padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-family: var(--fasti-font-mono);
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
@@ -2147,13 +2162,13 @@
     min-height: 44px;
     padding: 8px 18px;
     font-weight: 600;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
   }
 
   .save-key-btn {
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
   }
 
@@ -2184,7 +2199,7 @@
     .save-key-btn,
     .remove-key-btn
   ):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -2197,7 +2212,7 @@
   .token-form-card {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 20px;
   }
   .form-row {
@@ -2211,7 +2226,7 @@
     padding: 8px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
   .create-token-btn {
@@ -2220,9 +2235,9 @@
     gap: 6px;
     padding: 8px 18px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -2256,7 +2271,7 @@
     font-family: var(--fasti-font-mono);
     padding: 2px 6px;
     background: var(--fasti-surface-archive);
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     margin-right: 4px;
   }
   .delete-tok-btn {
@@ -2275,7 +2290,7 @@
   .importer-card {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -2296,7 +2311,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     font-size: 0.85rem;
     cursor: pointer;
@@ -2326,16 +2341,16 @@
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
   }
   .btn-save {
     padding: 10px 20px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
     align-self: flex-start;
@@ -2348,7 +2363,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }

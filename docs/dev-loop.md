@@ -17,8 +17,9 @@ Run this command from the repository root:
 ./scripts/dev.sh
 ```
 
-This command builds and starts `fastid`, the production daemon. It waits
-until `fastid` answers its health check. Then it prints the API URL.
+This command builds and starts `fastid`, the production daemon. It waits until
+the health route answers and the durable initialization route returns its real
+authorization response. Then it prints the API URL.
 
 `fastid` prefers `http://127.0.0.1:8420`. By default, startup fails if that
 port is already taken. Set `FASTI_PORT_FALLBACK=auto` to have `fastid` ask
@@ -28,9 +29,8 @@ prints the port it actually got. Automatic fallback is unavailable when
 pin the URL other tooling should use. Run `./scripts/dev.sh --status` at
 any time to see the live URL.
 
-Some worktrees also carry `apps/web`, a pre-production health and
-interface-quality harness (see the "Browser QA harness" row in the status
-table above). If this worktree has `apps/web`, the command also builds
+Some worktrees also carry `apps/web`, the local B4 Workbench and its separate
+service diagnostic. If this worktree has `apps/web`, the command also builds
 `@fasti/tokens` and `@fasti/sdk` (its workspace dependencies), then starts
 Vite. The harness listens at `http://127.0.0.1:5173` and proxies `/api`
 requests to whichever URL `fastid` actually started on.
@@ -38,6 +38,13 @@ requests to whichever URL `fastid` actually started on.
 Not every worktree has `apps/web`. Check with `git worktree list`. Then look
 for `apps/web` inside each worktree path. If your current worktree does not
 have `apps/web`, `./scripts/dev.sh` says so and starts only `fastid`.
+
+Open `/` for the Workbench and `/status` for service diagnostics. The browser
+can save one non-secret client service URL. A cross-origin URL requires an
+HTTPS reverse proxy that explicitly allows the Workbench origin through CORS.
+Direct `fastid` does not provide CORS. Node listener, public URL, provider, and
+credential settings remain disabled in the browser because they require the
+trusted host.
 
 Other commands:
 
@@ -54,8 +61,9 @@ Useful environment variables: `FASTI_PORT` (preferred port, default 8420),
 `FASTI_LISTEN` (full bind address), `FASTI_PORT_FALLBACK` (`auto` or `fail`
 -- `fail` refuses to start rather than picking a different port),
 `FASTI_API_URL` (pin the URL other tooling should use instead of trusting
-the fallback), `FASTI_DEV_SCOPE` (name this worktree's container so multiple
-worktrees can run containers side by side).
+the fallback), `FASTI_PUBLIC_URL` (show a separate reverse-proxy origin), and
+`FASTI_DEV_SCOPE` (name this worktree's container so multiple worktrees can
+run containers side by side).
 
 ## QA
 
@@ -68,6 +76,10 @@ curl --fail --silent http://127.0.0.1:8420/api/v1/health   # replace 8420 if it 
 ```
 
 The exact response is `{"status":"healthy","version":"0.1.0"}`.
+
+The launcher also sends an empty initialization request without the bootstrap
+secret. The expected response is `403`. A `404` means the durable router is not
+mounted, so the launcher stops instead of reporting a false success.
 
 Run the full contributor gate before you open a pull request:
 
@@ -110,7 +122,14 @@ podman build --tag fasti:b0 .
 
 `./scripts/dev.sh --podman` (or `--docker`) runs that image locally, scoped
 to this worktree by container name so more than one worktree can run a
-container at the same time without colliding.
+container at the same time without colliding. The image listens on its wildcard
+container socket, while the launcher publishes it only on host
+`127.0.0.1`. The launcher sets `FASTI_EXTERNAL_BIND_IP=127.0.0.1` so `fastid`
+can distinguish this trusted loopback port forward from a remotely exposed
+wildcard listener. It runs the process as the invoking non-root user so the
+worktree-owned `.dev-data` directory stays writable without changing its
+ownership. Podman also keeps that user ID mapped into its rootless user
+namespace. Do not set the exposure assertion for a public port mapping.
 
 The native (default) dev loop above does not use a container at all. If your
 local dev environment happens to run inside a container that shares your

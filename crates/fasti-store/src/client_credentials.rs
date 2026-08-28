@@ -1,3 +1,4 @@
+use crate::browser_auth::viable_administrator_count;
 use crate::kernel::{
     authorize_transaction, digest_secret, map_sql, now, problem, random_secret, scope_storage_key,
     timestamp, SqliteKernel,
@@ -305,6 +306,9 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
             correlation_id,
         )?;
         authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let workspace_id = command.access().workspace_id().to_string();
+        let viable_administrators_before =
+            viable_administrator_count(&transaction, &workspace_id, capability, correlation_id)?;
 
         let target = map_sql(
             transaction
@@ -322,7 +326,7 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
                     "#,
                     params![
                         command.credential_id().to_string(),
-                        command.access().workspace_id().to_string(),
+                        workspace_id,
                         command.access().profile_id().to_string(),
                     ],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
@@ -365,11 +369,20 @@ impl ClientCredentialAdministrationPort for SqliteKernel {
         map_sql(
             transaction.execute(
                 "UPDATE clients SET status = 'revoked' WHERE client_id = ?1 AND workspace_id = ?2",
-                params![target.0, command.access().workspace_id().to_string()],
+                params![target.0, workspace_id],
             ),
             capability,
             correlation_id,
         )?;
+        if viable_administrators_before > 0
+            && viable_administrator_count(&transaction, &workspace_id, capability, correlation_id)?
+                == 0
+        {
+            return Err(Box::new(FastiProblem::forbidden(
+                capability,
+                correlation_id,
+            )));
+        }
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(())
     }

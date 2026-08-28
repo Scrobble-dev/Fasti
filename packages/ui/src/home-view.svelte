@@ -1,6 +1,7 @@
 <script lang="ts">
   import type {
     MediaRecord,
+    TrackingDispositionUpdate,
     WatchStatus,
     ContextMenuItemConfig,
   } from "./types.js";
@@ -9,20 +10,18 @@
   import ProgressModal from "./progress-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
   import PosterCard from "./poster-card.svelte";
-  import {
-    IconShieldCheck,
-    IconChevronRight,
-    IconAdjustments,
-    IconEye,
-    IconBookmark,
-    IconFolderPlus,
-    IconStar,
-  } from "@tabler/icons-svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
+  import { IconChevronRight } from "@tabler/icons-svelte";
 
   interface Props {
     records: MediaRecord[];
     availableCollections: string[];
-    onSelectRecord: (recordId: string) => void;
+    onSelectRecord: (recordId: string, tab?: "overview" | "sources") => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateProgress?: (
       recordId: string,
@@ -40,6 +39,8 @@
     records,
     availableCollections,
     onSelectRecord,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
     onUpdateStatus,
     onUpdateProgress,
     onSaveReview,
@@ -69,6 +70,7 @@
 
   const recentlyRecorded = $derived(
     [...records]
+      .filter((record) => Boolean(record.lastActivityAt))
       .sort((a, b) =>
         (b.lastActivityAt || "").localeCompare(a.lastActivityAt || ""),
       )
@@ -87,18 +89,21 @@
   );
 
   function handleToggleWatched(rec: MediaRecord) {
+    if (!onUpdateStatus) return;
     const newStatus: WatchStatus =
       rec.status === "completed" ? "watching" : "completed";
-    onUpdateStatus?.(rec.id, newStatus);
+    onUpdateStatus(rec.id, newStatus);
   }
 
   function handleToggleWatchlist(rec: MediaRecord) {
+    if (!onUpdateStatus) return;
     const newStatus: WatchStatus =
       rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
-    onUpdateStatus?.(rec.id, newStatus);
+    onUpdateStatus(rec.id, newStatus);
   }
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent) {
+    e.preventDefault();
     contextMenuRecord = rec;
     contextMenuPos = { x: e.clientX, y: e.clientY };
     contextMenuVisible = true;
@@ -107,78 +112,44 @@
   const contextMenuItems = $derived.by<ContextMenuItem[]>(() => {
     if (!contextMenuRecord) return [];
     const r = contextMenuRecord;
-    const allItems: Record<string, ContextMenuItem> = {
-      view: {
-        id: "view",
-        label: "View details",
-        icon: IconEye,
-        action: () => onSelectRecord(r.id),
+    return recordContextMenuItems(
+      r,
+      {
+        onView: () => onSelectRecord(r.id),
+        onSetTrackingDisposition: onSetTrackingDisposition
+          ? (disposition) => onSetTrackingDisposition(r.id, disposition)
+          : undefined,
+        onMarkCompleted: onUpdateStatus
+          ? () => handleToggleWatched(r)
+          : undefined,
+        onUpdateProgress: onUpdateProgress
+          ? () => (activeProgressRecord = r)
+          : undefined,
+        onToggleWatchlist: onUpdateStatus
+          ? () => handleToggleWatchlist(r)
+          : undefined,
+        onOpenCollection: onSaveCollection
+          ? () => (activeCollectionRecord = r)
+          : undefined,
+        onOpenReview: onSaveReview ? () => (activeRatingRecord = r) : undefined,
+        onInspectIds: () => onSelectRecord(r.id, "sources"),
+        onReconcile: onOpenReconciliation,
+        onCopyId:
+          typeof navigator !== "undefined" && navigator.clipboard
+            ? () => void navigator.clipboard.writeText(r.id).catch(() => {})
+            : undefined,
       },
-      watched: {
-        id: "watched",
-        label: r.status === "completed" ? "Mark unplayed" : "Mark as seen",
-        icon: IconEye,
-        action: () => handleToggleWatched(r),
-      },
-      progress: {
-        id: "progress",
-        label: "Update progress & episodes",
-        icon: IconAdjustments,
-        action: () => (activeProgressRecord = r),
-      },
-      watchlist: {
-        id: "watchlist",
-        label:
-          r.status === "plan_to_watch"
-            ? "Remove from watchlist"
-            : "Add to watchlist",
-        icon: IconBookmark,
-        action: () => handleToggleWatchlist(r),
-      },
-      collection: {
-        id: "collection",
-        label: "Add to collection...",
-        icon: IconFolderPlus,
-        action: () => (activeCollectionRecord = r),
-      },
-      review: {
-        id: "review",
-        label: "Rate & personal review...",
-        icon: IconStar,
-        action: () => (activeRatingRecord = r),
-      },
-      edit_tags: {
-        id: "edit_tags",
-        label: "Inspect tags & genres",
-        icon: IconFolderPlus,
-        action: () => onSelectRecord(r.id),
-      },
-      manage_ids: {
-        id: "manage_ids",
-        label: "Inspect external claims & IDs",
-        icon: IconShieldCheck,
-        action: () => onSelectRecord(r.id),
-      },
-      reconcile: {
-        id: "reconcile",
-        label: "Review identity evidence",
-        icon: IconShieldCheck,
-        action: () => onSelectRecord(r.id),
-      },
-    };
-
-    if (contextMenuConfigs && contextMenuConfigs.length > 0) {
-      return [...contextMenuConfigs]
-        .filter((cfg) => cfg.visible && allItems[cfg.id])
-        .sort((a, b) => a.order - b.order)
-        .map((cfg) => allItems[cfg.id]);
-    }
-
-    return Object.values(allItems);
+      contextMenuConfigs,
+    );
   });
 </script>
 
 <div class="home-container">
+  <header class="home-header">
+    <h1>Overview</h1>
+    <p>Review the records available from the active Fasti host.</p>
+  </header>
+
   <!-- Section 1: In progress -->
   <section class="shelf-section">
     <div class="shelf-header">
@@ -190,6 +161,10 @@
         type="button"
         class="view-all-btn"
         onclick={() => onViewAllSection?.("in_progress")}
+        disabled={!onViewAllSection}
+        title={onViewAllSection
+          ? "View all records in progress"
+          : "Section navigation is not available in this view"}
       >
         <span>View all</span>
         <IconChevronRight size={16} />
@@ -201,10 +176,14 @@
         <PosterCard
           record={rec}
           {onSelectRecord}
-          onToggleWatched={handleToggleWatched}
-          onToggleWatchlist={handleToggleWatchlist}
-          onOpenCollection={(r) => (activeCollectionRecord = r)}
-          onOpenReview={(r) => (activeRatingRecord = r)}
+          onToggleWatched={onUpdateStatus ? handleToggleWatched : undefined}
+          onToggleWatchlist={onUpdateStatus ? handleToggleWatchlist : undefined}
+          onOpenCollection={onSaveCollection
+            ? (r) => (activeCollectionRecord = r)
+            : undefined}
+          onOpenReview={onSaveReview
+            ? (r) => (activeRatingRecord = r)
+            : undefined}
           onOpenContextMenu={handleOpenContextMenu}
         />
       {/each}
@@ -222,6 +201,10 @@
         type="button"
         class="view-all-btn"
         onclick={() => onViewAllSection?.("history")}
+        disabled={!onViewAllSection}
+        title={onViewAllSection
+          ? "View all recent records"
+          : "Section navigation is not available in this view"}
       >
         <span>View all</span>
         <IconChevronRight size={16} />
@@ -233,10 +216,14 @@
         <PosterCard
           record={rec}
           {onSelectRecord}
-          onToggleWatched={handleToggleWatched}
-          onToggleWatchlist={handleToggleWatchlist}
-          onOpenCollection={(r) => (activeCollectionRecord = r)}
-          onOpenReview={(r) => (activeRatingRecord = r)}
+          onToggleWatched={onUpdateStatus ? handleToggleWatched : undefined}
+          onToggleWatchlist={onUpdateStatus ? handleToggleWatchlist : undefined}
+          onOpenCollection={onSaveCollection
+            ? (r) => (activeCollectionRecord = r)
+            : undefined}
+          onOpenReview={onSaveReview
+            ? (r) => (activeRatingRecord = r)
+            : undefined}
           onOpenContextMenu={handleOpenContextMenu}
         />
       {/each}
@@ -254,6 +241,10 @@
         type="button"
         class="view-all-btn"
         onclick={() => onViewAllSection?.("up_next")}
+        disabled={!onViewAllSection}
+        title={onViewAllSection
+          ? "View all records up next"
+          : "Section navigation is not available in this view"}
       >
         <span>View all</span>
         <IconChevronRight size={16} />
@@ -265,10 +256,14 @@
         <PosterCard
           record={rec}
           {onSelectRecord}
-          onToggleWatched={handleToggleWatched}
-          onToggleWatchlist={handleToggleWatchlist}
-          onOpenCollection={(r) => (activeCollectionRecord = r)}
-          onOpenReview={(r) => (activeRatingRecord = r)}
+          onToggleWatched={onUpdateStatus ? handleToggleWatched : undefined}
+          onToggleWatchlist={onUpdateStatus ? handleToggleWatchlist : undefined}
+          onOpenCollection={onSaveCollection
+            ? (r) => (activeCollectionRecord = r)
+            : undefined}
+          onOpenReview={onSaveReview
+            ? (r) => (activeRatingRecord = r)
+            : undefined}
           onOpenContextMenu={handleOpenContextMenu}
         />
       {/each}
@@ -276,35 +271,35 @@
   </section>
 
   <!-- Modals & Context Menu -->
-  {#if activeProgressRecord}
+  {#if activeProgressRecord && onUpdateProgress}
     <ProgressModal
       record={activeProgressRecord}
       onClose={() => (activeProgressRecord = null)}
       onSaveProgress={(recId, ep, sec, st) => {
-        onUpdateProgress?.(recId, ep, sec, st);
+        onUpdateProgress(recId, ep, sec, st);
         activeProgressRecord = null;
       }}
     />
   {/if}
 
-  {#if activeRatingRecord}
+  {#if activeRatingRecord && onSaveReview}
     <RatingReviewModal
       record={activeRatingRecord}
       onClose={() => (activeRatingRecord = null)}
       onSaveReview={(recId, rating, notes) => {
-        onSaveReview?.(recId, rating, notes);
+        onSaveReview(recId, rating, notes);
         activeRatingRecord = null;
       }}
     />
   {/if}
 
-  {#if activeCollectionRecord}
+  {#if activeCollectionRecord && onSaveCollection}
     <CollectionModal
       record={activeCollectionRecord}
       collections={availableCollections}
       onClose={() => (activeCollectionRecord = null)}
       onSaveCollection={(recId, collections) => {
-        onSaveCollection?.(recId, collections);
+        onSaveCollection(recId, collections);
         activeCollectionRecord = null;
       }}
     />
@@ -327,6 +322,20 @@
     flex-direction: column;
     gap: 36px;
     box-sizing: border-box;
+  }
+
+  .home-header h1,
+  .home-header p {
+    margin: 0;
+  }
+
+  .home-header h1 {
+    font-family: var(--fasti-font-display);
+  }
+
+  .home-header p {
+    margin-top: 4px;
+    color: var(--fasti-text-muted);
   }
 
   .shelf-section {
@@ -362,7 +371,7 @@
     color: var(--fasti-text-muted);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 12px;
+    border-radius: calc(12px * var(--tblr-border-radius-scale, 1));
   }
 
   .view-all-btn {
@@ -375,13 +384,19 @@
     font-size: 0.86rem;
     font-weight: 600;
     cursor: pointer;
+    min-height: 44px;
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     transition: all 120ms ease;
   }
 
   .view-all-btn:hover {
     color: var(--fasti-action-primary);
+  }
+
+  .view-all-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
   }
 
   .cards-grid {

@@ -1,41 +1,31 @@
-import { FastiClient } from "@fasti/sdk";
+import { connectionEndpoint, FastiClient } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
   AttachIdentifierResult,
+  BrowserSession,
+  BrowserUser,
+  BrowserUserUpdate,
   CreateRecordResult,
   EndpointConnectionStatus,
   IntegrationRuntimeStatus,
   IntegrationStatusHost,
   IntegrationStatusResponse,
   NetworkConfiguration,
+  NuvioCollectionsDocument,
+  NuvioCollectionsState,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
   RecordSummary,
   RegisterNamespaceInput,
   RegisterNamespaceResult,
   SaveNetworkConfigurationRequest,
+  TrackingDispositionState,
+  TrackingDispositionList,
+  TrackingDispositionUpdate,
   WorkbenchHost,
 } from "@fasti/ui";
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
-
-/** Bearer credential for this browser's own session, distinct from provider
- * API keys (never stored client-side at all -- see `providerCredentialStatus`
- * below). Nothing writes this key yet: the browser has no working sign-in
- * flow (`auth-modal.svelte` is UI-only pending a real passkey/OIDC/PAT
- * backend), so every call below fails closed with a clear message until one
- * exists. The SDK methods are real and wired now; only the credential source
- * is still missing. */
-const CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
-
-function storedCredential(): string | undefined {
-  if (typeof localStorage === "undefined") return undefined;
-  try {
-    return localStorage.getItem(CREDENTIAL_STORAGE_KEY) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 const PROVIDERS: ReadonlyArray<{
   provider: string;
@@ -116,67 +106,101 @@ const INTEGRATION_STATES = new Set([
 
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
+  source: "default" | "saved" = "default",
 ): NetworkConfiguration {
+  const serviceUrl = connectionEndpoint(
+    defaultApiUrl || "http://127.0.0.1:8420",
+    "default",
+  ).url;
   return {
     connection: {
       service_url: {
-        value: defaultApiUrl || "http://127.0.0.1:8420",
-        source: "default",
+        value: serviceUrl,
+        source,
         managed: false,
       },
-      public_url: { value: null, source: "default", managed: false },
+      public_url: { value: null, source: "default", managed: true },
     },
     outbound_policy: {
-      allow_providers: ["*"],
+      allow_providers: [],
       deny_providers: [],
-      allow_capabilities: ["*"],
+      allow_capabilities: [],
       deny_capabilities: [],
-      allow_hosts: ["*"],
+      allow_hosts: [],
       deny_hosts: [],
-      allow_networks: ["public", "loopback", "private"],
+      allow_networks: [],
       deny_networks: [],
     },
   };
 }
 
+function unavailable(message: string): Error {
+  return new Error(message);
+}
+
+function checkedEndpoint(value: string) {
+  try {
+    return connectionEndpoint(value);
+  } catch {
+    throw unavailable(
+      "The Fasti service URL must contain only a scheme, host, and optional port. Cleartext HTTP is allowed only for loopback endpoints.",
+    );
+  }
+}
+
 function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
-  if (typeof localStorage === "undefined")
+  if (typeof localStorage === "undefined") {
     return defaultNetworkConfiguration(defaultApiUrl);
+  }
   try {
     const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
-    const value = JSON.parse(raw) as Partial<NetworkConfiguration>;
-    const publicUrlValue = value?.connection?.public_url?.value;
+    const value = JSON.parse(raw) as Partial<NetworkConfiguration> & {
+      service_url?: unknown;
+    };
+    const candidate =
+      typeof value.service_url === "string"
+        ? value.service_url
+        : value.connection?.service_url?.value;
+    if (typeof candidate !== "string") {
+      return defaultNetworkConfiguration(defaultApiUrl);
+    }
+    const serviceUrl = checkedEndpoint(candidate).url;
     if (
-      typeof value?.connection?.service_url?.value !== "string" ||
-      !value.connection.public_url ||
-      (typeof publicUrlValue !== "string" && publicUrlValue !== null) ||
+      !value.connection ||
       !value.outbound_policy ||
       !Array.isArray(value.outbound_policy.allow_networks) ||
       !Array.isArray(value.outbound_policy.deny_networks)
-    )
-      return defaultNetworkConfiguration(defaultApiUrl);
-    return value as NetworkConfiguration;
+    ) {
+      return defaultNetworkConfiguration(serviceUrl, "saved");
+    }
+    const publicUrl = value.connection.public_url?.value;
+    return {
+      connection: {
+        service_url: { value: serviceUrl, source: "saved", managed: false },
+        public_url: {
+          value:
+            typeof publicUrl === "string"
+              ? checkedEndpoint(publicUrl).url
+              : null,
+          source: "saved",
+          managed: false,
+        },
+      },
+      outbound_policy: value.outbound_policy,
+    };
   } catch {
     return defaultNetworkConfiguration(defaultApiUrl);
   }
 }
 
-function unavailable(message: string): Error {
-  return new Error(message);
-}
-function normalizedEndpoint(value: string): string {
-  return value.replace(/\/+$/, "");
-}
-
-function requireCredential(): string {
-  const credential = storedCredential();
-  if (!credential) {
-    throw unavailable(
-      "Sign in to Fasti to see and manage records. This browser has no stored credential yet.",
-    );
-  }
-  return credential;
+function csrfToken(): string {
+  if (typeof document === "undefined") return "";
+  const values = document.cookie
+    .split(";")
+    .map((part) => part.trim().split("="))
+    .filter(([name]) => name === "fasti_csrf");
+  return values.length === 1 ? (values[0][1] ?? "") : "";
 }
 
 function isIntegrationStatus(
@@ -199,14 +223,15 @@ function isIntegrationStatus(
 export async function fetchIntegrationStatus(
   endpoint: string,
 ): Promise<IntegrationRuntimeStatus[]> {
-  const normalized = normalizedEndpoint(endpoint);
+  const normalized = checkedEndpoint(endpoint).url;
   const response = await fetch(`${normalized}/api/v1/integrations`, {
     headers: { Accept: "application/json" },
     cache: "no-store",
     signal: AbortSignal.timeout(3_000),
   });
-  if (!response.ok)
+  if (!response.ok) {
     throw unavailable(`Fasti integration status returned ${response.status}.`);
+  }
   const value = (await response.json()) as Partial<IntegrationStatusResponse>;
   if (
     !Array.isArray(value.integrations) ||
@@ -222,27 +247,37 @@ export async function fetchIntegrationStatus(
 export function createWebHost(
   defaultApiUrl: string,
 ): WorkbenchHost & IntegrationStatusHost {
-  let client = new FastiClient({
-    baseUrl: defaultApiUrl,
-    credential: requireCredential,
-  });
+  const createClient = (baseUrl: string): FastiClient =>
+    new FastiClient({
+      baseUrl,
+      useBrowserSession: true,
+      csrfToken,
+    });
+  let network = loadNetworkConfiguration(defaultApiUrl);
+  let client = createClient(network.connection.service_url.value);
 
   return {
+    networkConfigurationScope: "client",
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
-      return loadNetworkConfiguration(defaultApiUrl);
+      return network;
     },
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
+      const endpoint = checkedEndpoint(input.service_url);
+      const publicUrl = input.public_url
+        ? checkedEndpoint(input.public_url).url
+        : null;
+      const nextClient = createClient(endpoint.url);
       const config: NetworkConfiguration = {
         connection: {
           service_url: {
-            value: input.service_url,
+            value: endpoint.url,
             source: "saved",
             managed: false,
           },
           public_url: {
-            value: input.public_url,
+            value: publicUrl,
             source: "saved",
             managed: false,
           },
@@ -260,42 +295,25 @@ export function createWebHost(
       }
       // Recreate the client with the saved service URL so subsequent SDK
       // calls use the new endpoint rather than the original defaultApiUrl.
-      client = new FastiClient({
-        baseUrl: input.service_url,
-        credential: requireCredential,
-      });
+      network = config;
+      client = nextClient;
       return config;
     },
     async testEndpointConnection(
       endpoint: string,
+      signal?: AbortSignal,
     ): Promise<EndpointConnectionStatus> {
-      const normalized = normalizedEndpoint(endpoint);
-      const parsed = new URL(normalized);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
-      }
-      if (
-        parsed.protocol === "http:" &&
-        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
-      ) {
-        throw unavailable(
-          "Cleartext HTTP is allowed only for loopback endpoints.",
-        );
-      }
-      const response = await fetch(`${normalized}/api/v1/health`, {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok)
-        throw unavailable(`The endpoint returned status ${response.status}.`);
-      const data = (await response.json()) as {
-        status?: string;
-        version?: string;
-      };
+      const target = checkedEndpoint(endpoint);
+      const health = await new FastiClient({
+        baseUrl: target.url,
+        timeoutMs: 3_000,
+        retryPolicy: { maxAttempts: 1 },
+      }).health({ signal });
       return {
-        endpoint: normalized,
-        scheme: parsed.protocol === "https:" ? "https" : "http",
-        status: data.status ?? "healthy",
-        version: data.version ?? "unknown",
+        endpoint: target.url,
+        scheme: target.scheme,
+        status: health.status,
+        version: health.version,
       };
     },
     async listIntegrations(): Promise<IntegrationRuntimeStatus[]> {
@@ -341,28 +359,99 @@ export function createWebHost(
       return 0;
     },
     async listRecords(): Promise<RecordSummary[]> {
-      requireCredential();
       const response = await client.listRecords();
-      return response.records as RecordSummary[];
+      return response.records.map((record) => ({
+        ...record,
+        poster: { ...record.poster, value: null },
+      })) as RecordSummary[];
     },
 
     async createRecord(grain: string): Promise<CreateRecordResult> {
-      requireCredential();
       return client.createRecord({ grain });
     },
 
     async attachIdentifier(
       input: AttachIdentifierInput,
     ): Promise<AttachIdentifierResult> {
-      requireCredential();
       return client.attachIdentifier(input);
     },
 
     async registerNamespace(
       input: RegisterNamespaceInput,
     ): Promise<RegisterNamespaceResult> {
-      requireCredential();
       return client.registerNamespace(input);
+    },
+
+    async listTrackingDispositions(): Promise<TrackingDispositionList> {
+      const response = await client.listTrackingDispositions();
+      return {
+        states: response.states as TrackingDispositionState[],
+        truncated: response.truncated,
+      };
+    },
+
+    async setTrackingDisposition(
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ): Promise<TrackingDispositionState> {
+      return client.setTrackingDisposition(recordId, {
+        disposition,
+      }) as Promise<TrackingDispositionState>;
+    },
+
+    async getNuvioCollections(): Promise<NuvioCollectionsState> {
+      return client.getNuvioCollections();
+    },
+
+    async replaceNuvioCollections(
+      document: NuvioCollectionsDocument,
+    ): Promise<NuvioCollectionsState> {
+      return client.replaceNuvioCollections(document);
+    },
+
+    async clearNuvioCollections(): Promise<NuvioCollectionsState> {
+      return client.clearNuvioCollections();
+    },
+
+    async createBrowserSession(
+      username: string,
+      password: string,
+      sessionTimeoutMinutes: number,
+    ): Promise<BrowserSession> {
+      return client.createBrowserSession({
+        username,
+        password,
+        session_timeout_minutes: sessionTimeoutMinutes,
+      });
+    },
+
+    async currentBrowserSession(): Promise<BrowserSession> {
+      return client.readBrowserSession();
+    },
+
+    async endBrowserSession(): Promise<void> {
+      await client.endBrowserSession();
+    },
+
+    async listBrowserUsers(): Promise<BrowserUser[]> {
+      const response = await client.listBrowserUsers();
+      return [...response.users];
+    },
+
+    async updateBrowserUser(
+      userId: string,
+      input: BrowserUserUpdate,
+    ): Promise<BrowserUser> {
+      return client.updateBrowserUser(userId, input);
+    },
+
+    async deleteBrowserUser(
+      userId: string,
+      currentPassword: string,
+    ): Promise<void> {
+      await client.deleteBrowserUser(userId, {
+        current_password: currentPassword,
+      });
     },
   };
 }

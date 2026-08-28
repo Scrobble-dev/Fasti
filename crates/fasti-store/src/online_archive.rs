@@ -978,7 +978,30 @@ impl ExportScratch {
         Err(unsupported_platform_problem(correlation_id))
     }
 
+    /// Reports that stream-file removal is unavailable on the current platform.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # // On unsupported platforms, this operation returns an unsupported-platform error.
+    /// ```
     fn remove_stream_file(&self, correlation_id: RequestCorrelationId) -> ApplicationResult<()> {
+        Err(unsupported_platform_problem(correlation_id))
+    }
+
+    /// Reports that scratch-directory cleanup is unavailable on the current platform.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let result = scratch.cleanup(correlation_id);
+    /// assert!(result.is_err());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an unsupported-platform error.
+    fn cleanup(&mut self, correlation_id: RequestCorrelationId) -> ApplicationResult<()> {
         Err(unsupported_platform_problem(correlation_id))
     }
 }

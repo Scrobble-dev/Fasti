@@ -412,6 +412,12 @@ mod tests {
         assert!(!health.is_local_operator());
         assert!(health.required_scopes().is_empty());
 
+        let browser_login =
+            AuthorizationRequirement::for_capability(CapabilityKey::CreateBrowserSession);
+        assert!(browser_login.is_unauthenticated());
+        assert!(!browser_login.is_local_operator());
+        assert!(browser_login.required_scopes().is_empty());
+
         let initialize = AuthorizationRequirement::for_capability(CapabilityKey::InitializeNode);
         assert!(initialize.is_bootstrap_only());
         assert!(!initialize.is_local_operator());
@@ -434,6 +440,7 @@ mod tests {
                 capability,
                 CapabilityKey::SystemHealth
                     | CapabilityKey::IntegrationStatus
+                    | CapabilityKey::CreateBrowserSession
                     | CapabilityKey::InitializeNode
                     | CapabilityKey::RestoreWorkspace
             )

@@ -11,7 +11,25 @@ export type MediaKind =
   | "custom";
 
 export type WatchStatus =
-  "watching" | "completed" | "plan_to_watch" | "on_hold" | "dropped";
+  | "unknown"
+  | "watching"
+  | "completed"
+  | "plan_to_watch"
+  | "on_hold"
+  | "dropped";
+
+export type TrackingDisposition = "watching" | "on_hold" | "dropped";
+export type TrackingDispositionUpdate = TrackingDisposition | "unset";
+
+export interface TrackingDispositionState {
+  readonly record_id: string;
+  readonly disposition: TrackingDisposition | null;
+}
+
+export interface TrackingDispositionList {
+  readonly states: ReadonlyArray<TrackingDispositionState>;
+  readonly truncated: boolean;
+}
 
 export interface ExternalId {
   readonly namespace: string;
@@ -59,6 +77,8 @@ export interface SeasonItem {
 export interface MediaRecord {
   readonly id: string;
   readonly title: string;
+  /** Declares whether optional detail collections are authoritative. */
+  readonly detailLevel?: "summary" | "complete";
   readonly originalTitle?: string;
   readonly mediaKind: MediaKind;
   readonly customTypeName?: string;
@@ -73,6 +93,7 @@ export interface MediaRecord {
   readonly posterUrl?: string;
   readonly backdropUrl?: string;
   readonly status: WatchStatus;
+  readonly trackingDisposition?: TrackingDisposition | null;
   readonly userRating?: number;
   readonly communityRating?: {
     readonly score: number;
@@ -239,12 +260,50 @@ export interface ProviderSearchCandidate {
   readonly external_ids?: ExternalId[];
 }
 
+export interface ProviderSelection {
+  readonly provider: string;
+  readonly provider_id: string;
+  readonly kind: string;
+}
+
+export interface BrowserUser {
+  readonly user_id: string;
+  readonly username: string;
+  readonly is_admin: boolean;
+  readonly is_test_account: boolean;
+  readonly active: boolean;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface BrowserSession {
+  readonly user: BrowserUser;
+  readonly expires_at: string;
+}
+
+export interface BrowserUserUpdate {
+  readonly current_password: string;
+  readonly username?: string;
+  readonly password?: string;
+  readonly active?: boolean;
+}
+
+export type NuvioCollectionsDocument = ReadonlyArray<Record<string, unknown>>;
+
+export interface NuvioCollectionsState {
+  readonly document?: NuvioCollectionsDocument | null;
+}
+
 export interface WorkbenchHost {
+  readonly networkConfigurationScope: "client" | "node";
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
   ): Promise<NetworkConfiguration>;
-  testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
+  testEndpointConnection(
+    endpoint: string,
+    signal?: AbortSignal,
+  ): Promise<EndpointConnectionStatus>;
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
   saveProviderCredential(
     provider: string,
@@ -257,6 +316,13 @@ export interface WorkbenchHost {
     provider: string,
     query: string,
   ): Promise<ProviderSearchCandidate[]>;
+  trackProviderCandidate?(
+    selection: ProviderSelection,
+  ): Promise<CreateRecordResult>;
+  applyProviderMetadata?(
+    recordId: string,
+    selection: ProviderSelection,
+  ): Promise<void>;
   listApiClients?(): Promise<ApiClientCredentialSummary[]>;
   createApiClient?(scopes: string[]): Promise<CreatedApiClientCredential>;
   revokeApiClient?(credentialId: string): Promise<ApiClientCredentialSummary[]>;
@@ -272,6 +338,29 @@ export interface WorkbenchHost {
   registerNamespace?(
     input: RegisterNamespaceInput,
   ): Promise<RegisterNamespaceResult>;
+  listTrackingDispositions?(): Promise<TrackingDispositionList>;
+  setTrackingDisposition?(
+    recordId: string,
+    disposition: TrackingDispositionUpdate,
+  ): Promise<TrackingDispositionState>;
+  getNuvioCollections?(): Promise<NuvioCollectionsState>;
+  replaceNuvioCollections?(
+    document: NuvioCollectionsDocument,
+  ): Promise<NuvioCollectionsState>;
+  clearNuvioCollections?(): Promise<NuvioCollectionsState>;
+  createBrowserSession?(
+    username: string,
+    password: string,
+    sessionTimeoutMinutes: number,
+  ): Promise<BrowserSession>;
+  currentBrowserSession?(): Promise<BrowserSession>;
+  endBrowserSession?(): Promise<void>;
+  listBrowserUsers?(): Promise<BrowserUser[]>;
+  updateBrowserUser?(
+    userId: string,
+    input: BrowserUserUpdate,
+  ): Promise<BrowserUser>;
+  deleteBrowserUser?(userId: string, currentPassword: string): Promise<void>;
 }
 
 /** Wire shape of the desktop host's `create_record` command output. */
@@ -347,6 +436,12 @@ export interface RecordActivityView {
   readonly interpretation_state: "unresolved" | "resolved" | "conflicted";
 }
 
+export interface RecordIdentifierView {
+  readonly namespace: string;
+  readonly grain: string;
+  readonly value: string;
+}
+
 /** Wire shape of the desktop host's `list_records` command output
  * (`apps/desktop/src-tauri/src/records.rs`'s `RecordSummary`). `grain` is
  * identity granularity (`fasti_domain::Grain`), not the frontend's display
@@ -358,6 +453,13 @@ export interface RecordSummary {
   readonly status: "active";
   readonly title: ResolvedFieldView;
   readonly poster: ResolvedFieldView;
+  /** Trusted Desktop-only cache path. The host converts it to a scoped asset
+   * URL and never passes the provider URL to the Desktop webview. */
+  readonly poster_asset_path?: string;
+  readonly original_title?: ResolvedFieldView;
+  readonly overview?: ResolvedFieldView;
+  readonly release_year?: ResolvedFieldView;
+  readonly identifiers?: RecordIdentifierView[];
   readonly latest_activity: RecordActivityView | null;
 }
 

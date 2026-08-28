@@ -53,6 +53,61 @@
         ],
         "type": "object"
       },
+      "BrowserSessionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/BrowserUserDto"
+          }
+        },
+        "required": [
+          "user",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "BrowserUserDto": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "is_admin": {
+            "type": "boolean"
+          },
+          "is_test_account": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "is_admin",
+          "is_test_account",
+          "active",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "ClaimedPrecisionDto": {
         "enum": [
           "date",
@@ -93,6 +148,34 @@
         ],
         "type": "object"
       },
+      "CreateBrowserSessionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "session_timeout_minutes": {
+            "format": "int32",
+            "maximum": 1440,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "username": {
+            "maxLength": 64,
+            "minLength": 3,
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password",
+          "session_timeout_minutes"
+        ],
+        "type": "object"
+      },
       "CreateRecordRequest": {
         "additionalProperties": false,
         "properties": {
@@ -128,6 +211,21 @@
           "Bearer"
         ],
         "type": "string"
+      },
+      "DeleteBrowserUserRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "current_password": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password"
+        ],
+        "type": "object"
       },
       "EnrollFirstClientRequest": {
         "additionalProperties": false,
@@ -351,6 +449,21 @@
         ],
         "type": "object"
       },
+      "ListBrowserUsersResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserUserDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "users"
+        ],
+        "type": "object"
+      },
       "ListRecordsResponse": {
         "additionalProperties": false,
         "properties": {
@@ -363,6 +476,25 @@
         },
         "required": [
           "records"
+        ],
+        "type": "object"
+      },
+      "ListTrackingDispositionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "states": {
+            "items": {
+              "$ref": "#/components/schemas/TrackingDispositionStateDto"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "states",
+          "truncated"
         ],
         "type": "object"
       },
@@ -381,6 +513,209 @@
         "required": [
           "initialization_proof"
         ],
+        "type": "object"
+      },
+      "NuvioCatalogSourceDto": {
+        "additionalProperties": {},
+        "properties": {
+          "addonId": {},
+          "catalogId": {},
+          "genre": {},
+          "type": {}
+        },
+        "type": "object"
+      },
+      "NuvioCollectionDto": {
+        "additionalProperties": {},
+        "properties": {
+          "backdropImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "focusGlowEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/NuvioCollectionFolderDto"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "id": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pinToTop": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "showAllTab": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 8192,
+            "type": "string"
+          },
+          "viewMode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "folders"
+        ],
+        "type": "object"
+      },
+      "NuvioCollectionFolderDto": {
+        "additionalProperties": {},
+        "properties": {
+          "catalogSources": {
+            "items": {
+              "$ref": "#/components/schemas/NuvioCatalogSourceDto"
+            },
+            "maxItems": 128,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "coverEmoji": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coverImageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "focusGifEnabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "focusGifUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heroBackdropUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "heroVideoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hideTitle": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "id": {
+            "maxLength": 8192,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/NuvioCollectionSourceDto"
+            },
+            "maxItems": 128,
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tileShape": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 8192,
+            "type": "string"
+          },
+          "titleLogoUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "type": "object"
+      },
+      "NuvioCollectionSourceDto": {
+        "additionalProperties": {},
+        "properties": {
+          "addonId": {},
+          "catalogId": {},
+          "filters": {},
+          "genre": {},
+          "id": {},
+          "mediaType": {},
+          "name": {},
+          "provider": {},
+          "sortBy": {},
+          "sortHow": {},
+          "title": {},
+          "tmdbId": {},
+          "tmdbSourceType": {},
+          "traktListId": {},
+          "type": {}
+        },
+        "type": "object"
+      },
+      "NuvioCollectionsDocumentDto": {
+        "items": {
+          "$ref": "#/components/schemas/NuvioCollectionDto"
+        },
+        "type": "array"
+      },
+      "NuvioCollectionsStateDto": {
+        "additionalProperties": false,
+        "properties": {
+          "document": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NuvioCollectionsDocumentDto"
+              }
+            ]
+          }
+        },
         "type": "object"
       },
       "ObservationIdentifierInput": {
@@ -554,11 +889,37 @@
         ],
         "type": "object"
       },
+      "RecordIdentifierDto": {
+        "additionalProperties": false,
+        "properties": {
+          "grain": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "grain",
+          "value"
+        ],
+        "type": "object"
+      },
       "RecordSummaryDto": {
         "additionalProperties": false,
         "properties": {
           "grain": {
             "type": "string"
+          },
+          "identifiers": {
+            "items": {
+              "$ref": "#/components/schemas/RecordIdentifierDto"
+            },
+            "type": "array"
           },
           "latest_activity": {
             "oneOf": [
@@ -570,11 +931,41 @@
               }
             ]
           },
+          "original_title": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedFieldDto"
+              }
+            ]
+          },
+          "overview": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedFieldDto"
+              }
+            ]
+          },
           "poster": {
             "$ref": "#/components/schemas/ResolvedFieldDto"
           },
           "record_id": {
             "type": "string"
+          },
+          "release_year": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResolvedFieldDto"
+              }
+            ]
           },
           "status": {
             "type": "string"
@@ -678,6 +1069,18 @@
         "required": [
           "tier",
           "is_stale"
+        ],
+        "type": "object"
+      },
+      "SetTrackingDispositionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/TrackingDispositionUpdateDto"
+          }
+        },
+        "required": [
+          "disposition"
         ],
         "type": "object"
       },
@@ -847,6 +1250,83 @@
         ],
         "type": "object"
       },
+      "TrackingDispositionDto": {
+        "enum": [
+          "watching",
+          "on_hold",
+          "dropped"
+        ],
+        "type": "string"
+      },
+      "TrackingDispositionStateDto": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrackingDispositionDto"
+              }
+            ]
+          },
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id"
+        ],
+        "type": "object"
+      },
+      "TrackingDispositionUpdateDto": {
+        "enum": [
+          "watching",
+          "on_hold",
+          "dropped",
+          "unset"
+        ],
+        "type": "string"
+      },
+      "UpdateBrowserUserRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "current_password": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "password": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "username": {
+            "maxLength": 64,
+            "minLength": 3,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "current_password"
+        ],
+        "type": "object"
+      },
       "ViolationDto": {
         "additionalProperties": false,
         "properties": {
@@ -875,6 +1355,26 @@
         ],
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "bootstrap_bearer": {
+        "bearerFormat": "64-character lowercase hexadecimal secret",
+        "description": "One-time local data-root bootstrap secret. Never use an enrolled client credential here.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "browser_session": {
+        "description": "Opaque HttpOnly browser session cookie",
+        "in": "cookie",
+        "name": "fasti_session",
+        "type": "apiKey"
+      },
+      "credential_bearer": {
+        "bearerFormat": "64-character lowercase hexadecimal credential",
+        "description": "Enrolled Fasti client credential sent only in the Authorization header.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -892,6 +1392,616 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/browser/session": {
+      "delete": {
+        "operationId": "end_session",
+        "responses": {
+          "204": {
+            "description": "Browser session ended"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.end",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "read_session",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserSessionResponse"
+                }
+              }
+            },
+            "description": "The current authenticated browser session"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Session no longer has active access"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "post": {
+        "operationId": "create_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBrowserSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserSessionResponse"
+                }
+              }
+            },
+            "description": "An authenticated browser session"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Username or password is invalid"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Input does not satisfy the browser authentication contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "unauthenticated",
+        "x-fasti-capability-id": "browser.session.create",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/users": {
+      "get": {
+        "operationId": "list_users",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBrowserUsersResponse"
+                }
+              }
+            },
+            "description": "Browser users visible to an administrator"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session lacks user-management access"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.user.list",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "browser_user_manage"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/users/{user_id}": {
+      "delete": {
+        "operationId": "delete_user",
+        "parameters": [
+          {
+            "description": "Browser user identifier",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteBrowserUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Browser user deleted"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Administration, CSRF, or password re-authentication failed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Target user is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.user.delete",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "browser_user_manage"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "patch": {
+        "operationId": "update_user",
+        "parameters": [
+          {
+            "description": "Browser user identifier",
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBrowserUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserUserDto"
+                }
+              }
+            },
+            "description": "Updated browser user"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Administration, CSRF, or password re-authentication failed"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Input or target user is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.user.update",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "browser_user_manage"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/client-enrollments": {
       "post": {
         "operationId": "enroll_first_client",
@@ -1342,6 +2452,11 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "integrations"
         ],
@@ -1552,6 +2667,11 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "integrations"
         ],
@@ -1762,6 +2882,11 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "integrations"
         ],
@@ -1962,6 +3087,11 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "integrations"
         ],
@@ -2172,6 +3302,11 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
         "tags": [
           "integrations"
         ],
@@ -2243,7 +3378,7 @@
                 }
               }
             },
-            "description": "Bearer credential is missing or inactive"
+            "description": "Credential or browser session is missing or inactive"
           },
           "403": {
             "content": {
@@ -2253,7 +3388,7 @@
                 }
               }
             },
-            "description": "Credential lacks record-write scope"
+            "description": "Authenticated principal lacks record-write scope"
           },
           "413": {
             "content": {
@@ -2348,6 +3483,14 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
         "tags": [
           "records"
         ],
@@ -2510,6 +3653,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "bootstrap_bearer": []
+          }
+        ],
         "tags": [
           "node"
         ],
@@ -2574,7 +3722,7 @@
                 }
               }
             },
-            "description": "Bearer credential is missing or inactive"
+            "description": "Credential or browser session is missing or inactive"
           },
           "403": {
             "content": {
@@ -2584,7 +3732,7 @@
                 }
               }
             },
-            "description": "Credential lacks observation acceptance scope"
+            "description": "Authenticated principal lacks observation acceptance scope"
           },
           "409": {
             "content": {
@@ -2713,6 +3861,14 @@
             "description": "Bounded evidence or observation capacity is exhausted"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
         "tags": [
           "observations"
         ],
@@ -2742,6 +3898,652 @@
         "x-fasti-runtime-availability": "implemented"
       }
     },
+    "/api/v1/profile/nuvio-collections": {
+      "delete": {
+        "operationId": "clear_nuvio_collections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NuvioCollectionsStateDto"
+                }
+              }
+            },
+            "description": "The authenticated profile no longer has a Nuvio custom Collections document"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state write scope"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.nuvio_collections.clear",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "get_nuvio_collections",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NuvioCollectionsStateDto"
+                }
+              }
+            },
+            "description": "The authenticated profile's Nuvio custom Collections document"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state read scope"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.nuvio_collections.get",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "put": {
+        "operationId": "replace_nuvio_collections",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NuvioCollectionsDocumentDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NuvioCollectionsStateDto"
+                }
+              }
+            },
+            "description": "The authenticated profile's normalized Nuvio custom Collections document"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state write scope"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Document does not satisfy the Nuvio Collections contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.nuvio_collections.replace",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/profile/record-tracking-dispositions": {
+      "get": {
+        "operationId": "list_tracking_dispositions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListTrackingDispositionsResponse"
+                }
+              }
+            },
+            "description": "The authenticated profile's explicit record tracking dispositions"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "profile.record.tracking_disposition.list.forbidden": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "profile.record.tracking_disposition.list",
+                      "code": "forbidden",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000024",
+                      "detail": "request is not authorized for this capability",
+                      "next_actions": [
+                        {
+                          "id": "verify_request_authorization",
+                          "label": "Verify the request context and local grant"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state read scope"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.record.tracking_disposition.list",
+        "x-fasti-example-ids": [
+          "profile.record.tracking_disposition.list.forbidden"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/profile/record-tracking-dispositions/{record_id}": {
+      "put": {
+        "operationId": "set_tracking_disposition",
+        "parameters": [
+          {
+            "description": "Fasti Record identifier",
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTrackingDispositionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingDispositionStateDto"
+                }
+              }
+            },
+            "description": "The authenticated profile's resulting explicit tracking disposition"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential or browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks profile-state write scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record does not exist"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "profile.record.tracking_disposition.set.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "profile.record.tracking_disposition.set",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000025",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record ID or disposition does not satisfy the domain contract"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "501": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Capability is unavailable in this runtime"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "profile"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "profile.record.tracking_disposition.set",
+        "x-fasti-example-ids": [
+          "profile.record.tracking_disposition.set.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "capability_unavailable",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "record_not_found",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "profile_state_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/records": {
       "get": {
         "operationId": "list_records",
@@ -2764,7 +4566,7 @@
                 }
               }
             },
-            "description": "Bearer credential is missing or inactive"
+            "description": "Credential or browser session is missing or inactive"
           },
           "403": {
             "content": {
@@ -2798,7 +4600,7 @@
                 }
               }
             },
-            "description": "Credential lacks record-read scope"
+            "description": "Authenticated principal lacks record-read scope"
           },
           "500": {
             "content": {
@@ -2831,6 +4633,14 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
         "tags": [
           "records"
         ],
@@ -2892,7 +4702,7 @@
                 }
               }
             },
-            "description": "Bearer credential is missing or inactive"
+            "description": "Credential or browser session is missing or inactive"
           },
           "403": {
             "content": {
@@ -2902,7 +4712,7 @@
                 }
               }
             },
-            "description": "Credential lacks record-write scope"
+            "description": "Authenticated principal lacks record-write scope"
           },
           "413": {
             "content": {
@@ -2997,6 +4807,14 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
         "tags": [
           "records"
         ],
@@ -3065,7 +4883,7 @@
                 }
               }
             },
-            "description": "Bearer credential is missing or inactive"
+            "description": "Credential or browser session is missing or inactive"
           },
           "403": {
             "content": {
@@ -3075,7 +4893,7 @@
                 }
               }
             },
-            "description": "Credential lacks record-write scope"
+            "description": "Authenticated principal lacks record-write scope"
           },
           "404": {
             "content": {
@@ -3190,6 +5008,14 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "credential_bearer": []
+          },
+          {
+            "browser_session": []
+          }
+        ],
         "tags": [
           "records"
         ],

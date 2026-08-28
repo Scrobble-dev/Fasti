@@ -1,31 +1,43 @@
 <script lang="ts">
   import {
+    IconLogin,
+    IconLogout,
+    IconPencil,
+    IconTrash,
+    IconUserShield,
     IconX,
-    IconFingerprint,
-    IconShieldLock,
-    IconDevices2,
-    IconLockAccess,
-    IconIdBadge,
-    IconCopy,
-    IconCheck,
-    IconRefresh,
-    IconBrandGithub,
-    IconBrandGoogle,
-    IconBrandApple,
   } from "@tabler/icons-svelte";
+  import type { BrowserSession, BrowserUser, WorkbenchHost } from "./types.js";
 
   interface Props {
     show: boolean;
+    host: WorkbenchHost;
+    session: BrowserSession | null;
     onClose: () => void;
-    onSignIn?: (method: string, credentials: unknown) => void;
+    onSessionChange: (session: BrowserSession | null) => void;
   }
 
-  let { show, onClose, onSignIn }: Props = $props();
-
-  type AuthMethod = "passkey" | "oidc" | "pin" | "password" | "pat";
-
+  let { show, host, session, onClose, onSessionChange }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
-  let activeMethod = $state<AuthMethod>("passkey");
+  let username = $state("");
+  let password = $state("");
+  let sessionTimeoutMinutes = $state(60);
+  let users = $state<BrowserUser[]>([]);
+  let selectedUserId = $state<string | null>(null);
+  let editUsername = $state("");
+  let editPassword = $state("");
+  let editActive = $state(true);
+  let currentPassword = $state("");
+  let confirmDelete = $state(false);
+  let busy = $state(false);
+  let problem = $state("");
+  let notice = $state("");
+  let signInInvalid = $state(false);
+  const usernamePattern = "[a-z0-9][a-z0-9._\\-]{2,63}";
+
+  const selectedUser = $derived(
+    users.find((user) => user.user_id === selectedUserId) ?? null,
+  );
 
   $effect(() => {
     if (!dialog) return;
@@ -33,357 +45,460 @@
     else if (!show && dialog.open) dialog.close();
   });
 
-  const METHOD_TABS: Array<{ id: AuthMethod; label: string; icon: any }> = [
-    { id: "passkey", label: "Passkey", icon: IconFingerprint },
-    { id: "oidc", label: "OIDC / SSO", icon: IconShieldLock },
-    { id: "pin", label: "NuvioTV Device", icon: IconDevices2 },
-    { id: "password", label: "Master Password", icon: IconLockAccess },
-    { id: "pat", label: "Access Token", icon: IconIdBadge },
-  ];
-
-  // --- Passkey / WebAuthn ---
-  const passkeySupported =
-    typeof navigator !== "undefined" && "credentials" in navigator;
-  let passkeyBusy = $state(false);
-  let passkeyError = $state("");
-
-  async function handlePasskeySignIn(): Promise<void> {
-    if (!passkeySupported || passkeyBusy) return;
-    passkeyBusy = true;
-    passkeyError = "";
-    try {
-      // ponytail: challenge is a client-only placeholder — a real WebAuthn
-      // relying party must issue this server-side once that backend exists.
-      const credential = await navigator.credentials.get({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          userVerification: "preferred",
-          timeout: 60000,
-        },
-      });
-      onSignIn?.("passkey", credential);
-    } catch (error) {
-      passkeyError =
-        error instanceof Error
-          ? error.message
-          : "Passkey sign-in was cancelled or failed.";
-    } finally {
-      passkeyBusy = false;
-    }
-  }
-
-  // --- OIDC / SSO ---
-  const OIDC_PROVIDERS = [
-    { id: "authentik", name: "Authentik", icon: IconShieldLock },
-    { id: "authelia", name: "Authelia", icon: IconShieldLock },
-    { id: "keycloak", name: "Keycloak", icon: IconShieldLock },
-    { id: "pocket_id", name: "Pocket ID", icon: IconShieldLock },
-    { id: "github", name: "GitHub", icon: IconBrandGithub },
-    { id: "google", name: "Google", icon: IconBrandGoogle },
-    { id: "apple", name: "Apple", icon: IconBrandApple },
-  ];
-  let selectedOidcProvider = $state<string | null>(null);
-  let oidcIssuerUrl = $state("");
-
-  function handleSelectOidcProvider(id: string): void {
-    selectedOidcProvider = id;
-  }
-
-  function handleOidcSubmit(e: Event): void {
-    e.preventDefault();
-    if (oidcIssuerUrl.trim().length === 0) return;
-    onSignIn?.("oidc", {
-      provider: selectedOidcProvider,
-      issuerUrl: oidcIssuerUrl.trim(),
-    });
-  }
-
-  // --- NuvioTV Device PIN ---
-  const PIN_TTL_MS = 10 * 60 * 1000;
-
-  function generatePairingCode(): string {
-    // ponytail: still client-only and never registered with a host, so no
-    // device can actually validate this code -- same placeholder status as
-    // the WebAuthn challenge above. Real issuance needs a host command with
-    // a server-tracked expiry. This only fixes the randomness: a predictable
-    // Math.random() PIN would make guessing collisions dramatically easier
-    // once real validation exists.
-    const buffer = new Uint32Array(1);
-    crypto.getRandomValues(buffer);
-    return String(100000 + (buffer[0] % 900000));
-  }
-
-  let pairingCode = $state(generatePairingCode());
-  let pairingExpiresAt = $state(Date.now() + PIN_TTL_MS);
-  let nowTick = $state(Date.now());
-  let pinCopied = $state(false);
-
   $effect(() => {
-    const interval = setInterval(() => (nowTick = Date.now()), 1000);
-    return () => clearInterval(interval);
+    if (show && session?.user.is_admin) void loadUsers();
   });
 
-  const pinSecondsRemaining = $derived(
-    Math.max(0, Math.round((pairingExpiresAt - nowTick) / 1000)),
-  );
-  const pinExpired = $derived(pinSecondsRemaining <= 0);
-  const pinCountdownLabel = $derived(
-    `${Math.floor(pinSecondsRemaining / 60)}:${String(pinSecondsRemaining % 60).padStart(2, "0")}`,
-  );
-
-  function handleRegeneratePin(): void {
-    pairingCode = generatePairingCode();
-    pairingExpiresAt = Date.now() + PIN_TTL_MS;
-    pinCopied = false;
+  function problemDetails(error: unknown):
+    | {
+        code?: unknown;
+        violations?: ReadonlyArray<{ code?: unknown }>;
+      }
+    | undefined {
+    if (error && typeof error === "object" && "problem" in error) {
+      return (
+        error as {
+          problem?: {
+            code?: unknown;
+            violations?: ReadonlyArray<{ code?: unknown }>;
+          };
+        }
+      ).problem;
+    }
+    return undefined;
   }
 
-  async function handleCopyPin(): Promise<void> {
+  function messageFor(error: unknown): string {
+    const details = problemDetails(error);
+    if (details?.code === "authentication_failed") {
+      return "The username or password is incorrect.";
+    }
+    if (
+      details?.violations?.some(
+        (violation) => violation.code === "last_active_administrator_required",
+      )
+    ) {
+      return "This is the only active administrator. Keep the account active.";
+    }
+    return error instanceof Error
+      ? error.message
+      : "Fasti could not complete the account request. Try again.";
+  }
+
+  function formatExpiry(value: string): string {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? value
+      : new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(date);
+  }
+
+  async function loadUsers(): Promise<void> {
+    if (!host.listBrowserUsers) return;
     try {
-      await navigator.clipboard.writeText(pairingCode);
-      pinCopied = true;
-      setTimeout(() => (pinCopied = false), 2000);
-    } catch {
-      pinCopied = false;
+      users = await host.listBrowserUsers();
+    } catch (error) {
+      problem = messageFor(error);
     }
   }
 
-  // --- Local Master Password ---
-  let passwordUsername = $state("");
-  let passwordValue = $state("");
-  let sessionTimeoutMinutes = $state(60);
-
-  function handlePasswordSubmit(e: Event): void {
-    e.preventDefault();
-    if (!passwordUsername.trim() || !passwordValue) return;
-    onSignIn?.("password", {
-      username: passwordUsername.trim(),
-      password: passwordValue,
-      sessionTimeoutMinutes,
-    });
-    // Clear the secret out of this component's own state immediately after
-    // handing it off -- it should not keep sitting in memory once onSignIn
-    // has it, and a caller that re-opens this modal must not find it prefilled.
-    passwordValue = "";
+  async function signIn(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (!host.createBrowserSession || busy) return;
+    busy = true;
+    problem = "";
+    notice = "";
+    signInInvalid = false;
+    try {
+      const result = await host.createBrowserSession(
+        username.trim(),
+        password,
+        sessionTimeoutMinutes,
+      );
+      password = "";
+      onSessionChange(result);
+      notice = `Signed in as ${result.user.username}.`;
+      if (result.user.is_admin) await loadUsers();
+    } catch (error) {
+      signInInvalid = problemDetails(error)?.code === "authentication_failed";
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
   }
 
-  // --- Personal Access Token ---
-  let patValue = $state("");
-  const patValid = $derived(patValue.trim().startsWith("fst_pat_"));
+  async function signOut(): Promise<void> {
+    if (!host.endBrowserSession || busy) return;
+    busy = true;
+    problem = "";
+    try {
+      await host.endBrowserSession();
+      users = [];
+      selectedUserId = null;
+      onSessionChange(null);
+      notice = "Signed out.";
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
 
-  function handlePatSubmit(e: Event): void {
-    e.preventDefault();
-    if (!patValid) return;
-    onSignIn?.("pat", { token: patValue.trim() });
-    // Same reasoning as handlePasswordSubmit: don't keep the token sitting
-    // in this component's state once it's been handed off.
-    patValue = "";
+  function beginEdit(user: BrowserUser): void {
+    selectedUserId = user.user_id;
+    editUsername = user.username;
+    editPassword = "";
+    editActive = user.active;
+    currentPassword = "";
+    confirmDelete = false;
+    problem = "";
+    notice = "";
+  }
+
+  async function saveUser(event: SubmitEvent): Promise<void> {
+    event.preventDefault();
+    if (!selectedUser || !host.updateBrowserUser || busy) return;
+    const usernameChanged = editUsername.trim() !== selectedUser.username;
+    const activeChanged = editActive !== selectedUser.active;
+    if (!usernameChanged && !editPassword && !activeChanged) {
+      problem = "Change the username, password, or active state before saving.";
+      return;
+    }
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      const updated = await host.updateBrowserUser(selectedUser.user_id, {
+        current_password: currentPassword,
+        ...(usernameChanged ? { username: editUsername.trim() } : {}),
+        ...(editPassword ? { password: editPassword } : {}),
+        ...(activeChanged ? { active: editActive } : {}),
+      });
+      users = users.map((user) =>
+        user.user_id === updated.user_id ? updated : user,
+      );
+      currentPassword = "";
+      const currentUserUpdated = updated.user_id === session?.user.user_id;
+      const sessionInvalidated =
+        currentUserUpdated &&
+        (usernameChanged || Boolean(editPassword) || !updated.active);
+      editPassword = "";
+      if (sessionInvalidated) {
+        username = updated.username;
+        users = [];
+        onSessionChange(null);
+        notice = "Account updated. Sign in again with the new details.";
+      } else {
+        if (currentUserUpdated && session) {
+          onSessionChange({ ...session, user: updated });
+        }
+        notice = `Saved ${updated.username}.`;
+      }
+      selectedUserId = null;
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteUser(): Promise<void> {
+    if (!selectedUser || !host.deleteBrowserUser || !confirmDelete || busy)
+      return;
+    const user = selectedUser;
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      await host.deleteBrowserUser(user.user_id, currentPassword);
+      users = users.filter((candidate) => candidate.user_id !== user.user_id);
+      const deletedCurrentUser = user.user_id === session?.user.user_id;
+      selectedUserId = null;
+      currentPassword = "";
+      confirmDelete = false;
+      if (deletedCurrentUser) onSessionChange(null);
+      notice = deletedCurrentUser
+        ? "Account deleted. The development seed will not recreate it."
+        : "Account deleted.";
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
   }
 </script>
 
 <dialog
   bind:this={dialog}
-  class="modal-backdrop"
+  class="auth-dialog"
   aria-labelledby="auth-modal-title"
-  oncancel={onClose}
+  oncancel={(event) => {
+    event.preventDefault();
+    onClose();
+  }}
   onclick={(event) => {
     if (event.target === event.currentTarget) onClose();
   }}
 >
-  <div class="modal-card">
-    <div class="modal-header">
-      <h2 id="auth-modal-title" class="modal-title">Sign in to Fasti</h2>
+  <section class="modal-card">
+    <header class="modal-header">
+      <div>
+        <h2 id="auth-modal-title">Account access</h2>
+        <p>Browser sessions stay separate from integration tokens.</p>
+      </div>
       <button
         type="button"
-        class="close-btn"
+        class="icon-button"
         onclick={onClose}
-        aria-label="Close dialog"
+        aria-label="Close account dialog"
       >
         <IconX size={18} />
       </button>
-    </div>
-
-    <nav class="method-tabs" aria-label="Sign-in method">
-      {#each METHOD_TABS as tab}
-        <button
-          type="button"
-          class="method-tab-btn"
-          class:active={activeMethod === tab.id}
-          onclick={() => (activeMethod = tab.id)}
-        >
-          <tab.icon size={16} />
-          {tab.label}
-        </button>
-      {/each}
-    </nav>
+    </header>
 
     <div class="modal-body">
-      {#if activeMethod === "passkey"}
-        <div class="method-pane">
-          <p class="body-desc">
-            Use a passkey stored on this device or a nearby security key.
-          </p>
-          {#if passkeySupported}
-            <button
-              type="button"
-              class="btn-primary-full"
-              onclick={handlePasskeySignIn}
-              disabled={passkeyBusy}
-            >
-              <IconFingerprint size={18} />
-              {passkeyBusy ? "Waiting for passkey…" : "Sign in with Passkey"}
-            </button>
-            {#if passkeyError}
-              <p class="inline-problem" role="alert">{passkeyError}</p>
-            {/if}
-          {:else}
-            <p class="inline-problem" role="alert">
-              This browser does not support WebAuthn passkeys. Try Chrome,
-              Safari, Edge, or Firefox on a device with platform authentication
-              enabled.
-            </p>
-          {/if}
-        </div>
-      {:else if activeMethod === "oidc"}
-        <form class="method-pane" onsubmit={handleOidcSubmit}>
-          <p class="body-desc">
-            Sign in with your identity provider. Pick a common provider or enter
-            a custom issuer URL.
-          </p>
-          <div class="provider-grid">
-            {#each OIDC_PROVIDERS as prov}
-              <button
-                type="button"
-                class="provider-btn"
-                class:selected={selectedOidcProvider === prov.id}
-                onclick={() => handleSelectOidcProvider(prov.id)}
-              >
-                <prov.icon size={18} />
-                <span>{prov.name}</span>
-              </button>
-            {/each}
-          </div>
-          <div class="form-field">
-            <label for="oidc-issuer-url">Issuer URL</label>
-            <input
-              id="oidc-issuer-url"
-              type="url"
-              class="form-input"
-              placeholder="https://auth.example.com/application/o/fasti/"
-              bind:value={oidcIssuerUrl}
-              required
-            />
-          </div>
-          <button type="submit" class="btn-primary-full">
-            Continue with SSO
-          </button>
-        </form>
-      {:else if activeMethod === "pin"}
-        <div class="method-pane">
-          <p class="body-desc">
-            Enter this pairing code on your NuvioTV device to link it to your
-            Fasti account.
-          </p>
-          <div class="pin-display" class:expired={pinExpired}>
-            {pairingCode.slice(0, 3)}
-            {pairingCode.slice(3)}
-          </div>
-          <p class="pin-countdown" class:expired={pinExpired}>
-            {#if pinExpired}
-              Code expired — regenerate to continue.
-            {:else}
-              Expires in {pinCountdownLabel}
-            {/if}
-          </p>
-          <div class="pin-actions">
-            <button type="button" class="btn-secondary" onclick={handleCopyPin}>
-              {#if pinCopied}
-                <IconCheck size={16} /> Copied
-              {:else}
-                <IconCopy size={16} /> Copy code
-              {/if}
-            </button>
-            <button
-              type="button"
-              class="btn-secondary"
-              onclick={handleRegeneratePin}
-            >
-              <IconRefresh size={16} /> Regenerate
-            </button>
-          </div>
-        </div>
-      {:else if activeMethod === "password"}
-        <form class="method-pane" onsubmit={handlePasswordSubmit}>
+      {#if notice}
+        <p class="notice" role="status">{notice}</p>
+      {/if}
+      {#if problem}
+        <p id="auth-problem" class="problem" role="alert">{problem}</p>
+      {/if}
+
+      {#if !session}
+        <form class="form-stack" onsubmit={signIn}>
           <div class="form-field">
             <label for="auth-username">Username</label>
             <input
               id="auth-username"
               type="text"
-              class="form-input"
               autocomplete="username"
-              bind:value={passwordUsername}
+              minlength="3"
+              maxlength="64"
+              pattern={usernamePattern}
+              aria-invalid={signInInvalid}
+              aria-describedby={signInInvalid ? "auth-problem" : undefined}
+              bind:value={username}
+              oninput={() => (signInInvalid = false)}
               required
             />
           </div>
           <div class="form-field">
-            <label for="auth-password">Master Password</label>
+            <label for="auth-password">Password</label>
             <input
               id="auth-password"
               type="password"
-              class="form-input"
               autocomplete="current-password"
-              bind:value={passwordValue}
+              minlength="8"
+              maxlength="128"
+              aria-invalid={signInInvalid}
+              aria-describedby={signInInvalid ? "auth-problem" : undefined}
+              bind:value={password}
+              oninput={() => (signInInvalid = false)}
               required
             />
           </div>
           <div class="form-field">
-            <label for="auth-session-timeout">Session Timeout</label>
+            <label for="auth-session-timeout">Session duration</label>
             <select
               id="auth-session-timeout"
-              class="form-input"
               bind:value={sessionTimeoutMinutes}
             >
               <option value={15}>15 minutes</option>
               <option value={60}>1 hour</option>
               <option value={480}>8 hours</option>
               <option value={1440}>24 hours</option>
-              <option value={0}>Never</option>
             </select>
           </div>
-          <button type="submit" class="btn-primary-full">Sign In</button>
-        </form>
-      {:else if activeMethod === "pat"}
-        <form class="method-pane" onsubmit={handlePatSubmit}>
-          <p class="body-desc">
-            Sign in with a scoped Personal Access Token generated in Settings.
-          </p>
-          <div class="form-field">
-            <label for="auth-pat">Access Token</label>
-            <input
-              id="auth-pat"
-              type="password"
-              class="form-input mono"
-              placeholder="fst_pat_..."
-              autocomplete="off"
-              spellcheck="false"
-              bind:value={patValue}
-            />
-          </div>
-          {#if patValue.length > 0 && !patValid}
-            <p class="inline-problem" role="alert">
-              Tokens must start with "fst_pat_".
+          <button
+            type="submit"
+            class="primary-button"
+            disabled={busy || !host.createBrowserSession}
+          >
+            <IconLogin size={18} />
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+          {#if !host.createBrowserSession}
+            <p class="hint">
+              This host does not provide browser account sessions.
             </p>
           {/if}
-          <button type="submit" class="btn-primary-full" disabled={!patValid}>
-            Sign In
-          </button>
         </form>
+      {:else}
+        <div class="session-summary">
+          <IconUserShield size={22} aria-hidden="true" />
+          <div>
+            <strong>{session.user.username}</strong>
+            <span>
+              {session.user.is_admin ? "Administrator" : "User"}
+              {session.user.is_test_account ? " · test account" : ""}
+            </span>
+            <span>Session expires {formatExpiry(session.expires_at)}</span>
+          </div>
+          <button
+            type="button"
+            class="secondary-button"
+            onclick={signOut}
+            disabled={busy}
+          >
+            <IconLogout size={17} /> Sign out
+          </button>
+        </div>
+
+        {#if session.user.is_admin && host.listBrowserUsers}
+          <section class="users" aria-labelledby="browser-users-title">
+            <div class="section-heading">
+              <h3 id="browser-users-title">Profiles & Accounts</h3>
+              <button
+                type="button"
+                class="text-button"
+                onclick={loadUsers}
+                disabled={busy}>Refresh</button
+              >
+            </div>
+            {#if users.length === 0}
+              <p class="hint">No browser users are available.</p>
+            {:else}
+              <ul class="profile-cards-list">
+                {#each users as user (user.user_id)}
+                  {@const isCurrent = user.user_id === session?.user.user_id}
+                  {@const initial = user.username
+                    ? user.username.charAt(0).toUpperCase()
+                    : "U"}
+                  <li class="profile-card" class:active-profile={isCurrent}>
+                    <div class="profile-avatar-row">
+                      <div
+                        class="profile-avatar"
+                        class:admin-avatar={user.is_admin}
+                      >
+                        <span>{initial}</span>
+                      </div>
+                      <div class="user-name">
+                        <div class="user-title-row">
+                          <strong>{user.username}</strong>
+                          {#if isCurrent}
+                            <span class="badge bg-green-lt text-dark fw-bold"
+                              >Signed in</span
+                            >
+                          {/if}
+                        </div>
+                        <div class="user-meta-row">
+                          <span class="role-pill"
+                            >{user.is_admin ? "Administrator" : "User"}</span
+                          >
+                          <span class="status-meta"
+                            >{user.active
+                              ? "Enabled"
+                              : "Disabled"}{user.is_test_account
+                              ? " · test"
+                              : ""}</span
+                          >
+                        </div>
+                      </div>
+                    </div>
+                    <div class="profile-card-actions">
+                      <button
+                        type="button"
+                        class="secondary-button"
+                        onclick={() => beginEdit(user)}
+                      >
+                        <IconPencil size={16} /> Edit
+                      </button>
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
+        {/if}
+
+        {#if selectedUser}
+          <form class="edit-panel form-stack" onsubmit={saveUser}>
+            <div class="section-heading">
+              <h3>Edit {selectedUser.username}</h3>
+              <button
+                type="button"
+                class="text-button"
+                onclick={() => (selectedUserId = null)}>Cancel</button
+              >
+            </div>
+            <div class="form-field">
+              <label for="edit-username">Username</label>
+              <input
+                id="edit-username"
+                type="text"
+                autocomplete="username"
+                minlength="3"
+                maxlength="64"
+                pattern={usernamePattern}
+                bind:value={editUsername}
+                required
+              />
+            </div>
+            <div class="form-field">
+              <label for="edit-password">
+                New password <span>(leave blank to keep it)</span>
+              </label>
+              <input
+                id="edit-password"
+                type="password"
+                autocomplete="new-password"
+                minlength="8"
+                maxlength="128"
+                bind:value={editPassword}
+              />
+            </div>
+            <label class="check-row">
+              <input type="checkbox" bind:checked={editActive} />
+              Account is active
+            </label>
+            <div class="form-field">
+              <label for="current-password">Your current password</label>
+              <input
+                id="current-password"
+                type="password"
+                autocomplete="current-password"
+                minlength="8"
+                maxlength="128"
+                bind:value={currentPassword}
+                required
+              />
+              <span>Required to save changes or delete this user.</span>
+            </div>
+            <div class="form-actions">
+              <button
+                type="submit"
+                class="primary-button"
+                disabled={busy || !host.updateBrowserUser}>Save changes</button
+              >
+            </div>
+            <div class="delete-zone">
+              <label class="check-row">
+                <input type="checkbox" bind:checked={confirmDelete} />
+                I understand that deleting {selectedUser.username} cannot be undone.
+              </label>
+              <button
+                type="button"
+                class="danger-button"
+                onclick={deleteUser}
+                disabled={busy ||
+                  !confirmDelete ||
+                  !currentPassword ||
+                  !host.deleteBrowserUser}
+              >
+                <IconTrash size={17} /> Delete user
+              </button>
+            </div>
+          </form>
+        {/if}
       {/if}
     </div>
-  </div>
+  </section>
 </dialog>
 
 <style>
-  .modal-backdrop {
+  .auth-dialog {
     position: fixed;
     inset: 0;
     z-index: 9999;
@@ -398,216 +513,294 @@
     place-items: center;
     padding: 16px;
   }
-
-  .modal-backdrop::backdrop {
-    background: rgba(0, 0, 0, 0.5);
+  .auth-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.55);
   }
-
-  .modal-backdrop:not([open]) {
+  .auth-dialog:not([open]) {
     display: none;
   }
-
   .modal-card {
+    width: min(100%, 680px);
+    max-height: min(88dvh, 760px);
+    overflow: auto;
     background: var(--fasti-surface-paper);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
-    width: 100%;
-    max-width: 480px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
-    overflow: hidden;
+    color: var(--fasti-text-primary);
+    border-radius: calc(12px * var(--tblr-border-radius-scale, 1));
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
   }
-
   .modal-header {
     display: flex;
+    align-items: flex-start;
     justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
+    gap: 16px;
+    padding: 20px 24px 16px;
     border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
   }
-
-  .modal-title {
+  h2,
+  h3,
+  p {
+    margin: 0;
+  }
+  h2 {
     font-family: var(--fasti-font-display);
-    font-size: 1.2rem;
-    margin: 0;
+    font-size: 1.25rem;
   }
-  .close-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 44px;
-    min-height: 44px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
+  h3 {
+    font-size: 1rem;
+  }
+  .modal-header p,
+  .hint,
+  .session-summary span,
+  .user-name span,
+  .form-field span {
     color: var(--fasti-text-muted);
+    font-size: 0.875rem;
   }
-
-  .modal-card :is(button, input, select):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
-    outline-offset: 2px;
+  .modal-header p {
+    margin-top: 4px;
   }
-
-  .method-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    padding: 8px 12px 0;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    background: var(--fasti-surface-archive);
-  }
-  .method-tab-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 12px;
-    min-height: 44px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--fasti-text-muted);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .method-tab-btn.active {
-    color: var(--fasti-action-primary);
-    border-bottom-color: var(--fasti-action-primary);
-  }
-
   .modal-body {
-    padding: 20px;
+    padding: 24px;
   }
-
-  .method-pane {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
+  .form-stack {
+    display: grid;
+    gap: 16px;
   }
-
-  .body-desc {
-    font-size: 0.88rem;
-    color: var(--fasti-text-muted);
-    margin: 0;
-  }
-
   .form-field {
-    display: flex;
-    flex-direction: column;
+    display: grid;
     gap: 6px;
   }
   .form-field label {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: var(--fasti-text-muted);
+    font-weight: 650;
+    font-size: 0.875rem;
   }
-  .form-input {
-    height: 44px;
+  input,
+  select {
+    width: 100%;
     min-height: 44px;
-    padding: 8px 12px;
+    padding: 9px 11px;
     border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    font-size: 0.9rem;
+      color-mix(in srgb, var(--fasti-text-muted) 38%, transparent);
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
+    font: inherit;
+    font-size: max(1rem, 16px);
   }
-  .form-input.mono {
-    font-family: var(--fasti-font-mono);
+  button {
+    font: inherit;
   }
-
-  .btn-primary-full {
+  :is(button, input, select):focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
+  .icon-button,
+  .primary-button,
+  .secondary-button,
+  .danger-button,
+  .text-button {
+    min-height: 44px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 10px 16px;
-    background: var(--fasti-action-primary);
-    color: white;
-    border: none;
-    border-radius: 4px;
-    font-weight: 600;
+    gap: 7px;
     cursor: pointer;
   }
-  .btn-primary-full:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-secondary {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    min-height: 44px;
-    background: var(--fasti-surface-archive);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
-    font-weight: 600;
-    font-size: 0.85rem;
-    cursor: pointer;
-  }
-
-  .inline-problem {
-    margin: 0;
-    font-size: 0.86rem;
-    color: var(--fasti-state-error, #b42318);
-  }
-
-  .provider-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 8px;
-  }
-  .provider-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 12px 8px;
-    background: var(--fasti-surface-archive);
-    border: 2px solid transparent;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-  .provider-btn.selected {
-    border-color: var(--fasti-action-primary);
-    background: color-mix(in srgb, var(--fasti-action-primary) 8%, transparent);
-  }
-
-  .pin-display {
-    text-align: center;
-    font-family: var(--fasti-font-mono);
-    font-size: 2.2rem;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    padding: 18px;
-    background: var(--fasti-surface-archive);
-    border-radius: 6px;
-    color: var(--fasti-text-primary);
-  }
-  .pin-display.expired {
-    opacity: 0.5;
-  }
-  .pin-countdown {
-    text-align: center;
-    margin: 0;
-    font-size: 0.85rem;
+  .icon-button {
+    min-width: 44px;
+    border: 0;
+    background: transparent;
     color: var(--fasti-text-muted);
   }
-  .pin-countdown.expired {
-    color: var(--fasti-state-error, #b42318);
-    font-weight: 600;
+  .primary-button,
+  .secondary-button,
+  .danger-button {
+    padding: 9px 14px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    font-weight: 650;
   }
-  .pin-actions {
+  .primary-button {
+    border: 0;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
+  }
+  .secondary-button {
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+  }
+  .danger-button {
+    border: 1px solid var(--fasti-state-error, #b42318);
+    background: transparent;
+    color: var(--fasti-state-error, #b42318);
+  }
+  .text-button {
+    border: 0;
+    background: transparent;
+    color: var(--fasti-action-primary);
+    font-weight: 650;
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .notice,
+  .problem {
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
+    overflow-wrap: anywhere;
+  }
+  .notice {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #087a55) 12%,
+      transparent
+    );
+  }
+  .problem {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-error, #b42318) 11%,
+      transparent
+    );
+    color: var(--fasti-state-error, #b42318);
+  }
+  .session-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+  .session-summary div,
+  .user-name {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    overflow-wrap: anywhere;
+  }
+  .users {
+    margin-top: 28px;
+  }
+  .section-heading {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .profile-cards-list {
+    display: flex;
+    flex-direction: column;
     gap: 10px;
-    justify-content: center;
+    margin-top: 12px;
+    margin-bottom: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .profile-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
+    transition: border-color 100ms ease;
+  }
+  .profile-card.active-profile {
+    border-color: var(--fasti-action-primary);
+    background: color-mix(
+      in srgb,
+      var(--fasti-action-primary) 6%,
+      var(--fasti-surface-archive)
+    );
+  }
+  .profile-avatar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .profile-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+  }
+  .profile-avatar.admin-avatar {
+    background: var(--fasti-brand-mark, #8b2e2a);
+    color: var(--fasti-brand-contrast, #fff);
+  }
+  .user-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .user-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+  }
+  .role-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
+  }
+  .edit-panel {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 28%, transparent);
+  }
+  .check-row {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.4;
+  }
+  .check-row input {
+    width: 20px;
+    min-height: 20px;
+    margin-top: 1px;
+    accent-color: var(--fasti-action-primary);
+  }
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .delete-zone {
+    display: grid;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-state-error, #b42318) 35%, transparent);
+  }
+  @media (max-width: 36rem) {
+    .modal-card {
+      max-height: calc(100dvh - 16px);
+    }
+    .modal-header,
+    .modal-body {
+      padding-inline: 16px;
+    }
+    .session-summary {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    .session-summary .secondary-button {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
   }
 </style>

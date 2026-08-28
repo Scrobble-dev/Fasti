@@ -3,6 +3,8 @@ import {
   LOCAL_BOOTSTRAP_OPERATIONS,
   LOCAL_RUNTIME_OPERATIONS,
   FastiContractParseError,
+  parseBrowserSessionResponse,
+  parseBrowserUserDto,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
   parseAttachIdentifierRequest,
@@ -11,17 +13,26 @@ import {
   parseClientEnrollmentResponse,
   parseCreateRecordRequest,
   parseCreateRecordResponse,
+  parseCreateBrowserSessionRequest,
+  parseDeleteBrowserUserRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListBrowserUsersResponse,
+  parseListTrackingDispositionsResponse,
+  parseNuvioCollectionsDocumentDto,
+  parseNuvioCollectionsStateDto,
   parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
   parseReceiptCommittedEvent,
   parseRegisterNamespaceRequest,
   parseRegisterNamespaceResponse,
+  parseSetTrackingDispositionRequest,
+  parseTrackingDispositionStateDto,
+  parseUpdateBrowserUserRequest,
   parseReplayReceiptResponse,
   parseSubmitObservationRequest,
   parseSubmitObservationResponse,
@@ -30,26 +41,37 @@ import {
   type AcceptObservationResponse,
   type AttachIdentifierRequest,
   type AttachIdentifierResponse,
+  type BrowserSessionResponse,
+  type BrowserUserDto,
   type CapabilityDiscoveryResponse,
   type CapabilityId,
   type ClientEnrollmentResponse,
   type CreateRecordRequest,
   type CreateRecordResponse,
+  type CreateBrowserSessionRequest,
+  type DeleteBrowserUserRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListBrowserUsersResponse,
+  type ListTrackingDispositionsResponse,
+  type NuvioCollectionsDocumentDto,
+  type NuvioCollectionsStateDto,
   type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
   type ReceiptCommittedEnvelope,
   type RegisterNamespaceRequest,
   type RegisterNamespaceResponse,
+  type SetTrackingDispositionRequest,
   type ReplayReceiptResponse,
   type SubmitObservationRequest,
   type SubmitObservationResponse,
+  type TrackingDispositionStateDto,
+  type UpdateBrowserUserRequest,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -76,6 +98,8 @@ export type CredentialProvider = string | (() => string | Promise<string>);
 export interface FastiClientOptions {
   readonly baseUrl: string;
   readonly credential?: CredentialProvider;
+  readonly useBrowserSession?: boolean;
+  readonly csrfToken?: CredentialProvider;
   readonly timeoutMs?: number;
   readonly retryPolicy?: Partial<RetryPolicy>;
   readonly fetch?: typeof globalThis.fetch;
@@ -95,6 +119,15 @@ export interface ConnectionEndpoint {
   readonly loopbackAliases: readonly string[];
 }
 
+/**
+ * Creates a normalized connection endpoint from a URL string.
+ * @param value - The base URL string to normalize.
+ * @param source - The source of the connection value.
+ * @returns A frozen ConnectionEndpoint object.
+ * @throws {TypeError} If the URL scheme is not http or https, contains credentials,
+ *   includes a query string or fragment, has an application path, has an invalid port
+ *   (must be from 1 to 65535), or if a non-loopback HTTP connection is attempted.
+ */
 export function connectionEndpoint(
   value: string,
   source: ConnectionValueSource = "saved",
@@ -194,11 +227,14 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_ATTEMPTS = 10;
 const MAX_RETRY_DELAY_MS = 60_000;
 const MAX_JSON_RESPONSE_BYTES = 512 * 1_024;
+const MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES = 4 * 1_024 * 1_024 + 64 * 1_024;
 const MAX_SSE_LINE_BYTES = 64 * 1_024;
 const MAX_SSE_EVENT_BYTES = 256 * 1_024;
 const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const USER_ID = /^usr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -207,6 +243,8 @@ const HEALTH_PROBLEM_CONTRACT = {
 export class FastiClient {
   readonly #baseUrl: URL;
   readonly #credential?: CredentialProvider;
+  readonly #useBrowserSession: boolean;
+  readonly #csrfToken?: CredentialProvider;
   readonly #timeoutMs: number;
   readonly #retryPolicy: RetryPolicy;
   readonly #fetch: typeof globalThis.fetch;
@@ -214,6 +252,8 @@ export class FastiClient {
   constructor(options: FastiClientOptions) {
     this.#baseUrl = normalizeBaseUrl(options.baseUrl);
     this.#credential = options.credential;
+    this.#useBrowserSession = options.useBrowserSession ?? false;
+    this.#csrfToken = options.csrfToken;
     this.#timeoutMs = positiveInteger(
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       "timeoutMs",
@@ -545,6 +585,239 @@ export class FastiClient {
     });
   }
 
+  listTrackingDispositions(
+    options: CallOptions = {},
+  ): Promise<ListTrackingDispositionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listTrackingDispositions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListTrackingDispositionsResponse,
+      responseLabel: "List tracking dispositions response",
+      options,
+    });
+  }
+
+  setTrackingDisposition(
+    recordId: string,
+    request: SetTrackingDispositionRequest,
+    options: CallOptions = {},
+  ): Promise<TrackingDispositionStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.setTrackingDisposition;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    const body = parseOutgoing(
+      parseSetTrackingDispositionRequest,
+      request,
+      "Set tracking disposition request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{record_id}",
+        encodeURIComponent(safeRecordId),
+      ),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: (value) => {
+        const response = parseTrackingDispositionStateDto(value);
+        if (response.record_id !== safeRecordId) {
+          throw new FastiContractParseError(
+            "Tracking disposition response does not match the requested record id",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Set tracking disposition response",
+      options,
+    });
+  }
+
+  getNuvioCollections(
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.getNuvioCollections;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  replaceNuvioCollections(
+    request: NuvioCollectionsDocumentDto,
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.replaceNuvioCollections;
+    const body = parseOutgoing(
+      parseNuvioCollectionsDocumentDto,
+      request,
+      "Nuvio Collections request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  clearNuvioCollections(
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.clearNuvioCollections;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  createBrowserSession(
+    request: CreateBrowserSessionRequest,
+    options: CallOptions = {},
+  ): Promise<BrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.createBrowserSession;
+    const body = parseOutgoing(
+      parseCreateBrowserSessionRequest,
+      request,
+      "Create browser session request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseBrowserSessionResponse,
+      responseLabel: "Create browser session response",
+      options,
+    });
+  }
+
+  readBrowserSession(
+    options: CallOptions = {},
+  ): Promise<BrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseBrowserSessionResponse,
+      responseLabel: "Read browser session response",
+      options,
+    });
+  }
+
+  endBrowserSession(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.endBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: undefined,
+      responseLabel: "End browser session response",
+      options,
+    });
+  }
+
+  listBrowserUsers(
+    options: CallOptions = {},
+  ): Promise<ListBrowserUsersResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listBrowserUsers;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListBrowserUsersResponse,
+      responseLabel: "List browser users response",
+      options,
+    });
+  }
+
+  updateBrowserUser(
+    userId: string,
+    request: UpdateBrowserUserRequest,
+    options: CallOptions = {},
+  ): Promise<BrowserUserDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.updateBrowserUser;
+    const safeUserId = contractPathIdentifier(userId, USER_ID, "userId");
+    const body = parseOutgoing(
+      parseUpdateBrowserUserRequest,
+      request,
+      "Update browser user request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace("{user_id}", encodeURIComponent(safeUserId)),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseBrowserUserDto,
+      responseLabel: "Update browser user response",
+      options,
+    });
+  }
+
+  deleteBrowserUser(
+    userId: string,
+    request: DeleteBrowserUserRequest,
+    options: CallOptions = {},
+  ): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.deleteBrowserUser;
+    const safeUserId = contractPathIdentifier(userId, USER_ID, "userId");
+    const body = parseOutgoing(
+      parseDeleteBrowserUserRequest,
+      request,
+      "Delete browser user request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace("{user_id}", encodeURIComponent(safeUserId)),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: undefined,
+      responseLabel: "Delete browser user response",
+      options,
+    });
+  }
+
   /**
    * Opens the governed receipt SSE fixture and performs bounded reconnects.
    * This never persists or queues events, and only reconnects the safe stream.
@@ -575,7 +848,12 @@ export class FastiClient {
         try {
           response = await this.#fetch(
             this.#url(RECEIPT_STREAM_CONTRACT.path),
-            { method: "GET", headers, signal: scope.signal },
+            {
+              method: "GET",
+              headers,
+              signal: scope.signal,
+              credentials: this.#useBrowserSession ? "include" : "same-origin",
+            },
           );
         } catch {
           throw new NetworkRequestError();
@@ -708,14 +986,15 @@ export class FastiClient {
   }
 
   async #jsonOperation<T>(input: {
-    readonly method: "GET" | "POST" | "PUT";
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly authenticated: boolean;
     readonly problemContract: ProblemContractBinding;
     readonly retryMode: RetryMode;
     readonly body?: unknown;
-    readonly responseParser: JsonParser<T>;
+    readonly responseParser?: JsonParser<T>;
     readonly responseLabel: string;
+    readonly maxResponseBytes?: number;
     readonly options: CallOptions;
   }): Promise<T> {
     const retryPolicy = normalizeRetryPolicy(
@@ -737,6 +1016,7 @@ export class FastiClient {
           "application/json",
           input.authenticated,
           scope.signal,
+          input.method !== "GET",
         );
         if (serializedBody !== undefined) {
           headers.set("Content-Type", "application/json");
@@ -749,6 +1029,7 @@ export class FastiClient {
             headers,
             body: serializedBody,
             signal: scope.signal,
+            credentials: this.#useBrowserSession ? "include" : "same-origin",
           });
         } catch {
           throw new NetworkRequestError();
@@ -770,12 +1051,29 @@ export class FastiClient {
         if (!response.ok) {
           throw await problemOrTransportError(response, input.problemContract);
         }
+        if (input.responseParser === undefined) {
+          if (response.status !== 204) {
+            await response.body?.cancel();
+            throw new FastiProtocolError(
+              `${input.responseLabel} must use status 204`,
+            );
+          }
+          return undefined as T;
+        }
+        if (response.status === 204) {
+          throw new FastiProtocolError(
+            `${input.responseLabel} must contain generated JSON`,
+          );
+        }
         if (!contentTypeIs(response, "application/json")) {
           throw new FastiProtocolError(
             `${input.responseLabel} must use application/json`,
           );
         }
-        const value = await parseJson(response);
+        const value = await parseJson(
+          response,
+          input.maxResponseBytes ?? MAX_JSON_RESPONSE_BYTES,
+        );
         try {
           return input.responseParser(value);
         } catch (error) {
@@ -816,6 +1114,7 @@ export class FastiClient {
     accept: string,
     authenticated: boolean,
     signal: AbortSignal,
+    mutation = false,
   ): Promise<Headers> {
     const headers = new Headers({ Accept: accept });
     if (authenticated && this.#credential !== undefined) {
@@ -826,6 +1125,19 @@ export class FastiClient {
         );
       }
       headers.set("Authorization", `Bearer ${credential}`);
+    } else if (authenticated && this.#useBrowserSession && mutation) {
+      if (this.#csrfToken === undefined) {
+        throw new CredentialProviderError(
+          "Browser-session mutations require a CSRF token provider",
+        );
+      }
+      const csrf = await resolveCredential(this.#csrfToken, signal);
+      if (!/^[0-9a-f]{64}$/.test(csrf)) {
+        throw new CredentialProviderError(
+          "Browser-session CSRF token must be 64 lowercase hexadecimal characters",
+        );
+      }
+      headers.set("X-Fasti-CSRF", csrf);
     }
     return headers;
   }
@@ -838,6 +1150,14 @@ export class FastiClient {
   }
 }
 
+/**
+ * Parses outgoing request data against the generated contract schema.
+ * @param parser - The JSON schema parser function.
+ * @param value - The value to parse.
+ * @param label - A label for error reporting.
+ * @returns The parsed and validated value.
+ * @throws {FastiProtocolError} If parsing fails.
+ */
 function parseOutgoing<T>(
   parser: JsonParser<T>,
   value: unknown,
@@ -850,12 +1170,24 @@ function parseOutgoing<T>(
   }
 }
 
+/**
+ * Rejects successful responses for bindings that define only problem responses.
+ *
+ * @throws FastiProtocolError Always throws a protocol error.
+ */
 function unexpectedProblemOnlySuccess(_value: unknown): never {
   throw new FastiProtocolError(
     "Problem-only fixture binding returned an undocumented success",
   );
 }
 
+/**
+ * Normalizes and validates a base URL for Fasti client connections.
+ *
+ * @param value - The URL string to validate.
+ * @returns A validated HTTP or HTTPS origin URL.
+ * @throws {TypeError} If the URL is invalid or contains credentials, a path, query, fragment, or invalid port.
+ */
 export function normalizeBaseUrl(value: string): URL {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -878,10 +1210,22 @@ export function normalizeBaseUrl(value: string): URL {
   return url;
 }
 
+/**
+ * Determines whether a hostname identifies a loopback address.
+ *
+ * @param hostname - The hostname to check.
+ * @returns `true` for `localhost`, `127.0.0.1`, or `[::1]`, `false` otherwise.
+ */
 function isLoopbackHostname(hostname: string): boolean {
   return ["localhost", "127.0.0.1", "[::1]"].includes(hostname.toLowerCase());
 }
 
+/**
+ * Generates equivalent loopback origins for a URL.
+ *
+ * @param url - The URL whose loopback hostname and port determine the aliases.
+ * @returns Loopback origin aliases, or an empty array if the hostname is not loopback.
+ */
 function loopbackAliases(url: URL): readonly string[] {
   if (!isLoopbackHostname(url.hostname)) return Object.freeze([]);
   const port = url.port === "" ? "" : `:${url.port}`;
@@ -893,6 +1237,14 @@ function loopbackAliases(url: URL): readonly string[] {
     `${url.protocol}//127.0.0.1${port}`,
   ]);
 }
+
+/**
+ * Normalizes retry policy options with validation and defaults.
+ * @param override - Partial retry policy to override defaults.
+ * @param fallback - The fallback retry policy to use for missing values.
+ * @returns A complete, frozen retry policy.
+ * @throws {RangeError} If policy values are invalid.
+ */
 function normalizeRetryPolicy(
   override?: Partial<RetryPolicy>,
   fallback: RetryPolicy = DEFAULT_RETRY_POLICY,
@@ -1044,7 +1396,10 @@ async function problemOrTransportError(
   );
 }
 
-async function parseJson(response: Response): Promise<unknown> {
+async function parseJson(
+  response: Response,
+  maxBytes = MAX_JSON_RESPONSE_BYTES,
+): Promise<unknown> {
   if (response.body === null) {
     throw new FastiProtocolError("JSON response has no body");
   }
@@ -1052,7 +1407,7 @@ async function parseJson(response: Response): Promise<unknown> {
   if (
     contentLength !== null &&
     /^\d+$/.test(contentLength) &&
-    Number(contentLength) > MAX_JSON_RESPONSE_BYTES
+    Number(contentLength) > maxBytes
   ) {
     await response.body.cancel().catch(() => undefined);
     throw new FastiProtocolError("JSON response exceeds the bounded body size");
@@ -1070,7 +1425,7 @@ async function parseJson(response: Response): Promise<unknown> {
       }
       if (result.done) break;
       totalBytes += result.value.byteLength;
-      if (totalBytes > MAX_JSON_RESPONSE_BYTES) {
+      if (totalBytes > maxBytes) {
         throw new FastiProtocolError(
           "JSON response exceeds the bounded body size",
         );

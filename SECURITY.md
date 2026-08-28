@@ -14,7 +14,11 @@ The project will acknowledge and investigate reports as maintainer availability 
 
 - Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value. Automatic collision recovery stays on the requested loopback address. It never moves a public or wildcard listener.
 - Client and public origins reject credentials, paths, queries, and fragments. Non-loopback origins require HTTPS and platform certificate validation.
-- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
+- Non-loopback durable routes require an explicit data root, `FASTI_REMOTE_TRUSTED_PROXY=true`, and an absolute HTTPS `FASTI_PUBLIC_URL`. Remote bootstrap routes remain absent.
+- Browser passwords use Argon2 hashes. Authentication performs dummy password work for unknown users and applies persistent per-account lockout after repeated failures.
+- Browser sessions are opaque digests in SQLite. The session cookie is `HttpOnly` and `SameSite=Strict`; remote cookies are also `Secure`. Browser mutations require the matching strict CSRF cookie and `X-Fasti-CSRF` header. Account changes require the current password and invalidate affected sessions.
+- The one-time development account is disabled by default and explicitly marked as test data when enabled. `FASTI_DEVELOPMENT_TEST_ACCOUNT=true` is accepted only on a loopback durable listener; remote listeners reject it. Rename and deletion survive restart and never trigger recreation. Fasti rejects browser-account or credential changes that would leave a workspace without an active administrator with current browser-user management access.
+- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port. Durable routes remain disabled unless a detected container boundary and `FASTI_EXTERNAL_BIND_IP` explicitly establish the outer loopback-only port forward. Native wildcard listeners cannot replay that assertion.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.
 - Planned export, restore, and verify commands exit nonzero and change no data.
@@ -27,7 +31,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 - `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
-These controls make the development baseline and B2 review implementation safer. Production mounts only the durable loopback setup slice when `FASTI_DATA_ROOT` is explicit. This does not make Fasti a supported service.
+These controls make the development baseline and B2 review implementation safer. Durable local routes require an explicit data root and direct loopback or an explicitly declared loopback-only container port forward. The authenticated remote subset additionally requires explicit trusted-proxy and HTTPS-origin configuration. This does not make Fasti a supported service.
 
 ## Temporary dependency exception
 
@@ -69,11 +73,11 @@ B2-B8 must still prove, rather than merely document:
 - SQLite durability settings verified by readback, bounded writer transactions, receipt replay, and crash or controlled power-cut survival;
 - archive traversal, decompression-bomb, Unicode/path ambiguity, SQL injection, header confusion, stale-credential, SSRF, and hostile-JSON defenses;
 - secrets external to images and proof bundles, permission-restricted credential delivery, and no credentials in command arguments or logs;
-- explicit local-origin and browser security policy when B4 adds a UI;
+- browser origin/proxy allow-list hardening and hostile cross-origin deployment evidence before a supported remote release;
 - dependency license compliance and SBOM generation, now covered in CI by `cargo-deny` and `cargo-cyclonedx`/`cyclonedx-npm` (`.github/workflows/release.yml`, `deny.toml`) — see [B8b release readiness](docs/architecture/b8b-release-readiness.md);
 - signing, trust-root, update, and recovery evidence, still deferred to B8's own release action.
 
-Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. A supported network-exposure guide cannot exist until the access and threat-model gates pass.
+Provider adapters and metadata enrichment cannot bypass application authorization, write storage directly, or make a provider canonical. The documented Remote recipe is development-only; a supported production exposure guide still requires the remaining threat-model and release gates.
 
 Provider and other governed outbound adapters must evaluate the shared application policy after DNS resolution. Provider declarations are maximum grants; operator allow lists only narrow them and deny rules win. Adapters must reject redirects, system proxies, empty DNS results, any unsafe answer, and DNS rebinding. Provider secrets use request headers or platform credential stores, never URLs or browser storage.
 

@@ -5,5 +5,5 @@
     "checkJs": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"]
+  "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.svelte"]
 }

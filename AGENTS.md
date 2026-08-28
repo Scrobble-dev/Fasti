@@ -65,9 +65,11 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
-- Mount durable local routes only on loopback with an explicit `FASTI_DATA_ROOT`; never infer a data directory.
+- Mount durable local routes only for direct loopback access or an explicitly declared loopback-only port forward inside a detected container boundary, with an explicit `FASTI_DATA_ROOT`. Keep bootstrap routes on those local exposures. Require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
+- Treat `TMDB_API_READ_ACCESS_TOKEN` as a TMDB API Read Access Token. Send it only in a sensitive `Authorization: Bearer` header; never fall back to the v3 `api_key` URL parameter.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
+- Keep development browser accounts disabled by default. Permit the explicit test account only on a loopback durable listener. Until a governed recovery capability exists, reject browser-account or credential changes that would leave a workspace without an active administrator with current browser-user management access.
 - Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
 - Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
@@ -120,8 +122,15 @@ setting.
 
 Android sandbox selection, data-root locking, and descriptor-rooted kernel
 directories are implemented in source but are not Android build- or
-device-verified. Do not claim Android package support until the NDK build and
-device evidence pass. B3 restore and startup recovery remain Linux-only.
+device-verified. The Gradle project scaffold
+(`apps/desktop/src-tauri/gen/android/`) and the `io.crates.keyring.Keyring`
+JNI bridge that Android's keyring store calls into are checked in, but
+`cargo tauri android build` has never been run against them — this host has
+no Android SDK, NDK, or JDK. Building for Android requires Java, the Android
+SDK/NDK, and `@tauri-apps/cli` (`npx @tauri-apps/cli@2.11.4 android build`
+from `apps/desktop/src-tauri`, after `pnpm --filter @fasti/web build`). Do not
+claim Android package support until the NDK build and device evidence pass.
+B3 restore and startup recovery remain Linux-only.
 
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 
@@ -146,12 +155,26 @@ setting, or desktop surface.
 Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision.
 
 ### UI Invariants & Requirements:
+<!-- FASTI_TABLER_POLICY_START -->
 - **Tabler-First Policy**: Always use upstream Tabler (`@tabler/core` and `@tabler/icons`) layout, grid, typography, cards, tables, forms, modals, and badge classes first.
 - **Component Decision Hierarchy**:
   1. Tabler Core Component (direct usage)
   2. Tabler Pattern Composition
   3. Fasti Token-Skinned Tabler Element (`brand/tokens/tokens.json`)
   4. Custom Svelte Component (STRICT EXCEPTION: only if Tabler has zero equivalent; requires explicit documented architectural rationale).
+- **Permanent gate**: `pnpm lint:ui` must pass. It rejects non-Tabler icon systems, unapproved raw SVG, removal of the Tabler Core stylesheet, and removal of these managed policy markers. Do not weaken its allowlist to land UI work.
+- **Workbench shell contract**: Use one `.page` root with an adjacent `.navbar.navbar-vertical.navbar-expand-lg.offcanvas-lg` and `.page-wrapper`. Below `lg`, navigation is closed by default and the page wrapper owns the full viewport. Settings uses `.container-fluid`, list-group links on wide screens, and a labelled `.form-select` on constrained screens. Theme settings uses the Tabler `.offcanvas` and writes every exposed choice to the documented Tabler and Fasti data attributes. Finite Fasti component radii must consume `--tblr-border-radius-scale`; focus indicators must use `--fasti-focus`, never a selectable accent. `pnpm lint:ui` enforces these rules and rejects the prior fixed mobile rail, compensating page margin, centered Settings ceiling, and bespoke drawer fallback.
+
+<!-- FASTI_TABLER_POLICY_END -->
+
+- <!-- FASTI_CHESTERTON_POLICY_START --> **Chesterton's fence**: Before deleting, hiding, or replacing an existing UI control, trace its callers, history, tests, screenshots, and intended capability. Mature fake behavior behind a governed host capability. If the capability is not ready, keep the affordance visible with a precise unavailable state and add an owned TODO. Removal requires explicit user approval plus a documented replacement or migration.
+
+<!-- FASTI_CHESTERTON_POLICY_END -->
+
+- <!-- FASTI_AUTH_BOUNDARY_START --> **Authentication boundary**: Follow [`docs/architecture/authentication.md`](docs/architecture/authentication.md). Browser sessions, scoped API client credentials, packaged-host administrator credentials, passkeys, passwords, device authorization, and OIDC tokens are distinct credential models. Never collapse them into one token or simulate a backend flow in Svelte.
+
+<!-- FASTI_AUTH_BOUNDARY_END -->
+
 - **Impeccable Craft Floor**: Surface mode must be `Operate` (workbench, triage, settings) or `Read` (annal, chronicle, markdown docs). Zero layout shifts (`CLS = 0`), no purple/violet AI gradients, no generic SaaS card walls, no continuous decorative animations, and strict 44px min touch targets.
 - **Interaction & Usability Standards**: All UI flows must be audited against:
   - AskTog interaction principles (anticipation, Fitts's law, latency reduction, user work protection, state continuity)

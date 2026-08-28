@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 const health = { status: "healthy", version: "0.1.0" };
 const healthEndpoint = /\/api\/v1\/health$/;
@@ -8,6 +9,22 @@ const viewports = [
   { width: 768, height: 900 },
   { width: 1440, height: 1000 },
 ] as const;
+
+test("the bounded health fixture fails closed for unknown routes", async ({
+  request,
+}) => {
+  const response = await request.get("http://127.0.0.1:18422/api/v1/unknown");
+  expect(response.status()).toBe(404);
+  await expect(response.json()).resolves.toMatchObject({
+    title: "Not found",
+    status: 404,
+  });
+  expect(
+    (
+      await request.get("http://127.0.0.1:18422/api/v1/records-not-a-route")
+    ).status(),
+  ).toBe(404);
+});
 
 async function mockHealth(page: Page) {
   await page.route(healthEndpoint, (route) =>
@@ -19,8 +36,8 @@ async function mockHealth(page: Page) {
   );
 }
 
-async function mockTrustedHost(page: Page) {
-  await page.addInitScript(() => {
+async function mockTrustedHost(page: Page, providerConfigured = false) {
+  await page.addInitScript((configured) => {
     const networkConfiguration = {
       connection: {
         service_url: {
@@ -45,14 +62,16 @@ async function mockTrustedHost(page: Page) {
       {
         provider: "google-books",
         label: "Google Books",
-        configured: false,
+        configured,
         source: "none",
         writable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
     ];
+    let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
+      __NUVIO_REPLACE_COUNT__?: number;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_: unknown) => Promise<unknown>;
       };
@@ -66,6 +85,18 @@ async function mockTrustedHost(page: Page) {
             return networkConfiguration;
           case "provider_credential_status":
             return providerStatus;
+          case "get_nuvio_collections":
+            return { document: nuvioDocument };
+          case "replace_nuvio_collections": {
+            const candidate = arguments_ as { document?: unknown };
+            browserWindow.__NUVIO_REPLACE_COUNT__ =
+              (browserWindow.__NUVIO_REPLACE_COUNT__ ?? 0) + 1;
+            nuvioDocument = candidate.document;
+            return { document: nuvioDocument };
+          }
+          case "clear_nuvio_collections":
+            nuvioDocument = null;
+            return { document: null };
           case "test_endpoint_connection":
             return {
               endpoint: "http://127.0.0.1:8420",
@@ -87,13 +118,487 @@ async function mockTrustedHost(page: Page) {
               next_action: "Unlock the credential store, then retry.",
             };
           }
+          case "search_provider":
+            throw new Error("Trusted provider execution is unavailable.");
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
         }
       },
     };
-  });
+  }, providerConfigured);
 }
+
+test("the development browser user can sign in and edit but cannot delete the last administrator", async ({
+  page,
+}) => {
+  const developmentUsername = "testadmin";
+  const editedUsername = developmentUsername.replace("test", "edited");
+  const csrfToken = "a".repeat(64);
+  const userId = "usr_01991f588e0070008000000000000001";
+  let user = {
+    active: true,
+    created_at: "2026-08-28T00:00:00Z",
+    is_admin: true,
+    is_test_account: true,
+    updated_at: "2026-08-28T00:00:00Z",
+    user_id: userId,
+    username: developmentUsername,
+  };
+
+  await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/problem+json",
+        body: JSON.stringify({ detail: "Sign in to continue." }),
+      });
+      return;
+    }
+    const body = request.postDataJSON();
+    expect(body).toMatchObject({
+      username: user.username,
+      password: user.username,
+      session_timeout_minutes: 60,
+    });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "set-cookie": `fasti_csrf=${csrfToken}; Path=/; SameSite=Strict`,
+      },
+      body: JSON.stringify({
+        expires_at: "2026-08-28T01:00:00Z",
+        user,
+      }),
+    });
+  });
+  await page.route(/\/api\/v1\/browser\/users(?:\/[^/]+)?$/, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ users: [user] }),
+      });
+      return;
+    }
+    expect(request.headers()["x-fasti-csrf"]).toBe(csrfToken);
+    const body = request.postDataJSON();
+    if (request.method() === "PATCH") {
+      expect(body.current_password).toBe(user.username);
+      user = {
+        ...user,
+        username: body.username,
+        updated_at: "2026-08-28T00:05:00Z",
+      };
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(user),
+      });
+      return;
+    }
+    expect(body).toEqual({ current_password: editedUsername });
+    await route.fulfill({
+      status: 422,
+      contentType: "application/problem+json",
+      body: JSON.stringify({
+        type: "https://fasti.scrobble.dev/v1/problems/validation-failed",
+        title: "Validation failed",
+        status: 422,
+        detail: "request representation does not satisfy the governed contract",
+        code: "validation_failed",
+        capability_id: "browser.user.delete",
+        safe_state: "no_mutation",
+        retryability: "retry_after_correction",
+        next_actions: [
+          {
+            id: "correct_request",
+            label: "Correct the request representation and retry",
+          },
+        ],
+        correlation_id: "req_01991f588e0070008000000000000002",
+        param: null,
+        actual: null,
+        violations: [
+          {
+            code: "last_active_administrator_required",
+            pointer: "/",
+            reason:
+              "deactivating or deleting this account would remove the workspace's last active administrator",
+            expected: "at least one active administrator must remain",
+            actual: null,
+          },
+        ],
+      }),
+    });
+  });
+  await page.route(/\/api\/v1\/records$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ records: [] }),
+    }),
+  );
+
+  await page.goto("/?surface=workbench");
+  await page
+    .locator("#main-content")
+    .getByRole("button", { name: "Sign in", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Username").fill(developmentUsername);
+  await dialog.getByLabel("Password").fill(developmentUsername);
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("button", { name: "Manage account testadmin" }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("list")).toHaveCount(1);
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await expect(dialog.getByText("Signed in", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText("Enabled · test", { exact: true }),
+  ).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Edit" }).click();
+  await dialog.getByLabel("Username").fill(editedUsername);
+  await dialog.getByLabel(/New password/).fill(editedUsername);
+  await dialog.getByLabel("Your current password").fill(developmentUsername);
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog.getByRole("status")).toContainText("Sign in again");
+  await expect(dialog.getByLabel("Username")).toHaveValue(editedUsername);
+
+  await dialog.getByLabel("Password").fill(editedUsername);
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+  await dialog.getByRole("button", { name: "Edit" }).click();
+  await dialog.getByLabel("Your current password").fill(editedUsername);
+  const deleteConfirmation = dialog.getByRole("checkbox", {
+    name: /cannot be undone/,
+  });
+  const deleteTarget = await deleteConfirmation.locator("..").boundingBox();
+  expect(deleteTarget?.height).toBeGreaterThanOrEqual(44);
+  await deleteConfirmation.check();
+  await dialog.getByRole("button", { name: "Delete user" }).click();
+
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "This is the only active administrator. Keep the account active.",
+  );
+  await expect(
+    page.getByRole("button", { name: `Manage account ${editedUsername}` }),
+  ).toBeVisible();
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
+test("global search and configured record actions use durable tracking state", async ({
+  page,
+  context,
+}) => {
+  const recordId = "rec_01991f588e0070008000000000000002";
+  const csrf = "a".repeat(64);
+  let updatedDisposition: string | null = null;
+
+  await context.addCookies([
+    {
+      name: "fasti_csrf",
+      value: csrf,
+      url: "http://127.0.0.1:4173",
+      sameSite: "Strict",
+    },
+  ]);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "fasti-workbench-preferences",
+      JSON.stringify({
+        contextMenuItems: [
+          { id: "view", label: "View Details", visible: false, order: 0 },
+        ],
+      }),
+    );
+  });
+  await page.route(/\/api\/v1\/browser\/session$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        expires_at: "2026-08-28T12:00:00Z",
+        user: {
+          active: true,
+          created_at: "2026-08-28T00:00:00Z",
+          is_admin: true,
+          is_test_account: true,
+          updated_at: "2026-08-28T00:00:00Z",
+          user_id: "usr_01991f58-8e00-7000-8000-000000000001",
+          username: "testadmin",
+        },
+      }),
+    }),
+  );
+  await page.route(/\/api\/v1\/records$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        records: [
+          {
+            grain: "film",
+            latest_activity: {
+              occurred_at: null,
+              interpretation_state: "resolved",
+            },
+            poster: {
+              is_stale: false,
+              tier: "empty",
+              value: null,
+              source: null,
+            },
+            record_id: recordId,
+            status: "active",
+            title: {
+              is_stale: false,
+              tier: "user_override",
+              value: "Alpha Film",
+              source: "local",
+            },
+          },
+        ],
+      }),
+    }),
+  );
+  await page.route(
+    /\/api\/v1\/profile\/record-tracking-dispositions(?:\/[^/]+)?$/,
+    async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        await route.abort("failed");
+        return;
+      }
+      expect(request.method()).toBe("PUT");
+      expect(request.headers()["x-fasti-csrf"]).toBe(csrf);
+      updatedDisposition = request.postDataJSON().disposition;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          record_id: recordId,
+          disposition: updatedDisposition,
+        }),
+      });
+    },
+  );
+
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+  await expect(page.getByText("Alpha Film", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Records still use their activity fallback.",
+  );
+
+  const search = page.getByRole("combobox", {
+    name: "Search records or commands",
+  });
+  await search.fill("Alpha");
+  await expect(page.getByRole("option", { name: /Alpha Film/ })).toBeVisible();
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "Alpha Film" })).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Profile tracking state" }),
+  ).toHaveValue("unset");
+  await page.getByRole("button", { name: "Back to Library" }).click();
+
+  await page.getByRole("group", { name: "Alpha Film card" }).click({
+    button: "right",
+  });
+  const menu = page.getByRole("menu");
+  await expect(
+    menu.getByText("Playback & tracking", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByText("Library & lists", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByText("Identity & metadata", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: /View media details/ }),
+  ).toHaveCount(0);
+  await expect(
+    menu.getByRole("menuitem", { name: /Update progress and episodes/ }),
+  ).toBeDisabled();
+  await menu.getByRole("menuitem", { name: "Mark as on hold" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "Tracking state set to on hold.",
+  );
+  await expect(page.getByText("on hold", { exact: true })).toBeVisible();
+  expect(updatedDisposition).toBe("on_hold");
+
+  await page.keyboard.press("Control+K");
+  await expect(search).toBeFocused();
+  await search.fill("Settings");
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
+test("record metadata can refresh or switch through a configured provider", async ({
+  page,
+}) => {
+  const recordId = "rec_01991f588e0070008000000000000003";
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.addInitScript((id) => {
+    let title = "Dune";
+    let overview = "A noble family becomes involved in a war for Arrakis.";
+    let identifiers = [{ namespace: "tmdb", grain: "film", value: "438631" }];
+    const browserWindow = window as typeof window & {
+      __METADATA_CALLS__?: unknown[];
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+      };
+    };
+    browserWindow.__METADATA_CALLS__ = [];
+    browserWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command, arguments_) => {
+        switch (command) {
+          case "setup_status":
+            return { phase: "ready", proof_cleanup_pending: false };
+          case "provider_credential_status":
+            return [
+              {
+                provider: "tmdb",
+                label: "TMDB",
+                configured: true,
+                source: "credential_store",
+                writable: true,
+                docs_url: "https://developer.themoviedb.org/",
+              },
+            ];
+          case "list_tracking_dispositions":
+            return { states: [], truncated: false };
+          case "list_records":
+            return [
+              {
+                grain: "film",
+                identifiers,
+                latest_activity: null,
+                original_title: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: title,
+                  source: "tmdb",
+                },
+                overview: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: overview,
+                  source: "tmdb",
+                },
+                poster: {
+                  is_stale: false,
+                  tier: "empty",
+                  value: null,
+                  source: null,
+                },
+                record_id: id,
+                release_year: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: "2021",
+                  source: "tmdb",
+                },
+                status: "active",
+                title: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: title,
+                  source: "tmdb",
+                },
+              },
+            ];
+          case "search_provider":
+            return [
+              {
+                provider: "tmdb",
+                provider_id: "693134",
+                title: "Dune: Part Two",
+                original_title: "Dune: Part Two",
+                kind: "movie",
+                release_year: 2024,
+                authors: [],
+                image_url: null,
+                overview: "Paul Atreides unites with Chani and the Fremen.",
+              },
+            ];
+          case "apply_provider_metadata": {
+            const call = (arguments_ as { input: unknown }).input as {
+              record_id: string;
+              selection: {
+                provider: string;
+                provider_id: string;
+                kind: string;
+              };
+            };
+            browserWindow.__METADATA_CALLS__?.push(call);
+            if (call.selection.provider_id === "693134") {
+              title = "Dune: Part Two";
+              overview = "Paul Atreides unites with Chani and the Fremen.";
+              identifiers = [
+                ...identifiers,
+                { namespace: "tmdb", grain: "film", value: "693134" },
+              ];
+            }
+            return undefined;
+          }
+          default:
+            throw new Error(`Unexpected trusted-host command: ${command}`);
+        }
+      },
+    };
+  }, recordId);
+
+  await page.goto(`/records/${recordId}`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Dune" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Refreshed metadata from tmdb.")).toBeVisible();
+  await page
+    .getByRole("searchbox", { name: "Search TMDB" })
+    .fill("Dune Part Two");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText("Dune: Part Two", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Use metadata" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
+  ).toBeVisible();
+
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __METADATA_CALLS__?: unknown[];
+          }
+        ).__METADATA_CALLS__,
+    ),
+  ).toEqual([
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "438631", kind: "movie" },
+    },
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
+    },
+  ]);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
 
 for (const theme of ["light", "dark"] as const) {
   for (const viewport of viewports) {
@@ -106,7 +611,7 @@ for (const theme of ["light", "dark"] as const) {
         theme,
       );
       await mockHealth(page);
-      await page.goto("/");
+      await page.goto("/status");
 
       await expect(page).toHaveTitle("Local service status · Fasti");
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -121,9 +626,9 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         page
           .locator("#network-settings dd")
-          .filter({ hasText: "http://127.0.0.1:8420" }),
+          .filter({ hasText: "http://127.0.0.1:4173" }),
       ).toBeVisible();
-      await expect(page.getByText("http://localhost:8420")).toBeVisible();
+      await expect(page.getByText("http://localhost:4173")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute(
         "data-bs-theme",
         theme,
@@ -165,7 +670,7 @@ test("keyboard path, theme persistence, and unavailable recovery remain clear", 
 }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await page.route(healthEndpoint, (route) => route.abort("connectionrefused"));
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.getByRole("alert")).toContainText(
     "local service is unavailable",
@@ -214,7 +719,7 @@ test("invalid health responses use the contract recovery state", async ({
       body: JSON.stringify({ status: "healthy" }),
     }),
   );
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", {
@@ -254,7 +759,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/");
+  await page.goto("/status");
   const retry = page.getByRole("button", { name: "Try again" });
   await expect(retry).toBeVisible();
 
@@ -279,7 +784,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
 });
 
 test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
@@ -289,16 +794,31 @@ test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
 test("the saved theme is applied before the application module", async ({
   page,
 }) => {
-  await page.addInitScript(() => localStorage.setItem("fasti-theme", "dark"));
+  await page.addInitScript(() => {
+    localStorage.setItem("fasti-theme", "light");
+    localStorage.setItem(
+      "fasti-theme-settings",
+      JSON.stringify({ mode: "night" }),
+    );
+  });
   await page.route(/\/src\/main\.ts$/, (route) => route.abort());
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
-  await expect(page.locator("body")).toHaveCSS(
-    "background-color",
-    "rgb(17, 17, 15)",
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-fasti-theme",
+    "night",
   );
-  await expect(page.locator("body")).toHaveCSS("color", "rgb(255, 253, 248)");
+  const colors = await page.locator("body").evaluate((body) => {
+    const style = getComputedStyle(body);
+    return {
+      background: style.backgroundColor,
+      foreground: style.color,
+    };
+  });
+  expect(colors.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(colors.background).not.toBe("rgb(247, 244, 237)");
+  expect(colors.foreground).not.toBe("rgb(24, 23, 22)");
 });
 
 test("system dark mode survives unavailable local storage", async ({
@@ -313,7 +833,7 @@ test("system dark mode survives unavailable local storage", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(
@@ -332,7 +852,7 @@ test("theme changes remain usable when persistence is unavailable", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
@@ -346,7 +866,7 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
 }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.locator("html").evaluate((element) => {
     element.style.fontSize = "200%";
@@ -378,7 +898,9 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
         document.documentElement.clientWidth,
     ),
   ).toBeLessThanOrEqual(0);
-  await expect(page.getByText("Catalogue, review, playback")).toBeVisible();
+  await expect(
+    page.getByText("Records and durable occurrence ingress"),
+  ).toBeVisible();
 });
 
 test("reduced motion stops the loading animation", async ({ page }) => {
@@ -395,7 +917,7 @@ test("reduced motion stops the loading animation", async ({ page }) => {
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/status", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.locator(".spinner")).toHaveCSS("animation-name", "none");
@@ -410,7 +932,7 @@ test("forced colors preserves visible status and controls", async ({
 }) => {
   await page.emulateMedia({ forcedColors: "active" });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
@@ -432,7 +954,7 @@ test("the harness does not contact third-party origins", async ({ page }) => {
     if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
@@ -448,7 +970,9 @@ test("trusted-host provider settings clear a rejected secret", async ({
   await page.goto("/settings");
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await page.getByRole("button", { name: "Metadata credentials" }).click();
+  await page
+    .getByLabel("Settings section", { exact: true })
+    .selectOption("providers");
   await expect(page.getByText("No credential is configured.")).toBeVisible();
 
   const credential = page.getByLabel("New credential");
@@ -491,4 +1015,126 @@ test("trusted-host provider settings clear a rejected secret", async ({
     fullPage: true,
     animations: "disabled",
   });
+});
+
+test("provider connection tests fail closed when trusted execution is unavailable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await mockTrustedHost(page, true);
+  await page.goto("/settings/metadata");
+
+  await page.getByRole("button", { name: "Test Connection" }).click();
+  const result = page.locator(".test-result-alert");
+  await expect(result).toHaveText("Trusted provider execution is unavailable.");
+  await expect(result).not.toContainText("Connection successful");
+});
+
+test("profile Nuvio Collections import, export, and clear stay local", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await mockTrustedHost(page);
+  const externalOrigins = new Set<string>();
+  page.on("request", (request) => {
+    const origin = new URL(request.url()).origin;
+    if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
+  });
+  await page.goto("/settings/collections");
+
+  await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
+  const input = [
+    {
+      id: "collection",
+      title: "Collection",
+      folders: [
+        {
+          id: "folder",
+          title: "Folder",
+          coverImageUrl: "https://example.invalid/never-requested.jpg",
+          sources: [
+            {
+              id: "source",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { vote_count_gte: 10 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  await page.getByLabel("Nuvio JSON file").setInputFiles({
+    name: "nuvio.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(input)),
+  });
+  await page.getByRole("button", { name: "Import and replace" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Imported 1 collections, 1 folders, and 1 sources",
+  );
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("nuvio-collections-imported-320.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(download.suggestedFilename()).toMatch(
+    /^fasti-nuvio-collections-\d{4}-\d{2}-\d{2}\.json$/,
+  );
+  expect(JSON.parse(await readFile(downloadPath!, "utf8"))).toEqual(input);
+
+  const preset = page.locator(".preset-card").filter({
+    hasText: "Kaptain's Mega Collection",
+  });
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await preset.getByRole("button", { name: "Install pack" }).click();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __NUVIO_REPLACE_COUNT__?: number })
+          .__NUVIO_REPLACE_COUNT__,
+    ),
+  ).toBe(1);
+  const dismissedDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const dismissedDownload = await dismissedDownloadPromise;
+  expect(
+    JSON.parse(await readFile((await dismissedDownload.path())!, "utf8")),
+  ).toEqual(input);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await preset.getByRole("button", { name: "Install pack" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Installed Kaptain's Mega Collection",
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __NUVIO_REPLACE_COUNT__?: number })
+          .__NUVIO_REPLACE_COUNT__,
+    ),
+  ).toBe(2);
+  const presetDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const presetDownload = await presetDownloadPromise;
+  const presetDownloadPath = await presetDownload.path();
+  expect(await readFile(presetDownloadPath!, "utf8")).not.toContain(
+    "coverImageUrl",
+  );
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Clear saved document" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "This profile's Nuvio Collections document was cleared.",
+  );
+  await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
+  expect(externalOrigins).toEqual(new Set());
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });

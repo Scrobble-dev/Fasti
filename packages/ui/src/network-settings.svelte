@@ -9,6 +9,7 @@
   import { hostProblemText } from "./host-problem.js";
 
   interface Props {
+    scope: "client" | "node";
     configuration?: NetworkConfiguration;
     loading?: boolean;
     loadProblem?: string;
@@ -31,6 +32,7 @@
   ];
 
   let {
+    scope,
     configuration,
     loading = false,
     loadProblem,
@@ -43,6 +45,7 @@
   let busy: "save" | "test" | undefined = $state();
   let notice = $state("");
   let problem = $state("");
+  const clientOnly = $derived(scope === "client");
 
   $effect(() => {
     if (!configuration || configuration === loadedConfiguration) return;
@@ -159,13 +162,90 @@
   }
 </script>
 
+{#snippet outboundPolicyFields(policy: OutboundAccessPolicy)}
+  <fieldset
+    class="settings-fieldset policy-fieldset"
+    disabled={!!busy || clientOnly}
+    aria-describedby={clientOnly ? "outbound-policy-client-note" : undefined}
+  >
+    <legend>Provider outbound access</legend>
+    <p class="help">
+      One exact value per line. A provider manifest is the maximum grant. Allow
+      lists can only narrow access. Deny lists always win. Blank allow lists
+      keep the manifest limit.
+    </p>
+    <div class="policy-grid">
+      {#each [["allow_providers", "Allowed providers"], ["deny_providers", "Denied providers"], ["allow_capabilities", "Allowed capabilities"], ["deny_capabilities", "Denied capabilities"], ["allow_hosts", "Allowed hosts"], ["deny_hosts", "Denied hosts"]] as item}
+        <label class="form-label">
+          {item[1]}
+          <textarea
+            class="form-control"
+            rows="3"
+            value={listText(
+              policy[item[0] as keyof OutboundAccessPolicy] as string[],
+            )}
+            oninput={(event) =>
+              updateList(
+                item[0] as Parameters<typeof updateList>[0],
+                event.currentTarget.value,
+              )}
+            spellcheck="false"></textarea>
+        </label>
+      {/each}
+    </div>
+
+    <div class="network-grid">
+      <fieldset>
+        <legend>Allowed network classes</legend>
+        <p class="help">Leave all clear to keep the provider manifest limit.</p>
+        {#each NETWORK_CLASSES as network}
+          <label class="check-label">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              checked={policy.allow_networks.includes(network)}
+              onchange={(event) =>
+                toggleNetwork(
+                  "allow_networks",
+                  network,
+                  event.currentTarget.checked,
+                )}
+            />
+            {network.replaceAll("_", " ")}
+          </label>
+        {/each}
+      </fieldset>
+      <fieldset>
+        <legend>Denied network classes</legend>
+        {#each NETWORK_CLASSES as network}
+          <label class="check-label">
+            <input
+              type="checkbox"
+              class="form-check-input"
+              checked={policy.deny_networks.includes(network)}
+              onchange={(event) =>
+                toggleNetwork(
+                  "deny_networks",
+                  network,
+                  event.currentTarget.checked,
+                )}
+            />
+            {network.replaceAll("_", " ")}
+          </label>
+        {/each}
+      </fieldset>
+    </div>
+  </fieldset>
+{/snippet}
+
 <section class="section-pane" aria-labelledby="advanced-settings-title">
   <h2 id="advanced-settings-title" class="pane-title" tabindex="-1">
     Advanced network access
   </h2>
   <p class="pane-desc">
-    Set the service address, public URL, and outbound access policy. Managed
-    environment and build values are read-only.
+    {clientOnly
+      ? "Choose the service endpoint used by this browser. Node public URL and outbound policy remain visible but require a trusted host."
+      : "Set the service address, public URL, and outbound access policy. Managed environment and build values are read-only."}
   </p>
 
   {#if loading}
@@ -188,10 +268,10 @@
     </p>
   {:else}
     <form onsubmit={save}>
-      <fieldset disabled={!!busy}>
+      <fieldset class="settings-fieldset" disabled={!!busy}>
         <legend>Connection</legend>
         <div class="fields two-columns">
-          <label>
+          <label class="form-label">
             Service URL
             <input
               type="url"
@@ -205,18 +285,21 @@
               >{configuration.connection.service_url.source}</span
             >
           </label>
-          <label>
+          <label class="form-label">
             Public URL (optional)
             <input
               type="url"
               class="form-control"
               bind:value={draft.public_url}
-              disabled={configuration.connection.public_url.managed}
+              disabled={clientOnly ||
+                configuration.connection.public_url.managed}
               placeholder="https://fasti.example.internal"
               aria-describedby="public-url-help"
             />
             <span class="source"
-              >{configuration.connection.public_url.source}</span
+              >{clientOnly
+                ? "node host required"
+                : configuration.connection.public_url.source}</span
             >
           </label>
         </div>
@@ -236,104 +319,49 @@
           separate. The daemon or container owns its listener and safe
           port-collision recovery.
         </p>
+
+        <div class="actions">
+          <button type="submit" class="btn btn-primary" disabled={!!busy}>
+            {busy === "save"
+              ? "Saving…"
+              : clientOnly
+                ? "Save service URL"
+                : "Save network settings"}
+          </button>
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            disabled={!!busy}
+            onclick={testConnection}
+          >
+            {busy === "test" ? "Testing…" : "Test service URL"}
+          </button>
+        </div>
       </fieldset>
 
-      <fieldset disabled={!!busy}>
-        <legend>Provider outbound access</legend>
-        <p class="help">
-          One exact value per line. A provider manifest is the maximum grant.
-          Allow lists can only narrow access. Deny lists always win. Blank allow
-          lists keep the manifest limit.
-        </p>
-        <div class="policy-grid">
-          {#each [["allow_providers", "Allowed providers"], ["deny_providers", "Denied providers"], ["allow_capabilities", "Allowed capabilities"], ["deny_capabilities", "Denied capabilities"], ["allow_hosts", "Allowed hosts"], ["deny_hosts", "Denied hosts"]] as item}
-            <label>
-              {item[1]}
-              <textarea
-                class="form-control"
-                rows="3"
-                value={listText(
-                  draft.outbound_policy[
-                    item[0] as keyof OutboundAccessPolicy
-                  ] as string[],
-                )}
-                oninput={(event) =>
-                  updateList(
-                    item[0] as Parameters<typeof updateList>[0],
-                    event.currentTarget.value,
-                  )}
-                spellcheck="false"></textarea>
-            </label>
-          {/each}
-        </div>
+      {#if notice}<p class="notice" role="status">{notice}</p>{/if}
+      {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
 
-        <div class="network-grid">
-          <fieldset>
-            <legend>Allowed network classes</legend>
-            <p class="help">
-              Leave all clear to keep the provider manifest limit.
+      {#if clientOnly}
+        <details class="managed-policy card">
+          <summary class="card-header">
+            <span>Provider outbound access</span>
+            <span class="badge managed-policy-badge">Node host required</span>
+          </summary>
+          <div class="card-body">
+            <p id="outbound-policy-client-note" class="managed-note">
+              This browser cannot read or change the node's provider outbound
+              policy. Use the trusted desktop or server host to edit these
+              fields.
             </p>
-            {#each NETWORK_CLASSES as network}
-              <label class="check-label">
-                <input
-                  type="checkbox"
-                  class="form-check-input"
-                  checked={draft.outbound_policy.allow_networks.includes(
-                    network,
-                  )}
-                  onchange={(event) =>
-                    toggleNetwork(
-                      "allow_networks",
-                      network,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {network.replaceAll("_", " ")}
-              </label>
-            {/each}
-          </fieldset>
-          <fieldset>
-            <legend>Denied network classes</legend>
-            {#each NETWORK_CLASSES as network}
-              <label class="check-label">
-                <input
-                  type="checkbox"
-                  class="form-check-input"
-                  checked={draft.outbound_policy.deny_networks.includes(
-                    network,
-                  )}
-                  onchange={(event) =>
-                    toggleNetwork(
-                      "deny_networks",
-                      network,
-                      event.currentTarget.checked,
-                    )}
-                />
-                {network.replaceAll("_", " ")}
-              </label>
-            {/each}
-          </fieldset>
-        </div>
-      </fieldset>
-
-      <div class="actions">
-        <button type="submit" class="btn btn-primary primary" disabled={!!busy}>
-          {busy === "save" ? "Saving…" : "Save network settings"}
-        </button>
-        <button
-          type="button"
-          class="btn btn-outline-secondary"
-          disabled={!!busy}
-          onclick={testConnection}
-        >
-          {busy === "test" ? "Testing…" : "Test service URL"}
-        </button>
-      </div>
+            {@render outboundPolicyFields(draft.outbound_policy)}
+          </div>
+        </details>
+      {:else}
+        {@render outboundPolicyFields(draft.outbound_policy)}
+      {/if}
     </form>
   {/if}
-
-  {#if notice}<p class="notice" role="status">{notice}</p>{/if}
-  {#if problem}<p class="problem" role="alert">{problem}</p>{/if}
 </section>
 
 <style>
@@ -346,14 +374,14 @@
     gap: 16px;
   }
 
-  form > fieldset,
+  .settings-fieldset,
   .network-grid > fieldset {
     min-width: 0;
     margin: 0;
     padding: 20px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 28%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
 
   legend {
@@ -374,7 +402,7 @@
     min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
   }
@@ -396,20 +424,15 @@
     cursor: pointer;
   }
 
-  button.primary {
-    border-color: var(--fasti-action-primary);
-    background: var(--fasti-action-primary);
-    color: white;
-  }
-
   button:disabled,
-  input:disabled {
+  input:disabled,
+  textarea:disabled {
     cursor: not-allowed;
     opacity: 0.68;
   }
 
   :is(input, textarea, button):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -429,11 +452,18 @@
   }
 
   .help,
+  .managed-note,
   .notice,
   .problem {
     margin: 0;
     color: var(--fasti-text-muted);
     font-size: 0.86rem;
+  }
+
+  .pane-desc,
+  .help,
+  .managed-note {
+    max-width: 75ch;
   }
 
   .check-label {
@@ -464,7 +494,40 @@
     color: var(--fasti-state-error, #b42318);
   }
 
-  @media (max-width: 47.99rem) {
+  .managed-policy summary {
+    min-height: 44px;
+    display: list-item;
+    padding-block: 11px;
+    cursor: pointer;
+    font-weight: 700;
+  }
+
+  .managed-policy summary .badge {
+    float: inline-end;
+    margin-inline-start: 12px;
+  }
+
+  .managed-policy-badge {
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+  }
+
+  .managed-policy summary:focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
+  }
+
+  .managed-policy .card-body {
+    display: grid;
+    gap: 16px;
+  }
+
+  .managed-policy .policy-fieldset {
+    padding: 0;
+    border: 0;
+  }
+
+  @media (max-width: 48rem) {
     .two-columns,
     .policy-grid,
     .network-grid {

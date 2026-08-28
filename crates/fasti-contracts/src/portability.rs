@@ -1,4 +1,4 @@
-//! Internal staged B3 `.fasti` archive-v1 manifest representation.
+//! Internal staged B3 `.fasti` archive manifest representation.
 //!
 //! The archive-v1 stream inventory is frozen. This module does not activate an
 //! HTTP, CLI, SDK, public registry, or runtime capability.
@@ -6,7 +6,7 @@
 use fasti_application::{
     PortabilityLimits, WorkspaceBlobDescriptor, WorkspaceExportEntity, WorkspaceManifest,
     WorkspaceManifestError, WorkspaceStreamDescriptor, MAX_PORTABLE_JSON_INTEGER,
-    WORKSPACE_ARCHIVE_CONTRACT_VERSION, WORKSPACE_ARCHIVE_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_CONTRACT_VERSION,
 };
 use fasti_domain::{EvidenceId, Sha256Digest, WorkspaceId};
 use schemars::JsonSchema;
@@ -64,6 +64,9 @@ pub enum WorkspaceExportEntityDto {
     Corrections,
     Receipts,
     Operations,
+    MetadataFieldClaims,
+    MetadataFieldOverrides,
+    ProfileRecordTrackingDispositions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -93,7 +96,7 @@ pub struct WorkspaceBlobDescriptorDto {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceManifestDto {
     pub format: WorkspaceManifestFormatDto,
-    #[schemars(range(min = 1, max = 1))]
+    #[schemars(range(min = 1, max = 2))]
     pub format_version: u32,
     #[schemars(length(equal = 36), regex(pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-workspace-id"))]
     pub workspace_id: String,
@@ -109,7 +112,7 @@ pub struct WorkspaceManifestDto {
     pub migration_version: u32,
     #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
     pub migration_digest: String,
-    #[schemars(length(equal = 16))]
+    #[schemars(length(min = 16, max = 19))]
     pub streams: Vec<WorkspaceStreamDescriptorDto>,
     pub blobs: Vec<WorkspaceBlobDescriptorDto>,
 }
@@ -218,6 +221,11 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
             WorkspaceExportEntityDto::Corrections => Self::Corrections,
             WorkspaceExportEntityDto::Receipts => Self::Receipts,
             WorkspaceExportEntityDto::Operations => Self::Operations,
+            WorkspaceExportEntityDto::MetadataFieldClaims => Self::MetadataFieldClaims,
+            WorkspaceExportEntityDto::MetadataFieldOverrides => Self::MetadataFieldOverrides,
+            WorkspaceExportEntityDto::ProfileRecordTrackingDispositions => {
+                Self::ProfileRecordTrackingDispositions
+            }
         }
     }
 }
@@ -241,6 +249,11 @@ impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
             WorkspaceExportEntity::Corrections => Self::Corrections,
             WorkspaceExportEntity::Receipts => Self::Receipts,
             WorkspaceExportEntity::Operations => Self::Operations,
+            WorkspaceExportEntity::MetadataFieldClaims => Self::MetadataFieldClaims,
+            WorkspaceExportEntity::MetadataFieldOverrides => Self::MetadataFieldOverrides,
+            WorkspaceExportEntity::ProfileRecordTrackingDispositions => {
+                Self::ProfileRecordTrackingDispositions
+            }
         }
     }
 }
@@ -348,7 +361,7 @@ impl ChecksummedWorkspaceManifestDto {
         limits: PortabilityLimits,
     ) -> Result<VerifiedInboundWorkspaceManifest, WorkspaceManifestConversionError> {
         let body = &self.manifest;
-        if body.format_version != WORKSPACE_ARCHIVE_FORMAT_VERSION {
+        if WorkspaceExportEntity::for_format(body.format_version).is_none() {
             return Err(WorkspaceManifestConversionError::UnsupportedFormatVersion);
         }
         let workspace_id = body
@@ -442,7 +455,8 @@ impl ChecksummedWorkspaceManifestDto {
             return Err(WorkspaceManifestConversionError::UncompressedBytesExceeded);
         }
 
-        let manifest = WorkspaceManifest::try_new(
+        let manifest = WorkspaceManifest::try_new_for_format(
+            body.format_version,
             workspace_id,
             body.workspace_revision,
             body.contract_version.clone(),
@@ -473,6 +487,9 @@ impl ChecksummedWorkspaceManifestDto {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fasti_application::{
+        WORKSPACE_ARCHIVE_FORMAT_VERSION, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
+    };
     use schemars::generate::SchemaSettings;
     use std::num::NonZeroU64;
 
@@ -481,6 +498,13 @@ mod tests {
             "../../../contracts/portability/v1/workspace-manifest.example.json"
         ))
         .expect("checked-in portability example")
+    }
+
+    fn checked_v2_example() -> ChecksummedWorkspaceManifestDto {
+        serde_json::from_str(include_str!(
+            "../../../contracts/portability/v2/workspace-manifest.example.json"
+        ))
+        .expect("checked-in portability-v2 example")
     }
 
     fn limits() -> PortabilityLimits {
@@ -511,7 +535,7 @@ mod tests {
 
         assert_eq!(
             manifest.manifest.streams.len(),
-            WorkspaceExportEntity::ALL.len()
+            WorkspaceExportEntity::V1.len()
         );
         assert_eq!(
             manifest
@@ -539,7 +563,10 @@ mod tests {
                 WorkspaceExportEntityDto::Operations,
             ]
         );
-        assert_eq!(manifest.manifest.format_version, 1);
+        assert_eq!(
+            manifest.manifest.format_version,
+            WORKSPACE_ARCHIVE_V1_FORMAT_VERSION
+        );
         assert_eq!(manifest.manifest.workspace_revision, 1);
         assert_eq!(
             manifest.manifest.archive_profile,
@@ -560,6 +587,44 @@ mod tests {
     }
 
     #[test]
+    fn archive_v2_extends_v1_and_round_trips_through_the_owned_projection() {
+        let expected = checked_v2_example();
+        assert_eq!(
+            expected.manifest.format_version,
+            WORKSPACE_ARCHIVE_FORMAT_VERSION
+        );
+        assert_eq!(
+            expected.manifest.streams.len(),
+            WorkspaceExportEntity::ALL.len()
+        );
+        assert_eq!(
+            expected.manifest.streams[..WorkspaceExportEntity::V1.len()],
+            checked_example().manifest.streams
+        );
+        assert_eq!(
+            expected.manifest.streams[WorkspaceExportEntity::V1.len()..]
+                .iter()
+                .map(|stream| stream.entity)
+                .collect::<Vec<_>>(),
+            vec![
+                WorkspaceExportEntityDto::MetadataFieldClaims,
+                WorkspaceExportEntityDto::MetadataFieldOverrides,
+                WorkspaceExportEntityDto::ProfileRecordTrackingDispositions,
+            ]
+        );
+
+        let application = expected
+            .clone()
+            .try_into_application(limits())
+            .expect("strict archive-v2 hostile-boundary conversion");
+        let projected = CanonicalWorkspaceManifestProjection::try_from_application(
+            application.manifest().clone(),
+        )
+        .expect("archive-v2 application manifest projects");
+        assert_eq!(projected.dto(), &expected);
+    }
+
+    #[test]
     fn checked_in_manifest_schema_and_dto_share_the_bounded_contract() {
         let checked: serde_json::Value = serde_json::from_str(include_str!(
             "../../../contracts/portability/v1/workspace-manifest.schema.json"
@@ -575,21 +640,21 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("internal_staged_archive_v1")
         );
-        let current_stream_count = serde_json::json!(WorkspaceExportEntity::ALL.len());
+        let v1_stream_count = serde_json::json!(WorkspaceExportEntity::V1.len());
         assert_eq!(
             checked.pointer("/$defs/WorkspaceManifest/properties/streams/minItems"),
-            Some(&current_stream_count)
+            Some(&v1_stream_count)
         );
         assert_eq!(
             checked.pointer("/$defs/WorkspaceManifest/properties/streams/maxItems"),
-            Some(&current_stream_count)
+            Some(&v1_stream_count)
         );
         assert_eq!(
             checked
                 .pointer("/$defs/WorkspaceManifest/properties/streams/prefixItems")
                 .and_then(serde_json::Value::as_array)
                 .map(Vec::len),
-            Some(WorkspaceExportEntity::ALL.len())
+            Some(WorkspaceExportEntity::V1.len())
         );
         assert_eq!(
             checked.pointer(
@@ -612,7 +677,7 @@ mod tests {
         assert_eq!(
             checked.pointer(&format!(
                 "/$defs/WorkspaceManifest/properties/streams/prefixItems/{}/allOf/1/properties/entity/const",
-                WorkspaceExportEntity::ALL.len() - 1
+                WorkspaceExportEntity::V1.len() - 1
             )),
             Some(&serde_json::json!("operations"))
         );
@@ -647,11 +712,11 @@ mod tests {
         );
         assert_eq!(
             generated.pointer("/$defs/WorkspaceManifestDto/properties/streams/minItems"),
-            Some(&current_stream_count)
+            Some(&serde_json::json!(WorkspaceExportEntity::V1.len()))
         );
         assert_eq!(
             generated.pointer("/$defs/WorkspaceManifestDto/properties/streams/maxItems"),
-            Some(&current_stream_count)
+            Some(&serde_json::json!(WorkspaceExportEntity::ALL.len()))
         );
         assert_eq!(
             generated.pointer("/$defs/WorkspaceManifestDto/properties/workspace_revision/minimum"),
@@ -764,7 +829,7 @@ mod tests {
     #[test]
     fn hostile_conversion_rejects_version_ids_digests_bounds_and_stream_order() {
         let mut value = checked_example();
-        value.manifest.format_version = 2;
+        value.manifest.format_version = WORKSPACE_ARCHIVE_FORMAT_VERSION + 1;
         assert_eq!(
             value.try_into_application(limits()),
             Err(WorkspaceManifestConversionError::UnsupportedFormatVersion)

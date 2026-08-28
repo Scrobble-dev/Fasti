@@ -1,8 +1,9 @@
 use anyhow::{ensure, Context};
-use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy};
-use fasti_contracts::{HealthResponse, ProblemDetails};
+use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy, WorkspaceExportEntity};
+use fasti_contracts::{ChecksummedWorkspaceManifestDto, HealthResponse, ProblemDetails};
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
@@ -20,6 +21,11 @@ const CAPABILITY_DISCOVERY_EXAMPLE_PATH: &str =
     "contracts/examples/v1/system.capabilities.success.json";
 const HEALTH_SCHEMA_PATH: &str = "packages/schemas/schemas/health-response.json";
 const PROBLEM_SCHEMA_PATH: &str = "packages/schemas/schemas/problem-details.json";
+const PORTABILITY_V2_SCHEMA_PATH: &str = "contracts/portability/v2/workspace-manifest.schema.json";
+const PORTABILITY_V1_EXAMPLE_PATH: &str =
+    "contracts/portability/v1/workspace-manifest.example.json";
+const PORTABILITY_V2_EXAMPLE_PATH: &str =
+    "contracts/portability/v2/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const ASYNCAPI_PATH: &str = "contracts/asyncapi/v1/transport.yaml";
@@ -172,7 +178,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 10] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 21] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -283,6 +289,127 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 10] = [
         response: Some("RegisterNamespaceResponse"),
         retry: "safe",
     },
+    ConformanceOperation {
+        alias: "listTrackingDispositions",
+        operation_id: "list_tracking_dispositions",
+        method: "get",
+        path: "/api/v1/profile/record-tracking-dispositions",
+        capability_id: "profile.record.tracking_disposition.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListTrackingDispositionsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "setTrackingDisposition",
+        operation_id: "set_tracking_disposition",
+        method: "put",
+        path: "/api/v1/profile/record-tracking-dispositions/{record_id}",
+        capability_id: "profile.record.tracking_disposition.set",
+        authenticated: true,
+        request: Some("SetTrackingDispositionRequest"),
+        response: Some("TrackingDispositionStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "getNuvioCollections",
+        operation_id: "get_nuvio_collections",
+        method: "get",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.get",
+        authenticated: true,
+        request: None,
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "replaceNuvioCollections",
+        operation_id: "replace_nuvio_collections",
+        method: "put",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.replace",
+        authenticated: true,
+        request: Some("NuvioCollectionsDocumentDto"),
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "clearNuvioCollections",
+        operation_id: "clear_nuvio_collections",
+        method: "delete",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.clear",
+        authenticated: true,
+        request: None,
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "createBrowserSession",
+        operation_id: "create_session",
+        method: "post",
+        path: "/api/v1/browser/session",
+        capability_id: "browser.session.create",
+        authenticated: false,
+        request: Some("CreateBrowserSessionRequest"),
+        response: Some("BrowserSessionResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readBrowserSession",
+        operation_id: "read_session",
+        method: "get",
+        path: "/api/v1/browser/session",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("BrowserSessionResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "endBrowserSession",
+        operation_id: "end_session",
+        method: "delete",
+        path: "/api/v1/browser/session",
+        capability_id: "browser.session.end",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listBrowserUsers",
+        operation_id: "list_users",
+        method: "get",
+        path: "/api/v1/browser/users",
+        capability_id: "browser.user.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListBrowserUsersResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "updateBrowserUser",
+        operation_id: "update_user",
+        method: "patch",
+        path: "/api/v1/browser/users/{user_id}",
+        capability_id: "browser.user.update",
+        authenticated: true,
+        request: Some("UpdateBrowserUserRequest"),
+        response: Some("BrowserUserDto"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "deleteBrowserUser",
+        operation_id: "delete_user",
+        method: "delete",
+        path: "/api/v1/browser/users/{user_id}",
+        capability_id: "browser.user.delete",
+        authenticated: true,
+        request: Some("DeleteBrowserUserRequest"),
+        response: None,
+        retry: "never",
+    },
 ];
 
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
@@ -366,6 +493,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let capability_discovery_example = capability_discovery_example(&public_registry)?;
     let health_schema = draft_2020_12_schema::<HealthResponse>()?;
     let problem_schema = draft_2020_12_schema::<ProblemDetails>()?;
+    let portability_v2_schema = portability_v2_schema()?;
+    let portability_v2_example = portability_v2_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -427,6 +556,16 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     )?;
     insert(&mut artifacts, HEALTH_SCHEMA_PATH, health_schema.clone())?;
     insert(&mut artifacts, PROBLEM_SCHEMA_PATH, problem_schema.clone())?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V2_SCHEMA_PATH,
+        portability_v2_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V2_EXAMPLE_PATH,
+        portability_v2_example,
+    )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
         &mut artifacts,
@@ -470,6 +609,92 @@ fn draft_2020_12_schema<T: JsonSchema>() -> anyhow::Result<Value> {
         "generated JSON Schema is not explicitly Draft 2020-12"
     );
     Ok(value)
+}
+
+fn portability_v2_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v2/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV2".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v2. It extends the frozen v1 stream prefix with metadata and profile tracking state."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v2".to_owned()),
+    );
+
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 2
+    });
+    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V1_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v1 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v1 example omits format_version")? = serde_json::json!(2);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v1 example omits streams")?;
+    let empty_digest = format!("sha256:{:x}", Sha256::digest([]));
+    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V1.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v1 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v2 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!("sha256:{:x}", Sha256::digest(canonical)));
+    Ok(example)
 }
 
 fn pretty_json(value: Value) -> anyhow::Result<Vec<u8>> {
@@ -913,6 +1138,7 @@ fn enrich_production_openapi(
     public_registry: &Value,
     capability_keys: &BTreeMap<String, CapabilityKey>,
 ) -> anyhow::Result<()> {
+    validate_production_security_schemes(openapi)?;
     enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
     enrich_production_integration_status_openapi(workspace_root, openapi, public_registry)?;
     let capabilities = array_at(public_registry, "/capabilities")?;
@@ -980,6 +1206,85 @@ fn enrich_production_openapi(
             &examples,
             &Value::Null,
         )?;
+    }
+    Ok(())
+}
+
+fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
+    for name in ["bootstrap_bearer", "credential_bearer"] {
+        let pointer = format!("/components/securitySchemes/{name}");
+        let scheme = value_at(openapi, &pointer)?;
+        ensure!(
+            string_at(scheme, "/type")? == "http" && string_at(scheme, "/scheme")? == "bearer",
+            "production security scheme {name} must be HTTP bearer"
+        );
+    }
+    let browser = value_at(openapi, "/components/securitySchemes/browser_session")?;
+    ensure!(
+        string_at(browser, "/type")? == "apiKey"
+            && string_at(browser, "/in")? == "cookie"
+            && string_at(browser, "/name")? == "fasti_session",
+        "production browser_session security scheme must use the fasti_session cookie"
+    );
+    Ok(())
+}
+
+fn validate_production_operation_security(
+    operation: &Value,
+    operation_id: &str,
+    method: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    let expected = match operation_id {
+        "initialize_node" => vec!["bootstrap_bearer"],
+        "submit_observation"
+        | "create_record"
+        | "attach_identifier"
+        | "list_records"
+        | "register_namespace"
+        | "list_tracking_dispositions"
+        | "set_tracking_disposition"
+        | "get_nuvio_collections"
+        | "replace_nuvio_collections"
+        | "clear_nuvio_collections" => vec!["credential_bearer", "browser_session"],
+        "nuvio_webhook"
+        | "tautulli_webhook"
+        | "jellyfin_webhook"
+        | "emby_webhook"
+        | "plex_webhook" => vec!["credential_bearer"],
+        "read_session" | "end_session" | "list_users" | "update_user" | "delete_user" => {
+            vec!["browser_session"]
+        }
+        "create_session" | "enroll_first_client" | "health_check" | "integration_status" => {
+            Vec::new()
+        }
+        other => anyhow::bail!("unknown production operation {other}"),
+    };
+    if expected.is_empty() {
+        ensure!(
+            operation.get("security").is_none(),
+            "production operation {method} {path} must not declare authentication"
+        );
+        return Ok(());
+    }
+    let requirements = array_at(operation, "/security")?;
+    ensure!(
+        requirements.len() == expected.len(),
+        "production operation {method} {path} has the wrong number of security requirements"
+    );
+    for scheme in expected {
+        ensure!(
+            requirements.iter().any(|requirement| {
+                requirement.as_object().is_some_and(|requirement| {
+                    requirement.len() == 1
+                        && requirement
+                            .get(scheme)
+                            .and_then(Value::as_array)
+                            .is_some_and(Vec::is_empty)
+                })
+            }),
+            "production operation {method} {path} must use {scheme} without OAuth scopes"
+        );
     }
     Ok(())
 }
@@ -1831,19 +2136,17 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
             None => None,
         };
 
-        // Bootstrap proofs stay in request bodies. Existing bearer credentials must not
-        // be attached to either one-time setup operation.
+        // Bootstrap proofs stay in request bodies. The initialization route uses its
+        // separate data-root bootstrap bearer; enrollment consumes the proof body and
+        // must not receive either bearer credential.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
-        let has_security = operation
-            .get("security")
-            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
-        ensure!(
-            has_security == authenticated,
-            "production security declaration changed for {} {}",
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
             expected.method,
-            expected.path
-        );
+            expected.path,
+        )?;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
@@ -1932,15 +2235,24 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
 
     let schemas = object_at(openapi, "/components/schemas")?;
     let mut output = String::new();
-    let name = "ObservationIngressKind";
-    let schema = schemas
-        .get(name)
-        .with_context(|| format!("production OpenAPI omits {name}"))?;
-    writeln!(
-        output,
-        "// prettier-ignore\nexport type {name} = {};\n",
-        typescript_type(schema)?
-    )?;
+    for name in [
+        "ObservationIngressKind",
+        "TrackingDispositionDto",
+        "TrackingDispositionUpdateDto",
+    ] {
+        let schema = schemas
+            .get(name)
+            .with_context(|| format!("production OpenAPI omits {name}"))?;
+        writeln!(
+            output,
+            "// prettier-ignore\nexport type {name} = {};\n",
+            typescript_type(schema)?
+        )?;
+    }
+    output.push_str(
+        "// The Nuvio wire document intentionally preserves extension fields.\n\
+         export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;\n\n",
+    );
     for name in [
         "ObservationIdentifierInput",
         "SubmitObservationRequest",
@@ -1949,12 +2261,23 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "CreateRecordResponse",
         "ResolvedFieldDto",
         "RecordActivityDto",
+        "RecordIdentifierDto",
         "RecordSummaryDto",
         "ListRecordsResponse",
         "AttachIdentifierRequest",
         "AttachIdentifierResponse",
         "RegisterNamespaceRequest",
         "RegisterNamespaceResponse",
+        "SetTrackingDispositionRequest",
+        "TrackingDispositionStateDto",
+        "ListTrackingDispositionsResponse",
+        "CreateBrowserSessionRequest",
+        "BrowserUserDto",
+        "BrowserSessionResponse",
+        "ListBrowserUsersResponse",
+        "UpdateBrowserUserRequest",
+        "DeleteBrowserUserRequest",
+        "NuvioCollectionsStateDto",
     ] {
         let schema = schemas
             .get(name)
@@ -2026,14 +2349,14 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             None => None,
         };
 
-        // The production OpenAPI document does not populate the standard
-        // `security` field for any route today (a pre-existing gap separate
-        // from this SDK-emission fix -- `x-fasti-authorization` is the
-        // contract's actual authenticated/unauthenticated signal until that's
-        // addressed), so unlike the conformance and bootstrap renderers this
-        // one does not cross-check `security` against `expected.authenticated`.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
+            expected.method,
+            expected.path,
+        )?;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
@@ -2082,6 +2405,32 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "parseRegisterNamespaceResponse",
             "RegisterNamespaceResponse",
         ),
+        (
+            "parseSetTrackingDispositionRequest",
+            "SetTrackingDispositionRequest",
+        ),
+        (
+            "parseTrackingDispositionStateDto",
+            "TrackingDispositionStateDto",
+        ),
+        (
+            "parseListTrackingDispositionsResponse",
+            "ListTrackingDispositionsResponse",
+        ),
+        (
+            "parseCreateBrowserSessionRequest",
+            "CreateBrowserSessionRequest",
+        ),
+        ("parseBrowserUserDto", "BrowserUserDto"),
+        ("parseBrowserSessionResponse", "BrowserSessionResponse"),
+        ("parseListBrowserUsersResponse", "ListBrowserUsersResponse"),
+        ("parseUpdateBrowserUserRequest", "UpdateBrowserUserRequest"),
+        ("parseDeleteBrowserUserRequest", "DeleteBrowserUserRequest"),
+        (
+            "parseNuvioCollectionsDocumentDto",
+            "NuvioCollectionsDocumentDto",
+        ),
+        ("parseNuvioCollectionsStateDto", "NuvioCollectionsStateDto"),
     ] {
         writeln!(
             output,
@@ -2839,6 +3188,7 @@ function parseConformanceDto<T>(schemaName: string, value: unknown): T {
 // prettier-ignore
 function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string, schemas: Record<string, unknown>): void {
   const schema = schemaValue as Record<string, unknown>;
+  if (Object.keys(schema).length === 0) return;
   if (typeof schema.$ref === "string") {
     const prefix = "#/components/schemas/";
     if (!schema.$ref.startsWith(prefix)) {
@@ -2902,6 +3252,24 @@ function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string
     }
     if (typeof schema.maximum === "number" && value > schema.maximum) {
       throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("number")) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new FastiContractParseError(`${path} must be a finite number`);
+    }
+    if (typeof schema.minimum === "number" && value < schema.minimum) {
+      throw new FastiContractParseError(`${path} is below its minimum`);
+    }
+    if (typeof schema.maximum === "number" && value > schema.maximum) {
+      throw new FastiContractParseError(`${path} exceeds its maximum`);
+    }
+    return;
+  }
+  if (schemaTypes.includes("boolean")) {
+    if (typeof value !== "boolean") {
+      throw new FastiContractParseError(`${path} must be a boolean`);
     }
     return;
   }
@@ -3310,6 +3678,8 @@ mod tests {
             Path::new(CAPABILITY_DISCOVERY_EXAMPLE_PATH),
             Path::new(HEALTH_SCHEMA_PATH),
             Path::new(PROBLEM_SCHEMA_PATH),
+            Path::new(PORTABILITY_V2_SCHEMA_PATH),
+            Path::new(PORTABILITY_V2_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]

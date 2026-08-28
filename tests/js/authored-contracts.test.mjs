@@ -21,6 +21,7 @@ const withContracts = async (mutate, assertRejected) => {
       "contracts/jsonld/v1",
       "contracts/examples/v1",
       "contracts/portability/v1",
+      "contracts/portability/v2",
     ]) {
       await mkdir(join(root, directory), { recursive: true });
       await cp(join(repositoryRoot, directory), join(root, directory), {

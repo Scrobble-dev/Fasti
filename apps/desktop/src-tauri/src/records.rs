@@ -1,12 +1,20 @@
+use crate::artwork::ArtworkCache;
+use crate::providers::ProviderCandidate;
 use crate::setup::{authenticate, DesktopProblem, SetupSecretStore};
 use fasti_application::{
-    AttachIdentifierCommand, CreateRecordCommand, IdentityPort, ListRecordsQuery,
-    RegisterNamespaceDefinitionCommand,
+    ApplyProviderMetadataCommand, AttachIdentifierCommand, CreateProviderRecordCommand,
+    CreateRecordCommand, IdentityPort, ListRecordsQuery, ListTrackingDispositionsQuery,
+    ProfileRecordStatePort, ProviderMetadataPort, RegisterNamespaceDefinitionCommand,
+    RequestAccessContext, SetTrackingDispositionCommand,
+};
+use fasti_contracts::{
+    ListTrackingDispositionsResponse, TrackingDispositionDto, TrackingDispositionStateDto,
+    TrackingDispositionUpdateDto,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, Grain, InterpretationState, NamespaceDefinition,
     NamespaceLicencePosture, OccurredAt, RecordId, RecordStatus, RequestCorrelationId,
-    ResolvedField,
+    ResolvedField, TrackingDisposition,
 };
 use fasti_store::SqliteKernel;
 use serde::{Deserialize, Serialize};
@@ -40,6 +48,13 @@ pub(crate) struct RecordActivityView {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct RecordIdentifierView {
+    namespace: String,
+    grain: Grain,
+    value: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct RecordSummary {
     record_id: String,
     /// Identity granularity, not the frontend's display `MediaKind`. A later
@@ -48,10 +63,15 @@ pub(crate) struct RecordSummary {
     status: RecordStatus,
     title: ResolvedFieldView,
     poster: ResolvedFieldView,
+    poster_asset_path: Option<String>,
+    original_title: ResolvedFieldView,
+    overview: ResolvedFieldView,
+    release_year: ResolvedFieldView,
+    identifiers: Vec<RecordIdentifierView>,
     latest_activity: Option<RecordActivityView>,
 }
 
-fn require_access(
+pub(crate) fn require_access(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
 ) -> Result<fasti_application::RequestAccessContext, DesktopProblem> {
@@ -61,6 +81,7 @@ fn require_access(
 pub(crate) fn list_records(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
+    artwork: &ArtworkCache,
 ) -> Result<Vec<RecordSummary>, DesktopProblem> {
     let access = require_access(kernel, store)?;
     let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
@@ -69,18 +90,38 @@ pub(crate) fn list_records(
         .map_err(|problem| DesktopProblem::application(&problem))?;
     Ok(summaries
         .into_iter()
-        .map(|summary| RecordSummary {
-            record_id: summary.record_id().to_string(),
-            grain: summary.grain(),
-            status: summary.status(),
-            title: summary.title().into(),
-            poster: summary.poster().into(),
-            latest_activity: summary
-                .latest_activity()
-                .map(|activity| RecordActivityView {
-                    occurred_at: activity.occurred_at().cloned(),
-                    interpretation_state: activity.interpretation_state(),
-                }),
+        .map(|summary| {
+            let poster_asset_path = summary
+                .poster()
+                .source()
+                .zip(summary.poster().value())
+                .and_then(|(source, url)| artwork.local_path(source.as_str(), url));
+            RecordSummary {
+                record_id: summary.record_id().to_string(),
+                grain: summary.grain(),
+                status: summary.status(),
+                title: summary.title().into(),
+                poster: summary.poster().into(),
+                poster_asset_path,
+                original_title: summary.original_title().into(),
+                overview: summary.overview().into(),
+                release_year: summary.release_year().into(),
+                identifiers: summary
+                    .identifiers()
+                    .iter()
+                    .map(|identifier| RecordIdentifierView {
+                        namespace: identifier.namespace().to_string(),
+                        grain: identifier.grain(),
+                        value: identifier.value().to_owned(),
+                    })
+                    .collect(),
+                latest_activity: summary
+                    .latest_activity()
+                    .map(|activity| RecordActivityView {
+                        occurred_at: activity.occurred_at().cloned(),
+                        interpretation_state: activity.interpretation_state(),
+                    }),
+            }
         })
         .collect())
 }
@@ -199,6 +240,136 @@ pub(crate) fn register_namespace(
     })
 }
 
+fn register_provider_namespace(
+    kernel: &SqliteKernel,
+    access: fasti_application::RequestAccessContext,
+    candidate: &ProviderCandidate,
+) -> Result<(), DesktopProblem> {
+    let definition = candidate.namespace_definition()?;
+    kernel
+        .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+            RequestCorrelationId::new_v7(),
+            access,
+            definition,
+        ))
+        .map(|_| ())
+        .map_err(|problem| DesktopProblem::application(&problem))
+}
+
+pub(crate) fn create_provider_record(
+    kernel: &SqliteKernel,
+    access: RequestAccessContext,
+    candidate: ProviderCandidate,
+) -> Result<CreateRecordView, DesktopProblem> {
+    register_provider_namespace(kernel, access, &candidate)?;
+    let grain = candidate.grain()?;
+    let identifier = candidate.identifier()?;
+    let fields = candidate.metadata_fields()?;
+    let outcome = kernel
+        .create_provider_record(CreateProviderRecordCommand::new(
+            RequestCorrelationId::new_v7(),
+            access,
+            grain,
+            identifier,
+            fields,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(CreateRecordView {
+        record_id: outcome.record_id().to_string(),
+        grain: outcome.grain(),
+    })
+}
+
+pub(crate) fn apply_provider_metadata(
+    kernel: &SqliteKernel,
+    access: RequestAccessContext,
+    record_id: RecordId,
+    candidate: ProviderCandidate,
+) -> Result<(), DesktopProblem> {
+    register_provider_namespace(kernel, access, &candidate)?;
+    let identifier = candidate.identifier()?;
+    let fields = candidate.metadata_fields()?;
+    kernel
+        .apply_provider_metadata(ApplyProviderMetadataCommand::new(
+            RequestCorrelationId::new_v7(),
+            access,
+            record_id,
+            identifier,
+            fields,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))
+}
+
+fn disposition_dto(disposition: TrackingDisposition) -> TrackingDispositionDto {
+    match disposition {
+        TrackingDisposition::Watching => TrackingDispositionDto::Watching,
+        TrackingDisposition::OnHold => TrackingDispositionDto::OnHold,
+        TrackingDisposition::Dropped => TrackingDispositionDto::Dropped,
+    }
+}
+
+pub(crate) fn list_tracking_dispositions(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+) -> Result<ListTrackingDispositionsResponse, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    kernel
+        .list_tracking_dispositions(ListTrackingDispositionsQuery::new(correlation_id, access))
+        .map(|page| {
+            let truncated = page.truncated();
+            ListTrackingDispositionsResponse {
+                states: page
+                    .into_states()
+                    .into_iter()
+                    .map(|state| TrackingDispositionStateDto {
+                        record_id: state.record_id().to_string(),
+                        disposition: Some(disposition_dto(state.disposition())),
+                    })
+                    .collect(),
+                truncated,
+            }
+        })
+        .map_err(|problem| DesktopProblem::application(&problem))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct SetTrackingDispositionInput {
+    record_id: String,
+    disposition: TrackingDispositionUpdateDto,
+}
+
+pub(crate) fn set_tracking_disposition(
+    kernel: &SqliteKernel,
+    store: &impl SetupSecretStore,
+    input: SetTrackingDispositionInput,
+) -> Result<TrackingDispositionStateDto, DesktopProblem> {
+    let access = require_access(kernel, store)?;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let record_id = input
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
+    let disposition = match input.disposition {
+        TrackingDispositionUpdateDto::Watching => Some(TrackingDisposition::Watching),
+        TrackingDispositionUpdateDto::OnHold => Some(TrackingDisposition::OnHold),
+        TrackingDispositionUpdateDto::Dropped => Some(TrackingDisposition::Dropped),
+        TrackingDispositionUpdateDto::Unset => None,
+    };
+    let state = kernel
+        .set_tracking_disposition(SetTrackingDispositionCommand::new(
+            correlation_id,
+            access,
+            record_id,
+            disposition,
+        ))
+        .map_err(|problem| DesktopProblem::application(&problem))?;
+    Ok(TrackingDispositionStateDto {
+        record_id: record_id.to_string(),
+        disposition: state.map(|value| disposition_dto(value.disposition())),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,22 +378,24 @@ mod tests {
 
     #[test]
     fn list_records_refuses_before_setup_completes() {
-        let (_root, kernel) = new_kernel();
+        let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
 
         assert!(matches!(
-            list_records(&kernel, &store),
+            list_records(&kernel, &store, &artwork),
             Err(problem) if problem.code() == "not_authenticated"
         ));
     }
 
     #[test]
     fn list_records_is_honestly_empty_on_a_fresh_node() {
-        let (_root, kernel) = new_kernel();
+        let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
         complete_setup(&kernel, &store).expect("complete setup");
 
-        let records = list_records(&kernel, &store).expect("list records");
+        let records = list_records(&kernel, &store, &artwork).expect("list records");
         assert!(records.is_empty());
     }
 
@@ -239,14 +412,15 @@ mod tests {
 
     #[test]
     fn create_record_makes_the_new_record_listable() {
-        let (_root, kernel) = new_kernel();
+        let (root, kernel) = new_kernel();
         let store = MemoryStore::default();
+        let artwork = ArtworkCache::new(root.path().join("artwork"));
         complete_setup(&kernel, &store).expect("complete setup");
 
         let created = create_record(&kernel, &store, Grain::Film).expect("create record");
         assert_eq!(created.grain, Grain::Film);
 
-        let records = list_records(&kernel, &store).expect("list records");
+        let records = list_records(&kernel, &store, &artwork).expect("list records");
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record_id, created.record_id);
     }
@@ -359,7 +533,36 @@ mod tests {
         let first = register_namespace(&kernel, &store, input()).expect("register namespace");
         assert!(first.created);
 
-        let second = register_namespace(&kernel, &store, input()).expect("register namespace again");
+        let second =
+            register_namespace(&kernel, &store, input()).expect("register namespace again");
         assert!(!second.created);
+    }
+
+    #[test]
+    fn tracking_disposition_round_trips_through_the_desktop_adapter() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+        let created = create_record(&kernel, &store, Grain::Film).expect("create record");
+
+        let updated = set_tracking_disposition(
+            &kernel,
+            &store,
+            SetTrackingDispositionInput {
+                record_id: created.record_id.clone(),
+                disposition: TrackingDispositionUpdateDto::OnHold,
+            },
+        )
+        .expect("set disposition");
+        assert_eq!(updated.record_id, created.record_id);
+        assert_eq!(updated.disposition, Some(TrackingDispositionDto::OnHold));
+
+        assert_eq!(
+            list_tracking_dispositions(&kernel, &store).expect("list dispositions"),
+            ListTrackingDispositionsResponse {
+                states: vec![updated],
+                truncated: false,
+            }
+        );
     }
 }

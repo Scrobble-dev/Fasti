@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
+  import { recordProgressPercent } from "./progress.js";
   import FastActionBar from "./fast-action-bar.svelte";
   import {
     IconDeviceTv,
@@ -12,10 +13,10 @@
   interface Props {
     record: MediaRecord;
     onSelectRecord: (recordId: string) => void;
-    onToggleWatched: (rec: MediaRecord) => void;
-    onToggleWatchlist: (rec: MediaRecord) => void;
-    onOpenCollection: (rec: MediaRecord) => void;
-    onOpenReview: (rec: MediaRecord) => void;
+    onToggleWatched?: (rec: MediaRecord) => void;
+    onToggleWatchlist?: (rec: MediaRecord) => void;
+    onOpenCollection?: (rec: MediaRecord) => void;
+    onOpenReview?: (rec: MediaRecord) => void;
     onOpenContextMenu: (rec: MediaRecord, e: MouseEvent) => void;
   }
 
@@ -48,19 +49,8 @@
     }
   }
 
-  function calculateProgress(rec: MediaRecord): number {
-    if (rec.status === "completed") return 100;
-    if (rec.totalEpisodes && rec.progressEpisodes) {
-      return Math.round((rec.progressEpisodes / rec.totalEpisodes) * 100);
-    }
-    if (rec.totalDurationSeconds && rec.progressSeconds) {
-      return Math.round((rec.progressSeconds / rec.totalDurationSeconds) * 100);
-    }
-    return 0;
-  }
-
   const KindIcon = $derived(getKindIcon(record.mediaKind));
-  const pct = $derived(calculateProgress(record));
+  const pct = $derived(recordProgressPercent(record));
 </script>
 
 <div class="poster-card" role="group" aria-label="{record.title} card">
@@ -88,6 +78,9 @@
     </div>
 
     {#if pct > 0}
+      <div class="top-badge top-right-badge" title="{pct}% completed">
+        <span class="badge-pct">{pct}%</span>
+      </div>
       <div class="progress-bar-track">
         <div class="progress-bar-fill" style="width: {pct}%"></div>
       </div>
@@ -103,6 +96,15 @@
         <span>{record.releaseYear}</span>
       {/if}
     </div>
+    {#if record.statusText}
+      <div class="next-ep-text" title={record.statusText}>
+        {record.statusText}
+      </div>
+    {:else if record.totalEpisodes && record.progressEpisodes}
+      <div class="next-ep-text">
+        Ep {record.progressEpisodes} of {record.totalEpisodes}
+      </div>
+    {/if}
     {#if pct > 0}
       <div class="pct-text">{pct}%</div>
     {/if}
@@ -118,8 +120,8 @@
       {record}
       {onToggleWatched}
       {onToggleWatchlist}
-      onOpenCollection={(r) => onOpenCollection(r)}
-      onOpenReview={(r) => onOpenReview(r)}
+      {onOpenCollection}
+      {onOpenReview}
       onOpenContextMenu={(r, e) => onOpenContextMenu(r, e)}
     />
   </div>
@@ -195,18 +197,42 @@
     top: 8px;
     width: 26px;
     height: 26px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.65);
-    color: #ffffff;
+    color: var(--fasti-overlay-contrast);
     backdrop-filter: blur(4px);
     z-index: 2;
   }
 
   .top-left-badge {
     left: 8px;
+  }
+
+  .top-right-badge {
+    right: 8px;
+    width: auto;
+    min-width: 34px;
+    padding: 0 6px;
+  }
+
+  .badge-pct {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--fasti-overlay-contrast);
+    letter-spacing: -0.02em;
+  }
+
+  .next-ep-text {
+    font-size: 0.72rem;
+    color: var(--fasti-text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
   }
 
   .progress-bar-track {

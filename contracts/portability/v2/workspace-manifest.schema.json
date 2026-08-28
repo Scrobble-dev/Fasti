@@ -1,0 +1,516 @@
+{
+  "$comment": "Internal staged B3 archive v2. It extends the frozen v1 stream prefix with metadata and profile tracking state.",
+  "$defs": {
+    "ArchiveProfileDto": {
+      "enum": [
+        "zstd-l3-w22"
+      ],
+      "type": "string"
+    },
+    "ExportScopeDto": {
+      "enum": [
+        "full_workspace"
+      ],
+      "type": "string"
+    },
+    "RecoveryGrantPolicyDto": {
+      "enum": [
+        "require_fresh_bootstrap"
+      ],
+      "type": "string"
+    },
+    "RestorePolicyDto": {
+      "enum": [
+        "clean_only"
+      ],
+      "type": "string"
+    },
+    "WorkspaceBlobDescriptorDto": {
+      "additionalProperties": false,
+      "properties": {
+        "byte_length": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "digest": {
+          "format": "sha256",
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "evidence_id": {
+          "format": "fasti-evidence-id",
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^evd_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "byte_length",
+        "digest"
+      ],
+      "type": "object"
+    },
+    "WorkspaceExportEntityDto": {
+      "enum": [
+        "workspaces",
+        "profiles",
+        "clients",
+        "records",
+        "namespaces",
+        "external_identifiers",
+        "evidence",
+        "observations",
+        "observation_clues",
+        "occurrences",
+        "interpretations",
+        "review_items",
+        "review_candidates",
+        "corrections",
+        "receipts",
+        "operations",
+        "metadata_field_claims",
+        "metadata_field_overrides",
+        "profile_record_tracking_dispositions"
+      ],
+      "type": "string"
+    },
+    "WorkspaceManifestDto": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_profile": {
+          "$ref": "#/$defs/ArchiveProfileDto"
+        },
+        "blobs": {
+          "items": {
+            "$ref": "#/$defs/WorkspaceBlobDescriptorDto"
+          },
+          "type": "array"
+        },
+        "contract_version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "export_scope": {
+          "$ref": "#/$defs/ExportScopeDto"
+        },
+        "format": {
+          "$ref": "#/$defs/WorkspaceManifestFormatDto"
+        },
+        "format_version": {
+          "const": 2
+        },
+        "migration_digest": {
+          "format": "sha256",
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "migration_version": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery_grant_policy": {
+          "$ref": "#/$defs/RecoveryGrantPolicyDto"
+        },
+        "restore_policy": {
+          "$ref": "#/$defs/RestorePolicyDto"
+        },
+        "streams": {
+          "items": false,
+          "maxItems": 19,
+          "minItems": 19,
+          "prefixItems": [
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "workspaces"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "profiles"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "clients"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "records"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "namespaces"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "external_identifiers"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "evidence"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "observations"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "observation_clues"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "occurrences"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "interpretations"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "review_items"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "review_candidates"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "corrections"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "receipts"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "operations"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "metadata_field_claims"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "metadata_field_overrides"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceStreamDescriptorDto"
+                },
+                {
+                  "properties": {
+                    "entity": {
+                      "const": "profile_record_tracking_dispositions"
+                    }
+                  },
+                  "type": "object"
+                }
+              ]
+            }
+          ],
+          "type": "array"
+        },
+        "workspace_id": {
+          "format": "fasti-workspace-id",
+          "maxLength": 36,
+          "minLength": 36,
+          "pattern": "^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+          "type": "string"
+        },
+        "workspace_revision": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "format_version",
+        "workspace_id",
+        "export_scope",
+        "archive_profile",
+        "restore_policy",
+        "recovery_grant_policy",
+        "workspace_revision",
+        "contract_version",
+        "migration_version",
+        "migration_digest",
+        "streams",
+        "blobs"
+      ],
+      "type": "object"
+    },
+    "WorkspaceManifestFormatDto": {
+      "enum": [
+        "fasti.workspace.manifest"
+      ],
+      "type": "string"
+    },
+    "WorkspaceStreamDescriptorDto": {
+      "additionalProperties": false,
+      "properties": {
+        "byte_length": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "digest": {
+          "format": "sha256",
+          "maxLength": 71,
+          "minLength": 71,
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "entity": {
+          "$ref": "#/$defs/WorkspaceExportEntityDto"
+        },
+        "row_count": {
+          "format": "uint64",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "entity",
+        "row_count",
+        "byte_length",
+        "digest"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://fasti.scrobble.dev/schemas/internal-staged/portability/v2/workspace-manifest.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The digest covers RFC 8785 canonical JSON bytes of `manifest` only.",
+  "properties": {
+    "manifest": {
+      "$ref": "#/$defs/WorkspaceManifestDto"
+    },
+    "manifest_digest": {
+      "format": "sha256",
+      "maxLength": 71,
+      "minLength": 71,
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "manifest",
+    "manifest_digest"
+  ],
+  "title": "InternalStagedChecksummedWorkspaceManifestV2",
+  "type": "object",
+  "x-fasti-contract-state": "internal_staged_archive_v2"
+}

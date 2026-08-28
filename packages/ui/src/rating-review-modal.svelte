@@ -144,7 +144,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     width: 100%;
     max-width: 520px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
@@ -191,7 +191,7 @@
     align-items: center;
     background: var(--fasti-surface-archive);
     padding: 14px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
 
   .section-label {
@@ -244,7 +244,7 @@
     padding: 10px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-family: var(--fasti-font-body);
     font-size: 0.92rem;
     background: var(--fasti-surface-paper);
@@ -267,7 +267,7 @@
     background: transparent;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -279,9 +279,9 @@
     gap: 6px;
     padding: 8px 18px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }

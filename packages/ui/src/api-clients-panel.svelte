@@ -31,7 +31,7 @@
   let copied = $state(false);
   let revealCredential = $state(false);
   let pendingRevoke = $state<string>();
-  let secretNotice: HTMLDivElement | undefined;
+  let secretNotice = $state<HTMLDivElement>();
 
   const canManage = $derived(
     Boolean(
@@ -387,7 +387,7 @@
   .empty-state {
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     padding: 18px;
   }
@@ -408,7 +408,7 @@
   }
 
   .one-time-secret:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -419,7 +419,7 @@
     padding: 10px;
     overflow-wrap: anywhere;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
   }
 
   .secret-actions,
@@ -438,7 +438,7 @@
     align-items: center;
     justify-content: center;
     gap: 7px;
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 8px 14px;
     font-weight: 650;
     cursor: pointer;
@@ -447,7 +447,7 @@
   .primary-action {
     border: 1px solid var(--fasti-action-primary);
     background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast, #fff);
+    color: var(--fasti-action-contrast);
   }
 
   .secondary-action {
@@ -468,7 +468,7 @@
   }
 
   button:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -500,7 +500,7 @@
   .scope-list code {
     padding: 2px 5px;
     background: var(--fasti-surface-archive);
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
 
   .problem {

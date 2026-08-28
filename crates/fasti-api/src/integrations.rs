@@ -1,5 +1,5 @@
 use crate::{
-    local::{bearer_secret, LocalApiState},
+    local::{bearer_secret, LocalApiState, RequestAuthentication},
     observation::accept_observation_request,
     problem::{application_problem, HttpProblem},
 };
@@ -221,13 +221,21 @@ async fn template_webhook(
     let request: IntegrationObservationRequest = serde_json::from_slice(&body)
         .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
     let normalized = normalize_template_request(source, request, correlation_id)?;
-    accept_observation_request(state, secret, normalized, body.to_vec(), correlation_id).await
+    accept_observation_request(
+        state,
+        RequestAuthentication::Bearer(secret),
+        normalized,
+        body.to_vec(),
+        correlation_id,
+    )
+    .await
 }
 
 #[utoipa::path(
     post,
     path = "/api/v1/integrations/tautulli/webhook",
     tag = "integrations",
+    security(("credential_bearer" = [])),
     request_body = IntegrationObservationRequest,
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
@@ -255,6 +263,7 @@ pub(crate) async fn tautulli_webhook(
     post,
     path = "/api/v1/integrations/jellyfin/webhook",
     tag = "integrations",
+    security(("credential_bearer" = [])),
     request_body = IntegrationObservationRequest,
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
@@ -282,6 +291,7 @@ pub(crate) async fn jellyfin_webhook(
     post,
     path = "/api/v1/integrations/nuvio/webhook",
     tag = "integrations",
+    security(("credential_bearer" = [])),
     request_body = IntegrationObservationRequest,
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
@@ -447,6 +457,7 @@ fn emby_request(
     post,
     path = "/api/v1/integrations/emby/webhook",
     tag = "integrations",
+    security(("credential_bearer" = [])),
     responses(
         (status = 200, description = "Durable occurrence receipt", body = SubmitObservationResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
@@ -485,7 +496,14 @@ pub(crate) async fn emby_webhook(
     let value: Value = serde_json::from_slice(&body)
         .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
     let normalized = emby_request(&value, &body, correlation_id)?;
-    accept_observation_request(state, secret, normalized, body.to_vec(), correlation_id).await
+    accept_observation_request(
+        state,
+        RequestAuthentication::Bearer(secret),
+        normalized,
+        body.to_vec(),
+        correlation_id,
+    )
+    .await
 }
 
 fn multipart_boundary(content_type: &str) -> Option<&str> {
@@ -660,6 +678,7 @@ fn plex_request(
     post,
     path = "/api/v1/integrations/plex/webhook",
     tag = "integrations",
+    security(("credential_bearer" = [])),
     responses(
         (status = 200, description = "Durable Plex scrobble receipt", body = SubmitObservationResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
@@ -729,7 +748,14 @@ pub(crate) async fn plex_webhook(
     let value: Value = serde_json::from_slice(payload)
         .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
     let normalized = plex_request(&value, payload, correlation_id)?;
-    accept_observation_request(state, secret, normalized, payload.to_vec(), correlation_id).await
+    accept_observation_request(
+        state,
+        RequestAuthentication::Bearer(secret),
+        normalized,
+        payload.to_vec(),
+        correlation_id,
+    )
+    .await
 }
 
 #[utoipa::path(

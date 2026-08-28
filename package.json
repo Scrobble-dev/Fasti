@@ -16,13 +16,13 @@
     "contracts:validate-examples": "node scripts/validate-examples.mjs",
     "contracts:validate-generated": "node scripts/validate-generated-contracts.mjs",
     "contracts:validate-okf": "node scripts/validate-okf-uat.mjs",
-    "lint:tabler": "node scripts/check-tabler-ui-boundary.mjs",
-    "test": "pnpm run build && pnpm contracts:validate-authored && pnpm contracts:validate-generated && pnpm contracts:validate-examples && pnpm contracts:validate-okf && pnpm lint:tabler && node scripts/check-js-workspace.mjs && node --test tests/js/*.test.mjs",
+    "lint:ui": "node scripts/check-ui-policy.mjs",
+    "test": "pnpm run build && pnpm contracts:validate-authored && pnpm contracts:validate-generated && pnpm contracts:validate-examples && pnpm contracts:validate-okf && pnpm lint:ui && node scripts/check-js-workspace.mjs && node --test tests/js/*.test.mjs",
     "test:ui": "playwright test",
     "test:coverage": "pnpm run build && mkdir -p coverage && node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/js-lcov.info tests/js/*.test.mjs",
     "typecheck": "pnpm run build && pnpm --filter @fasti/tokens typecheck && pnpm --filter @fasti/sdk typecheck && pnpm --filter @fasti/ui typecheck && pnpm --filter @fasti/web typecheck",
-    "format": "prettier --write .prettierrc.json package.json playwright.config.ts pnpm-workspace.yaml tsconfig.base.json \"apps/web/**/*.{json,ts,svelte,css,html}\" \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts,svelte}\" \"scripts/**/*.mjs\" \"tests/**/*.{mjs,ts}\"",
-    "format:check": "prettier --check .prettierrc.json package.json playwright.config.ts pnpm-workspace.yaml tsconfig.base.json \"apps/web/**/*.{json,ts,svelte,css,html}\" \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{json,ts,svelte}\" \"scripts/**/*.mjs\" \"tests/**/*.{mjs,ts}\""
+    "format": "prettier --write .prettierrc.json package.json playwright.config.ts pnpm-workspace.yaml tsconfig.base.json \"apps/web/**/*.{json,ts,svelte,css,html}\" \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{js,json,ts,svelte}\" \"scripts/**/*.mjs\" \"tests/**/*.{mjs,ts}\"",
+    "format:check": "prettier --check .prettierrc.json package.json playwright.config.ts pnpm-workspace.yaml tsconfig.base.json \"apps/web/**/*.{json,ts,svelte,css,html}\" \"contracts/{asyncapi,examples,jsonld,portability,registry}/**/*.{json,jsonld,yaml,yml}\" \"packages/**/*.{js,json,ts,svelte}\" \"scripts/**/*.mjs\" \"tests/**/*.{mjs,ts}\""
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "12.1.0",

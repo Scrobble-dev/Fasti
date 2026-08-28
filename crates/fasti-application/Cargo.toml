@@ -12,6 +12,7 @@ description = "Fasti capabilities, application ports, and typed problem catalog"
 chrono = { workspace = true }
 fasti-domain = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = "0.10.9"
 uuid = { workspace = true, optional = true }
 
@@ -20,5 +21,4 @@ default = []
 conformance-fixture = ["dep:uuid"]
 
 [dev-dependencies]
-serde_json = { workspace = true }
 static_assertions = { workspace = true }

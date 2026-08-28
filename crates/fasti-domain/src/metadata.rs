@@ -24,6 +24,12 @@ pub const MAX_LOCALE_BYTES: usize = 16;
 pub const TITLE_FIELD_KEY: &str = "core.title";
 /// Canonical field key for a Record's poster/artwork URL.
 pub const POSTER_FIELD_KEY: &str = "core.poster_url";
+/// Canonical field key for a Record's original provider title.
+pub const ORIGINAL_TITLE_FIELD_KEY: &str = "core.original_title";
+/// Canonical field key for a Record's provider synopsis.
+pub const OVERVIEW_FIELD_KEY: &str = "core.overview";
+/// Canonical field key for a Record's release year.
+pub const RELEASE_YEAR_FIELD_KEY: &str = "core.release_year";
 
 /// A dotted field identity such as `core.title` or `book.authors`.
 ///

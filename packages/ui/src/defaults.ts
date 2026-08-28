@@ -90,29 +90,54 @@ export const DEFAULT_NAV_ITEMS: NavItemConfig[] = [
 
 export const DEFAULT_CONTEXT_MENU_ITEMS: ContextMenuItemConfig[] = [
   { id: "view", label: "View Details", visible: true, order: 0 },
-  { id: "watched", label: "Mark as Seen / Unplayed", visible: true, order: 1 },
+  {
+    id: "tracking_watching",
+    label: "Mark as In Progress",
+    visible: true,
+    order: 1,
+  },
+  {
+    id: "tracking_on_hold",
+    label: "Mark as On Hold",
+    visible: true,
+    order: 2,
+  },
+  {
+    id: "tracking_dropped",
+    label: "Mark as Dropped",
+    visible: true,
+    order: 3,
+  },
+  {
+    id: "tracking_clear",
+    label: "Use Automatic Tracking State",
+    visible: true,
+    order: 4,
+  },
+  { id: "watched", label: "Mark as Seen / Unplayed", visible: true, order: 5 },
   {
     id: "progress",
     label: "Update Progress & Episodes",
     visible: true,
-    order: 2,
+    order: 6,
   },
-  { id: "watchlist", label: "Watchlist Toggle", visible: true, order: 3 },
-  { id: "collection", label: "Add to Collection...", visible: true, order: 4 },
-  { id: "review", label: "Rate & Personal Review...", visible: true, order: 5 },
-  { id: "edit_tags", label: "Manage Tags...", visible: true, order: 6 },
+  { id: "watchlist", label: "Watchlist Toggle", visible: true, order: 7 },
+  { id: "collection", label: "Add to Collection...", visible: true, order: 8 },
+  { id: "review", label: "Rate & Personal Review...", visible: true, order: 9 },
+  { id: "edit_tags", label: "Manage Tags...", visible: true, order: 10 },
   {
     id: "manage_ids",
     label: "Inspect External Claim IDs...",
     visible: true,
-    order: 7,
+    order: 11,
   },
   {
     id: "reconcile",
     label: "Review & Reconcile Identity...",
     visible: true,
-    order: 8,
+    order: 12,
   },
+  { id: "copy_id", label: "Copy Fasti Entity ID", visible: true, order: 13 },
 ];
 
 export function createDefaultWorkbenchPreferences(): WorkbenchPreferences {

@@ -44,9 +44,17 @@
   });
 
   const percentage = $derived(
-    record.mediaKind === "show" || record.mediaKind === "anime"
-      ? Math.min(100, Math.round((episodeVal / totalEps) * 100))
-      : Math.min(100, Math.round((progressSec / totalSec) * 100)),
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          record.mediaKind === "show" || record.mediaKind === "anime"
+            ? (episodeVal / totalEps) * 100
+            : (progressSec / totalSec) * 100,
+        ),
+      ),
+    ),
   );
 
   function handleSave(): void {
@@ -145,7 +153,10 @@
 
       <!-- Progress Meter -->
       <div class="meter-wrap">
-        <div class="meter-bar" style="width: {percentage}%"></div>
+        <div
+          class="meter-bar"
+          style="transform: scaleX({percentage / 100})"
+        ></div>
         <span class="meter-text">{percentage}% Completed</span>
       </div>
 
@@ -201,7 +212,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     width: 100%;
     max-width: 480px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
@@ -264,7 +275,7 @@
     min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     font-size: 1.2rem;
     font-weight: bold;
@@ -283,7 +294,7 @@
     font-weight: 700;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -291,7 +302,7 @@
     height: 44px;
     min-height: 44px;
     padding: 0 14px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     background: var(--fasti-surface-archive);
@@ -309,7 +320,7 @@
   .meter-wrap {
     height: 24px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     position: relative;
     display: flex;
@@ -319,9 +330,11 @@
   }
 
   .meter-bar {
+    width: 100%;
     height: 100%;
     background: var(--fasti-state-verified);
-    transition: width 150ms ease;
+    transform-origin: left center;
+    transition: transform 150ms ease;
   }
 
   .meter-text {
@@ -340,7 +353,7 @@
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
   }
@@ -361,7 +374,7 @@
     background: transparent;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -373,10 +386,16 @@
     gap: 6px;
     padding: 8px 20px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .meter-bar {
+      transition: none;
+    }
   }
 </style>
