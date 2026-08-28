@@ -60,9 +60,7 @@ const forbiddenIcons = gitGrep([
   ...sourcePaths,
 ]);
 if (forbiddenIcons) {
-  failures.push(
-    `Use Tabler icons before another icon package:\n${forbiddenIcons}`,
-  );
+  failures.push("Use Tabler icons before another icon package");
 }
 
 // eslint-disable-next-line xss/no-mixed-html -- static repository search; this script does not generate HTML
@@ -74,7 +72,7 @@ const rawSvg = gitGrep([
   ":(exclude)packages/ui/src/nav-sidebar.svelte",
 ]);
 if (rawSvg) {
-  failures.push(`Raw SVG needs a documented brand-only exception:\n${rawSvg}`);
+  failures.push("Raw SVG needs a documented brand-only exception");
 }
 // eslint-disable-next-line xss/no-mixed-html -- static repository search; this script does not generate HTML
 const brandSvg = gitGrep([
@@ -99,7 +97,7 @@ const hardCodedLightForeground = gitGrep([
 ]);
 if (hardCodedLightForeground) {
   failures.push(
-    `Use a governed contrast token instead of a hard-coded light foreground:\n${hardCodedLightForeground}`,
+    "Use a governed contrast token instead of a hard-coded light foreground",
   );
 }
 

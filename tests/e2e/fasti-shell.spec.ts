@@ -344,15 +344,26 @@ test("semantic badge contrast remains AA in both themes", async ({ page }) => {
     const ratios = await page.evaluate((mode) => {
       document.documentElement.setAttribute("data-bs-theme", mode);
       const parseColor = (value: string): number[] => {
-        const channels =
-          value
-            .match(/[\d.]+/g)
-            ?.slice(0, 3)
-            .map(Number) ?? [];
-        if (channels.length !== 3) return [];
-        return value.startsWith("color(")
-          ? channels.map((channel) => channel * 255)
-          : channels;
+        const parts = value.match(/-?[\d.]+/g)?.map(Number) ?? [];
+        const isRgb = value.startsWith("rgb");
+        const isSrgb = value.startsWith("color(srgb ");
+        if ((!isRgb && !isSrgb) || (parts.length !== 3 && parts.length !== 4)) {
+          throw new Error(`Unsupported color value: ${value}`);
+        }
+        if (parts.length === 4 && parts[3] !== 1) {
+          throw new Error(`Color is not opaque: ${value}`);
+        }
+        const channels = parts.slice(0, 3);
+        const maximum = isSrgb ? 1 : 255;
+        if (
+          channels.some(
+            (channel) =>
+              !Number.isFinite(channel) || channel < 0 || channel > maximum,
+          )
+        ) {
+          throw new Error(`Color channel is out of range: ${value}`);
+        }
+        return isSrgb ? channels.map((channel) => channel * 255) : channels;
       };
       const luminance = (channels: number[]): number =>
         channels
