@@ -3,10 +3,15 @@
 
   interface Props {
     watchingRecords: MediaRecord[];
+    stateUnavailable?: boolean;
     onSelectRecord: (recordId: string) => void;
   }
 
-  let { watchingRecords, onSelectRecord }: Props = $props();
+  let {
+    watchingRecords,
+    stateUnavailable = false,
+    onSelectRecord,
+  }: Props = $props();
 </script>
 
 <div class="calendar-container">
@@ -14,15 +19,25 @@
     <div>
       <h1 class="view-title">Up Next & Calendar</h1>
       <p class="view-subtitle">
-        Review records that are currently in progress.
+        {stateUnavailable
+          ? "Watch state is not included in the current record summaries."
+          : "Review records that are currently in progress."}
       </p>
     </div>
   </header>
 
   {#if watchingRecords.length === 0}
     <section class="calendar-empty" aria-labelledby="calendar-empty-title">
-      <h2 id="calendar-empty-title">No active records</h2>
-      <p>Calendar entries appear only when Fasti receives real record data.</p>
+      {#if stateUnavailable}
+        <h2 id="calendar-empty-title">Active state is unavailable</h2>
+        <p>
+          Record summaries do not include watch state. Calendar entries need
+          that state before they can appear here.
+        </p>
+      {:else}
+        <h2 id="calendar-empty-title">No active records</h2>
+        <p>No records are currently marked as in progress.</p>
+      {/if}
     </section>
   {:else}
     <section class="up-next-section" aria-label="Up Next Deck">
@@ -184,7 +199,7 @@
     padding: 6px 12px;
     border-radius: 4px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     font-size: 0.82rem;
     font-weight: 600;
     border: none;

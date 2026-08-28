@@ -88,7 +88,7 @@ The active workspace has an inward-facing ownership spine and executable B1 cont
 
 ```text
 apps/fastid          production health plus explicit locally exposed durable composition root
-apps/web             pre-production health and interface-quality harness; not packaged or deployed
+apps/web             local Workbench at / plus the explicit /status diagnostic; not packaged or deployed
 apps/desktop         trusted-host desktop review candidate; not packaged or released
 crates/fasti-domain  typed IDs, time values, and domain invariants
 crates/fasti-application
@@ -115,7 +115,7 @@ Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an e
 
 B1 has a machine-readable capability registry as the authoritative public ledger. Deterministic generation projects that meaning into:
 
-- a production OpenAPI 3.1 document covering health and durable setup routes;
+- a production OpenAPI 3.1 document covering health, durable setup, observations, Records, identifiers, and namespaces;
 - a separate OpenAPI 3.1 document for real, feature-gated conformance handlers and shared public DTOs;
 - AsyncAPI 3.x transport binding for the `receipt.stream` SSE channel;
 - JSON Schema 2020-12 for public payloads;

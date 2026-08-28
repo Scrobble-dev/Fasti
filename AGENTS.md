@@ -154,13 +154,25 @@ setting, or desktop surface.
 Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decision.
 
 ### UI Invariants & Requirements:
-
+<!-- FASTI_TABLER_POLICY_START -->
 - **Tabler-First Policy**: Always use upstream Tabler (`@tabler/core` and `@tabler/icons`) layout, grid, typography, cards, tables, forms, modals, and badge classes first.
 - **Component Decision Hierarchy**:
   1. Tabler Core Component (direct usage)
   2. Tabler Pattern Composition
   3. Fasti Token-Skinned Tabler Element (`brand/tokens/tokens.json`)
   4. Custom Svelte Component (STRICT EXCEPTION: only if Tabler has zero equivalent; requires explicit documented architectural rationale).
+- **Permanent gate**: `pnpm lint:ui` must pass. It rejects non-Tabler icon systems, unapproved raw SVG, removal of the Tabler Core stylesheet, and removal of these managed policy markers. Do not weaken its allowlist to land UI work.
+
+<!-- FASTI_TABLER_POLICY_END -->
+
+- <!-- FASTI_CHESTERTON_POLICY_START --> **Chesterton's fence**: Before deleting, hiding, or replacing an existing UI control, trace its callers, history, tests, screenshots, and intended capability. Mature fake behavior behind a governed host capability. If the capability is not ready, keep the affordance visible with a precise unavailable state and add an owned TODO. Removal requires explicit user approval plus a documented replacement or migration.
+
+<!-- FASTI_CHESTERTON_POLICY_END -->
+
+- <!-- FASTI_AUTH_BOUNDARY_START --> **Authentication boundary**: Follow [`docs/architecture/authentication.md`](docs/architecture/authentication.md). Browser sessions, scoped API client credentials, packaged-host administrator credentials, passkeys, passwords, device authorization, and OIDC tokens are distinct credential models. Never collapse them into one token or simulate a backend flow in Svelte.
+
+<!-- FASTI_AUTH_BOUNDARY_END -->
+
 - **Impeccable Craft Floor**: Surface mode must be `Operate` (workbench, triage, settings) or `Read` (annal, chronicle, markdown docs). Zero layout shifts (`CLS = 0`), no purple/violet AI gradients, no generic SaaS card walls, no continuous decorative animations, and strict 44px min touch targets.
 - **Interaction & Usability Standards**: All UI flows must be audited against:
   - AskTog interaction principles (anticipation, Fitts's law, latency reduction, user work protection, state continuity)

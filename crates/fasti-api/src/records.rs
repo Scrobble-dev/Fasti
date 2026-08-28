@@ -89,7 +89,7 @@ fn resolved_field_dto(field: &ResolvedField) -> ResolvedFieldDto {
     post,
     path = "/api/v1/records",
     tag = "records",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = CreateRecordRequest,
     responses(
         (status = 200, description = "The new record's identity", body = CreateRecordResponse),
@@ -140,7 +140,7 @@ pub(crate) async fn create_record(
     post,
     path = "/api/v1/records/identifiers",
     tag = "records",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = AttachIdentifierRequest,
     responses(
         (status = 200, description = "The attached (or already-present) identifier claim", body = AttachIdentifierResponse),
@@ -205,7 +205,7 @@ pub(crate) async fn attach_identifier(
     get,
     path = "/api/v1/records",
     tag = "records",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     responses(
         (status = 200, description = "Records visible to this credential's workspace", body = ListRecordsResponse),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
@@ -278,7 +278,7 @@ pub(crate) async fn list_records(
     post,
     path = "/api/v1/namespaces",
     tag = "records",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = RegisterNamespaceRequest,
     responses(
         (status = 200, description = "The registered (or already-present) namespace", body = RegisterNamespaceResponse),

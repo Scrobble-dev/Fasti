@@ -5,6 +5,7 @@
     rel="noopener noreferrer"
     aria-label="Visit TMDB"
   >
+    <!-- FASTI_BRAND_SVG_EXCEPTION: official TMDB provider attribution mark. -->
     <svg
       viewBox="0 0 185.04 133.4"
       role="img"

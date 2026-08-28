@@ -21,6 +21,8 @@
     actionLabel?: string;
     completedLabel?: string;
     actionProblemFallback?: string;
+    selectedProviderId?: string;
+    selectionExplicit?: boolean;
   }
 
   let {
@@ -35,6 +37,8 @@
     actionLabel = "Track Now",
     completedLabel = "Added to library",
     actionProblemFallback = "Fasti could not add this title to your library.",
+    selectedProviderId = $bindable(""),
+    selectionExplicit = $bindable(false),
   }: Props = $props();
   let query = $state("");
   let results: ProviderSearchCandidate[] = $state([]);
@@ -45,7 +49,8 @@
   let trackingId = $state("");
   let trackedIds = $state<Set<string>>(new Set());
   let trackProblem = $state("");
-  let selectedProvider = $state("");
+  let searchRevision = 0;
+  let searchProviderId = "";
 
   async function trackRecord(
     candidate: ProviderSearchCandidate,
@@ -62,37 +67,82 @@
       trackingId = "";
     }
   }
-  const configuredProviders = $derived(
-    (providerCredentials ?? []).filter((item) => item.configured),
+  const supportedProviders = $derived(
+    (providerCredentials ?? []).filter((provider) =>
+      ["google-books", "tmdb"].includes(provider.provider),
+    ),
   );
-  const activeProvider = $derived(
-    configuredProviders.find((item) => item.provider === selectedProvider),
+  const selectedProvider = $derived(
+    supportedProviders.find(
+      (provider) => provider.provider === selectedProviderId,
+    ),
   );
 
   $effect(() => {
-    if (!activeProvider)
-      selectedProvider = configuredProviders[0]?.provider ?? "";
+    if (supportedProviders.length === 0) return;
+    if (
+      selectionExplicit &&
+      supportedProviders.some(
+        (provider) => provider.provider === selectedProviderId,
+      )
+    ) {
+      return;
+    }
+    selectionExplicit = false;
+    selectedProviderId =
+      supportedProviders.find((provider) => provider.configured)?.provider ??
+      supportedProviders[0].provider;
   });
 
+  $effect(() => {
+    const providerId = selectedProviderId;
+    if (providerId === searchProviderId) return;
+    searchProviderId = providerId;
+    searchRevision += 1;
+    searching = false;
+    results = [];
+    problem = "";
+    searched = false;
+    completedQuery = "";
+  });
+
+  function selectProvider(provider: string): void {
+    selectionExplicit = true;
+    selectedProviderId = provider;
+  }
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const value = query.trim();
-    if (!value || !activeProvider || searching) return;
+    if (!value || !selectedProvider?.configured || searching) return;
+    if (
+      /[\u0000-\u001f\u007f]/u.test(value) ||
+      new TextEncoder().encode(value).byteLength > 256
+    ) {
+      problem = "Use 1 to 256 UTF-8 bytes and no control characters.";
+      results = [];
+      searched = false;
+      return;
+    }
+    const provider = selectedProvider;
+    const revision = ++searchRevision;
     searching = true;
     problem = "";
     searched = false;
     try {
-      results = await onSearch(activeProvider.provider, value);
+      const nextResults = await onSearch(provider.provider, value);
+      if (revision !== searchRevision) return;
+      results = nextResults;
       completedQuery = value;
       searched = true;
     } catch (error) {
+      if (revision !== searchRevision) return;
       results = [];
       problem = hostProblemText(
         error,
-        `${activeProvider.label} search failed. Check the provider credential and network policy.`,
+        `${provider.label} search failed. Check the provider credential and network policy.`,
       );
     } finally {
-      searching = false;
+      if (revision === searchRevision) searching = false;
     }
   }
 </script>
@@ -124,148 +174,173 @@
         Retry host connection
       </button>
     </div>
-  {:else if configuredProviders.length === 0}
+  {:else if supportedProviders.length === 0 || !selectedProvider}
     <section class="unavailable" aria-labelledby="discover-setup-title">
       <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
-        Add a metadata provider credential
+        No search provider is available
       </svelte:element>
-      <p>
-        Configure Google Books or a TMDB API Read Access Token in Settings.
-        Fasti stores app-managed credentials in the platform credential store.
-      </p>
-      <button type="button" class="btn btn-primary" onclick={onOpenSettings}
-        >Open provider settings</button
+      <p>The active host did not return a supported provider status.</p>
+      <button type="button" class="btn btn-outline-secondary" onclick={onRetry}
+        >Refresh provider status</button
       >
     </section>
   {:else}
-    <form class="search-form" onsubmit={search} role="search">
+    <div class="provider-choice">
       <label for="provider-choice">Metadata provider</label>
       <select
         id="provider-choice"
         class="form-select"
-        bind:value={selectedProvider}
-        disabled={searching}
-        onchange={() => {
-          results = [];
-          problem = "";
-          searched = false;
-        }}
+        value={selectedProviderId}
+        onchange={(event) => selectProvider(event.currentTarget.value)}
       >
-        {#each configuredProviders as provider (provider.provider)}
-          <option value={provider.provider}>{provider.label}</option>
+        {#each supportedProviders as provider (provider.provider)}
+          <option value={provider.provider}>
+            {provider.label}{provider.configured ? "" : " — setup required"}
+          </option>
         {/each}
       </select>
-      <label for="provider-search">Search title, creator, or identifier</label>
-      <div class="search-row">
-        <input
-          id="provider-search"
-          type="search"
-          class="form-control"
-          required
-          maxlength="256"
-          bind:value={query}
-          disabled={searching}
-          placeholder={selectedProvider === "google-books"
-            ? "Title, author, or ISBN"
-            : "Movie or TV title"}
-          autocomplete="off"
-        />
-        <button
-          type="submit"
-          class="btn btn-primary"
-          disabled={searching || !query.trim()}
-        >
-          <IconSearch size={18} aria-hidden="true" />
-          {searching ? "Searching…" : "Search"}
-        </button>
-      </div>
-    </form>
+    </div>
 
-    <section
-      class="results"
-      aria-labelledby="search-results-title"
-      aria-busy={searching}
-    >
-      <svelte:element this={embedded ? "h4" : "h2"} id="search-results-title">
-        Search results
-      </svelte:element>
-      {#if searching}
-        <p role="status">Searching {activeProvider?.label ?? "provider"}…</p>
-      {:else if problem}
-        <p class="problem" role="alert">{problem}</p>
-      {:else if searched && results.length === 0}
-        <p role="status">No compatible titles found for {completedQuery}.</p>
-      {:else if results.length > 0}
-        <p role="status">
-          {results.length}
-          {results.length === 1 ? "result" : "results"} for
-          {completedQuery}.
+    {#if !selectedProvider.configured}
+      <section class="unavailable" aria-labelledby="discover-setup-title">
+        <svelte:element this={embedded ? "h4" : "h2"} id="discover-setup-title">
+          {selectedProvider.label} needs a credential
+        </svelte:element>
+        <p>
+          Add one in Settings. Fasti stores it in the platform credential store.
         </p>
-        <ol>
-          {#each results as result (result.provider_id)}
-            <li>
-              <svelte:element
-                this={embedded ? "h5" : "h3"}
-                class="result-title"
-              >
-                {result.title}
-              </svelte:element>
-              {#if result.original_title}
-                <p>Original title: {result.original_title}</p>
-              {/if}
-              {#if result.authors.length > 0}
-                <p>By {result.authors.join(", ")}</p>
-              {/if}
-              {#if result.overview}
-                <p class="result-overview">{result.overview}</p>
-              {/if}
-              <dl>
-                <div>
-                  <dt>Provider</dt>
-                  <dd>{result.provider}</dd>
-                </div>
-                <div>
-                  <dt>Type</dt>
-                  <dd>{result.kind}</dd>
-                </div>
-                {#if result.release_year}
-                  <div>
-                    <dt>Year</dt>
-                    <dd>{result.release_year}</dd>
-                  </div>
-                {/if}
-                <div>
-                  <dt>Provider ID</dt>
-                  <dd><code>{result.provider_id}</code></dd>
-                </div>
-              </dl>
-              {#if onTrackRecord}
-                <button
-                  type="button"
-                  class="track-btn"
-                  disabled={Boolean(trackingId) ||
-                    trackedIds.has(result.provider_id)}
-                  onclick={() => trackRecord(result)}
+        <button type="button" class="btn btn-primary" onclick={onOpenSettings}
+          >Open provider settings</button
+        >
+      </section>
+    {:else}
+      <form class="search-form" onsubmit={search} role="search">
+        <label for="provider-search">Search {selectedProvider.label}</label>
+        <div class="search-row">
+          <input
+            id="provider-search"
+            type="search"
+            class="form-control"
+            required
+            maxlength="256"
+            bind:value={query}
+            disabled={searching}
+            placeholder={selectedProvider.provider === "google-books"
+              ? "Title, author, or ISBN"
+              : "Movie or series title"}
+            autocomplete="off"
+          />
+          <button
+            type="submit"
+            class="btn btn-primary"
+            disabled={searching || !query.trim()}
+          >
+            <IconSearch size={18} aria-hidden="true" />
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </div>
+      </form>
+
+      <section
+        class="results"
+        aria-labelledby="search-results-title"
+        aria-busy={searching}
+      >
+        <svelte:element this={embedded ? "h4" : "h2"} id="search-results-title">
+          Search results
+        </svelte:element>
+        {#if searching}
+          <p role="status">Searching {selectedProvider.label}…</p>
+        {:else if problem}
+          <p class="problem" role="alert">{problem}</p>
+        {:else if searched && results.length === 0}
+          <p role="status">No compatible titles found for {completedQuery}.</p>
+        {:else if results.length > 0}
+          <p role="status">
+            {results.length}
+            {results.length === 1 ? "result" : "results"} for
+            {completedQuery}.
+          </p>
+          {#if !onTrackRecord}
+            <p id="tracking-unavailable" class="result-action-note">
+              Search does not change your library. Adding a result is
+              unavailable until the host can save the record and identifier
+              together.
+            </p>
+          {/if}
+          <ol>
+            {#each results as result (result.provider_id)}
+              <li>
+                <svelte:element
+                  this={embedded ? "h5" : "h3"}
+                  class="result-title"
                 >
-                  {#if trackedIds.has(result.provider_id)}
-                    {completedLabel}
-                  {:else if trackingId === result.provider_id}
-                    Adding…
-                  {:else}
-                    {actionLabel}
+                  {result.title}
+                </svelte:element>
+                {#if result.original_title}
+                  <p>Original title: {result.original_title}</p>
+                {/if}
+                {#if result.authors.length > 0}
+                  <p>By {result.authors.join(", ")}</p>
+                {/if}
+                {#if result.overview}
+                  <p class="result-overview">{result.overview}</p>
+                {/if}
+                <dl>
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{result.provider}</dd>
+                  </div>
+                  <div>
+                    <dt>Type</dt>
+                    <dd>{result.kind}</dd>
+                  </div>
+                  {#if result.release_year}
+                    <div>
+                      <dt>Year</dt>
+                      <dd>{result.release_year}</dd>
+                    </div>
                   {/if}
-                </button>
-              {/if}
-            </li>
-          {/each}
-        </ol>
-        {#if trackProblem}
-          <p class="problem" role="alert">{trackProblem}</p>
+                  <div>
+                    <dt>Provider ID</dt>
+                    <dd><code>{result.provider_id}</code></dd>
+                  </div>
+                </dl>
+                {#if onTrackRecord}
+                  <button
+                    type="button"
+                    class="track-btn"
+                    disabled={Boolean(trackingId) ||
+                      trackedIds.has(result.provider_id)}
+                    onclick={() => trackRecord(result)}
+                  >
+                    {#if trackedIds.has(result.provider_id)}
+                      {completedLabel}
+                    {:else if trackingId === result.provider_id}
+                      Adding…
+                    {:else}
+                      {actionLabel}
+                    {/if}
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    class="track-btn"
+                    aria-describedby="tracking-unavailable"
+                    disabled>Tracking unavailable</button
+                  >
+                {/if}
+              </li>
+            {/each}
+          </ol>
+          {#if trackProblem}
+            <p class="problem" role="alert">{trackProblem}</p>
+          {/if}
+        {:else}
+          <p>Enter a title or provider identifier.</p>
         {/if}
-      {:else}
-        <p>Select a provider, then enter a title, creator, or identifier.</p>
-      {/if}
-    </section>
+      </section>
+    {/if}
   {/if}
 </div>
 
@@ -313,12 +388,14 @@
   .view-subtitle,
   .unavailable p,
   .results > p,
+  .result-action-note,
   li p {
     margin: 0;
     color: var(--fasti-text-muted);
   }
 
   .unavailable,
+  .provider-choice,
   .search-form,
   .results {
     padding: 24px;
@@ -373,7 +450,7 @@
     padding: 10px 16px;
     background: var(--fasti-action-primary);
     border-color: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     font-weight: 700;
     cursor: pointer;
   }

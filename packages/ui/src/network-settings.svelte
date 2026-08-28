@@ -9,6 +9,7 @@
   import { hostProblemText } from "./host-problem.js";
 
   interface Props {
+    scope: "client" | "node";
     configuration?: NetworkConfiguration;
     loading?: boolean;
     loadProblem?: string;
@@ -31,6 +32,7 @@
   ];
 
   let {
+    scope,
     configuration,
     loading = false,
     loadProblem,
@@ -43,6 +45,7 @@
   let busy: "save" | "test" | undefined = $state();
   let notice = $state("");
   let problem = $state("");
+  const clientOnly = $derived(scope === "client");
 
   $effect(() => {
     if (!configuration || configuration === loadedConfiguration) return;
@@ -164,8 +167,9 @@
     Advanced network access
   </h2>
   <p class="pane-desc">
-    Set the service address, public URL, and outbound access policy. Managed
-    environment and build values are read-only.
+    {clientOnly
+      ? "Choose the service endpoint used by this browser. Node public URL and outbound policy remain visible but require a trusted host."
+      : "Set the service address, public URL, and outbound access policy. Managed environment and build values are read-only."}
   </p>
 
   {#if loading}
@@ -211,12 +215,15 @@
               type="url"
               class="form-control"
               bind:value={draft.public_url}
-              disabled={configuration.connection.public_url.managed}
+              disabled={clientOnly ||
+                configuration.connection.public_url.managed}
               placeholder="https://fasti.example.internal"
               aria-describedby="public-url-help"
             />
             <span class="source"
-              >{configuration.connection.public_url.source}</span
+              >{clientOnly
+                ? "node host required"
+                : configuration.connection.public_url.source}</span
             >
           </label>
         </div>
@@ -238,7 +245,19 @@
         </p>
       </fieldset>
 
-      <fieldset disabled={!!busy}>
+      {#if clientOnly}
+        <p id="outbound-policy-client-note" class="managed-note">
+          This browser cannot read or change the node's provider outbound
+          policy. Use the trusted desktop or server host to edit these fields.
+        </p>
+      {/if}
+
+      <fieldset
+        disabled={!!busy || clientOnly}
+        aria-describedby={clientOnly
+          ? "outbound-policy-client-note"
+          : undefined}
+      >
         <legend>Provider outbound access</legend>
         <p class="help">
           One exact value per line. A provider manifest is the maximum grant.
@@ -318,7 +337,11 @@
 
       <div class="actions">
         <button type="submit" class="btn btn-primary primary" disabled={!!busy}>
-          {busy === "save" ? "Saving…" : "Save network settings"}
+          {busy === "save"
+            ? "Saving…"
+            : clientOnly
+              ? "Save service URL"
+              : "Save network settings"}
         </button>
         <button
           type="button"
@@ -399,11 +422,12 @@
   button.primary {
     border-color: var(--fasti-action-primary);
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
 
   button:disabled,
-  input:disabled {
+  input:disabled,
+  textarea:disabled {
     cursor: not-allowed;
     opacity: 0.68;
   }
@@ -429,6 +453,7 @@
   }
 
   .help,
+  .managed-note,
   .notice,
   .problem {
     margin: 0;
@@ -464,7 +489,7 @@
     color: var(--fasti-state-error, #b42318);
   }
 
-  @media (max-width: 47.99rem) {
+  @media (max-width: 48rem) {
     .two-columns,
     .policy-grid,
     .network-grid {

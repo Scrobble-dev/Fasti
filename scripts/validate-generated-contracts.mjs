@@ -95,18 +95,20 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/records/identifiers",
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
-    "bearer_credential",
+    "bootstrap_bearer",
     "browser_session",
+    "credential_bearer",
   ]);
   assert.deepEqual(openapi.paths["/api/v1/browser/session"].get.security, [
     { browser_session: [] },
   ]);
-  assert.deepEqual(openapi.paths["/api/v1/records"].get.security, [
-    { bearer_credential: [] },
-    { browser_session: [] },
-  ]);
+  assert.deepEqual(
+    openapi.paths["/api/v1/records"].get.security,
+    [{ credential_bearer: [] }, { browser_session: [] }],
+    "list_records security must match scoped authorization",
+  );
   const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
-  const profileSecurity = [{ bearer_credential: [] }, { browser_session: [] }];
+  const profileSecurity = [{ credential_bearer: [] }, { browser_session: [] }];
   assert.deepEqual(nuvioCollections.delete.security, profileSecurity);
   assert.deepEqual(nuvioCollections.get.security, profileSecurity);
   assert.deepEqual(nuvioCollections.put.security, profileSecurity);
@@ -306,6 +308,22 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   const healthOperation = openapi.paths["/api/v1/health"].get;
   const healthCapability = capabilities.get("system.health");
+  assert.deepEqual(Object.keys(openapi.components.securitySchemes).sort(), [
+    "bootstrap_bearer",
+    "browser_session",
+    "credential_bearer",
+  ]);
+  for (const name of ["bootstrap_bearer", "credential_bearer"]) {
+    const scheme = openapi.components.securitySchemes[name];
+    assert.equal(scheme.type, "http");
+    assert.equal(scheme.scheme, "bearer");
+  }
+  assert.deepEqual(openapi.components.securitySchemes.browser_session, {
+    type: "apiKey",
+    name: "fasti_session",
+    in: "cookie",
+    description: "Opaque HttpOnly browser session cookie",
+  });
   assert.equal(healthOperation["x-fasti-capability-id"], healthCapability.id);
   assert.equal(
     healthOperation["x-fasti-authorization"],
@@ -323,6 +341,40 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     healthOperation["x-fasti-example-ids"],
     healthCapability.examples,
   );
+  assert.equal(healthOperation.security, undefined);
+
+  for (const pathItem of Object.values(openapi.paths)) {
+    for (const operation of Object.values(pathItem)) {
+      const capability = capabilities.get(operation["x-fasti-capability-id"]);
+      assert.ok(
+        capability,
+        `production operation ${operation.operationId} has no capability`,
+      );
+      const security =
+        operation.operationId === "initialize_node"
+          ? [{ bootstrap_bearer: [] }]
+          : [
+                "read_session",
+                "end_session",
+                "list_users",
+                "update_user",
+                "delete_user",
+              ].includes(operation.operationId)
+            ? [{ browser_session: [] }]
+            : [
+                  "health_check",
+                  "enroll_first_client",
+                  "create_session",
+                ].includes(operation.operationId)
+              ? undefined
+              : [{ credential_bearer: [] }, { browser_session: [] }];
+      assert.deepEqual(
+        operation.security,
+        security,
+        `production operation ${operation.operationId} security must match ${capability.authorization} authorization`,
+      );
+    }
+  }
 
   const httpOperations = new Map(
     operations.map(({ operation }) => [

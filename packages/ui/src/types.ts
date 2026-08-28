@@ -11,7 +11,12 @@ export type MediaKind =
   | "custom";
 
 export type WatchStatus =
-  "watching" | "completed" | "plan_to_watch" | "on_hold" | "dropped";
+  | "unknown"
+  | "watching"
+  | "completed"
+  | "plan_to_watch"
+  | "on_hold"
+  | "dropped";
 
 export type TrackingDisposition = "watching" | "on_hold" | "dropped";
 export type TrackingDispositionUpdate = TrackingDisposition | "unset";
@@ -72,6 +77,8 @@ export interface SeasonItem {
 export interface MediaRecord {
   readonly id: string;
   readonly title: string;
+  /** Declares whether optional detail collections are authoritative. */
+  readonly detailLevel?: "summary" | "complete";
   readonly originalTitle?: string;
   readonly mediaKind: MediaKind;
   readonly customTypeName?: string;
@@ -288,12 +295,16 @@ export interface NuvioCollectionsState {
 }
 
 export interface WorkbenchHost {
+  readonly networkConfigurationScope: "client" | "node";
   readonly developmentTestAccountHint?: string;
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
   ): Promise<NetworkConfiguration>;
-  testEndpointConnection(endpoint: string): Promise<EndpointConnectionStatus>;
+  testEndpointConnection(
+    endpoint: string,
+    signal?: AbortSignal,
+  ): Promise<EndpointConnectionStatus>;
   providerCredentialStatus(): Promise<ProviderCredentialStatus[]>;
   saveProviderCredential(
     provider: string,

@@ -7,7 +7,6 @@
     IconMoon,
     IconMoonStars,
     IconX,
-    IconDeviceFloppy,
     IconRotate2,
   } from "@tabler/icons-svelte";
 
@@ -91,6 +90,7 @@
           type="button"
           class="mode-btn"
           class:active={themeSettings.mode === "light"}
+          aria-pressed={themeSettings.mode === "light"}
           onclick={() => onUpdateTheme({ mode: "light" })}
         >
           <IconSun size={18} />
@@ -101,6 +101,7 @@
           type="button"
           class="mode-btn"
           class:active={themeSettings.mode === "dark"}
+          aria-pressed={themeSettings.mode === "dark"}
           onclick={() => onUpdateTheme({ mode: "dark" })}
         >
           <IconMoon size={18} />
@@ -111,6 +112,7 @@
           type="button"
           class="mode-btn"
           class:active={themeSettings.mode === "night"}
+          aria-pressed={themeSettings.mode === "night"}
           onclick={() => onUpdateTheme({ mode: "night" })}
         >
           <IconMoonStars size={18} />
@@ -128,6 +130,7 @@
             type="button"
             class="swatch-btn"
             class:selected={themeSettings.accentColor === s.hex}
+            aria-pressed={themeSettings.accentColor === s.hex}
             style="background-color: {s.hex};"
             title={s.name}
             onclick={() => onUpdateTheme({ accentColor: s.hex })}
@@ -164,6 +167,7 @@
             type="button"
             class="segment-btn"
             class:active={(themeSettings.themeBase ?? "slate") === b.id}
+            aria-pressed={(themeSettings.themeBase ?? "slate") === b.id}
             onclick={() => onUpdateTheme({ themeBase: b.id as any })}
           >
             {b.name}
@@ -181,6 +185,7 @@
             type="button"
             class="segment-btn"
             class:active={(themeSettings.cornerRadius ?? 1) === r.id}
+            aria-pressed={(themeSettings.cornerRadius ?? 1) === r.id}
             onclick={() => onUpdateTheme({ cornerRadius: r.id })}
           >
             {r.label}
@@ -194,9 +199,7 @@
     <button type="button" class="btn-reset" onclick={handleReset}>
       <IconRotate2 size={16} /> Reset changes
     </button>
-    <button type="button" class="btn-save" onclick={onClose}>
-      <IconDeviceFloppy size={16} /> Save
-    </button>
+    <button type="button" class="btn-save" onclick={onClose}> Done </button>
   </footer>
 </dialog>
 
@@ -335,7 +338,7 @@
       transparent
     );
     border-color: var(--fasti-action-primary);
-    color: var(--fasti-action-primary);
+    color: var(--fasti-text-primary);
     font-weight: 600;
   }
 
@@ -346,20 +349,15 @@
   }
 
   .swatch-btn {
-    width: 34px;
-    height: 34px;
-    min-width: 34px;
-    min-height: 34px;
+    width: var(--fasti-touch-target-min);
+    height: var(--fasti-touch-target-min);
+    min-width: var(--fasti-touch-target-min);
+    min-height: var(--fasti-touch-target-min);
     border-radius: 50%;
     border: 2px solid transparent;
     cursor: pointer;
     padding: 0;
     margin: 2px;
-    transition: transform 120ms ease;
-  }
-
-  .swatch-btn:hover {
-    transform: scale(1.15);
   }
 
   .swatch-btn.selected {
@@ -399,7 +397,6 @@
     font-weight: 500;
     cursor: pointer;
     text-align: center;
-    transition: all 100ms ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -411,7 +408,7 @@
 
   .segment-btn.active {
     background: var(--fasti-action-primary);
-    color: #ffffff;
+    color: var(--fasti-action-contrast);
   }
 
   .drawer-footer {
@@ -448,7 +445,7 @@
     align-items: center;
     gap: 6px;
     background: var(--fasti-action-primary);
-    color: #ffffff;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: var(--tblr-border-radius, 4px);
     padding: 10px 20px;

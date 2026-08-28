@@ -197,6 +197,7 @@ fn bootstrap_secret(
     post,
     path = "/api/v1/node/initialization",
     tag = "node",
+    security(("bootstrap_bearer" = [])),
     request_body = InitializeNodeRequest,
     responses(
         (status = 200, description = "One-time durable initialization proof", body = NodeInitializationResponse),

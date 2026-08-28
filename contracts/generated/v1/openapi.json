@@ -1172,8 +1172,9 @@
       }
     },
     "securitySchemes": {
-      "bearer_credential": {
-        "bearerFormat": "opaque scoped integration credential",
+      "bootstrap_bearer": {
+        "bearerFormat": "64-character lowercase hexadecimal secret",
+        "description": "One-time local data-root bootstrap secret. Never use an enrolled client credential here.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -1182,6 +1183,12 @@
         "in": "cookie",
         "name": "fasti_session",
         "type": "apiKey"
+      },
+      "credential_bearer": {
+        "bearerFormat": "64-character lowercase hexadecimal credential",
+        "description": "Enrolled Fasti client credential sent only in the Authorization header.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -2148,7 +2155,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -2316,6 +2323,11 @@
             "description": "Local storage is unavailable"
           }
         },
+        "security": [
+          {
+            "bootstrap_bearer": []
+          }
+        ],
         "tags": [
           "node"
         ],
@@ -2521,7 +2533,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -2623,7 +2635,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -2713,7 +2725,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -2853,7 +2865,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -2973,7 +2985,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -3170,7 +3182,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -3293,7 +3305,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -3467,7 +3479,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []
@@ -3668,7 +3680,7 @@
         },
         "security": [
           {
-            "bearer_credential": []
+            "credential_bearer": []
           },
           {
             "browser_session": []

@@ -40,6 +40,46 @@ pub async fn health_check() -> Json<HealthResponse> {
     })
 }
 
+struct ProductionSecurityAddon;
+
+impl Modify for ProductionSecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bootstrap_bearer",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("64-character lowercase hexadecimal secret")
+                        .description(Some(
+                            "One-time local data-root bootstrap secret. Never use an enrolled client credential here.",
+                        ))
+                        .build(),
+                ),
+            );
+            components.add_security_scheme(
+                "credential_bearer",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("64-character lowercase hexadecimal credential")
+                        .description(Some(
+                            "Enrolled Fasti client credential sent only in the Authorization header.",
+                        ))
+                        .build(),
+                ),
+            );
+            components.add_security_scheme(
+                "browser_session",
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
+                    "fasti_session",
+                    "Opaque HttpOnly browser session cookie",
+                ))),
+            );
+        }
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -106,34 +146,9 @@ pub async fn health_check() -> Json<HealthResponse> {
         ProblemDetails,
         ViolationDto
     )),
-    modifiers(&SecurityAddon)
+    modifiers(&ProductionSecurityAddon)
 )]
 struct ApiDoc;
-
-struct SecurityAddon;
-
-impl Modify for SecurityAddon {
-    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        if let Some(components) = openapi.components.as_mut() {
-            components.add_security_scheme(
-                "bearer_credential",
-                SecurityScheme::Http(
-                    HttpBuilder::new()
-                        .scheme(HttpAuthScheme::Bearer)
-                        .bearer_format("opaque scoped integration credential")
-                        .build(),
-                ),
-            );
-            components.add_security_scheme(
-                "browser_session",
-                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
-                    "fasti_session",
-                    "Opaque HttpOnly browser session cookie",
-                ))),
-            );
-        }
-    }
-}
 
 /// Builds the OpenAPI 3.1 contract for routes actually mounted by [`api_router`].
 pub fn openapi() -> utoipa::openapi::OpenApi {
@@ -278,7 +293,11 @@ mod tests {
             Some(&serde_json::json!("apiKey"))
         );
         assert_eq!(
-            value.pointer("/components/securitySchemes/bearer_credential/scheme"),
+            value.pointer("/components/securitySchemes/credential_bearer/scheme"),
+            Some(&serde_json::json!("bearer"))
+        );
+        assert_eq!(
+            value.pointer("/components/securitySchemes/bootstrap_bearer/scheme"),
             Some(&serde_json::json!("bearer"))
         );
         assert_eq!(
@@ -295,6 +314,12 @@ mod tests {
                 .map(Vec::len),
             Some(0)
         );
+        assert!(value
+            .pointer("/paths/~1api~1v1~1health/get/security")
+            .is_none());
+        assert!(value
+            .pointer("/paths/~1api~1v1~1client-enrollments/post/security")
+            .is_none());
 
         let schemas = &document.components.expect("OpenAPI components").schemas;
         for schema in [

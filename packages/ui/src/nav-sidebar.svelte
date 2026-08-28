@@ -105,6 +105,10 @@
   function getItemIcon(id: string) {
     return ICON_MAP[id] || IconDeviceTv;
   }
+
+  function isCurrent(item: NavItemConfig): boolean {
+    return activeSection === item.id;
+  }
 </script>
 
 {#if !hidden}
@@ -173,7 +177,7 @@
           {/if}
           <button
             type="button"
-            class="btn btn-icon btn-sm btn-ghost-secondary"
+            class="btn btn-icon btn-sm btn-ghost-secondary sidebar-collapse-toggle"
             onclick={onToggleCollapse}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -195,7 +199,7 @@
             {#if !collapsed}
               <li class="nav-section-title">
                 <span
-                  class="text-uppercase text-muted fw-bold d-flex align-items-center gap-1 fs-6"
+                  class="section-label text-uppercase fw-bold d-flex align-items-center gap-1 fs-6"
                 >
                   <IconPin size={12} /> Pinned
                 </span>
@@ -207,10 +211,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "home" &&
-                      (activeSection === "chronicle" ||
-                        activeSection === "library"))}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed
@@ -251,10 +253,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "home" &&
-                      (activeSection === "chronicle" ||
-                        activeSection === "library"))}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
@@ -279,7 +279,7 @@
             {#if !collapsed}
               <li class="nav-section-title mt-2">
                 <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
+                  class="section-label text-uppercase fw-bold font-monospace fs-6"
                   >Media</span
                 >
               </li>
@@ -290,7 +290,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
@@ -315,7 +316,7 @@
             {#if !collapsed}
               <li class="nav-section-title mt-2">
                 <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
+                  class="section-label text-uppercase fw-bold font-monospace fs-6"
                   >Library</span
                 >
               </li>
@@ -326,7 +327,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed ? item.label : undefined}
@@ -351,7 +353,7 @@
             {#if !collapsed}
               <li class="nav-section-title mt-2">
                 <span
-                  class="text-uppercase text-muted fw-bold font-monospace fs-6"
+                  class="section-label text-uppercase fw-bold font-monospace fs-6"
                   >Utilities</span
                 >
               </li>
@@ -362,8 +364,8 @@
                 <button
                   type="button"
                   class="nav-link w-100 text-start d-flex align-items-center py-2 px-2 rounded"
-                  class:active={activeSection === item.id ||
-                    (item.id === "sources" && activeSection === "connections")}
+                  class:active={isCurrent(item)}
+                  aria-current={isCurrent(item) ? "page" : undefined}
                   onclick={() => onSelectSection(item.id)}
                   title={collapsed ? item.label : undefined}
                   aria-label={collapsed
@@ -408,12 +410,17 @@
     background: var(--fasti-surface-paper);
     border-right: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    transition: width 150ms cubic-bezier(0.16, 1, 0.3, 1);
     flex-shrink: 0;
   }
 
   .fasti-sidebar-vertical.navbar-vertical-collapsed {
     width: 64px;
+  }
+
+  .fasti-sidebar-vertical .navbar-collapse {
+    width: 100%;
+    flex-basis: auto;
+    align-self: stretch;
   }
 
   .brand-button:hover .navbar-brand-title {
@@ -434,6 +441,10 @@
     padding: 6px 8px 2px;
     font-size: 0.7rem;
     letter-spacing: 0.06em;
+  }
+
+  .section-label {
+    color: var(--fasti-text-muted);
   }
 
   .nav-link {
@@ -476,12 +487,16 @@
     margin-right: 0 !important;
   }
 
-  @media (max-width: 47.99rem) {
+  @media (max-width: 61.99rem) {
     .fasti-sidebar-vertical {
       position: fixed !important;
       inset: 0 auto 0 0;
       z-index: 30;
       box-shadow: 4px 0 16px rgba(0, 0, 0, 0.12);
+    }
+
+    .sidebar-collapse-toggle {
+      display: none;
     }
   }
 </style>

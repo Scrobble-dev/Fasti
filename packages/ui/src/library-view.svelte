@@ -111,15 +111,17 @@
   ];
 
   function handleToggleWatched(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
     const nextStatus: WatchStatus =
       rec.status === "completed" ? "watching" : "completed";
-    onUpdateStatus?.(rec.id, nextStatus);
+    onUpdateStatus(rec.id, nextStatus);
   }
 
   function handleToggleWatchlist(rec: MediaRecord): void {
+    if (!onUpdateStatus) return;
     const nextStatus: WatchStatus =
       rec.status === "plan_to_watch" ? "watching" : "plan_to_watch";
-    onUpdateStatus?.(rec.id, nextStatus);
+    onUpdateStatus(rec.id, nextStatus);
   }
 
   function handleOpenCollection(rec: MediaRecord): void {
@@ -186,7 +188,8 @@
     <div>
       <h1 class="view-title">Library</h1>
       <p class="view-subtitle">
-        Your unified media collection across all providers and formats.
+        Review up to 500 records returned by the active Fasti host. More records
+        can exist until pagination is active.
       </p>
     </div>
 
@@ -198,6 +201,7 @@
         class:active={viewMode === "grid"}
         onclick={() => (viewMode = "grid")}
         aria-label="Grid view"
+        aria-pressed={viewMode === "grid"}
       >
         <IconLayoutGrid size={18} stroke={1.75} />
       </button>
@@ -207,6 +211,7 @@
         class:active={viewMode === "list"}
         onclick={() => (viewMode = "list")}
         aria-label="List view"
+        aria-pressed={viewMode === "list"}
       >
         <IconList size={18} stroke={1.75} />
       </button>
@@ -348,12 +353,14 @@
               class="title-link"
               onclick={() => onSelectRecord(rec.id)}
             >
-              <h3 class="card-title">{rec.title}</h3>
+              <h2 class="card-title">{rec.title}</h2>
             </button>
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
               <span class="status-indicator {rec.status}"
-                >{rec.status.replaceAll("_", " ")}</span
+                >{rec.status === "unknown"
+                  ? "tracking state unavailable"
+                  : rec.status.replaceAll("_", " ")}</span
               >
             </div>
           </div>
@@ -400,7 +407,9 @@
               >
               <td
                 ><span class="status-pill {rec.status}"
-                  >{rec.status.replaceAll("_", " ")}</span
+                  >{rec.status === "unknown"
+                    ? "Unavailable"
+                    : rec.status.replaceAll("_", " ")}</span
                 ></td
               >
               <td>
@@ -475,7 +484,7 @@
 </div>
 
 <!-- Modal Dialogs -->
-{#if showProgressModal && activeModalRecord}
+{#if showProgressModal && activeModalRecord && onUpdateProgress}
   <ProgressModal
     record={activeModalRecord}
     onClose={() => {
@@ -483,22 +492,22 @@
       activeModalRecord = null;
     }}
     onSaveProgress={(recId, eps, sec, st) =>
-      onUpdateProgress?.(recId, eps, sec, st)}
+      onUpdateProgress(recId, eps, sec, st)}
   />
 {/if}
 
-{#if showReviewModal && activeModalRecord}
+{#if showReviewModal && activeModalRecord && onSaveReview}
   <RatingReviewModal
     record={activeModalRecord}
     onClose={() => {
       showReviewModal = false;
       activeModalRecord = null;
     }}
-    onSaveReview={(recId, r, n) => onSaveReview?.(recId, r, n)}
+    onSaveReview={(recId, r, n) => onSaveReview(recId, r, n)}
   />
 {/if}
 
-{#if showCollectionModal && activeModalRecord}
+{#if showCollectionModal && activeModalRecord && onSaveCollection}
   <CollectionModal
     record={activeModalRecord}
     collections={availableCollections}
@@ -506,7 +515,7 @@
       showCollectionModal = false;
       activeModalRecord = null;
     }}
-    onSaveCollection={(recId, colls) => onSaveCollection?.(recId, colls)}
+    onSaveCollection={(recId, colls) => onSaveCollection(recId, colls)}
   />
 {/if}
 
@@ -576,7 +585,7 @@
 
   .mode-btn.active {
     background: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
   }
 
   .toolbar {
@@ -632,7 +641,7 @@
   .filter-pill.active {
     background: var(--fasti-brand-mark);
     border-color: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
     font-weight: 600;
   }
 
@@ -649,7 +658,7 @@
     margin-top: 12px;
     padding: 8px 16px;
     background: var(--fasti-brand-mark);
-    color: white;
+    color: var(--fasti-brand-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;
@@ -719,7 +728,7 @@
     padding: 2px 6px;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.75);
-    color: white;
+    color: var(--fasti-overlay-contrast);
   }
 
   .card-rating {
@@ -748,7 +757,7 @@
     padding: 2px 6px;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.8);
-    color: white;
+    color: var(--fasti-overlay-contrast);
   }
 
   .fast-action-toolbar-wrap {
@@ -884,5 +893,10 @@
   .table-btn.active {
     color: var(--fasti-action-primary);
     border-color: var(--fasti-action-primary);
+  }
+
+  .table-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
   }
 </style>

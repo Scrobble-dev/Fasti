@@ -16,7 +16,10 @@ export { default as MediaDetailView } from "./media-detail-view.svelte";
 export { default as ReconciliationView } from "./reconciliation-view.svelte";
 export { default as CalendarView } from "./calendar-view.svelte";
 export { default as ConnectionsView } from "./connections-view.svelte";
-export { default as SettingsView } from "./settings-view.svelte";
+// RuntimeSettingsView is the only exported Settings composition. The older
+// settings-view.svelte is preserved as migration reference, but it predates
+// the host capability boundary and must not return as a second product path.
+export { default as RuntimeSettingsView } from "./runtime-settings-view.svelte";
 export { default as AuthModal } from "./auth-modal.svelte";
 export { default as FastiWorkbench } from "./fasti-workbench.svelte";
 export { projectRecordSummary } from "./record-projection.js";

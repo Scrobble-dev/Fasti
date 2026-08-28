@@ -200,7 +200,7 @@
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.65);
-    color: #ffffff;
+    color: var(--fasti-overlay-contrast);
     backdrop-filter: blur(4px);
     z-index: 2;
   }

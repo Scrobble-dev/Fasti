@@ -119,6 +119,20 @@ test("OpenAPI authorization posture mutation is rejected", async () => {
   );
 });
 
+test("production OpenAPI authenticated requirements cannot be removed", async () => {
+  await withArtifacts(
+    (root) =>
+      mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {
+        delete document.paths["/api/v1/records"].get.security;
+      }),
+    (result) =>
+      assert.rejects(
+        result,
+        /list_records security must match scoped authorization/u,
+      ),
+  );
+});
+
 test("JSON Schema dialect mutation is rejected", async () => {
   await withArtifacts(
     (root) =>

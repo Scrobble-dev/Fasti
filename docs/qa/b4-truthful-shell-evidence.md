@@ -1,10 +1,17 @@
-# Truthful browser harness QA evidence
+# Superseded status-only browser QA evidence
 
 Checked: 2026-08-25
 
+> Historical evidence only. This report describes the earlier status-only
+> checkpoint that rendered the diagnostic at `/`. The current product root is
+> the Workbench, and the diagnostic now lives at `/status`. Do not use the
+> capability or bundle claims below as current product truth. See the
+> [B4 Workbench Impeccable audit](b4-workbench-impeccable-audit.md).
+
 ## Scope and disposition
 
-This report covers the local Fasti browser harness at `http://127.0.0.1:5173/`.
+This report covered the earlier local Fasti status harness at
+`http://127.0.0.1:5173/`.
 The harness consumes the generated `system.health` SDK binding. It adds no
 product capability, API shape, desktop behavior, domain state, or release claim.
 

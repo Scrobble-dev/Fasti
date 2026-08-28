@@ -49,6 +49,15 @@
   });
 
   function messageFor(error: unknown): string {
+    if (
+      error &&
+      typeof error === "object" &&
+      "problem" in error &&
+      (error as { problem?: { code?: unknown } }).problem?.code ===
+        "authentication_failed"
+    ) {
+      return "The username or password is incorrect.";
+    }
     return error instanceof Error
       ? error.message
       : "Fasti could not complete the account request. Try again.";
@@ -199,9 +208,12 @@
 
 <dialog
   bind:this={dialog}
-  class="modal-backdrop"
+  class="auth-dialog"
   aria-labelledby="auth-modal-title"
-  oncancel={onClose}
+  oncancel={(event) => {
+    event.preventDefault();
+    onClose();
+  }}
   onclick={(event) => {
     if (event.target === event.currentTarget) onClose();
   }}
@@ -431,7 +443,7 @@
 </dialog>
 
 <style>
-  .modal-backdrop {
+  .auth-dialog {
     position: fixed;
     inset: 0;
     z-index: 9999;
@@ -446,10 +458,10 @@
     place-items: center;
     padding: 16px;
   }
-  .modal-backdrop::backdrop {
+  .auth-dialog::backdrop {
     background: rgba(0, 0, 0, 0.55);
   }
-  .modal-backdrop:not([open]) {
+  .auth-dialog:not([open]) {
     display: none;
   }
   .modal-card {
@@ -556,7 +568,7 @@
   .primary-button {
     border: 0;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
   }
   .secondary-button {
     border: 1px solid

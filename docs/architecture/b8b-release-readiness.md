@@ -20,7 +20,7 @@ B8b's scope, unchanged from `docs/handoffs/FASTI_EXTERNAL_HARNESS_CONTEXT_SAVE_2
 
 B8b sits downstream of B8a, B4, and B6 (`B8a → B6 → B8b`, per the capability-ledger dependency chain). Two of the nine streams cannot legitimately close before their upstream body exists:
 
-- **Final accessibility and design review** requires a rendered UI to review. B4 (the Svelte/Tauri UI Workbench) has not been built in this source tree yet. `cargo xtask test milestone --body B8b` therefore requires `design_review.status == Pass`, not `NotApplicable` — a strict requirement that is intentionally unsatisfiable until B4 ships. This is fail-closed by design, not a gap to work around.
+- **Final accessibility and design review** requires release-bound rendered evidence. The B4 Workbench now exists as local review code, but it is not packaged and its milestone has not closed. `cargo xtask test milestone --body B8b` therefore requires `design_review.status == Pass`, not `NotApplicable`. The gate remains unsatisfied until B4 closes with the required packaged evidence.
 - **Explicit publishing authorization** requires a human-approval gate B8b can prepare but not activate: creating the GitHub Environment and its required reviewers is a repo-settings action, not a file change (see §11 and §13).
 
 ## 2. Non-publishing boundary
@@ -67,9 +67,9 @@ Two gates, both re-run at release time and captured as B8b evidence:
 
 ## 8. Final accessibility and design review
 
-No rendered UI exists in this source tree yet — B4 is a later, currently-absent body (`docs/capability-ledger.md`). This section is therefore a roll-up checklist that will reuse the existing accessibility mechanism defined in `docs/architecture/b4-ui-quality-harness.md` (`@axe-core/playwright`, WCAG 2.1 A/AA, the state-permutation matrix for focus rings, touch targets, contrast, and reduced motion) once B4 ships — not new accessibility infrastructure built here.
+The local B4 Workbench now supplies rendered browser review evidence. Its Playwright matrix covers Axe, keyboard behavior, reflow, touch targets, contrast, themes, and reduced motion. This is pre-release evidence, not a WCAG or EN 301 549 conformance claim. B8b must bind the final packaged interface, manual assistive-technology review, and release-specific design evidence.
 
-Unlike B1 (permanently headless, `design_review.status == NotApplicable` is the correct, permanent answer), B8b's `design_review.status` must read `Pass`. By the time B8b is legitimately closed, B4 sits upstream of it in the dependency graph and has already closed. Until then, `cargo xtask test milestone --body B8b` fails here, correctly.
+Unlike B1 (permanently headless, where `design_review.status == NotApplicable` is correct), B8b's `design_review.status` must read `Pass`. Until B4 closes and the final packaged evidence exists, `cargo xtask test milestone --body B8b` fails here, correctly.
 
 ## 9. Final release QA
 
@@ -96,7 +96,7 @@ A GitHub Environment named `production-release`, configured with required review
 | Provenance/attestations | No | Unsigned output from generate-provenance.mjs is source-bound evidence, not an authenticated attestation |
 | Update/rollback path | No | Doc-only, checked by `check-doc-links.mjs`, not manifest evidence |
 | Final security review | Yes | `cargo-audit` + `cargo-deny` receipt bound as evidence |
-| Final accessibility/design review | No — blocked | `design_review.status` cannot legitimately read `Pass` until B4 ships |
+| Final accessibility/design review | No — blocked | Local B4 review evidence exists; final packaged and assistive-technology evidence does not |
 | Final release QA | Yes | `qa.status == Pass` requires a human-authored receipt, machine-verified shape |
 | Release notes/support guidance | Yes | Release-notes file exists and is non-empty for the tag |
 | Explicit publishing authorization | No | The Environment's approval gate is a GitHub-side mechanism, not manifest-introspectable |

@@ -67,14 +67,14 @@ pub(crate) async fn test_connection(
         .await
         .map_err(DesktopProblem::connection)?;
     let health: HealthResponse = serde_json::from_slice(&body).map_err(|_| {
-        DesktopProblem::connection("The endpoint returned an invalid health response.")
+        DesktopProblem::invalid_response("The endpoint returned an invalid health response.")
     })?;
     if health.status != "healthy"
         || health.version.is_empty()
         || health.version.len() > 64
         || health.version.chars().any(char::is_control)
     {
-        return Err(DesktopProblem::connection(
+        return Err(DesktopProblem::invalid_response(
             "The endpoint returned an invalid health response.",
         ));
     }

@@ -189,7 +189,10 @@ test("the development browser user can sign in, edit, and delete itself", async 
   );
 
   await page.goto("/?surface=workbench");
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await page
+    .locator("#main-content")
+    .getByRole("button", { name: "Sign in", exact: true })
+    .click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("Password").fill(developmentUsername);
   await dialog.getByRole("button", { name: "Sign in" }).click();
@@ -215,7 +218,9 @@ test("the development browser user can sign in, edit, and delete itself", async 
   await expect(dialog.getByRole("status")).toHaveText(
     "Account deleted. The development seed will not recreate it.",
   );
-  await expect(page.getByLabel("Sign in", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByRole("button", { name: "Sign in", exact: true }),
+  ).toBeVisible();
   expect(deleted).toBe(true);
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
@@ -318,7 +323,7 @@ test("global search and configured record actions use durable tracking state", a
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
   await expect(page.getByText("Alpha Film", { exact: true })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText(
+  await expect(page.getByRole("status")).toContainText(
     "Records still use their activity fallback.",
   );
 
@@ -494,7 +499,7 @@ test("record metadata can refresh or switch through a configured provider", asyn
   await page.getByRole("button", { name: "Refresh" }).click();
   await expect(page.getByText("Refreshed metadata from tmdb.")).toBeVisible();
   await page
-    .getByRole("searchbox", { name: "Search title, creator, or identifier" })
+    .getByRole("searchbox", { name: "Search TMDB" })
     .fill("Dune Part Two");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByText("Dune: Part Two", { exact: true })).toBeVisible();
@@ -544,7 +549,7 @@ for (const theme of ["light", "dark"] as const) {
         theme,
       );
       await mockHealth(page);
-      await page.goto("/");
+      await page.goto("/status");
 
       await expect(page).toHaveTitle("Local service status · Fasti");
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -559,9 +564,9 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         page
           .locator("#network-settings dd")
-          .filter({ hasText: "http://127.0.0.1:8420" }),
+          .filter({ hasText: "http://127.0.0.1:4173" }),
       ).toBeVisible();
-      await expect(page.getByText("http://localhost:8420")).toBeVisible();
+      await expect(page.getByText("http://localhost:4173")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute(
         "data-bs-theme",
         theme,
@@ -603,7 +608,7 @@ test("keyboard path, theme persistence, and unavailable recovery remain clear", 
 }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await page.route(healthEndpoint, (route) => route.abort("connectionrefused"));
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.getByRole("alert")).toContainText(
     "local service is unavailable",
@@ -652,7 +657,7 @@ test("invalid health responses use the contract recovery state", async ({
       body: JSON.stringify({ status: "healthy" }),
     }),
   );
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", {
@@ -692,7 +697,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/");
+  await page.goto("/status");
   const retry = page.getByRole("button", { name: "Try again" });
   await expect(retry).toBeVisible();
 
@@ -717,7 +722,7 @@ test("the loading state prevents duplicate concurrent retries", async ({
 });
 
 test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
@@ -729,7 +734,7 @@ test("the saved theme is applied before the application module", async ({
 }) => {
   await page.addInitScript(() => localStorage.setItem("fasti-theme", "dark"));
   await page.route(/\/src\/main\.ts$/, (route) => route.abort());
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(page.locator("body")).toHaveCSS(
@@ -751,7 +756,7 @@ test("system dark mode survives unavailable local storage", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
   await expect(
@@ -770,7 +775,7 @@ test("theme changes remain usable when persistence is unavailable", async ({
     });
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
@@ -784,7 +789,7 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
 }) => {
   await page.setViewportSize({ width: 320, height: 800 });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await page.locator("html").evaluate((element) => {
     element.style.fontSize = "200%";
@@ -816,7 +821,9 @@ test("text enlargement and WCAG text spacing do not lose content", async ({
         document.documentElement.clientWidth,
     ),
   ).toBeLessThanOrEqual(0);
-  await expect(page.getByText("Catalogue, review, playback")).toBeVisible();
+  await expect(
+    page.getByText("Records and durable occurrence ingress"),
+  ).toBeVisible();
 });
 
 test("reduced motion stops the loading animation", async ({ page }) => {
@@ -833,7 +840,7 @@ test("reduced motion stops the loading animation", async ({ page }) => {
       body: JSON.stringify(health),
     });
   });
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/status", { waitUntil: "domcontentloaded" });
 
   await expect(page.getByText("Checking the local service")).toBeVisible();
   await expect(page.locator(".spinner")).toHaveCSS("animation-name", "none");
@@ -848,7 +855,7 @@ test("forced colors preserves visible status and controls", async ({
 }) => {
   await page.emulateMedia({ forcedColors: "active" });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
 
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
@@ -870,7 +877,7 @@ test("the harness does not contact third-party origins", async ({ page }) => {
     if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
   });
   await mockHealth(page);
-  await page.goto("/");
+  await page.goto("/status");
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();

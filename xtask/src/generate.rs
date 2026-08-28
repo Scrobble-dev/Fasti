@@ -1083,6 +1083,7 @@ fn enrich_production_openapi(
     public_registry: &Value,
     capability_keys: &BTreeMap<String, CapabilityKey>,
 ) -> anyhow::Result<()> {
+    validate_production_security_schemes(openapi)?;
     enrich_production_health_openapi(workspace_root, openapi, public_registry)?;
     let capabilities = array_at(public_registry, "/capabilities")?;
     for expected in PRODUCTION_BOOTSTRAP_OPERATIONS
@@ -1149,6 +1150,78 @@ fn enrich_production_openapi(
             &examples,
             &Value::Null,
         )?;
+    }
+    Ok(())
+}
+
+fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
+    for name in ["bootstrap_bearer", "credential_bearer"] {
+        let pointer = format!("/components/securitySchemes/{name}");
+        let scheme = value_at(openapi, &pointer)?;
+        ensure!(
+            string_at(scheme, "/type")? == "http" && string_at(scheme, "/scheme")? == "bearer",
+            "production security scheme {name} must be HTTP bearer"
+        );
+    }
+    let browser = value_at(openapi, "/components/securitySchemes/browser_session")?;
+    ensure!(
+        string_at(browser, "/type")? == "apiKey"
+            && string_at(browser, "/in")? == "cookie"
+            && string_at(browser, "/name")? == "fasti_session",
+        "production browser_session security scheme must use the fasti_session cookie"
+    );
+    Ok(())
+}
+
+fn validate_production_operation_security(
+    operation: &Value,
+    operation_id: &str,
+    method: &str,
+    path: &str,
+) -> anyhow::Result<()> {
+    let expected = match operation_id {
+        "initialize_node" => vec!["bootstrap_bearer"],
+        "submit_observation"
+        | "create_record"
+        | "attach_identifier"
+        | "list_records"
+        | "register_namespace"
+        | "list_tracking_dispositions"
+        | "set_tracking_disposition"
+        | "get_nuvio_collections"
+        | "replace_nuvio_collections"
+        | "clear_nuvio_collections" => vec!["credential_bearer", "browser_session"],
+        "read_session" | "end_session" | "list_users" | "update_user" | "delete_user" => {
+            vec!["browser_session"]
+        }
+        "create_session" | "enroll_first_client" | "health_check" => Vec::new(),
+        other => anyhow::bail!("unknown production operation {other}"),
+    };
+    if expected.is_empty() {
+        ensure!(
+            operation.get("security").is_none(),
+            "production operation {method} {path} must not declare authentication"
+        );
+        return Ok(());
+    }
+    let requirements = array_at(operation, "/security")?;
+    ensure!(
+        requirements.len() == expected.len(),
+        "production operation {method} {path} has the wrong number of security requirements"
+    );
+    for scheme in expected {
+        ensure!(
+            requirements.iter().any(|requirement| {
+                requirement.as_object().is_some_and(|requirement| {
+                    requirement.len() == 1
+                        && requirement
+                            .get(scheme)
+                            .and_then(Value::as_array)
+                            .is_some_and(Vec::is_empty)
+                })
+            }),
+            "production operation {method} {path} must use {scheme} without OAuth scopes"
+        );
     }
     Ok(())
 }
@@ -1929,19 +2002,17 @@ fn render_production_bootstrap_contract(openapi: &Value) -> anyhow::Result<Strin
             None => None,
         };
 
-        // Bootstrap proofs stay in request bodies. Existing bearer credentials must not
-        // be attached to either one-time setup operation.
+        // Bootstrap proofs stay in request bodies. The initialization route uses its
+        // separate data-root bootstrap bearer; enrollment consumes the proof body and
+        // must not receive either bearer credential.
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
-        let has_security = operation
-            .get("security")
-            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
-        ensure!(
-            has_security == authenticated,
-            "production security declaration changed for {} {}",
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
             expected.method,
-            expected.path
-        );
+            expected.path,
+        )?;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;
@@ -2146,15 +2217,12 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
 
         let authorization = string_at(operation, "/x-fasti-authorization")?;
         let authenticated = expected.authenticated;
-        let has_security = operation
-            .get("security")
-            .is_some_and(|security| security.as_array().is_some_and(|items| !items.is_empty()));
-        ensure!(
-            has_security == authenticated,
-            "production security declaration changed for {} {}",
+        validate_production_operation_security(
+            operation,
+            expected.operation_id,
             expected.method,
-            expected.path
-        );
+            expected.path,
+        )?;
 
         let required_scopes =
             serde_json::to_string(array_at(operation, "/x-fasti-required-scopes")?)?;

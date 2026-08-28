@@ -1,10 +1,10 @@
 <script lang="ts">
-  import {
-    FastiClient,
-    FastiProtocolError,
-    connectionEndpoint,
-  } from "@fasti/sdk";
-  import type { RecordSummary, WorkbenchHost } from "@fasti/ui";
+  import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
+  import type {
+    NetworkConfiguration,
+    RecordSummary,
+    WorkbenchHost,
+  } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
     type SetupViewState,
@@ -39,9 +39,11 @@
     throw new TypeError("VITE_FASTI_PORT_FALLBACK must be auto or fail");
   }
 
-  const endpoint = connectionEndpoint(
-    buildApiUrl || "http://127.0.0.1:8420",
-    buildApiUrl ? "build" : "default",
+  let endpoint = $state(
+    connectionEndpoint(
+      buildApiUrl || "http://127.0.0.1:8420",
+      buildApiUrl ? "build" : "default",
+    ),
   );
   const publicEndpoint = buildPublicUrl
     ? connectionEndpoint(buildPublicUrl, "build")
@@ -49,47 +51,19 @@
 
   const isTauri =
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-  const client = new FastiClient({
-    baseUrl:
-      buildApiUrl ||
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "http://127.0.0.1:8420"),
-    timeoutMs: 3_000,
-    retryPolicy: { maxAttempts: 1 },
-  });
-
-  const WORKBENCH_PATHS = new Set([
-    "/connections",
-    "/settings",
-    "/discover",
-    "/reconciliation",
-    "/reviews",
-    "/library",
-    "/calendar",
-  ]);
-
   function computeInitialSurface(): "status" | "workbench" {
-    if (typeof window === "undefined") return "status";
-    const path = window.location.pathname;
-    if (path === "/status") return "status";
-    if (WORKBENCH_PATHS.has(path) || path.startsWith("/records")) {
-      return "workbench";
-    }
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("surface") === "workbench") return "workbench";
-    if (urlParams.get("surface") === "status") return "status";
-    try {
-      const saved = localStorage.getItem("fasti-surface");
-      if (saved === "workbench") return "workbench";
-      if (saved === "status") return "status";
-    } catch {}
-    return "status";
+    return typeof window !== "undefined" &&
+      window.location.pathname === "/status"
+      ? "status"
+      : "workbench";
   }
 
   let status: StatusPanelState = $state({ view: "loading" });
   let theme: Theme = $state(resolveTheme());
   let request: AbortController | undefined;
+  let networkConfigurationRevision = 0;
+  let requestConfigurationRevision: number | undefined;
+  let refreshHealthAfterCurrent = false;
   let setupState: SetupViewState = $state("loading");
   let setupProblem: DesktopProblem | undefined = $state();
   let cleanupPending = $state(false);
@@ -103,8 +77,24 @@
   );
   let activeSurface = $state<"status" | "workbench">(computeInitialSurface());
 
+  $effect(() => {
+    if (typeof document !== "undefined") {
+      document.title =
+        activeSurface === "status"
+          ? "Local service status · Fasti"
+          : "Fasti · Living Chronicle";
+    }
+  });
+
   function statusProblemFor(error: unknown): StatusProblem {
-    if (error instanceof FastiProtocolError) {
+    const candidate =
+      error !== null && typeof error === "object"
+        ? (error as { code?: unknown })
+        : undefined;
+    if (
+      error instanceof FastiProtocolError ||
+      candidate?.code === "invalid_response"
+    ) {
       return {
         title: "The local service returned an invalid response",
         detail:
@@ -121,21 +111,49 @@
   }
 
   async function inspectHealth(restoreRetryFocus = false): Promise<void> {
-    request?.abort();
+    if (request && !request.signal.aborted) return;
     const currentRequest = new AbortController();
     request = currentRequest;
+    requestConfigurationRevision = networkConfigurationRevision;
     status = { view: "loading" };
     try {
-      const response = await client.health({ signal: currentRequest.signal });
-      if (request !== currentRequest) return;
-      status = { view: "healthy", health: response };
-    } catch (error) {
+      const configuration = await host.loadNetworkConfiguration();
       if (currentRequest.signal.aborted || request !== currentRequest) return;
+      const serviceUrl = configuration.connection.service_url;
+      endpoint = connectionEndpoint(serviceUrl.value, serviceUrl.source);
+      const response = await host.testEndpointConnection(
+        serviceUrl.value,
+        currentRequest.signal,
+      );
+      if (request !== currentRequest || refreshHealthAfterCurrent) return;
+      if (response.status !== "healthy") {
+        throw new TypeError("The service did not return a healthy status.");
+      }
+      status = {
+        view: "healthy",
+        health: { status: "healthy", version: response.version },
+      };
+    } catch (error) {
+      if (
+        currentRequest.signal.aborted ||
+        request !== currentRequest ||
+        refreshHealthAfterCurrent
+      )
+        return;
       status = { view: "blocked", problem: statusProblemFor(error) };
       if (restoreRetryFocus) {
         await tick();
         if (request === currentRequest && status.view === "blocked") {
           document.getElementById("retry-health")?.focus();
+        }
+      }
+    } finally {
+      if (request === currentRequest) {
+        request = undefined;
+        requestConfigurationRevision = undefined;
+        if (refreshHealthAfterCurrent) {
+          refreshHealthAfterCurrent = false;
+          if (activeSurface === "status") void inspectHealth();
         }
       }
     }
@@ -169,9 +187,23 @@
     try {
       const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
       host = {
+        networkConfigurationScope: "node",
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
-        saveNetworkConfiguration: (input) =>
-          invoke("save_network_configuration", { input }),
+        saveNetworkConfiguration: async (input) => {
+          const configuration = await invoke<NetworkConfiguration>(
+            "save_network_configuration",
+            { input },
+          );
+          networkConfigurationRevision += 1;
+          if (activeSurface === "status") {
+            if (request && !request.signal.aborted) {
+              refreshHealthAfterCurrent = true;
+            } else {
+              void inspectHealth();
+            }
+          }
+          return configuration;
+        },
         testEndpointConnection: (endpoint) =>
           invoke("test_endpoint_connection", { input: { endpoint } }),
         providerCredentialStatus: () => invoke("provider_credential_status"),
@@ -222,26 +254,65 @@
           invoke("replace_nuvio_collections", { document }),
         clearNuvioCollections: () => invoke("clear_nuvio_collections"),
       };
-      applySetupStatus(await invoke<SetupStatus>("setup_status"));
+      try {
+        applySetupStatus(await invoke<SetupStatus>("setup_status"));
+      } catch (error) {
+        applySetupProblem(error);
+      }
+      if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);
+      if (activeSurface === "status") {
+        status = { view: "blocked", problem: statusProblemFor(error) };
+      }
     }
   }
 
   function openWorkbench(): void {
     activeSurface = "workbench";
-    if (typeof window !== "undefined" && window.location.hash) {
-      window.history.replaceState(null, "", window.location.pathname);
+    cancelBrowserHealthInspection();
+    if (typeof window !== "undefined") window.history.pushState({}, "", "/");
+  }
+
+  function cancelBrowserHealthInspection(): void {
+    if (isTauri) return;
+    request?.abort();
+    request = undefined;
+  }
+
+  function openStatus(): void {
+    activeSurface = "status";
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/status");
     }
-    try {
-      localStorage.setItem("fasti-surface", "workbench");
-    } catch {}
+    inspectHealthOnRouteEntry();
+  }
+
+  function inspectHealthOnRouteEntry(): void {
+    if (isTauri && request && !request.signal.aborted) {
+      refreshHealthAfterCurrent =
+        requestConfigurationRevision !== networkConfigurationRevision;
+      return;
+    }
+    void inspectHealth();
+  }
+
+  function syncSurfaceFromLocation(): void {
+    const nextSurface = computeInitialSurface();
+    if (nextSurface === activeSurface) return;
+    activeSurface = nextSurface;
+    if (nextSurface === "status") {
+      inspectHealthOnRouteEntry();
+    } else {
+      cancelBrowserHealthInspection();
+    }
   }
 
   async function setup(): Promise<void> {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       applySetupStatus(await invoke<SetupStatus>("complete_setup"));
+      if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);
     }
@@ -257,42 +328,41 @@
   }
 
   onMount(() => {
+    window.addEventListener("popstate", syncSurfaceFromLocation);
     if (isTauri) {
       void inspectDesktop();
-      return;
+    } else if (activeSurface === "status") {
+      void inspectHealth();
     }
-    void inspectHealth();
-    return () => request?.abort();
+    return () => {
+      window.removeEventListener("popstate", syncSurfaceFromLocation);
+      request?.abort();
+      request = undefined;
+    };
   });
 </script>
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-{#if isTauri}
-  {#if setupState === "ready" && host}
-    <FastiWorkbench {host} />
-  {:else}
-    <SetupPanel
-      state={setupState}
-      problem={setupProblem}
-      {cleanupPending}
-      onSetup={setup}
-    />
-  {/if}
-{:else}
-  {#if activeSurface === "workbench" && host}
-    <FastiWorkbench {host} />
-  {:else}
-    <StatusPanel
-      {status}
-      {theme}
-      mark={theme === "dark" ? markDark : markLight}
-      {endpoint}
-      {publicEndpoint}
-      portFallback={configuredFallback}
-      onRetry={retryHealth}
-      onToggleTheme={toggleTheme}
-      onOpenWorkbench={openWorkbench}
-    />
-  {/if}
+{#if activeSurface === "status"}
+  <StatusPanel
+    {status}
+    {theme}
+    mark={theme === "dark" ? markDark : markLight}
+    {endpoint}
+    {publicEndpoint}
+    portFallback={configuredFallback}
+    onRetry={retryHealth}
+    onToggleTheme={toggleTheme}
+    onOpenWorkbench={openWorkbench}
+  />
+{:else if isTauri && setupState !== "ready"}
+  <SetupPanel
+    state={setupState}
+    problem={setupProblem}
+    {cleanupPending}
+    onSetup={setup}
+  />
+{:else if activeSurface === "workbench" && host}
+  <FastiWorkbench {host} onOpenStatus={openStatus} />
 {/if}

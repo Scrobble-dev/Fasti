@@ -38,7 +38,7 @@ fn requested_disposition(disposition: TrackingDispositionUpdateDto) -> Option<Tr
     get,
     path = "/api/v1/profile/record-tracking-dispositions",
     tag = "profile",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     responses(
         (status = 200, description = "The authenticated profile's explicit record tracking dispositions", body = ListTrackingDispositionsResponse),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
@@ -87,7 +87,7 @@ pub(crate) async fn list_tracking_dispositions(
     put,
     path = "/api/v1/profile/record-tracking-dispositions/{record_id}",
     tag = "profile",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     params(("record_id" = String, Path, description = "Fasti Record identifier")),
     request_body = SetTrackingDispositionRequest,
     responses(

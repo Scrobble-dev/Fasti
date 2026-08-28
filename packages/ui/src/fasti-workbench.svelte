@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import {
     IconChevronRight,
+    IconActivityHeartbeat,
     IconDatabase,
     IconLayoutSidebar,
     IconLayoutSidebarLeftExpand,
@@ -9,6 +10,7 @@
     IconPlugConnected,
     IconSettings,
     IconShieldCheck,
+    IconLogout,
     IconUserCircle,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
@@ -45,6 +47,7 @@
 
   interface Props {
     host: WorkbenchHost;
+    onOpenStatus?: () => void;
   }
 
   type Section =
@@ -57,7 +60,8 @@
     | "calendar"
     | "detail";
 
-  let { host }: Props = $props();
+  let { host, onOpenStatus }: Props = $props();
+  let credentialTarget = $state("");
 
   const credentialAdministration = $derived(
     Boolean(
@@ -72,6 +76,26 @@
       if (saved) return JSON.parse(saved) as T;
     } catch {}
     return fallback;
+  }
+
+  function accessibleAccent(value: string): {
+    color: string;
+    contrast: "#000000" | "#ffffff";
+  } {
+    const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
+    const color = match ? `#${match[1]}` : DEFAULT_THEME_SETTINGS.accentColor;
+    const channels = [1, 3, 5].map((index) => {
+      const channel = Number.parseInt(color.slice(index, index + 2), 16) / 255;
+      return channel <= 0.04045
+        ? channel / 12.92
+        : ((channel + 0.055) / 1.055) ** 2.4;
+    });
+    const luminance =
+      channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    return {
+      color,
+      contrast: luminance > 0.179 ? "#000000" : "#ffffff",
+    };
   }
 
   function pathForSection(section: Section): string {
@@ -130,14 +154,18 @@
     const mergeById = <T extends { id: string }>(
       storedItems: T[],
       defaultItems: T[],
-    ): T[] => [
-      ...(Array.isArray(storedItems) ? storedItems : []),
-      ...defaultItems.filter(
-        (d) =>
-          !Array.isArray(storedItems) ||
-          !storedItems.some((s) => s?.id === d.id),
-      ),
-    ];
+    ): T[] => {
+      const supportedIds = new Set(defaultItems.map((item) => item.id));
+      const supportedStored = Array.isArray(storedItems)
+        ? storedItems.filter((item) => supportedIds.has(item?.id))
+        : [];
+      return [
+        ...supportedStored,
+        ...defaultItems.filter(
+          (item) => !supportedStored.some((stored) => stored.id === item.id),
+        ),
+      ];
+    };
     // `defaults` spreads first so a preference field added since a browser's
     // stored copy was last written (e.g. `customFields`) is backfilled
     // instead of coming back `undefined` and crashing the first read.
@@ -191,11 +219,11 @@
     root.dataset.bsTheme = themeSettings.mode === "light" ? "light" : "dark";
     root.style.colorScheme = themeSettings.mode === "light" ? "light" : "dark";
     if (themeSettings.accentColor) {
-      root.style.setProperty(
-        "--fasti-action-primary",
-        themeSettings.accentColor,
-      );
-      root.style.setProperty("--tblr-primary", themeSettings.accentColor);
+      const accent = accessibleAccent(themeSettings.accentColor);
+      root.style.setProperty("--fasti-action-primary", accent.color);
+      root.style.setProperty("--fasti-action-contrast", accent.contrast);
+      root.style.setProperty("--tblr-primary", accent.color);
+      root.style.setProperty("--tblr-primary-fg", accent.contrast);
     }
     if (themeSettings.fontFamily === "serif") {
       root.style.setProperty(
@@ -247,22 +275,35 @@
   );
   let discoverLoading = $state(false);
   let discoverHostProblem = $state<string | undefined>(undefined);
-  let discoverLoaded = false;
+  let discoverSelectedProviderId = $state("");
+  let discoverSelectionExplicit = $state(false);
+  let discoverLoadId = 0;
+  let discoverSectionActive = false;
 
   async function loadDiscover(): Promise<void> {
+    const loadId = ++discoverLoadId;
     discoverLoading = true;
     discoverHostProblem = undefined;
     try {
-      discoverProviders = await host.providerCredentialStatus();
+      const providers = await host.providerCredentialStatus();
+      if (loadId === discoverLoadId) discoverProviders = providers;
     } catch (error) {
-      discoverProviders = undefined;
-      discoverHostProblem = hostProblemText(
-        error,
-        "Could not load provider status from the host.",
-      );
+      if (loadId === discoverLoadId) {
+        discoverProviders = undefined;
+        discoverHostProblem = hostProblemText(
+          error,
+          "Could not load provider status from the host.",
+        );
+      }
     } finally {
-      discoverLoading = false;
+      if (loadId === discoverLoadId) discoverLoading = false;
     }
+  }
+
+  function invalidateDiscoverProviders(): void {
+    discoverLoadId += 1;
+    discoverLoading = false;
+    discoverProviders = undefined;
   }
 
   // --- Reconciliation: review inbox, lazily loaded on first visit ---
@@ -270,6 +311,7 @@
   let reviewsLoading = $state(false);
   let reviewsProblem = $state<string | undefined>(undefined);
   let reviewsLoaded = false;
+  let resolvingReviewId = $state<string | undefined>(undefined);
 
   async function loadReviews(): Promise<void> {
     if (!host.listReviews) {
@@ -291,12 +333,17 @@
   }
 
   async function resolveReview(input: ResolveReviewInput): Promise<void> {
-    if (!host.resolveReview) return;
+    if (!host.resolveReview || resolvingReviewId) return;
+    resolvingReviewId = input.review_item_id;
     try {
       await host.resolveReview(input);
       await loadReviews();
     } catch (error) {
       reviewsProblem = hostProblemText(error, "Could not resolve that review.");
+    } finally {
+      if (resolvingReviewId === input.review_item_id) {
+        resolvingReviewId = undefined;
+      }
     }
   }
 
@@ -312,10 +359,10 @@
   let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
 
-  async function loadRecords(): Promise<void> {
+  async function loadRecords(restoreRetryFocus = false): Promise<boolean> {
     if (!host.listRecords) {
       recordsProblem = "This host does not support record listing yet.";
-      return;
+      return false;
     }
     const showLoading = mediaRecords.length === 0;
     if (showLoading) recordsLoading = true;
@@ -324,7 +371,7 @@
       const statesPromise = host.listTrackingDispositions
         ? host.listTrackingDispositions().catch((error) => {
             const detail = hostProblemText(error, "Fasti request failed.");
-            recordActionProblem = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
+            recordActionNotice = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
             return { states: [], truncated: false };
           })
         : Promise.resolve({ states: [], truncated: false });
@@ -347,9 +394,15 @@
         error,
         "Could not load records from the host.",
       );
+      return false;
     } finally {
       if (showLoading) recordsLoading = false;
+      if (restoreRetryFocus) {
+        await tick();
+        document.getElementById("retry-records")?.focus();
+      }
     }
+    return true;
   }
 
   async function setTrackingDisposition(
@@ -388,33 +441,6 @@
     }
   }
 
-  /** Inverse of record-projection.ts's `mediaKindForGrain` -- picks one
-   * representative grain per display kind so a Discover search result can
-   * become a record. Only "book" is exercised for real today (Google Books
-   * is the only working provider); the rest are best-effort for when a real
-   * provider search exists for them. */
-  function grainForMediaKind(kind: string): string {
-    switch (kind) {
-      case "movie":
-        return "film";
-      case "show":
-      case "anime":
-        return "series";
-      case "music":
-        return "recording";
-      case "book":
-      case "manga":
-      case "comic":
-        return "chapter";
-      case "podcast":
-        return "podcast_feed";
-      case "game":
-        return "game_release";
-      default:
-        return "custom";
-    }
-  }
-
   async function trackRecordFromDiscover(
     candidate: ProviderSearchCandidate,
   ): Promise<void> {
@@ -437,24 +463,22 @@
         "Adding titles to your library is not available on this host.",
       );
     }
-    const grain = grainForMediaKind(candidate.kind);
-    await host.registerNamespace({
-      namespace: candidate.provider,
-      label: candidate.provider,
-      grains: [grain],
-      id_pattern: ".+",
-      normalization: "identity",
-      licence_posture: "identifiers_only",
-    });
-    const created = await host.createRecord(grain);
-    await host.attachIdentifier({
-      record_id: created.record_id,
-      namespace: candidate.provider,
-      grain,
-      value: candidate.provider_id,
-    });
+  }
+
+  function resetClientEndpoint(): void {
+    browserSession = null;
+    browserSessionChecked = false;
+    mediaRecords = [];
     recordsLoaded = false;
-    await loadRecords();
+    recordsProblem = undefined;
+    recordActionNotice = undefined;
+    recordActionProblem = undefined;
+    void refreshBrowserSession();
+  }
+
+  function retryRecords(): void {
+    recordsLoaded = true;
+    void loadRecords(true);
   }
 
   async function applyProviderMetadata(
@@ -495,12 +519,13 @@
   );
 
   $effect(() => {
-    if (
-      (activeSection === "discover" || activeSection === "detail") &&
-      !discoverLoaded
-    ) {
-      discoverLoaded = true;
+    const needsDiscoverProviders =
+      activeSection === "discover" || activeSection === "detail";
+    if (needsDiscoverProviders && !discoverSectionActive) {
+      discoverSectionActive = true;
       void loadDiscover();
+    } else if (!needsDiscoverProviders) {
+      discoverSectionActive = false;
     }
     if (activeSection === "reconciliation" && !reviewsLoaded) {
       reviewsLoaded = true;
@@ -517,31 +542,42 @@
   });
 
   // nav-sidebar.svelte turns itself into a fixed-position rail below this
-  // breakpoint (see its own `@media (max-width: 47.99rem)` block). At a
+  // breakpoint (see its own `@media (max-width: 61.99rem)` block). At a
   // phone width, an always-expanded 240px rail leaves too little room for
   // real content and forces horizontal scroll, which then slides content
   // out from under the fixed rail. Force the icon-only (64px) width there
   // regardless of the persisted preference, matching a standard mobile
   // nav-rail pattern.
-  let isNarrowViewport = $state(false);
+  let isNarrowViewport = $state(
+    typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 61.99rem)").matches,
+  );
+
+  async function refreshBrowserSession(): Promise<void> {
+    if (!host.currentBrowserSession) {
+      browserSessionChecked = true;
+      return;
+    }
+    browserSessionChecked = false;
+    try {
+      browserSession = await host.currentBrowserSession();
+    } catch {
+      browserSession = null;
+      recordsProblem = "Sign in to load records from this Fasti service.";
+    } finally {
+      browserSessionChecked = true;
+    }
+  }
 
   onMount(() => {
     activeSection = sectionFromPath();
     const sync = () => (activeSection = sectionFromPath());
     window.addEventListener("popstate", sync);
-    const media = window.matchMedia("(max-width: 47.99rem)");
+    const media = window.matchMedia("(max-width: 61.99rem)");
     const syncViewport = () => (isNarrowViewport = media.matches);
     syncViewport();
     media.addEventListener("change", syncViewport);
-    if (host.currentBrowserSession) {
-      void host
-        .currentBrowserSession()
-        .then((session) => (browserSession = session))
-        .catch(() => (browserSession = null))
-        .finally(() => (browserSessionChecked = true));
-    } else {
-      browserSessionChecked = true;
-    }
+    void refreshBrowserSession();
     return () => {
       window.removeEventListener("popstate", sync);
       media.removeEventListener("change", syncViewport);
@@ -562,6 +598,35 @@
     return titles[section];
   }
 </script>
+
+{#snippet recordStatus()}
+  {#if recordsLoading}
+    <p class="record-load-status alert alert-info" role="status">
+      Loading records…
+    </p>
+  {:else if recordsProblem}
+    <section class="record-access-alert alert alert-warning" role="alert">
+      <div>
+        <strong class="record-access-title">Records are unavailable</strong>
+        <p>{recordsProblem}</p>
+      </div>
+      {#if host.currentBrowserSession && !browserSession}
+        <button
+          type="button"
+          class="btn btn-primary"
+          onclick={() => (authModalOpen = true)}>Sign in</button
+        >
+      {:else}
+        <button
+          id="retry-records"
+          type="button"
+          class="btn btn-primary"
+          onclick={retryRecords}>Retry records</button
+        >
+      {/if}
+    </section>
+  {/if}
+{/snippet}
 
 <div class="workbench-shell">
   <NavSidebar
@@ -608,16 +673,22 @@
             type="button"
             class="icon-btn"
             onclick={() =>
-              (workbenchPreferences = {
-                ...workbenchPreferences,
-                sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
-              })}
-            title={workbenchPreferences.sidebarCollapsed
-              ? "Expand sidebar"
-              : "Collapse sidebar"}
-            aria-label={workbenchPreferences.sidebarCollapsed
-              ? "Expand sidebar"
-              : "Collapse sidebar"}
+              (workbenchPreferences = isNarrowViewport
+                ? { ...workbenchPreferences, sidebarHidden: true }
+                : {
+                    ...workbenchPreferences,
+                    sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
+                  })}
+            title={isNarrowViewport
+              ? "Hide sidebar"
+              : workbenchPreferences.sidebarCollapsed
+                ? "Expand sidebar"
+                : "Collapse sidebar"}
+            aria-label={isNarrowViewport
+              ? "Hide sidebar"
+              : workbenchPreferences.sidebarCollapsed
+                ? "Expand sidebar"
+                : "Collapse sidebar"}
           >
             <IconLayoutSidebar size={18} />
           </button>
@@ -633,6 +704,20 @@
       />
 
       <div class="top-bar-actions">
+        <a
+          class="icon-btn"
+          href="/status"
+          title="Service status"
+          aria-label="Service status"
+          onclick={(event) => {
+            if (!onOpenStatus) return;
+            event.preventDefault();
+            onOpenStatus();
+          }}
+        >
+          <IconActivityHeartbeat size={18} />
+        </a>
+
         <button
           type="button"
           class="icon-btn"
@@ -649,10 +734,10 @@
           onclick={() => (authModalOpen = true)}
           title={browserSession
             ? `Account: ${browserSession.user.username}`
-            : "Sign in"}
+            : "Account access"}
           aria-label={browserSession
             ? `Manage account ${browserSession.user.username}`
-            : "Sign in"}
+            : "Open account access"}
         >
           <IconUserCircle size={18} />
         </button>
@@ -676,6 +761,8 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          onClientEndpointChanged={resetClientEndpoint}
+          onProviderCredentialsChanged={invalidateDiscoverProviders}
           onUpdateWorkbenchPreferences={(patch) =>
             (workbenchPreferences = { ...workbenchPreferences, ...patch })}
         />
@@ -684,6 +771,8 @@
           providerCredentials={discoverProviders}
           loading={discoverLoading}
           hostProblem={discoverHostProblem}
+          bind:selectedProviderId={discoverSelectedProviderId}
+          bind:selectionExplicit={discoverSelectionExplicit}
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
@@ -693,61 +782,50 @@
             : undefined}
         />
       {:else if activeSection === "reconciliation"}
-        {#if reviewsLoading}
-          <p class="state-message" role="status">Loading the review inbox…</p>
-        {:else if reviewsProblem}
-          <p class="state-message problem" role="alert">{reviewsProblem}</p>
-        {:else}
-          <ReconciliationView
-            items={reviews}
-            onResolveExisting={host.resolveReview
-              ? (reviewItemId, recordId) =>
-                  resolveReview({
-                    review_item_id: reviewItemId,
-                    target: { kind: "existing", value: recordId },
-                    identifiers: [],
-                  })
-              : undefined}
-            onResolveNew={host.resolveReview
-              ? (reviewItemId, grain) =>
-                  resolveReview({
-                    review_item_id: reviewItemId,
-                    target: { kind: "new", value: grain },
-                    identifiers: [],
-                  })
-              : undefined}
-          />
-        {/if}
+        <ReconciliationView
+          items={reviewsProblem ? [] : reviews}
+          loading={reviewsLoading}
+          unavailableReason={reviewsProblem}
+          {resolvingReviewId}
+          onResolveExisting={host.resolveReview
+            ? (reviewItemId, recordId) =>
+                resolveReview({
+                  review_item_id: reviewItemId,
+                  target: { kind: "existing", value: recordId },
+                  identifiers: [],
+                })
+            : undefined}
+          onResolveNew={host.resolveReview
+            ? (reviewItemId, grain) =>
+                resolveReview({
+                  review_item_id: reviewItemId,
+                  target: { kind: "new", value: grain },
+                  identifiers: [],
+                })
+            : undefined}
+        />
       {:else if activeSection === "library"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
-        {:else}
-          <LibraryView
-            records={mediaRecords}
-            availableCollections={[]}
-            onSelectRecord={openRecord}
-            contextMenuConfigs={workbenchPreferences.contextMenuItems}
-            onSetTrackingDisposition={(recordId, disposition) =>
-              void setTrackingDisposition(recordId, disposition)}
-            onOpenReconciliation={() => select("reconciliation")}
-          />
-        {/if}
+        {@render recordStatus()}
+        <LibraryView
+          records={recordsProblem ? [] : mediaRecords}
+          availableCollections={[]}
+          onSelectRecord={openRecord}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSetTrackingDisposition={(recordId, disposition) =>
+            void setTrackingDisposition(recordId, disposition)}
+          onOpenReconciliation={() => select("reconciliation")}
+        />
       {:else if activeSection === "calendar"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
-        {:else}
-          <CalendarView {watchingRecords} onSelectRecord={openRecord} />
-        {/if}
+        {@render recordStatus()}
+        <CalendarView
+          watchingRecords={recordsProblem ? [] : watchingRecords}
+          stateUnavailable={!recordsProblem &&
+            mediaRecords.some((record) => record.status === "unknown")}
+          onSelectRecord={openRecord}
+        />
       {:else if activeSection === "detail"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
-        {:else if selectedRecord}
+        {@render recordStatus()}
+        {#if selectedRecord && !recordsProblem}
           <MediaDetailView
             record={selectedRecord}
             availableCollections={[]}
@@ -770,7 +848,8 @@
           />
         {:else}
           <div class="state-message">
-            <p>No record selected.</p>
+            <h1>Media Detail</h1>
+            <p>No record is selected.</p>
             <button
               type="button"
               class="link-btn"
@@ -779,21 +858,16 @@
           </div>
         {/if}
       {:else if activeSection === "home"}
-        {#if recordsLoading}
-          <p class="state-message" role="status">Loading records…</p>
-        {:else if recordsProblem}
-          <p class="state-message problem" role="alert">{recordsProblem}</p>
-        {:else}
-          <HomeView
-            records={mediaRecords}
-            availableCollections={[]}
-            onSelectRecord={openRecord}
-            contextMenuConfigs={workbenchPreferences.contextMenuItems}
-            onSetTrackingDisposition={(recordId, disposition) =>
-              void setTrackingDisposition(recordId, disposition)}
-            onOpenReconciliation={() => select("reconciliation")}
-          />
-        {/if}
+        {@render recordStatus()}
+        <HomeView
+          records={recordsProblem ? [] : mediaRecords}
+          availableCollections={[]}
+          onSelectRecord={openRecord}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSetTrackingDisposition={(recordId, disposition) =>
+            void setTrackingDisposition(recordId, disposition)}
+          onOpenReconciliation={() => select("reconciliation")}
+        />
       {:else}
         <div class="overview">
           <header class="overview-header">
@@ -943,12 +1017,12 @@
     flex-direction: column;
   }
 
-  /* Below 47.99rem, nav-sidebar.svelte switches itself to
+  /* Below Tabler's `lg` boundary, nav-sidebar.svelte switches itself to
    * `position: fixed`, removing it from flex flow so it stops claiming
    * layout space. Reserve that space here (matching its collapsed width,
    * which `isNarrowViewport` forces at this breakpoint) so the fixed rail
    * doesn't overlap and intercept clicks on the main content. */
-  @media (max-width: 47.99rem) {
+  @media (max-width: 61.99rem) {
     .workbench-main-shell {
       margin-left: 64px;
     }
@@ -986,6 +1060,12 @@
     flex: 0 0 auto;
   }
 
+  .top-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .section-title {
     font-family: var(--fasti-font-display);
     font-weight: 700;
@@ -1006,6 +1086,7 @@
     background: transparent;
     color: var(--fasti-text-muted);
     cursor: pointer;
+    text-decoration: none;
   }
 
   .icon-btn:hover {
@@ -1056,17 +1137,41 @@
     color: var(--fasti-text-muted);
   }
 
-  .state-message.problem {
-    color: var(--fasti-state-error, #b42318);
+  .record-load-status,
+  .record-access-alert {
+    max-width: 1080px;
+    margin: 24px auto 0;
+  }
+
+  .record-access-alert {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .record-access-alert p {
+    margin: 4px 0 0;
+  }
+
+  .record-access-title {
+    color: var(--fasti-text-primary);
+  }
+
+  .record-access-alert .btn {
+    min-width: max-content;
+    min-height: 44px;
   }
 
   .link-btn {
-    border: 0;
-    background: transparent;
-    color: var(--fasti-action-primary);
+    min-height: var(--fasti-touch-target-min);
+    border: 1px solid var(--fasti-action-primary);
+    border-radius: 4px;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
     font-weight: 700;
     cursor: pointer;
-    padding: 6px 0;
+    padding: 10px 16px;
   }
 
   .overview {

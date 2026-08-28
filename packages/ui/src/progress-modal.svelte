@@ -44,9 +44,17 @@
   });
 
   const percentage = $derived(
-    record.mediaKind === "show" || record.mediaKind === "anime"
-      ? Math.min(100, Math.round((episodeVal / totalEps) * 100))
-      : Math.min(100, Math.round((progressSec / totalSec) * 100)),
+    Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(
+          record.mediaKind === "show" || record.mediaKind === "anime"
+            ? (episodeVal / totalEps) * 100
+            : (progressSec / totalSec) * 100,
+        ),
+      ),
+    ),
   );
 
   function handleSave(): void {
@@ -145,7 +153,10 @@
 
       <!-- Progress Meter -->
       <div class="meter-wrap">
-        <div class="meter-bar" style="width: {percentage}%"></div>
+        <div
+          class="meter-bar"
+          style="transform: scaleX({percentage / 100})"
+        ></div>
         <span class="meter-text">{percentage}% Completed</span>
       </div>
 
@@ -319,9 +330,11 @@
   }
 
   .meter-bar {
+    width: 100%;
     height: 100%;
     background: var(--fasti-state-verified);
-    transition: width 150ms ease;
+    transform-origin: left center;
+    transition: transform 150ms ease;
   }
 
   .meter-text {
@@ -373,10 +386,16 @@
     gap: 6px;
     padding: 8px 20px;
     background: var(--fasti-action-primary);
-    color: white;
+    color: var(--fasti-action-contrast);
     border: none;
     border-radius: 4px;
     font-weight: 600;
     cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .meter-bar {
+      transition: none;
+    }
   }
 </style>

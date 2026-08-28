@@ -127,7 +127,7 @@ fn resolution_name(value: ObservationResolution) -> &'static str {
     post,
     path = "/api/v1/observations",
     tag = "observations",
-    security(("bearer_credential" = []), ("browser_session" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = SubmitObservationRequest,
     responses(
         (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),

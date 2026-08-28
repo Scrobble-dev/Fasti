@@ -93,6 +93,7 @@ const PROVIDERS: ReadonlyArray<{
 
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
+  source: "default" | "saved" = "default",
 ): NetworkConfiguration {
   const serviceUrl = connectionEndpoint(
     defaultApiUrl || "http://127.0.0.1:8420",
@@ -102,22 +103,36 @@ function defaultNetworkConfiguration(
     connection: {
       service_url: {
         value: serviceUrl,
-        source: "default",
+        source,
         managed: false,
       },
-      public_url: { value: null, source: "default", managed: false },
+      public_url: { value: null, source: "default", managed: true },
     },
     outbound_policy: {
-      allow_providers: ["*"],
+      allow_providers: [],
       deny_providers: [],
-      allow_capabilities: ["*"],
+      allow_capabilities: [],
       deny_capabilities: [],
-      allow_hosts: ["*"],
+      allow_hosts: [],
       deny_hosts: [],
-      allow_networks: ["public", "loopback", "private"],
+      allow_networks: [],
       deny_networks: [],
     },
   };
+}
+
+function unavailable(message: string): Error {
+  return new Error(message);
+}
+
+function checkedEndpoint(value: string) {
+  try {
+    return connectionEndpoint(value);
+  } catch {
+    throw unavailable(
+      "The Fasti service URL must contain only a scheme, host, and optional port. Cleartext HTTP is allowed only for loopback endpoints.",
+    );
+  }
 }
 
 function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
@@ -127,26 +142,43 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
   try {
     const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
-    const value = JSON.parse(raw) as Partial<NetworkConfiguration>;
+    const value = JSON.parse(raw) as Partial<NetworkConfiguration> & {
+      service_url?: unknown;
+    };
+    const candidate =
+      typeof value.service_url === "string"
+        ? value.service_url
+        : value.connection?.service_url?.value;
+    if (typeof candidate !== "string") {
+      return defaultNetworkConfiguration(defaultApiUrl);
+    }
+    const serviceUrl = checkedEndpoint(candidate).url;
     if (
-      typeof value?.connection?.service_url?.value !== "string" ||
+      !value.connection ||
       !value.outbound_policy ||
       !Array.isArray(value.outbound_policy.allow_networks) ||
       !Array.isArray(value.outbound_policy.deny_networks)
     ) {
-      return defaultNetworkConfiguration(defaultApiUrl);
+      return defaultNetworkConfiguration(serviceUrl, "saved");
     }
-    connectionEndpoint(value.connection.service_url.value);
     const publicUrl = value.connection.public_url?.value;
-    if (typeof publicUrl === "string") connectionEndpoint(publicUrl);
-    return value as NetworkConfiguration;
+    return {
+      connection: {
+        service_url: { value: serviceUrl, source: "saved", managed: false },
+        public_url: {
+          value:
+            typeof publicUrl === "string"
+              ? checkedEndpoint(publicUrl).url
+              : null,
+          source: "saved",
+          managed: false,
+        },
+      },
+      outbound_policy: value.outbound_policy,
+    };
   } catch {
     return defaultNetworkConfiguration(defaultApiUrl);
   }
-}
-
-function unavailable(message: string): Error {
-  return new Error(message);
 }
 
 function csrfToken(): string {
@@ -165,24 +197,24 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       useBrowserSession: true,
       csrfToken,
     });
-  let client = createClient(
-    connectionEndpoint(defaultApiUrl || "http://127.0.0.1:8420", "default").url,
-  );
+  let network = loadNetworkConfiguration(defaultApiUrl);
+  let client = createClient(network.connection.service_url.value);
 
   return {
+    networkConfigurationScope: "client",
     developmentTestAccountHint: import.meta.env.DEV
       ? "Fresh development data root: testadmin / testadmin"
       : undefined,
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
-      return loadNetworkConfiguration(defaultApiUrl);
+      return network;
     },
 
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
-      const endpoint = connectionEndpoint(input.service_url);
+      const endpoint = checkedEndpoint(input.service_url);
       const publicUrl = input.public_url
-        ? connectionEndpoint(input.public_url).url
+        ? checkedEndpoint(input.public_url).url
         : null;
       const nextClient = createClient(endpoint.url);
       const config: NetworkConfiguration = {
@@ -211,19 +243,21 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       }
       // Recreate the client with the saved service URL so subsequent SDK
       // calls use the new endpoint rather than the original defaultApiUrl.
+      network = config;
       client = nextClient;
       return config;
     },
 
     async testEndpointConnection(
       endpoint: string,
+      signal?: AbortSignal,
     ): Promise<EndpointConnectionStatus> {
-      const target = connectionEndpoint(endpoint);
+      const target = checkedEndpoint(endpoint);
       const health = await new FastiClient({
         baseUrl: target.url,
         timeoutMs: 3_000,
         retryPolicy: { maxAttempts: 1 },
-      }).health();
+      }).health({ signal });
       return {
         endpoint: target.url,
         scheme: target.scheme,
@@ -275,7 +309,10 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
 
     async listRecords(): Promise<RecordSummary[]> {
       const response = await client.listRecords();
-      return response.records as RecordSummary[];
+      return response.records.map((record) => ({
+        ...record,
+        poster: { ...record.poster, value: null },
+      })) as RecordSummary[];
     },
 
     async createRecord(grain: string): Promise<CreateRecordResult> {

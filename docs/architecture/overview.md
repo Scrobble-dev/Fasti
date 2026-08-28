@@ -2,7 +2,7 @@
 
 Fasti is an identity-first local system of record for media activity. It is not a media player.
 
-## Current B0-B3 review spine
+## Current B0-B4 review spine
 
 ```text
 fasti-domain

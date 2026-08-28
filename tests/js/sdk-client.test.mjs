@@ -19,6 +19,7 @@ import {
   parseAcceptObservationRequest,
   parseBrowserSessionResponse,
   parseHealthResponse,
+  parseListRecordsResponse,
   parseReceiptCommittedEvent,
   PUBLIC_CAPABILITY_REGISTRY,
   RECEIPT_STREAM_CONTRACT,
@@ -764,6 +765,33 @@ test("exact generated parsers reject inherited fields, class instances, and impo
       }),
     /real RFC3339/,
   );
+});
+
+test("generated record parser accepts required boolean fields", () => {
+  const record = parseListRecordsResponse({
+    records: [
+      {
+        record_id: "018f7f2d-8f58-7a0a-8000-000000000001",
+        grain: "work",
+        status: "active",
+        title: {
+          tier: "preferred_provider_claim",
+          value: "A real local record",
+          source: "google-books",
+          is_stale: false,
+        },
+        poster: {
+          tier: "empty",
+          value: null,
+          source: null,
+          is_stale: false,
+        },
+        latest_activity: null,
+      },
+    ],
+  }).records[0];
+  assert.equal(record.title.is_stale, false);
+  assert.equal(record.poster.is_stale, false);
 });
 
 test("base URL semantics reject application paths instead of silently discarding them", () => {

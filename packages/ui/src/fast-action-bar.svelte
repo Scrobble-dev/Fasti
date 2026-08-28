@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MediaRecord, WatchStatus } from "./types.js";
+  import type { MediaRecord } from "./types.js";
   import {
     IconEye,
     IconEyeCheck,
@@ -33,14 +33,13 @@
 </script>
 
 <div
-  class="fast-action-bar"
+  class="btn-group fast-action-bar"
   role="toolbar"
   aria-label="Quick actions for {record.title}"
 >
-  <!-- 1. Seen / Watched Fast Button -->
   <button
     type="button"
-    class="fast-btn"
+    class="btn btn-icon fast-btn"
     class:active={isWatched}
     disabled={!onToggleWatched}
     onclick={(e) => {
@@ -65,7 +64,7 @@
   <!-- 2. Watchlist / Bookmark Fast Button -->
   <button
     type="button"
-    class="fast-btn"
+    class="btn btn-icon fast-btn"
     class:active={isWatchlist}
     disabled={!onToggleWatchlist}
     onclick={(e) => {
@@ -128,12 +127,12 @@
   <!-- 5. Context Menu Trigger -->
   <button
     type="button"
-    class="fast-btn menu-dots"
+    class="btn btn-icon fast-btn menu-dots"
     onclick={(e) => {
       e.stopPropagation();
       onOpenContextMenu(record, e);
     }}
-    title="More actions..."
+    title="More actions"
     aria-label="More actions context menu"
   >
     <IconDotsVertical size={16} stroke={2} />
@@ -143,6 +142,7 @@
 <style>
   .fast-action-bar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-around;
     background: var(--fasti-surface-paper);
@@ -155,7 +155,8 @@
   }
 
   .fast-btn {
-    flex: 1;
+    flex: 1 1 44px;
+    min-width: 44px;
     min-height: 44px;
     height: 44px;
     display: grid;
