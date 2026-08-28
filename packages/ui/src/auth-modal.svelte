@@ -378,7 +378,9 @@
                         <div class="user-title-row">
                           <strong>{user.username}</strong>
                           {#if isCurrent}
-                            <span class="active-badge">Active</span>
+                            <span class="badge bg-green-lt text-dark fw-bold"
+                              >Active</span
+                            >
                           {/if}
                         </div>
                         <div class="user-meta-row">
@@ -738,15 +740,6 @@
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-  .active-badge {
-    font-size: 0.7rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    padding: 2px 6px;
-    background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast);
-    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
   .user-meta-row {
     display: flex;
