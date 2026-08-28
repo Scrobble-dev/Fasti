@@ -372,12 +372,21 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
               ].includes(operation.operationId)
             ? [{ browser_session: [] }]
             : [
-                  "health_check",
-                  "enroll_first_client",
-                  "create_session",
+                  "nuvio_webhook",
+                  "tautulli_webhook",
+                  "jellyfin_webhook",
+                  "emby_webhook",
+                  "plex_webhook",
                 ].includes(operation.operationId)
-              ? undefined
-              : [{ credential_bearer: [] }, { browser_session: [] }];
+              ? [{ credential_bearer: [] }]
+              : [
+                    "health_check",
+                    "enroll_first_client",
+                    "create_session",
+                    "integration_status",
+                  ].includes(operation.operationId)
+                ? undefined
+                : [{ credential_bearer: [] }, { browser_session: [] }];
       assert.deepEqual(
         operation.security,
         security,

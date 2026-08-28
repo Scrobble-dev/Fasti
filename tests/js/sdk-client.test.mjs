@@ -638,6 +638,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "initializeDurableNode",
           "initializeNode",
           "listBrowserUsers",
+          "listIntegrations",
           "listRecords",
           "listTrackingDispositions",
           "readBrowserSession",

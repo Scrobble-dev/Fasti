@@ -1247,10 +1247,7 @@ fn validate_production_operation_security(
         | "get_nuvio_collections"
         | "replace_nuvio_collections"
         | "clear_nuvio_collections" => vec!["credential_bearer", "browser_session"],
-        "nuvio_webhook"
-        | "tautulli_webhook"
-        | "jellyfin_webhook"
-        | "emby_webhook"
+        "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
         | "plex_webhook" => vec!["credential_bearer"],
         "read_session" | "end_session" | "list_users" | "update_user" | "delete_user" => {
             vec!["browser_session"]
@@ -1814,7 +1811,8 @@ fn bind_governed_examples(
             (status.to_string(), "application/problem+json")
         } else {
             ensure!(
-                example_id == "system.capabilities.success",
+                example_id == "system.capabilities.success"
+                    || example_id == "integration.status.success",
                 "finite HTTP example {example_id} has no deterministic response binding rule"
             );
             ("200".to_owned(), "application/json")

@@ -267,7 +267,7 @@
     flex-shrink: 0;
   }
   .refresh-button:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -279,7 +279,7 @@
     gap: 16px;
     align-items: flex-start;
   }
-  .availability-body svg {
+  .availability-body :global(svg) {
     flex-shrink: 0;
     color: var(--fasti-text-muted);
   }
@@ -369,7 +369,7 @@
     font-size: 0.875rem;
     line-height: 1.45;
   }
-  .setup-action svg {
+  .setup-action :global(svg) {
     flex-shrink: 0;
     margin-top: 1px;
   }

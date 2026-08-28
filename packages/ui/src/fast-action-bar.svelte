@@ -171,7 +171,7 @@
   }
 
   .fast-btn:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 

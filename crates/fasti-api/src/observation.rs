@@ -324,7 +324,14 @@ pub(crate) async fn submit_observation(
             correlation_id,
         )))
     })?;
-    accept_observation_request(state, authentication, request, evidence_bytes, correlation_id).await
+    accept_observation_request(
+        state,
+        authentication,
+        request,
+        evidence_bytes,
+        correlation_id,
+    )
+    .await
 }
 
 pub(crate) fn router() -> Router<LocalApiState> {

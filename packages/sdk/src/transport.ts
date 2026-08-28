@@ -818,6 +818,33 @@ export class FastiClient {
     });
   }
 
+  listIntegrations(
+    options: CallOptions = {},
+  ): Promise<{ integrations: Array<Record<string, unknown>> }> {
+    return this.#jsonOperation({
+      method: "GET",
+      path: "/api/v1/integrations",
+      authenticated: false,
+      problemContract: HEALTH_PROBLEM_CONTRACT,
+      retryMode: "safe",
+      responseParser: (value) => {
+        if (
+          typeof value !== "object" ||
+          value === null ||
+          !("integrations" in value) ||
+          !Array.isArray((value as { integrations: unknown }).integrations)
+        ) {
+          throw new FastiContractParseError(
+            "Integration status response did not match the supported contract.",
+          );
+        }
+        return value as { integrations: Array<Record<string, unknown>> };
+      },
+      responseLabel: "Integration status response",
+      options,
+    });
+  }
+
   /**
    * Opens the governed receipt SSE fixture and performs bounded reconnects.
    * This never persists or queues events, and only reconnects the safe stream.

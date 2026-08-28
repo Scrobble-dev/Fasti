@@ -222,26 +222,24 @@ function isIntegrationStatus(
 
 export async function fetchIntegrationStatus(
   endpoint: string,
+  signal?: AbortSignal,
 ): Promise<IntegrationRuntimeStatus[]> {
-  const normalized = checkedEndpoint(endpoint).url;
-  const response = await fetch(`${normalized}/api/v1/integrations`, {
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-    signal: AbortSignal.timeout(3_000),
+  const target = checkedEndpoint(endpoint);
+  const probeClient = new FastiClient({
+    baseUrl: target.url,
+    timeoutMs: 3_000,
+    retryPolicy: { maxAttempts: 1 },
   });
-  if (!response.ok) {
-    throw unavailable(`Fasti integration status returned ${response.status}.`);
-  }
-  const value = (await response.json()) as Partial<IntegrationStatusResponse>;
+  const response = await probeClient.listIntegrations({ signal });
   if (
-    !Array.isArray(value.integrations) ||
-    !value.integrations.every(isIntegrationStatus)
+    !Array.isArray(response.integrations) ||
+    !response.integrations.every(isIntegrationStatus)
   ) {
     throw unavailable(
       "Fasti integration status did not match the supported contract.",
     );
   }
-  return value.integrations;
+  return response.integrations as unknown as IntegrationRuntimeStatus[];
 }
 
 export function createWebHost(
@@ -317,10 +315,8 @@ export function createWebHost(
       };
     },
     async listIntegrations(): Promise<IntegrationRuntimeStatus[]> {
-      const configured = loadNetworkConfiguration(defaultApiUrl);
-      return fetchIntegrationStatus(
-        configured.connection.service_url.value || defaultApiUrl,
-      );
+      const response = await client.listIntegrations();
+      return response.integrations as unknown as IntegrationRuntimeStatus[];
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
       return PROVIDERS.map((provider) => ({

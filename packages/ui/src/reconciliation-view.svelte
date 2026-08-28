@@ -385,7 +385,7 @@
   }
   .action-btn:focus-visible,
   .new-record-form select:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
   .action-btn:disabled {

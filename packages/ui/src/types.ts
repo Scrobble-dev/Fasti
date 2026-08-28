@@ -1,3 +1,5 @@
+import type { IntegrationRuntimeStatus } from "./integration-status.js";
+
 export type MediaKind =
   | "movie"
   | "show"
@@ -361,6 +363,7 @@ export interface WorkbenchHost {
     input: BrowserUserUpdate,
   ): Promise<BrowserUser>;
   deleteBrowserUser?(userId: string, currentPassword: string): Promise<void>;
+  listIntegrations?(): Promise<IntegrationRuntimeStatus[]>;
 }
 
 /** Wire shape of the desktop host's `create_record` command output. */
