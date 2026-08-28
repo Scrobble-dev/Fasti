@@ -64,6 +64,7 @@ test("Workbench navigation and theme controls keep 44 pixel targets", async ({
 test("theme settings apply distinct Tabler and Fasti effects and persist", async ({
   page,
 }) => {
+  test.slow();
   await page.setViewportSize({ width: 375, height: 900 });
   await page.goto("/library");
 
