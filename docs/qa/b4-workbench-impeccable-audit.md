@@ -7,6 +7,37 @@ Surface: local Workbench at `/` and service diagnostic at `/status`
 Status: review evidence, not a B4 completion, WCAG conformance, or EN 301 549
 conformity claim
 
+## Metadata credential acceptance
+
+The metadata credential slice was verified on implementation head
+`85978b4caddb5980a330dba4d288848c1462b497`, rebased on merged `dev` head
+`e5e56a93b065ac3d969f7db7886d6c4867375f4d`.
+
+- The full CI-mode browser suite passed 84 of 84 tests. It includes Axe,
+  keyboard, target-size, text-spacing, reduced-motion, theme, and 320 pixel
+  reflow checks.
+- Rendered Settings and Discover checks covered 320, 768, and 1440 CSS pixels
+  in Light and Dark modes. Axe and console findings were empty after the
+  merged documentation-link fix and this slice's separate status-badge fix.
+- Exact created Record IDs remain in the candidate row and wrap without page
+  overflow at 320 CSS pixels. TMDB movie and show candidates with the same
+  numeric provider ID keep independent action state.
+- Credential save, removal, and search tests verify one operation at a time,
+  retained masked correction input, restored focus after removal, exact
+  provider terminology, and structured recovery text.
+- `impeccable detect` returned no findings on the changed UI, launcher, test,
+  and documentation files.
+- `cargo xtask test pr`, `pnpm test`, `pnpm format:check`, repository-truth
+  checks, and the launcher self-test passed.
+- In the local `ai-vibe` container, the launcher built the static web app,
+  compiled the real Desktop crate, opened a `Fasti` Tauri window, and exited
+  cleanly with an isolated private data root. It did not start `fastid` or
+  Vite.
+
+No real provider secret was entered during this review. A credentialed TMDB
+network call therefore remains an operator acceptance step. Packaged
+assistive-technology evidence also remains open as recorded below.
+
 ## Audit health score
 
 | Dimension                |     Score | Evidence or limit                                                                                                                                           |
