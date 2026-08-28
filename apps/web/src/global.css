@@ -34,6 +34,10 @@ textarea {
   min-width: var(--fasti-touch-target-min);
 }
 
+.btn-primary:disabled {
+  opacity: 1;
+}
+
 select option {
   background-color: var(--fasti-surface-paper, #ffffff) !important;
   color: var(--fasti-text-primary, #181716) !important;
