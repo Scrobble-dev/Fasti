@@ -164,7 +164,7 @@ struct TmdbSearchResult {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
-    adult: bool,
+    adult: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -596,7 +596,7 @@ fn parse_tmdb_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopP
         .results
         .into_iter()
         .filter_map(|item| {
-            if item.adult {
+            if item.adult != Some(false) {
                 return None;
             }
             let (kind, title) = match item.media_type? {
@@ -784,13 +784,14 @@ mod tests {
     fn tmdb_skips_people_adult_partial_unsafe_and_duplicate_results() {
         let body = br#"{
           "results": [
-            {"id":1,"media_type":"person","name":"A Person"},
+            {"id":1,"media_type":"person","name":"A Person","adult":false},
             {"id":2,"media_type":"movie","title":"Adult","adult":true},
-            {"id":3,"media_type":"movie"},
-            {"id":4,"media_type":"tv","name":"Bad\nTitle"},
-            {"id":5,"media_type":"movie","title":"A Film"},
-            {"id":5,"media_type":"movie","title":"Duplicate Film"},
-            {"id":5,"media_type":"tv","name":"A Series"}
+            {"id":3,"media_type":"movie","adult":false},
+            {"id":4,"media_type":"tv","name":"Bad\nTitle","adult":false},
+            {"id":5,"media_type":"movie","title":"A Film","adult":false},
+            {"id":5,"media_type":"movie","title":"Duplicate Film","adult":false},
+            {"id":5,"media_type":"tv","name":"A Series","adult":false},
+            {"id":6,"media_type":"movie","title":"Unknown adult flag","adult":null}
           ]
         }"#;
         let candidates = parse_candidates(TMDB, body).expect("filtered TMDB candidates");
