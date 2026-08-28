@@ -545,6 +545,10 @@
     margin-top: 8px;
   }
 
+  .result-action-status code {
+    overflow-wrap: anywhere;
+  }
+
   @media (max-width: 47.99rem) {
     .discover-container {
       padding: 24px 16px;

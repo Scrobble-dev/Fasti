@@ -9,6 +9,16 @@ async function openWorkbenchSection(page: Page, name: string): Promise<void> {
   await page.getByRole("link", { name, exact: true }).click();
 }
 
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+}
+
 function recordResponse(
   title = "A bounded local record",
   poster: string | null = null,
@@ -551,7 +561,7 @@ test("legacy saved navigation cannot revive unsupported destinations", async ({
 test("Discover selects configured providers and refreshes explicit setup state", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
+  await page.setViewportSize({ width: 320, height: 900 });
   await page.addInitScript(() => {
     let googleConfigured = false;
     let tmdbConfigured = true;
@@ -710,13 +720,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
     .toBe(1);
   const providerBox = await provider.boundingBox();
   expect(providerBox?.height).toBeGreaterThanOrEqual(44);
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth -
-        document.documentElement.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
+  await expectNoHorizontalOverflow(page);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await openWorkbenchSection(page, "Library");
@@ -774,6 +778,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await expect(showResult.getByRole("status")).toHaveText(
     "Record ID: rec_01991f588e0070008000000000000010",
   );
+  await expectNoHorizontalOverflow(page);
   await expect(
     page
       .getByRole("listitem")
