@@ -94,6 +94,7 @@
   function accessibleAccent(value: string): {
     color: string;
     contrast: "#000000" | "#ffffff";
+    rgb: string;
   } {
     const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
     const color = match ? `#${match[1]}` : DEFAULT_THEME_SETTINGS.accentColor;
@@ -108,6 +109,9 @@
     return {
       color,
       contrast: luminance > 0.179 ? "#000000" : "#ffffff",
+      rgb: [1, 3, 5]
+        .map((index) => Number.parseInt(color.slice(index, index + 2), 16))
+        .join(", "),
     };
   }
 
@@ -323,7 +327,12 @@
       root.style.setProperty("--fasti-action-primary", accent.color);
       root.style.setProperty("--fasti-action-contrast", accent.contrast);
       root.style.setProperty("--tblr-primary", accent.color);
+      root.style.setProperty("--tblr-primary-rgb", accent.rgb);
       root.style.setProperty("--tblr-primary-fg", accent.contrast);
+      root.style.setProperty(
+        "--tblr-primary-darken",
+        `color-mix(in srgb, ${accent.color} 88%, ${accent.contrast === "#ffffff" ? "#000000" : "#ffffff"})`,
+      );
     }
     if (themeSettings.fontFamily === "serif") {
       root.style.setProperty(
