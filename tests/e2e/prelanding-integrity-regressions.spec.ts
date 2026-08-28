@@ -8,6 +8,7 @@ type Scenario =
   | "status-setup-error"
   | "status-invalid-response"
   | "status-single-flight"
+  | "status-navigation-single-flight"
   | "credential-delete"
   | "review-resolution"
   | "record-retry"
@@ -157,6 +158,11 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
                   next_action: "Check the address, then retry.",
                 };
               }
+              await new Promise<void>((resolve) => {
+                resolveEndpoint = resolve;
+              });
+            }
+            if (activeScenario === "status-navigation-single-flight") {
               await new Promise<void>((resolve) => {
                 resolveEndpoint = resolve;
               });
@@ -404,6 +410,27 @@ test("packaged retry starts one native health check", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Local service available" }),
   ).toBeVisible();
+});
+
+test("packaged navigation keeps one native health check", async ({ page }) => {
+  await installTrustedHost(page, "status-navigation-single-flight");
+  await page.goto("/status");
+  await expect
+    .poll(() => page.evaluate(() => window.__ENDPOINT_CALLS__?.()))
+    .toBe(1);
+  await expect(page.getByText("Checking the local service")).toBeVisible();
+
+  await page.getByRole("button", { name: "Open Media Workbench" }).click();
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByText("Checking the local service")).toBeVisible();
+  expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(1);
+
+  await page.evaluate(() => window.__RESOLVE_ENDPOINT__?.());
+  await expect(
+    page.getByRole("heading", { name: "Local service available" }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.__ENDPOINT_CALLS__?.())).toBe(1);
 });
 
 test("provider credential removal requires confirmation", async ({ page }) => {

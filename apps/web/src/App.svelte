@@ -212,9 +212,14 @@
 
   function openWorkbench(): void {
     activeSurface = "workbench";
+    cancelBrowserHealthInspection();
+    if (typeof window !== "undefined") window.history.pushState({}, "", "/");
+  }
+
+  function cancelBrowserHealthInspection(): void {
+    if (isTauri) return;
     request?.abort();
     request = undefined;
-    if (typeof window !== "undefined") window.history.pushState({}, "", "/");
   }
 
   function openStatus(): void {
@@ -232,8 +237,7 @@
     if (nextSurface === "status") {
       void inspectHealth();
     } else {
-      request?.abort();
-      request = undefined;
+      cancelBrowserHealthInspection();
     }
   }
 
