@@ -45,9 +45,18 @@ The automated matrix covers only states that the current host can produce:
 | Review resolution  | Empty, open review, one mutation in flight, and resolved state                                                               |
 | Settings           | Browser client URL, saved display state, trusted-host network and credential controls, and browser-disabled host controls   |
 | Service status     | Healthy, unavailable, contract-invalid, duplicate retry prevention, setup-inspection failure, and focus recovery            |
-| Viewports          | 320, 768, and 1440 CSS pixels                                                                                                |
-| Themes             | Light and Dark                                                                                                               |
-| Accessibility      | Keyboard, focus, Axe, contrast, reflow, text spacing, reduced motion, forced colors, and shared 44 CSS pixel product targets |
+| Viewports          | 320, 375, 768, 1024, 1440, and 1920 CSS pixels                                                                               |
+| Themes             | Light, Dark, and distinct Night; every exposed accent, base, font, and radius persists and changes its advertised output     |
+| Accessibility      | Workbench keyboard and modal containment, stable focus contrast, Axe in open and closed overlays, text enlargement, text spacing, reduced motion, forced colors, and shared 44 CSS pixel product targets |
+
+Run the fast structural and focused interaction checks before the complete gate:
+
+```bash
+pnpm lint:ui
+pnpm test:ui -- tests/e2e/workbench-regressions.spec.ts tests/e2e/control-target-regression.spec.ts
+```
+
+`pnpm lint:ui` normally returns in about one second. It names the shell or theme file and the required Tabler primitive. It also rejects accent-owned focus rings and finite component radii that bypass Tabler's scale. The focused browser command proves responsive geometry, Settings canvas ownership, theme truth and continuity, enlarged-text reflow, keyboard containment, focus return, Axe, and 44px targets. The full `pnpm test:ui` suite and `PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr` remain required before a pull request.
 
 Do not add optimistic stories for a capability that has no real host command.
 Add its states when its bounded context, contract or IPC adapter, typed recovery,

@@ -10,6 +10,22 @@ const viewports = [
   { width: 1440, height: 1000 },
 ] as const;
 
+test("the bounded health fixture fails closed for unknown routes", async ({
+  request,
+}) => {
+  const response = await request.get("http://127.0.0.1:18422/api/v1/unknown");
+  expect(response.status()).toBe(404);
+  await expect(response.json()).resolves.toMatchObject({
+    title: "Not found",
+    status: 404,
+  });
+  expect(
+    (
+      await request.get("http://127.0.0.1:18422/api/v1/records-not-a-route")
+    ).status(),
+  ).toBe(404);
+});
+
 async function mockHealth(page: Page) {
   await page.route(healthEndpoint, (route) =>
     route.fulfill({
@@ -20,8 +36,8 @@ async function mockHealth(page: Page) {
   );
 }
 
-async function mockTrustedHost(page: Page) {
-  await page.addInitScript(() => {
+async function mockTrustedHost(page: Page, providerConfigured = false) {
+  await page.addInitScript((configured) => {
     const networkConfiguration = {
       connection: {
         service_url: {
@@ -46,7 +62,7 @@ async function mockTrustedHost(page: Page) {
       {
         provider: "google-books",
         label: "Google Books",
-        configured: false,
+        configured,
         source: "none",
         writable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
@@ -55,6 +71,7 @@ async function mockTrustedHost(page: Page) {
     let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
+      __NUVIO_REPLACE_COUNT__?: number;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_: unknown) => Promise<unknown>;
       };
@@ -72,6 +89,8 @@ async function mockTrustedHost(page: Page) {
             return { document: nuvioDocument };
           case "replace_nuvio_collections": {
             const candidate = arguments_ as { document?: unknown };
+            browserWindow.__NUVIO_REPLACE_COUNT__ =
+              (browserWindow.__NUVIO_REPLACE_COUNT__ ?? 0) + 1;
             nuvioDocument = candidate.document;
             return { document: nuvioDocument };
           }
@@ -99,12 +118,14 @@ async function mockTrustedHost(page: Page) {
               next_action: "Unlock the credential store, then retry.",
             };
           }
+          case "search_provider":
+            throw new Error("Trusted provider execution is unavailable.");
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
         }
       },
     };
-  });
+  }, providerConfigured);
 }
 
 test("the development browser user can sign in and edit but cannot delete the last administrator", async ({
@@ -229,6 +250,12 @@ test("the development browser user can sign in and edit but cannot delete the la
   await dialog.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("button", { name: "Manage account testadmin" }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("list")).toHaveCount(1);
+  await expect(dialog.getByRole("listitem")).toHaveCount(1);
+  await expect(dialog.getByText("Signed in", { exact: true })).toBeVisible();
+  await expect(
+    dialog.getByText("Enabled · test", { exact: true }),
   ).toBeVisible();
 
   await dialog.getByRole("button", { name: "Edit" }).click();
@@ -767,16 +794,31 @@ test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
 test("the saved theme is applied before the application module", async ({
   page,
 }) => {
-  await page.addInitScript(() => localStorage.setItem("fasti-theme", "dark"));
+  await page.addInitScript(() => {
+    localStorage.setItem("fasti-theme", "light");
+    localStorage.setItem(
+      "fasti-theme-settings",
+      JSON.stringify({ mode: "night" }),
+    );
+  });
   await page.route(/\/src\/main\.ts$/, (route) => route.abort());
   await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
-  await expect(page.locator("body")).toHaveCSS(
-    "background-color",
-    "rgb(17, 17, 15)",
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-fasti-theme",
+    "night",
   );
-  await expect(page.locator("body")).toHaveCSS("color", "rgb(255, 253, 248)");
+  const colors = await page.locator("body").evaluate((body) => {
+    const style = getComputedStyle(body);
+    return {
+      background: style.backgroundColor,
+      foreground: style.color,
+    };
+  });
+  expect(colors.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(colors.background).not.toBe("rgb(247, 244, 237)");
+  expect(colors.foreground).not.toBe("rgb(24, 23, 22)");
 });
 
 test("system dark mode survives unavailable local storage", async ({
@@ -928,7 +970,9 @@ test("trusted-host provider settings clear a rejected secret", async ({
   await page.goto("/settings");
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await page.getByRole("button", { name: "Metadata credentials" }).click();
+  await page
+    .getByLabel("Settings section", { exact: true })
+    .selectOption("providers");
   await expect(page.getByText("No credential is configured.")).toBeVisible();
 
   const credential = page.getByLabel("New credential");
@@ -973,6 +1017,19 @@ test("trusted-host provider settings clear a rejected secret", async ({
   });
 });
 
+test("provider connection tests fail closed when trusted execution is unavailable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await mockTrustedHost(page, true);
+  await page.goto("/settings/metadata");
+
+  await page.getByRole("button", { name: "Test Connection" }).click();
+  const result = page.locator(".test-result-alert");
+  await expect(result).toHaveText("Trusted provider execution is unavailable.");
+  await expect(result).not.toContainText("Connection successful");
+});
+
 test("profile Nuvio Collections import, export, and clear stay local", async ({
   page,
 }, testInfo) => {
@@ -983,8 +1040,7 @@ test("profile Nuvio Collections import, export, and clear stay local", async ({
     const origin = new URL(request.url()).origin;
     if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
   });
-  await page.goto("/settings");
-  await page.getByRole("button", { name: "Nuvio Collections" }).click();
+  await page.goto("/settings/collections");
 
   await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
   const input = [
@@ -1032,6 +1088,45 @@ test("profile Nuvio Collections import, export, and clear stay local", async ({
     /^fasti-nuvio-collections-\d{4}-\d{2}-\d{2}\.json$/,
   );
   expect(JSON.parse(await readFile(downloadPath!, "utf8"))).toEqual(input);
+
+  const preset = page.locator(".preset-card").filter({
+    hasText: "Kaptain's Mega Collection",
+  });
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await preset.getByRole("button", { name: "Install pack" }).click();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __NUVIO_REPLACE_COUNT__?: number })
+          .__NUVIO_REPLACE_COUNT__,
+    ),
+  ).toBe(1);
+  const dismissedDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const dismissedDownload = await dismissedDownloadPromise;
+  expect(
+    JSON.parse(await readFile((await dismissedDownload.path())!, "utf8")),
+  ).toEqual(input);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await preset.getByRole("button", { name: "Install pack" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Installed Kaptain's Mega Collection",
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __NUVIO_REPLACE_COUNT__?: number })
+          .__NUVIO_REPLACE_COUNT__,
+    ),
+  ).toBe(2);
+  const presetDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const presetDownload = await presetDownloadPromise;
+  const presetDownloadPath = await presetDownload.path();
+  expect(await readFile(presetDownloadPath!, "utf8")).not.toContain(
+    "coverImageUrl",
+  );
 
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Clear saved document" }).click();

@@ -157,7 +157,7 @@
     padding: 20px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -189,7 +189,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -223,7 +223,7 @@
     color: var(--fasti-text-muted);
     background: var(--fasti-surface-archive);
     padding: 3px 7px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
 
   .conn-desc {

@@ -349,7 +349,7 @@
         {#if session.user.is_admin && host.listBrowserUsers}
           <section class="users" aria-labelledby="browser-users-title">
             <div class="section-heading">
-              <h3 id="browser-users-title">Browser users</h3>
+              <h3 id="browser-users-title">Profiles & Accounts</h3>
               <button
                 type="button"
                 class="text-button"
@@ -360,24 +360,52 @@
             {#if users.length === 0}
               <p class="hint">No browser users are available.</p>
             {:else}
-              <ul>
+              <ul class="profile-cards-list">
                 {#each users as user (user.user_id)}
-                  <li>
-                    <div class="user-name">
-                      <strong>{user.username}</strong>
-                      <span>
-                        {user.active
-                          ? "Active"
-                          : "Inactive"}{user.is_test_account ? " · test" : ""}
-                      </span>
+                  {@const isCurrent = user.user_id === session?.user.user_id}
+                  {@const initial = user.username
+                    ? user.username.charAt(0).toUpperCase()
+                    : "U"}
+                  <li class="profile-card" class:active-profile={isCurrent}>
+                    <div class="profile-avatar-row">
+                      <div
+                        class="profile-avatar"
+                        class:admin-avatar={user.is_admin}
+                      >
+                        <span>{initial}</span>
+                      </div>
+                      <div class="user-name">
+                        <div class="user-title-row">
+                          <strong>{user.username}</strong>
+                          {#if isCurrent}
+                            <span class="badge bg-green-lt text-dark fw-bold"
+                              >Signed in</span
+                            >
+                          {/if}
+                        </div>
+                        <div class="user-meta-row">
+                          <span class="role-pill"
+                            >{user.is_admin ? "Administrator" : "User"}</span
+                          >
+                          <span class="status-meta"
+                            >{user.active
+                              ? "Enabled"
+                              : "Disabled"}{user.is_test_account
+                              ? " · test"
+                              : ""}</span
+                          >
+                        </div>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      class="secondary-button"
-                      onclick={() => beginEdit(user)}
-                    >
-                      <IconPencil size={16} /> Edit
-                    </button>
+                    <div class="profile-card-actions">
+                      <button
+                        type="button"
+                        class="secondary-button"
+                        onclick={() => beginEdit(user)}
+                      >
+                        <IconPencil size={16} /> Edit
+                      </button>
+                    </div>
                   </li>
                 {/each}
               </ul>
@@ -497,7 +525,7 @@
     overflow: auto;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
-    border-radius: 12px;
+    border-radius: calc(12px * var(--tblr-border-radius-scale, 1));
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
   }
   .modal-header {
@@ -554,7 +582,7 @@
     padding: 9px 11px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 38%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
     font: inherit;
@@ -564,7 +592,7 @@
     font: inherit;
   }
   :is(button, input, select):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
   .icon-button,
@@ -589,7 +617,7 @@
   .secondary-button,
   .danger-button {
     padding: 9px 14px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-weight: 650;
   }
   .primary-button {
@@ -622,7 +650,7 @@
   .problem {
     padding: 10px 12px;
     margin-bottom: 16px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow-wrap: anywhere;
   }
   .notice {
@@ -662,21 +690,71 @@
     justify-content: space-between;
     gap: 12px;
   }
-  .users ul {
-    list-style: none;
+  .profile-cards-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    margin-bottom: 0;
     padding: 0;
-    margin: 10px 0 0;
-    border-top: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    list-style: none;
   }
-  .users li {
+  .profile-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 0;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    padding: 12px 14px;
+    background: var(--fasti-surface-archive);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
+    transition: border-color 100ms ease;
+  }
+  .profile-card.active-profile {
+    border-color: var(--fasti-action-primary);
+    background: color-mix(
+      in srgb,
+      var(--fasti-action-primary) 6%,
+      var(--fasti-surface-archive)
+    );
+  }
+  .profile-avatar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .profile-avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+  }
+  .profile-avatar.admin-avatar {
+    background: var(--fasti-brand-mark, #8b2e2a);
+    color: var(--fasti-brand-contrast, #fff);
+  }
+  .user-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .user-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: var(--fasti-text-muted);
+  }
+  .role-pill {
+    font-family: var(--fasti-font-mono);
+    font-size: 0.72rem;
   }
   .edit-panel {
     margin-top: 28px;
@@ -723,9 +801,6 @@
     .session-summary .secondary-button {
       grid-column: 1 / -1;
       width: 100%;
-    }
-    .users li {
-      align-items: flex-start;
     }
   }
 </style>

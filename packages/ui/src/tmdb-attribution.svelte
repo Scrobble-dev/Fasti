@@ -47,7 +47,7 @@
     padding: 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
   }
   .tmdb-credit a {
