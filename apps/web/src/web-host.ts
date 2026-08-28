@@ -1,12 +1,4 @@
-import {
-  connectionEndpoint,
-  FastiClient,
-  parseBrowserSessionResponse,
-  parseBrowserUserDto,
-  parseListBrowserUsersResponse,
-  type BrowserSessionResponse,
-  type BrowserUserDto,
-} from "@fasti/sdk";
+import { connectionEndpoint, FastiClient } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
   AttachIdentifierResult,
@@ -166,52 +158,15 @@ function csrfToken(): string {
 }
 
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
-  let serviceUrl = connectionEndpoint(
-    defaultApiUrl || "http://127.0.0.1:8420",
-    "default",
-  ).url;
   const createClient = (baseUrl: string): FastiClient =>
     new FastiClient({
       baseUrl,
       useBrowserSession: true,
       csrfToken,
     });
-  let client = createClient(serviceUrl);
-
-  async function browserRequest<T>(
-    path: string,
-    method: "GET" | "POST" | "PATCH" | "DELETE",
-    parser?: (value: unknown) => T,
-    body?: unknown,
-  ): Promise<T> {
-    const headers = new Headers({ Accept: "application/json" });
-    if (body !== undefined) headers.set("Content-Type", "application/json");
-    if (method === "PATCH" || method === "DELETE") {
-      const csrf = csrfToken();
-      if (!csrf)
-        throw unavailable(
-          "Your browser session is missing its CSRF proof. Sign in again.",
-        );
-      headers.set("X-Fasti-CSRF", csrf);
-    }
-    const response = await fetch(new URL(path, `${serviceUrl}/`), {
-      method,
-      headers,
-      credentials: "include",
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    if (!response.ok) {
-      let detail = `Fasti returned status ${response.status}.`;
-      try {
-        const problem = (await response.json()) as { detail?: unknown };
-        if (typeof problem.detail === "string") detail = problem.detail;
-      } catch {}
-      throw unavailable(detail);
-    }
-    if (response.status === 204) return undefined as T;
-    const value: unknown = await response.json();
-    return parser ? parser(value) : (value as T);
-  }
+  let client = createClient(
+    connectionEndpoint(defaultApiUrl || "http://127.0.0.1:8420", "default").url,
+  );
 
   return {
     developmentTestAccountHint: import.meta.env.DEV
@@ -255,7 +210,6 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       }
       // Recreate the client with the saved service URL so subsequent SDK
       // calls use the new endpoint rather than the original defaultApiUrl.
-      serviceUrl = endpoint.url;
       client = nextClient;
       return config;
     },
@@ -264,21 +218,16 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       endpoint: string,
     ): Promise<EndpointConnectionStatus> {
       const target = connectionEndpoint(endpoint);
-      const response = await fetch(new URL("/api/v1/health", target.url), {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok) {
-        throw unavailable(`The endpoint returned status ${response.status}.`);
-      }
-      const data = (await response.json()) as {
-        status?: string;
-        version?: string;
-      };
+      const health = await new FastiClient({
+        baseUrl: target.url,
+        timeoutMs: 3_000,
+        retryPolicy: { maxAttempts: 1 },
+      }).health();
       return {
         endpoint: target.url,
         scheme: target.scheme,
-        status: data.status ?? "healthy",
-        version: data.version ?? "unknown",
+        status: health.status,
+        version: health.version,
       };
     },
 
@@ -377,61 +326,40 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       password: string,
       sessionTimeoutMinutes: number,
     ): Promise<BrowserSession> {
-      return browserRequest<BrowserSessionResponse>(
-        "/api/v1/browser/session",
-        "POST",
-        parseBrowserSessionResponse,
-        {
-          username,
-          password,
-          session_timeout_minutes: sessionTimeoutMinutes,
-        },
-      ) as Promise<BrowserSession>;
+      return client.createBrowserSession({
+        username,
+        password,
+        session_timeout_minutes: sessionTimeoutMinutes,
+      });
     },
 
     async currentBrowserSession(): Promise<BrowserSession> {
-      return browserRequest<BrowserSessionResponse>(
-        "/api/v1/browser/session",
-        "GET",
-        parseBrowserSessionResponse,
-      ) as Promise<BrowserSession>;
+      return client.readBrowserSession();
     },
 
     async endBrowserSession(): Promise<void> {
-      await browserRequest<void>("/api/v1/browser/session", "DELETE");
+      await client.endBrowserSession();
     },
 
     async listBrowserUsers(): Promise<BrowserUser[]> {
-      const response = await browserRequest(
-        "/api/v1/browser/users",
-        "GET",
-        parseListBrowserUsersResponse,
-      );
-      return response.users as BrowserUser[];
+      const response = await client.listBrowserUsers();
+      return [...response.users];
     },
 
     async updateBrowserUser(
       userId: string,
       input: BrowserUserUpdate,
     ): Promise<BrowserUser> {
-      return browserRequest<BrowserUserDto>(
-        `/api/v1/browser/users/${encodeURIComponent(userId)}`,
-        "PATCH",
-        parseBrowserUserDto,
-        input,
-      ) as Promise<BrowserUser>;
+      return client.updateBrowserUser(userId, input);
     },
 
     async deleteBrowserUser(
       userId: string,
       currentPassword: string,
     ): Promise<void> {
-      await browserRequest<void>(
-        `/api/v1/browser/users/${encodeURIComponent(userId)}`,
-        "DELETE",
-        undefined,
-        { current_password: currentPassword },
-      );
+      await client.deleteBrowserUser(userId, {
+        current_password: currentPassword,
+      });
     },
   };
 }

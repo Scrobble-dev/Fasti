@@ -3,6 +3,8 @@ import {
   LOCAL_BOOTSTRAP_OPERATIONS,
   LOCAL_RUNTIME_OPERATIONS,
   FastiContractParseError,
+  parseBrowserSessionResponse,
+  parseBrowserUserDto,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
   parseAttachIdentifierRequest,
@@ -11,12 +13,15 @@ import {
   parseClientEnrollmentResponse,
   parseCreateRecordRequest,
   parseCreateRecordResponse,
+  parseCreateBrowserSessionRequest,
+  parseDeleteBrowserUserRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListBrowserUsersResponse,
   parseListTrackingDispositionsResponse,
   parseNuvioCollectionsDocumentDto,
   parseNuvioCollectionsStateDto,
@@ -27,6 +32,7 @@ import {
   parseRegisterNamespaceResponse,
   parseSetTrackingDispositionRequest,
   parseTrackingDispositionStateDto,
+  parseUpdateBrowserUserRequest,
   parseReplayReceiptResponse,
   parseSubmitObservationRequest,
   parseSubmitObservationResponse,
@@ -35,17 +41,22 @@ import {
   type AcceptObservationResponse,
   type AttachIdentifierRequest,
   type AttachIdentifierResponse,
+  type BrowserSessionResponse,
+  type BrowserUserDto,
   type CapabilityDiscoveryResponse,
   type CapabilityId,
   type ClientEnrollmentResponse,
   type CreateRecordRequest,
   type CreateRecordResponse,
+  type CreateBrowserSessionRequest,
+  type DeleteBrowserUserRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListBrowserUsersResponse,
   type ListTrackingDispositionsResponse,
   type NuvioCollectionsDocumentDto,
   type NuvioCollectionsStateDto,
@@ -60,6 +71,7 @@ import {
   type SubmitObservationRequest,
   type SubmitObservationResponse,
   type TrackingDispositionStateDto,
+  type UpdateBrowserUserRequest,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -222,6 +234,7 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const USER_ID = /^usr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -686,6 +699,125 @@ export class FastiClient {
     });
   }
 
+  createBrowserSession(
+    request: CreateBrowserSessionRequest,
+    options: CallOptions = {},
+  ): Promise<BrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.createBrowserSession;
+    const body = parseOutgoing(
+      parseCreateBrowserSessionRequest,
+      request,
+      "Create browser session request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseBrowserSessionResponse,
+      responseLabel: "Create browser session response",
+      options,
+    });
+  }
+
+  readBrowserSession(
+    options: CallOptions = {},
+  ): Promise<BrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseBrowserSessionResponse,
+      responseLabel: "Read browser session response",
+      options,
+    });
+  }
+
+  endBrowserSession(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.endBrowserSession;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: undefined,
+      responseLabel: "End browser session response",
+      options,
+    });
+  }
+
+  listBrowserUsers(
+    options: CallOptions = {},
+  ): Promise<ListBrowserUsersResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listBrowserUsers;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListBrowserUsersResponse,
+      responseLabel: "List browser users response",
+      options,
+    });
+  }
+
+  updateBrowserUser(
+    userId: string,
+    request: UpdateBrowserUserRequest,
+    options: CallOptions = {},
+  ): Promise<BrowserUserDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.updateBrowserUser;
+    const safeUserId = contractPathIdentifier(userId, USER_ID, "userId");
+    const body = parseOutgoing(
+      parseUpdateBrowserUserRequest,
+      request,
+      "Update browser user request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace("{user_id}", encodeURIComponent(safeUserId)),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseBrowserUserDto,
+      responseLabel: "Update browser user response",
+      options,
+    });
+  }
+
+  deleteBrowserUser(
+    userId: string,
+    request: DeleteBrowserUserRequest,
+    options: CallOptions = {},
+  ): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.deleteBrowserUser;
+    const safeUserId = contractPathIdentifier(userId, USER_ID, "userId");
+    const body = parseOutgoing(
+      parseDeleteBrowserUserRequest,
+      request,
+      "Delete browser user request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace("{user_id}", encodeURIComponent(safeUserId)),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: undefined,
+      responseLabel: "Delete browser user response",
+      options,
+    });
+  }
+
   /**
    * Opens the governed receipt SSE fixture and performs bounded reconnects.
    * This never persists or queues events, and only reconnects the safe stream.
@@ -854,13 +986,13 @@ export class FastiClient {
   }
 
   async #jsonOperation<T>(input: {
-    readonly method: "DELETE" | "GET" | "POST" | "PUT";
+    readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
     readonly path: string;
     readonly authenticated: boolean;
     readonly problemContract: ProblemContractBinding;
     readonly retryMode: RetryMode;
     readonly body?: unknown;
-    readonly responseParser: JsonParser<T>;
+    readonly responseParser?: JsonParser<T>;
     readonly responseLabel: string;
     readonly maxResponseBytes?: number;
     readonly options: CallOptions;
@@ -918,6 +1050,20 @@ export class FastiClient {
         }
         if (!response.ok) {
           throw await problemOrTransportError(response, input.problemContract);
+        }
+        if (input.responseParser === undefined) {
+          if (response.status !== 204) {
+            await response.body?.cancel();
+            throw new FastiProtocolError(
+              `${input.responseLabel} must use status 204`,
+            );
+          }
+          return undefined as T;
+        }
+        if (response.status === 204) {
+          throw new FastiProtocolError(
+            `${input.responseLabel} must contain generated JSON`,
+          );
         }
         if (!contentTypeIs(response, "application/json")) {
           throw new FastiProtocolError(

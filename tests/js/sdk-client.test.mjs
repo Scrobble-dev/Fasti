@@ -47,6 +47,7 @@ const contractIds = {
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
+  user: v7("usr", "9"),
 };
 
 test("browser session DTOs enforce generated boolean schemas", () => {
@@ -71,6 +72,92 @@ test("browser session DTOs enforce generated boolean schemas", () => {
         user: { ...session.user, active: "true" },
       }),
     FastiContractParseError,
+  );
+});
+
+test("browser session SDK uses generated DTOs, cookies, CSRF, and exact empty responses", async () => {
+  const csrf = "a".repeat(64);
+  const user = {
+    active: true,
+    created_at: "2026-08-28T10:00:00Z",
+    is_admin: true,
+    is_test_account: true,
+    updated_at: "2026-08-28T10:00:00Z",
+    user_id: contractIds.user,
+    username: "testadmin",
+  };
+  const session = { expires_at: "2026-08-28T12:00:00Z", user };
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    useBrowserSession: true,
+    csrfToken: csrf,
+    fetch: async (url, init) => {
+      const method = init?.method ?? "GET";
+      const path = new URL(url).pathname;
+      calls.push({
+        path,
+        method,
+        csrf: new Headers(init?.headers).get("x-fasti-csrf"),
+        credentials: init?.credentials,
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      if (method === "DELETE") return new Response(null, { status: 204 });
+      const body =
+        path === "/api/v1/browser/users"
+          ? { users: [user] }
+          : path.startsWith("/api/v1/browser/users/")
+            ? user
+            : session;
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await client.createBrowserSession({
+      username: user.username,
+      password: user.username,
+      session_timeout_minutes: 60,
+    }),
+    session,
+  );
+  assert.deepEqual(await client.readBrowserSession(), session);
+  await client.endBrowserSession();
+  assert.deepEqual(await client.listBrowserUsers(), { users: [user] });
+  assert.deepEqual(
+    await client.updateBrowserUser(contractIds.user, {
+      current_password: user.username,
+      username: "editedadmin",
+    }),
+    user,
+  );
+  await client.deleteBrowserUser(contractIds.user, {
+    current_password: user.username,
+  });
+
+  assert.deepEqual(
+    calls.map(({ method, csrf: header, credentials }) => ({
+      method,
+      csrf: header,
+      credentials,
+    })),
+    [
+      { method: "POST", csrf: null, credentials: "include" },
+      { method: "GET", csrf: null, credentials: "include" },
+      { method: "DELETE", csrf, credentials: "include" },
+      { method: "GET", csrf: null, credentials: "include" },
+      { method: "PATCH", csrf, credentials: "include" },
+      { method: "DELETE", csrf, credentials: "include" },
+    ],
+  );
+  assert.throws(
+    () =>
+      client.updateBrowserUser("not-a-user", {
+        current_password: user.username,
+      }),
+    /userId does not match the generated contract/,
   );
 });
 
@@ -507,16 +594,21 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "clearNuvioCollections",
           "configureListener",
           "constructor",
+          "createBrowserSession",
           "createRecord",
+          "deleteBrowserUser",
           "discoverCapabilities",
+          "endBrowserSession",
           "enrollDurableFirstClient",
           "enrollFirstClient",
           "getNuvioCollections",
           "health",
           "initializeDurableNode",
           "initializeNode",
+          "listBrowserUsers",
           "listRecords",
           "listTrackingDispositions",
+          "readBrowserSession",
           "receiptEvents",
           "registerNamespace",
           "replaceNuvioCollections",
@@ -526,6 +618,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "selectProfile",
           "setTrackingDisposition",
           "submitObservation",
+          "updateBrowserUser",
         ]);
       },
     );

@@ -112,7 +112,8 @@ test("the development browser user can sign in, edit, and delete itself", async 
 }) => {
   const developmentUsername = "testadmin";
   const editedUsername = developmentUsername.replace("test", "edited");
-  const userId = "usr_01991f58-8e00-7000-8000-000000000001";
+  const csrfToken = "a".repeat(64);
+  const userId = "usr_01991f588e0070008000000000000001";
   let user = {
     active: true,
     created_at: "2026-08-28T00:00:00Z",
@@ -144,7 +145,7 @@ test("the development browser user can sign in, edit, and delete itself", async 
       status: 200,
       contentType: "application/json",
       headers: {
-        "set-cookie": "fasti_csrf=csrf-test; Path=/; SameSite=Strict",
+        "set-cookie": `fasti_csrf=${csrfToken}; Path=/; SameSite=Strict`,
       },
       body: JSON.stringify({
         expires_at: "2026-08-28T01:00:00Z",
@@ -161,7 +162,7 @@ test("the development browser user can sign in, edit, and delete itself", async 
       });
       return;
     }
-    expect(request.headers()["x-fasti-csrf"]).toBe("csrf-test");
+    expect(request.headers()["x-fasti-csrf"]).toBe(csrfToken);
     const body = request.postDataJSON();
     if (request.method() === "PATCH") {
       expect(body.current_password).toBe(user.username);
