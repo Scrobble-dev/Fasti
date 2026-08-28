@@ -81,12 +81,27 @@
   $effect(() => {
     if (activeTab && activeTab !== active) {
       active = activeTab;
+      if (activeTab === "nuvio_collections") void loadNuvioCollections();
     }
   });
 
   function switchTab(tab: typeof active) {
     active = tab;
     onTabChange?.(tab);
+    if (tab === "nuvio_collections") void loadNuvioCollections();
+  }
+
+  function followTabLink(event: MouseEvent, tab: typeof active): void {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    event.preventDefault();
+    switchTab(tab);
   }
 
   let showPassword = $state<Record<string, boolean>>({});
@@ -517,7 +532,7 @@
   }
 
   onMount(() => {
-    void Promise.all([loadNetwork(), loadProviders(), loadNuvioCollections()]);
+    void Promise.all([loadNetwork(), loadProviders()]);
   });
 
   let newFieldName = $state("");
@@ -655,56 +670,83 @@
   }
 </script>
 
-<div class="settings-container">
+<div class="settings-container container-fluid">
   <header>
     <h1>Settings</h1>
     <p>Only settings with an active host capability are editable here.</p>
   </header>
 
   <div class="settings-layout">
-    <nav aria-label="Settings sections">
-      <button
-        type="button"
-        class:active={active === "network"}
-        aria-pressed={active === "network"}
-        onclick={() => switchTab("network")}>Network</button
-      >
-      <button
-        type="button"
-        class:active={active === "providers"}
-        aria-pressed={active === "providers"}
-        onclick={() => switchTab("providers")}>Metadata credentials</button
-      >
-      <button
-        type="button"
-        class:active={active === "preferences"}
-        aria-pressed={active === "preferences"}
-        onclick={() => switchTab("preferences")}
-        ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</button
-      >
-      <button
-        type="button"
-        class:active={active === "custom_fields"}
-        aria-pressed={active === "custom_fields"}
-        onclick={() => switchTab("custom_fields")}
-        ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
-      >
-      <button
-        type="button"
-        class:active={active === "nuvio_collections"}
-        aria-pressed={active === "nuvio_collections"}
-        onclick={() => {
-          switchTab("nuvio_collections");
-          void loadNuvioCollections();
-        }}>Nuvio Collections</button
-      >
-      <button
-        type="button"
-        class:active={active === "system"}
-        aria-pressed={active === "system"}
-        onclick={() => switchTab("system")}>Capability status</button
-      >
-    </nav>
+    <div class="settings-navigation">
+      <div class="settings-section-selector">
+        <label for="settings-section" class="form-label">Settings section</label
+        >
+        <select
+          id="settings-section"
+          class="form-select"
+          value={active}
+          onchange={(event) =>
+            switchTab(event.currentTarget.value as typeof active)}
+        >
+          <option value="network">Network</option>
+          <option value="providers">Metadata credentials</option>
+          <option value="preferences">Preferences & Metadata</option>
+          <option value="custom_fields">Custom Types & Fields</option>
+          <option value="nuvio_collections">Nuvio Collections</option>
+          <option value="system">Capability status</option>
+        </select>
+      </div>
+
+      <nav class="settings-nav list-group" aria-label="Settings sections">
+        <a
+          href="/settings"
+          class="list-group-item list-group-item-action"
+          class:active={active === "network"}
+          aria-current={active === "network" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "network")}>Network</a
+        >
+        <a
+          href="/settings/metadata"
+          class="list-group-item list-group-item-action"
+          class:active={active === "providers"}
+          aria-current={active === "providers" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "providers")}
+          >Metadata credentials</a
+        >
+        <a
+          href="/settings/preferences"
+          class="list-group-item list-group-item-action"
+          class:active={active === "preferences"}
+          aria-current={active === "preferences" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "preferences")}
+          ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</a
+        >
+        <a
+          href="/settings/custom-fields"
+          class="list-group-item list-group-item-action"
+          class:active={active === "custom_fields"}
+          aria-current={active === "custom_fields" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "custom_fields")}
+          ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</a
+        >
+        <a
+          href="/settings/collections"
+          class="list-group-item list-group-item-action"
+          class:active={active === "nuvio_collections"}
+          aria-current={active === "nuvio_collections" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "nuvio_collections")}
+          >Nuvio Collections</a
+        >
+        <a
+          href="/settings/status"
+          class="list-group-item list-group-item-action"
+          class:active={active === "system"}
+          aria-current={active === "system" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "system")}
+          >Capability status</a
+        >
+      </nav>
+    </div>
 
     <div class="settings-panel">
       {#if active === "network"}
@@ -1627,9 +1669,10 @@
 
 <style>
   .settings-container {
-    max-width: 1080px;
-    margin: 0 auto;
-    padding: 32px 24px 64px;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: clamp(20px, 2vw, 32px) clamp(16px, 2.5vw, 40px) 64px;
   }
 
   header {
@@ -1664,45 +1707,52 @@
 
   .settings-layout {
     display: grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 24px;
+    grid-template-columns: minmax(12rem, 14rem) minmax(0, 1fr);
+    gap: clamp(20px, 2.5vw, 40px);
   }
 
-  nav {
+  .settings-nav {
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
 
-  nav button {
+  .settings-nav a {
     min-height: 44px;
     display: flex;
     align-items: center;
     gap: 8px;
-    border: 0;
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 9px 12px;
     text-align: left;
-    background: transparent;
     color: var(--fasti-text-muted);
-    cursor: pointer;
+    text-decoration: none;
   }
 
-  nav button:hover,
-  nav button.active {
+  .settings-nav a:hover,
+  .settings-nav a.active {
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
   }
 
-  nav button.active {
+  .settings-nav a.active {
     font-weight: 700;
     box-shadow: inset 3px 0 0 var(--fasti-action-primary);
+  }
+
+  .settings-section-selector {
+    display: none;
+    width: min(100%, 28rem);
+  }
+
+  .settings-panel {
+    min-width: 0;
   }
 
   button:focus-visible,
   a:focus-visible,
   input:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -1743,7 +1793,7 @@
     font-size: 0.75rem;
     font-weight: 700;
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
   }
 
   .status-badge.configured {
@@ -1808,7 +1858,7 @@
     gap: 8px;
     margin-top: 10px;
     padding: 8px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.875rem;
   }
 
@@ -1856,7 +1906,7 @@
   .provider-card {
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     padding: 16px;
     background: var(--fasti-surface-paper);
   }
@@ -1893,7 +1943,7 @@
     min-width: 0;
     min-height: 44px;
     border: 1px solid var(--fasti-border, currentColor);
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 8px 10px;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
@@ -1910,7 +1960,7 @@
     padding: 12px 14px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-state-attention) 45%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-state-attention) 9%,
@@ -1967,7 +2017,7 @@
     padding: 16px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 12px;
   }
 
@@ -1989,7 +2039,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     font-size: 0.88rem;
   }
 
@@ -2023,7 +2073,7 @@
     margin: 20px 0;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
 
@@ -2069,7 +2119,7 @@
     padding: 16px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -2099,7 +2149,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 8px 13px;
     font-weight: 650;
     cursor: pointer;
@@ -2148,7 +2198,7 @@
     margin: 20px 0 0;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
 
@@ -2200,7 +2250,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 16px;
     display: flex;
     flex-direction: column;
@@ -2256,7 +2306,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 14px 16px;
   }
 
@@ -2274,7 +2324,7 @@
     text-transform: uppercase;
     padding: 2px 6px;
     background: var(--fasti-surface-archive);
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     color: var(--fasti-text-muted);
   }
 
@@ -2333,7 +2383,7 @@
     font-size: 0.72rem;
     padding: 2px 8px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     color: var(--fasti-text-muted);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
@@ -2348,21 +2398,13 @@
       grid-template-columns: minmax(0, 1fr);
     }
 
-    nav {
-      flex-direction: row;
-      overflow-x: auto;
-      padding-block-end: 4px;
-      scroll-snap-type: inline proximity;
+    .settings-section-selector {
+      display: grid;
+      gap: 6px;
     }
 
-    nav button {
-      flex: 0 0 auto;
-      white-space: nowrap;
-      scroll-snap-align: start;
-    }
-
-    nav button.active {
-      box-shadow: inset 0 -3px 0 var(--fasti-action-primary);
+    .settings-nav {
+      display: none;
     }
 
     .section-heading,

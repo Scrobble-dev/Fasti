@@ -167,7 +167,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 8px 14px;
     text-align: right;
   }
@@ -205,7 +205,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     transition:
       transform 120ms ease,
@@ -251,7 +251,7 @@
     font-weight: 700;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
     color: var(--fasti-text-muted);
   }
@@ -284,7 +284,7 @@
     font-family: var(--fasti-font-mono);
     font-size: 0.7rem;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-action-primary) 15%,
@@ -352,7 +352,7 @@
       transparent
     );
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
 
   .rating-badge {

@@ -17,7 +17,10 @@ test("Workbench routes expose one current navigation item", async ({
     ["/connections", "Connections"],
   ] as const) {
     await page.goto(path);
-    const current = page.locator('[aria-current="page"]');
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    const current = page
+      .getByRole("dialog", { name: "Main navigation" })
+      .locator('[aria-current="page"]');
     await expect(current).toHaveCount(1);
     await expect(current).toHaveAccessibleName(name);
   }

@@ -95,9 +95,11 @@
   }
 
   function handleInputKeydown(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      open = false;
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
       query = "";
+      open = false;
+      input?.focus();
       return;
     }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -121,16 +123,29 @@
     }
   }
 
+  function handleResultKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    query = "";
+    open = false;
+    input?.focus();
+  }
+
+  function handleFocusOut(): void {
+    queueMicrotask(() => {
+      if (!root?.contains(document.activeElement)) open = false;
+    });
+  }
+
   onMount(() => {
     const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const editing =
-        target?.matches("input, textarea, select") || target?.isContentEditable;
+      if (
+        document.querySelector(
+          'dialog[open], [role="dialog"][aria-modal="true"]',
+        )
+      )
+        return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        input?.focus();
-        open = true;
-      } else if (!editing && event.key === "/") {
         event.preventDefault();
         input?.focus();
         open = true;
@@ -148,7 +163,7 @@
   });
 </script>
 
-<div class="global-search" bind:this={root}>
+<div class="global-search" bind:this={root} onfocusout={handleFocusOut}>
   <IconSearch size={17} aria-hidden="true" />
   <input
     bind:this={input}
@@ -187,6 +202,7 @@
             class:active={index === activeIndex}
             onpointermove={() => (activeIndex = index)}
             onclick={() => choose(result)}
+            onkeydown={handleResultKeydown}
           >
             {#if result.kind === "record"}
               <span class="result-art" aria-hidden="true">
@@ -238,13 +254,13 @@
     padding: 8px 72px 8px 38px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
   }
 
   input:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -255,7 +271,7 @@
     gap: 3px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 20%, transparent));
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     padding: 2px 5px;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-muted);
@@ -272,7 +288,7 @@
     overflow: auto;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 20%, transparent));
-    border-radius: 7px;
+    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     box-shadow: 0 14px 32px rgba(0, 0, 0, 0.18);
     padding: 6px;
@@ -291,7 +307,7 @@
     align-items: center;
     gap: 10px;
     border: 0;
-    border-radius: 5px;
+    border-radius: calc(5px * var(--tblr-border-radius-scale, 1));
     padding: 6px 9px;
     background: transparent;
     color: var(--fasti-text-primary);
@@ -311,7 +327,7 @@
     display: grid;
     place-items: center;
     overflow: hidden;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-muted);
     font-family: var(--fasti-font-mono);

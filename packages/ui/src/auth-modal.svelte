@@ -496,7 +496,7 @@
     overflow: auto;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
-    border-radius: 12px;
+    border-radius: calc(12px * var(--tblr-border-radius-scale, 1));
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
   }
   .modal-header {
@@ -553,7 +553,7 @@
     padding: 9px 11px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 38%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
     font: inherit;
@@ -563,7 +563,7 @@
     font: inherit;
   }
   :is(button, input, select):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
   .icon-button,
@@ -588,7 +588,7 @@
   .secondary-button,
   .danger-button {
     padding: 9px 14px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-weight: 650;
   }
   .primary-button {
@@ -621,7 +621,7 @@
   .problem {
     padding: 10px 12px;
     margin-bottom: 16px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow-wrap: anywhere;
   }
   .notice {
@@ -676,7 +676,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     transition: border-color 100ms ease;
   }
   .profile-card.active-profile {
@@ -719,7 +719,7 @@
     padding: 2px 6px;
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
   .user-meta-row {
     display: flex;

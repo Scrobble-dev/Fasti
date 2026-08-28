@@ -586,7 +586,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 2px;
   }
 
@@ -599,7 +599,7 @@
     min-height: 44px;
     border: none;
     background: transparent;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     color: var(--fasti-text-muted);
     cursor: pointer;
   }
@@ -637,7 +637,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     color: var(--fasti-text-primary);
   }
@@ -675,7 +675,7 @@
     text-align: center;
     padding: 48px 24px;
     background: var(--fasti-surface-paper);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     border: 1px dashed
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
   }
@@ -688,7 +688,7 @@
     background: var(--fasti-brand-mark);
     color: var(--fasti-brand-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -718,7 +718,7 @@
     position: relative;
     width: 100%;
     aspect-ratio: 2 / 3;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     background: var(--fasti-surface-archive);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
@@ -754,7 +754,7 @@
     font-weight: 700;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.75);
     color: var(--fasti-overlay-contrast);
   }
@@ -767,7 +767,7 @@
     font-size: 0.68rem;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.75);
     color: var(--fasti-overlay-contrast);
     letter-spacing: -0.02em;
@@ -799,7 +799,7 @@
     font-size: 0.72rem;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.8);
     color: var(--fasti-brand-gold);
   }
@@ -812,7 +812,7 @@
     font-size: 0.7rem;
     font-weight: 700;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: rgba(0, 0, 0, 0.8);
     color: var(--fasti-overlay-contrast);
   }
@@ -873,7 +873,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
 
@@ -904,7 +904,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
   }
 
@@ -913,7 +913,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
 
   .status-pill.watching {
@@ -948,7 +948,7 @@
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
     color: var(--fasti-text-muted);
   }

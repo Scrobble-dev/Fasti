@@ -290,7 +290,7 @@ The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user
 
 The approved [brand and design system](brand/DESIGN.md) is a protected input. B0 preserves its tokens, logos, boards, preview assets, accessibility rules, and ADHD/AuDHD state-continuity requirements byte-for-byte.
 
-The pre-production Workbench is the active B4 interface over the headless contract and local kernel. It provides media-first navigation, poster and row views, a collapsible rail, browser account access, global record and navigation search, implemented data reads, configurable grouped record actions, profile-owned tracking disposition, profile-scoped Nuvio custom Collections import/export, and a Tabler-based theme panel governed by Fasti tokens. Unsupported completion, progress, watchlist, collection membership, review, and tag mutations remain visibly unavailable instead of reporting prototype success. There is no playback control and no persistent “offline ready” badge.
+The pre-production Workbench is the active B4 interface over the headless contract and local kernel. It provides media-first navigation, poster and row views, a Tabler vertical navbar with narrow-screen offcanvas navigation, browser account access, global record and navigation search, implemented data reads, configurable grouped record actions, profile-owned tracking disposition, profile-scoped Nuvio custom Collections import/export, and a Tabler-based theme panel governed by Fasti tokens. Unsupported completion, progress, watchlist, collection membership, review, and tag mutations remain visibly unavailable instead of reporting prototype success. There is no playback control and no persistent “offline ready” badge.
 
 ## Relationship to Scrobble.dev
 

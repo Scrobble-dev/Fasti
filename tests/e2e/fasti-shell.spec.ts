@@ -732,16 +732,31 @@ test("the Vite proxy reaches the bounded health fixture", async ({ page }) => {
 test("the saved theme is applied before the application module", async ({
   page,
 }) => {
-  await page.addInitScript(() => localStorage.setItem("fasti-theme", "dark"));
+  await page.addInitScript(() => {
+    localStorage.setItem("fasti-theme", "light");
+    localStorage.setItem(
+      "fasti-theme-settings",
+      JSON.stringify({ mode: "night" }),
+    );
+  });
   await page.route(/\/src\/main\.ts$/, (route) => route.abort());
   await page.goto("/status");
 
   await expect(page.locator("html")).toHaveAttribute("data-bs-theme", "dark");
-  await expect(page.locator("body")).toHaveCSS(
-    "background-color",
-    "rgb(17, 17, 15)",
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-fasti-theme",
+    "night",
   );
-  await expect(page.locator("body")).toHaveCSS("color", "rgb(255, 253, 248)");
+  const colors = await page.locator("body").evaluate((body) => {
+    const style = getComputedStyle(body);
+    return {
+      background: style.backgroundColor,
+      foreground: style.color,
+    };
+  });
+  expect(colors.background).not.toBe("rgba(0, 0, 0, 0)");
+  expect(colors.background).not.toBe("rgb(247, 244, 237)");
+  expect(colors.foreground).not.toBe("rgb(24, 23, 22)");
 });
 
 test("system dark mode survives unavailable local storage", async ({
@@ -893,7 +908,9 @@ test("trusted-host provider settings clear a rejected secret", async ({
   await page.goto("/settings");
 
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-  await page.getByRole("button", { name: "Metadata credentials" }).click();
+  await page
+    .getByLabel("Settings section", { exact: true })
+    .selectOption("providers");
   await expect(page.getByText("No credential is configured.")).toBeVisible();
 
   const credential = page.getByLabel("New credential");
@@ -949,7 +966,9 @@ test("profile Nuvio Collections import, export, and clear stay local", async ({
     if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
   });
   await page.goto("/settings");
-  await page.getByRole("button", { name: "Nuvio Collections" }).click();
+  await page
+    .getByLabel("Settings section", { exact: true })
+    .selectOption("nuvio_collections");
 
   await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
   const input = [

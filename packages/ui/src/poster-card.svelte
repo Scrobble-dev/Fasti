@@ -207,7 +207,7 @@
     top: 8px;
     width: 26px;
     height: 26px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     display: flex;
     align-items: center;
     justify-content: center;

@@ -3,6 +3,12 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const browserOrigin = "http://127.0.0.1:4173";
 
+async function openWorkbenchSection(page: Page, name: string): Promise<void> {
+  const trigger = page.getByRole("button", { name: "Open navigation" });
+  if (await trigger.isVisible()) await trigger.click();
+  await page.getByRole("link", { name, exact: true }).click();
+}
+
 function recordResponse(
   title = "A bounded local record",
   poster: string | null = null,
@@ -185,6 +191,31 @@ test("endpoint testing rejects a contract-invalid health response", async ({
   await expect(page.getByRole("status")).toHaveCount(0);
 });
 
+test("an invalid service URL cannot overwrite the last valid endpoint", async ({
+  page,
+}) => {
+  const validEndpoint = "http://localhost:8420";
+  await page.addInitScript((endpoint) => {
+    localStorage.setItem(
+      "fasti-network-config",
+      JSON.stringify({ service_url: endpoint }),
+    );
+  }, validEndpoint);
+  await page.goto("/settings");
+  await expect(page.getByLabel("Service URL")).toHaveValue(validEndpoint);
+
+  await page
+    .getByLabel("Service URL")
+    .fill("https://invalid.fasti.test/path-is-not-allowed");
+  await page.getByRole("button", { name: "Save service URL" }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "must contain only a scheme, host, and optional port",
+  );
+
+  await page.reload();
+  await expect(page.getByLabel("Service URL")).toHaveValue(validEndpoint);
+});
+
 test("a saved service URL owns browser record and status requests after reload", async ({
   page,
 }) => {
@@ -277,7 +308,7 @@ test("changing the browser service URL resets the origin-bound session state", a
     }),
   );
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await openWorkbenchSection(page, "Settings");
   await page.getByLabel("Service URL").fill("https://new.fasti.test");
   await page.getByRole("button", { name: "Save service URL" }).click();
   await expect(page.getByRole("status")).toHaveText("Settings saved.");
@@ -311,7 +342,7 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
     page.getByRole("heading", { name: "Summary-only record" }).first(),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await openWorkbenchSection(page, "Library");
   await expect(page.getByText("Review up to 500 records")).toBeVisible();
   await expect(page.getByRole("button", { name: "Grid view" })).toHaveAttribute(
     "aria-pressed",
@@ -341,7 +372,7 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
     page.getByText("No external identifiers are attached."),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await openWorkbenchSection(page, "Calendar");
   await expect(
     page.getByRole("heading", { name: "Up Next & Calendar" }),
   ).toBeVisible();
@@ -375,7 +406,7 @@ test("legacy saved navigation cannot revive unsupported destinations", async ({
   await expect(page.getByRole("button", { name: "Legacy Movies" })).toHaveCount(
     0,
   );
-  await expect(page.getByRole("button", { name: "Overview" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
 });
 
 test("Discover selects configured providers and refreshes explicit setup state", async ({
@@ -497,8 +528,8 @@ test("Discover selects configured providers and refreshes explicit setup state",
   ).toBeLessThanOrEqual(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
-  await page.getByRole("button", { name: "Library", exact: true }).click();
-  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await openWorkbenchSection(page, "Library");
+  await openWorkbenchSection(page, "Discover");
   await expect
     .poll(() =>
       page.evaluate(
@@ -548,13 +579,15 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await expect(page.getByRole("heading", { name: "Breaking Bad" })).toHaveCount(
     0,
   );
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await openWorkbenchSection(page, "Settings");
   await page
-    .getByRole("button", { name: "Metadata credentials", exact: true })
-    .click();
+    .getByLabel("Settings section", { exact: true })
+    .selectOption("providers");
   await page.getByLabel("New credential").fill("provider-secret");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Credential saved");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Credential saved" }),
+  ).toBeVisible();
   expect(page.url()).not.toContain("provider-secret");
   expect(await page.locator("body").innerText()).not.toContain(
     "provider-secret",
@@ -567,7 +600,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
       ),
   ).not.toContain("provider-secret");
 
-  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await openWorkbenchSection(page, "Discover");
   await expect(page.getByLabel("Metadata provider")).toHaveValue(
     "google-books",
   );
@@ -586,8 +619,8 @@ test("Discover selects configured providers and refreshes explicit setup state",
       }
     ).__SET_TMDB_CONFIGURED__?.(false),
   );
-  await page.getByRole("button", { name: "Library", exact: true }).click();
-  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await openWorkbenchSection(page, "Library");
+  await openWorkbenchSection(page, "Discover");
   await expect(provider).toHaveValue("tmdb");
   await expect(
     page.getByRole("heading", { name: "TMDB needs a credential" }),

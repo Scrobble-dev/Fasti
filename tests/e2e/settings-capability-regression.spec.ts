@@ -8,11 +8,9 @@ test("inactive settings stay visible without reporting false success", async ({
   await page.setViewportSize({ width: 768, height: 1024 });
   await page.goto("/settings");
 
-  const preferences = page.getByRole("button", {
-    name: "Preferences & Metadata",
-  });
-  await preferences.click();
-  await expect(preferences).toHaveAttribute("aria-pressed", "true");
+  const settingsSection = page.getByLabel("Settings section", { exact: true });
+  await settingsSection.selectOption("preferences");
+  await expect(settingsSection).toHaveValue("preferences");
   await expect(
     page.getByText("current provider searches and Records do not read"),
   ).toBeVisible();
@@ -24,11 +22,8 @@ test("inactive settings stay visible without reporting false success", async ({
   }
   await expect(preferencePanel.getByRole("checkbox")).toBeDisabled();
 
-  const customTypes = page.getByRole("button", {
-    name: "Custom Types & Fields",
-  });
-  await customTypes.click();
-  await expect(customTypes).toHaveAttribute("aria-pressed", "true");
+  await settingsSection.selectOption("custom_fields");
+  await expect(settingsSection).toHaveValue("custom_fields");
   await expect(
     page.getByText("does not apply them to node Records or schemas"),
   ).toBeVisible();
@@ -39,7 +34,7 @@ test("inactive settings stay visible without reporting false success", async ({
     await expect(control).toBeDisabled();
   }
 
-  await page.getByRole("button", { name: "Capability status" }).click();
+  await settingsSection.selectOption("system");
   const downloadStarted = page.waitForEvent("download");
   await page
     .getByRole("button", { name: "Download diagnostic summary" })

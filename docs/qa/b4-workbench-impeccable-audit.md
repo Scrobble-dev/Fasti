@@ -12,31 +12,29 @@ conformity claim
 | Dimension                |     Score | Evidence or limit                                                                                                                                           |
 | ------------------------ | --------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Accessibility            |       3/4 | Axe, keyboard, focus, contrast, reflow, target-size, and rendered checks pass. A manual screen-reader pass remains open.                                    |
-| Performance              |       4/4 | Progress uses transform animation. Reduced motion removes non-essential motion. Browser tests use two workers to remain deterministic on constrained hosts. |
-| Responsive design        |       4/4 | Light and Dark checks at 320, 768, and 1440 CSS pixels pass without horizontal overflow or undersized shared controls.                                      |
-| Theming                  |       4/4 | Fasti tokens drive Light and Dark themes. Text and control contrast checks pass in the tested matrix.                                                       |
+| Performance              |       4/4 | The Tabler offcanvas uses a 200 ms transform. Reduced motion removes it. Hidden Collections data loads only when its Settings section opens.                 |
+| Responsive design        |       4/4 | Checks at 320, 375, 768, 1024, 1440, and 1920 CSS pixels cover full-canvas mobile navigation, fluid Settings, text enlargement, and horizontal overflow.     |
+| Theming                  |       4/4 | Light, Dark, and distinct Night modes share one persisted owner. Every accent passes rendered Axe checks; base, font, and scaled radius effects are tested.  |
 | Implementation integrity |       4/4 | The preserved Workbench uses real host data, truthful disabled states, shared Tabler controls, and no client-owned media mutations.                         |
 | **Total**                | **19/20** | **Good. Manual assistive-technology evidence remains required before release.**                                                                             |
 
 ## Detector evidence
 
-The required Impeccable detector returned `[]` for every changed UI source at
-exact commit `5052bb7b`. The detector declared `DEGRADED` because its optional
-parser modules were unavailable. The empty result is not standalone proof.
-Manual inspection, rendered review, Playwright, Axe, target-size, reflow, and
-contrast evidence support it.
-
-Later Workbench recovery changes were reviewed with the permanent UI policy,
-manual source and rendered inspection, and Playwright/Axe journeys. The
-degraded detector was not rerun, so its `5052bb7b` result is baseline evidence,
-not an exact-head claim.
+`impeccable detect` was run on the changed shell, navigation, Settings, theme,
+search, token, and application sources on the current working tree. It returned
+no findings. This is not standalone proof. Rendered review, the red-team and
+blue-team passes, Playwright, Axe, target-size, reflow, contrast, and theme
+continuity evidence provide the behavioral checks.
 
 Resolved craft findings include:
 
 - progress animation now uses `transform: scaleX()` instead of animating width;
 - setup and runtime-setting notices use restrained full borders and background
   grouping instead of one-sided attention tabs;
-- the navigation rail no longer animates layout width;
+- mobile navigation now uses Tabler's full-width offcanvas and desktop collapse
+  changes the adjacent page offset without a dead gutter;
+- selectable accents no longer own focus contrast, and finite Fasti component
+  radii scale with the Tabler radius setting;
 - provider verification uses the established flat border and semantic state.
 
 ## Product and interaction truth
@@ -81,8 +79,8 @@ Resolved craft findings include:
 | --- | --- |
 | Proximity | Page headings, status, actions, and evidence are grouped by task. |
 | Similarity | Navigation items, settings choices, state notices, and media rows use consistent visual and semantic patterns. |
-| Common region | The primary rail, current-view toolbar, settings navigation, editor, and content surface have stable boundaries. |
-| Continuity | A consistent rail-to-toolbar-to-content reading path survives mobile and tablet reflow. |
+| Common region | The primary navbar, current-view toolbar, Settings navigation, editor, and content surface have stable boundaries. |
+| Continuity | A consistent navbar-to-toolbar-to-content reading path survives mobile and tablet reflow. |
 | Closure | Disabled sections remain complete enough to explain purpose, state, and activation requirement. |
 | Figure and ground | Light, Dark, forced-colors, selected, focus, and notice states retain tested separation. |
 | Pragnanz | Each page presents one primary task and one current route without ornamental competing actions. |
@@ -97,7 +95,7 @@ Resolved craft findings include:
 | 4. Consistency and standards | Native semantics, Tabler components, shared tokens, one Settings composition, and one route predicate prevent parallel patterns. |
 | 5. Error prevention | Contract parsing rejects invalid health; unsupported actions are disabled; provider state is authoritative; origin changes clear bearer state. |
 | 6. Recognition rather than recall | Current route, selected settings area, selected provider, capability limits, and recovery actions remain visible. |
-| 7. Flexibility and efficiency | Keyboard tabs, compact rail, persistent non-secret preferences, and remembered explicit provider selection reduce repeated work. |
+| 7. Flexibility and efficiency | Keyboard tabs, compact desktop navigation, persistent non-secret preferences, and remembered explicit provider selection reduce repeated work. |
 | 8. Aesthetic and minimalist design | Flat editorial grouping, restrained borders, no gradients, no ornamental motion, and no fake dashboards keep focus on tasks. |
 | 9. Recognize, diagnose, and recover from errors | Invalid credentials, invalid health contracts, unavailable APIs, and unconfigured providers have distinct plain-language recovery. |
 | 10. Help and documentation | Setup requirements, browser limits, service URL behavior, provider documentation links, and the diagnostic route are adjacent to need. |
@@ -137,7 +135,7 @@ criterion 4.1.1 is not part of WCAG 2.2.
 | 1.4.4, 1.4.10, 1.4.12 | Automated checks cover 200% text, 320 pixel reflow, and WCAG text spacing without lost content or horizontal page overflow. |
 | 1.4.11 | Automated and rendered checks cover controls, boundaries, selected state, focus, and semantic action foregrounds. |
 | 1.4.13 | Hover and focus do not reveal persistent content that cannot be dismissed or reached. |
-| 2.1.1, 2.1.2, 2.1.4 | Native controls and the modal tab pattern work by keyboard, with no trap or character-key shortcut. |
+| 2.1.1, 2.1.2, 2.1.4 | Native controls and modal containment work by keyboard. Search uses Ctrl/Cmd+K; there is no unmodified character-key shortcut. |
 | 2.2.1, 2.2.2 | The Workbench sets no user time limit. Reduced motion removes non-essential animation. |
 | 2.3.1 | No content flashes. |
 | 2.4.1-2.4.7 | Skip navigation, descriptive titles and headings, predictable focus, explicit link purpose, one current route, and visible focus are tested. |

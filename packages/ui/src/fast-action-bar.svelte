@@ -148,7 +148,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     padding: 2px;
     gap: 2px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
@@ -163,7 +163,7 @@
     place-items: center;
     background: transparent;
     border: none;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     color: var(--fasti-text-muted);
     cursor: pointer;
     transition: all 100ms ease;
@@ -186,7 +186,7 @@
   }
 
   .fast-btn:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 

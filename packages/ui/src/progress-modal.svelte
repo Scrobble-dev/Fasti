@@ -212,7 +212,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     width: 100%;
     max-width: 480px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
@@ -275,7 +275,7 @@
     min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     font-size: 1.2rem;
     font-weight: bold;
@@ -294,7 +294,7 @@
     font-weight: 700;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -302,7 +302,7 @@
     height: 44px;
     min-height: 44px;
     padding: 0 14px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     background: var(--fasti-surface-archive);
@@ -320,7 +320,7 @@
   .meter-wrap {
     height: 24px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     position: relative;
     display: flex;
@@ -353,7 +353,7 @@
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.9rem;
     background: var(--fasti-surface-paper);
   }
@@ -374,7 +374,7 @@
     background: transparent;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -388,7 +388,7 @@
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
