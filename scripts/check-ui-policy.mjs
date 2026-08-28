@@ -272,11 +272,17 @@ forbidText(
   "{:else if rec.userRating}",
   "show rating and progress as independent record facts",
 );
-forbidText(
+const browserHostFetch = gitGrep([
+  "-nEI",
+  "(^|[^[:alnum:]_$])(globalThis[.]|window[.])?fetch[[:space:]]*[(]",
+  "--",
   "apps/web/src/web-host.ts",
-  "await fetch(",
-  "route provider requests through the governed trusted host, never the browser host",
-);
+]);
+if (browserHostFetch) {
+  failures.push(
+    "apps/web/src/web-host.ts: route provider requests through the governed trusted host, never the browser host",
+  );
+}
 forbidText(
   "apps/web/src/web-host.ts",
   "fasti-provider-credentials",
