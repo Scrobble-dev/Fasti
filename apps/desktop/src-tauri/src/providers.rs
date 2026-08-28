@@ -266,6 +266,8 @@ struct TmdbSearchResponse {
 struct TmdbItem {
     id: Option<u64>,
     #[serde(default)]
+    adult: Option<bool>,
+    #[serde(default)]
     media_type: Option<String>,
     #[serde(default)]
     title: Option<String>,
@@ -859,6 +861,9 @@ fn parse_tmdb_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopP
 }
 
 fn tmdb_candidate(item: TmdbItem, forced_kind: Option<&str>) -> Option<ProviderCandidate> {
+    if item.adult != Some(false) {
+        return None;
+    }
     let kind = match forced_kind.or(item.media_type.as_deref())? {
         "movie" => "movie",
         "tv" | "show" => "show",
@@ -1042,9 +1047,10 @@ mod tests {
     fn tmdb_candidates_keep_movie_and_show_identity_distinct() {
         let body = br#"{
           "results": [
-            {"id": 42, "media_type": "movie", "title": "A Film", "original_title": "Original Film", "release_date": "2025-04-03", "overview": "Film overview", "poster_path": "/film.jpg"},
-            {"id": 42, "media_type": "tv", "name": "A Show", "first_air_date": "2024-01-02", "poster_path": "/show.jpg"},
-            {"id": 7, "media_type": "person", "name": "Not media"}
+            {"id": 42, "adult": false, "media_type": "movie", "title": "A Film", "original_title": "Original Film", "release_date": "2025-04-03", "overview": "Film overview", "poster_path": "/film.jpg"},
+            {"id": 42, "adult": false, "media_type": "tv", "name": "A Show", "first_air_date": "2024-01-02", "poster_path": "/show.jpg"},
+            {"id": 7, "adult": false, "media_type": "person", "name": "Not media"},
+            {"id": 8, "adult": true, "media_type": "movie", "title": "Adult media"}
           ]
         }"#;
         let candidates = parse_tmdb_candidates(body).expect("TMDB candidates");

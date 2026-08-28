@@ -16,6 +16,7 @@ reverse-proxy address from changing the daemon bind address.
 | `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
 | `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
 | `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
+| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP is accepted.                                        |
 | `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
@@ -38,8 +39,15 @@ FASTI_PORT=19420 ./scripts/dev.sh --docker
 ```
 
 The container always listens on port `8420` internally. The launcher maps the
-configured host port to it. The memory ceiling remains 192 MiB with no extra
-swap.
+configured host port to it on `127.0.0.1` and sets
+`FASTI_EXTERNAL_BIND_IP=127.0.0.1`. That explicit assertion lets `fastid`
+mount the durable API through the wildcard container socket. A wildcard
+listener without the assertion stays health-only. A non-loopback assertion is
+rejected. Do not set this variable when the outer published address is public.
+The launcher runs the container process as the invoking non-root user so its
+worktree-owned data directory remains writable. Podman uses `keep-id` for the
+rootless user namespace. The image default remains the non-root `fasti` user.
+The memory ceiling remains 192 MiB with no extra swap.
 
 ## Recover from a port collision
 
@@ -201,6 +209,8 @@ a token does not grant one. Poster URLs are stored as provider claims. The
 Desktop CSP still rejects remote images; it permits only the narrowly scoped
 local Tauri asset protocol in addition to self-contained image sources.
 
+TMDB people and adult results are excluded before candidates reach the UI.
+
 An app-managed provider credential is scoped to the identity of the opened
 physical Fasti data root. Fasti derives that identity from the retained root
 descriptor's device and inode plus an owner-only random nonce persisted in
@@ -223,5 +233,7 @@ local Tauri IPC. They do not add a public Fasti HTTP route, event, domain
 entity, or linked-data term. The existing public Record read response gains
 additive resolved metadata fields and external identifiers, so production
 OpenAPI and the generated TypeScript SDK change. AsyncAPI and JSON-LD remain
-unchanged. The Tauri command types and this document own the local mutation
-contract until a public capability is authorized.
+unchanged. The container exposure assertion changes only which existing
+production router is composed; it adds no route or payload. The Tauri command
+types and this document own the local mutation contract until a public
+capability is authorized.

@@ -5,7 +5,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
@@ -95,6 +95,42 @@ fn is_remote_listener(addr: SocketAddr) -> bool {
     !addr.ip().is_loopback()
 }
 
+fn parse_external_bind_ip(value: Option<&str>) -> Result<Option<IpAddr>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        !value.is_empty(),
+        "FASTI_EXTERNAL_BIND_IP must be a loopback IP address when it is set"
+    );
+    value
+        .parse()
+        .map(Some)
+        .with_context(|| format!("FASTI_EXTERNAL_BIND_IP must be an IP address, got {value:?}"))
+}
+
+fn external_bind_ip() -> Result<Option<IpAddr>> {
+    parse_external_bind_ip(env::var("FASTI_EXTERNAL_BIND_IP").ok().as_deref())
+}
+
+fn local_api_exposure_addr(
+    listen_addr: SocketAddr,
+    external_bind_ip: Option<IpAddr>,
+) -> Result<Option<SocketAddr>> {
+    let Some(external_bind_ip) = external_bind_ip else {
+        return Ok((!is_remote_listener(listen_addr)).then_some(listen_addr));
+    };
+    anyhow::ensure!(
+        listen_addr.ip().is_unspecified(),
+        "FASTI_EXTERNAL_BIND_IP is valid only when FASTI_LISTEN uses a wildcard address"
+    );
+    anyhow::ensure!(
+        external_bind_ip.is_loopback(),
+        "FASTI_EXTERNAL_BIND_IP must be a loopback IP address"
+    );
+    Ok(Some(SocketAddr::new(external_bind_ip, listen_addr.port())))
+}
+
 fn parse_data_root(value: Option<OsString>) -> Result<Option<PathBuf>> {
     let Some(value) = value else {
         return Ok(None);
@@ -153,7 +189,8 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let requested_addr = listen_addr()?;
-    let remote_listener = is_remote_listener(requested_addr);
+    let local_api_addr = local_api_exposure_addr(requested_addr, external_bind_ip()?)?;
+    let remote_listener = local_api_addr.is_none();
     let (listener, used_fallback) = bind_listener(requested_addr, port_fallback()?).await?;
     let addr = listener.local_addr()?;
 
@@ -190,7 +227,11 @@ async fn main() -> Result<()> {
                     "Fasti durable local listener starting on http://{} with data root {:?}",
                     addr, data_root
                 );
-                api_router(kernel, addr, &data_root)
+                api_router(
+                    kernel,
+                    local_api_addr.expect("configured durable local routes require local exposure"),
+                    &data_root,
+                )
             }
         }
         None => {
@@ -242,6 +283,36 @@ mod tests {
             [192, 0, 2, 10],
             8420
         ))));
+    }
+
+    #[test]
+    fn permits_durable_routes_through_an_explicit_loopback_port_forward() {
+        let wildcard = SocketAddr::from(([0, 0, 0, 0], 8420));
+        let loopback = IpAddr::from([127, 0, 0, 1]);
+
+        assert_eq!(
+            local_api_exposure_addr(wildcard, Some(loopback)).expect("trusted port forward"),
+            Some(SocketAddr::new(loopback, 8420))
+        );
+        assert_eq!(
+            local_api_exposure_addr(wildcard, None).expect("health-only wildcard"),
+            None
+        );
+        assert!(local_api_exposure_addr(wildcard, Some(IpAddr::from([192, 0, 2, 1]))).is_err());
+        assert!(
+            local_api_exposure_addr(SocketAddr::from(([192, 0, 2, 1], 8420)), Some(loopback))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validates_the_external_bind_ip() {
+        assert_eq!(
+            parse_external_bind_ip(Some("127.0.0.1")).expect("loopback IP"),
+            Some(IpAddr::from([127, 0, 0, 1]))
+        );
+        assert!(parse_external_bind_ip(Some("")).is_err());
+        assert!(parse_external_bind_ip(Some("localhost")).is_err());
     }
 
     #[test]

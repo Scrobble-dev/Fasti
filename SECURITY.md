@@ -18,7 +18,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Browser passwords use Argon2 hashes. Authentication performs dummy password work for unknown users and applies persistent per-account lockout after repeated failures.
 - Browser sessions are opaque digests in SQLite. The session cookie is `HttpOnly` and `SameSite=Strict`; remote cookies are also `Secure`. Browser mutations require the matching strict CSRF cookie and `X-Fasti-CSRF` header. Account changes require the current password and invalidate affected sessions.
 - The one-time development account is explicitly marked as test data. Debug builds seed `testadmin` once per fresh data root; release builds default the seed off. Rename and deletion survive restart and never trigger recreation.
-- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port.
+- The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port. Durable routes remain disabled unless `FASTI_EXTERNAL_BIND_IP` explicitly declares the outer loopback-only port forward.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.
 - Planned export, restore, and verify commands exit nonzero and change no data.
@@ -31,7 +31,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 - `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
-These controls make the development baseline and B2 review implementation safer. Durable local routes require an explicit data root. The authenticated remote subset additionally requires explicit trusted-proxy and HTTPS-origin configuration. This does not make Fasti a supported service.
+These controls make the development baseline and B2 review implementation safer. Durable local routes require an explicit data root and direct loopback or an explicitly declared loopback-only container port forward. The authenticated remote subset additionally requires explicit trusted-proxy and HTTPS-origin configuration. This does not make Fasti a supported service.
 
 ## Temporary dependency exception
 

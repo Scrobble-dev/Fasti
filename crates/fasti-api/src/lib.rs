@@ -146,28 +146,34 @@ pub fn health_router() -> Router {
     Router::new().route("/api/v1/health", get(health_check))
 }
 
-/// Constructs the durable loopback API router for fastid.
+/// Constructs the durable local API router for fastid.
 ///
 /// # Contract
 ///
 /// This function merges health and durable local routes and validates that:
-/// - `bind_addr` is a loopback address (panics if not)
+/// - `local_exposure_addr` is the effective loopback address clients use
+///   directly or through a trusted loopback-only port forward (panics if not)
 /// - `data_root` is non-empty (panics if empty)
 ///
 /// These validations enforce the local durable route security model: the router
-/// must stay on loopback and must have an explicit data root. Non-loopback durable
+/// must stay on direct loopback or an explicitly declared loopback-only port
+/// forward and must have an explicit data root. Intentional non-loopback durable
 /// listeners use [`remote_api_router`]; missing data roots use [`health_router`].
 ///
 /// # Panics
 ///
-/// Panics if `bind_addr` is not a loopback address, if `data_root` is empty,
-/// or if the bootstrap secret cannot be prepared (durable state is
+/// Panics if `local_exposure_addr` is not a loopback address, if `data_root` is
+/// empty, or if the bootstrap secret cannot be prepared (durable state is
 /// unavailable at startup either way; failing fast here matches every other
 /// durable precondition this function already enforces).
-pub fn api_router(kernel: Arc<dyn LocalKernel>, bind_addr: SocketAddr, data_root: &Path) -> Router {
+pub fn api_router(
+    kernel: Arc<dyn LocalKernel>,
+    local_exposure_addr: SocketAddr,
+    data_root: &Path,
+) -> Router {
     assert!(
-        bind_addr.ip().is_loopback(),
-        "api_router requires loopback bind address, got non-loopback {bind_addr}"
+        local_exposure_addr.ip().is_loopback(),
+        "api_router requires loopback client exposure, got non-loopback {local_exposure_addr}"
     );
     assert!(
         !data_root.as_os_str().is_empty(),

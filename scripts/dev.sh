@@ -198,6 +198,14 @@ _wait_for_health() {
   return 1
 }
 
+_durable_api_is_mounted() {
+  local status=""
+  status="$(curl --connect-timeout 2 --max-time 5 --silent --output /dev/null \
+    --write-out '%{http_code}' --request POST --header 'content-type: application/json' \
+    --data '{}' "$FASTI_API_URL/api/v1/node/initialization")" || return 1
+  [[ "$status" == 403 ]]
+}
+
 _read_bound_addr() {
   local pid="$1"
   local actual=""
@@ -428,12 +436,27 @@ _container_port() {
 
 _run_container() {
   local ceiling_mib=""
+  local user_id=""
+  local group_id=""
+  local user_args=()
+  user_id="$(id -u)"
+  if [[ "$user_id" == 0 ]]; then
+    echo "Container mode refuses to run Fasti as root" >&2
+    return 1
+  fi
+  group_id="$(id -g)"
+  user_args=(--user "$user_id:$group_id")
   ceiling_mib="$(_memory_ceiling_mib)"
+  if [[ "$FASTI_CONTAINER_RUNTIME" == podman ]]; then
+    user_args=(--userns keep-id --user "$user_id:$group_id")
+  fi
   "$FASTI_CONTAINER_RUNTIME" run -d --name "$CONTAINER_NAME" --rm \
+    "${user_args[@]}" \
     --memory "${ceiling_mib}m" --memory-swap "${ceiling_mib}m" \
     --publish "$1" \
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
+    -e FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
     "$FASTI_IMAGE"
 }
 
@@ -483,10 +506,11 @@ _start_container() {
   fi
   _write_bound_addr "127.0.0.1:$actual_port"
 
-  if _wait_for_health; then
-    echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy: $FASTI_API_URL/api/v1/health"
+  if _wait_for_health && _durable_api_is_mounted; then
+    echo "Fasti $FASTI_CONTAINER_RUNTIME container is healthy with durable routes on $FASTI_API_URL"
   else
-    echo "Fasti $FASTI_CONTAINER_RUNTIME container failed its health probe; run: $FASTI_CONTAINER_RUNTIME logs $CONTAINER_NAME" >&2
+    echo "Fasti $FASTI_CONTAINER_RUNTIME container failed its health or durable-route probe:" >&2
+    "$FASTI_CONTAINER_RUNTIME" logs "$CONTAINER_NAME" >&2 || true
     "$FASTI_CONTAINER_RUNTIME" stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
     return 1
   fi
@@ -530,10 +554,10 @@ _start_native() {
   fi
 
   echo "Waiting for daemon health probe..."
-  if _wait_for_health "$daemon_pid"; then
-    echo "Fasti daemon is healthy: $FASTI_API_URL/api/v1/health"
+  if _wait_for_health "$daemon_pid" && _durable_api_is_mounted; then
+    echo "Fasti daemon is healthy with durable routes on $FASTI_API_URL"
   else
-    echo "Fasti daemon failed to start; see .dev-logs/fastid.log" >&2
+    echo "Fasti daemon failed its health or durable-route probe; see .dev-logs/fastid.log" >&2
     return 1
   fi
 
@@ -677,6 +701,12 @@ _self_test() {
     echo "self-test accepted an unsupported container listener" >&2
     return 1
   fi
+  id() { printf '0\n'; }
+  if FASTI_CONTAINER_RUNTIME=podman _run_container 127.0.0.1:18420:8420 >/dev/null 2>&1; then
+    echo "self-test accepted a root container process" >&2
+    return 1
+  fi
+  unset -f id
   podman() { return 1; }
   if FASTI_CONTAINER_RUNTIME=podman _require_container_image >/dev/null 2>&1; then
     echo "self-test accepted a missing container image" >&2

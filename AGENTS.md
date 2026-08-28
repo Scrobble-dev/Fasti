@@ -65,8 +65,9 @@ Generated files are outputs, not sources of truth.
 - Local operation must work without external services.
 - Fail closed on missing authorization, stale state, missing evidence, or unsafe input.
 - Keep secrets out of logs, URLs, fixtures, and documentation.
-- Mount durable routes only with an explicit `FASTI_DATA_ROOT`; keep bootstrap routes on loopback, and require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
+- Mount durable local routes only for direct loopback access or an explicitly declared loopback-only container port forward, with an explicit `FASTI_DATA_ROOT`. Keep bootstrap routes on those local exposures. Require `FASTI_REMOTE_TRUSTED_PROXY=true` plus an absolute HTTPS `FASTI_PUBLIC_URL` before mounting the authenticated non-loopback router. Never infer a data directory.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
+- Treat `TMDB_API_READ_ACCESS_TOKEN` as a TMDB API Read Access Token. Send it only in a sensitive `Authorization: Bearer` header; never fall back to the v3 `api_key` URL parameter.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
 - Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
 - Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
