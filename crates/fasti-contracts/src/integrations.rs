@@ -45,6 +45,8 @@ pub struct IntegrationObservationRequest {
     pub provider_ids: BTreeMap<String, String>,
     /// Provider IDs for the parent series when `item_type` is `episode`.
     #[schemars(length(max = 16))]
+    #[serde(default)]
+    #[schemars(length(max = 16))]
     pub series_provider_ids: BTreeMap<String, String>,
     /// Safe source binding clues. They are recorded as evidence and can also be
     /// checked by a configured adapter before mutation.
