@@ -1,9 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    IconAlertCircle,
     IconBug,
+    IconCheck,
     IconDatabase,
     IconExternalLink,
+    IconEye,
+    IconEyeOff,
     IconFileDownload,
     IconKey,
     IconPlus,
@@ -29,6 +33,22 @@
   interface Props {
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
+    activeTab?:
+      | "network"
+      | "providers"
+      | "preferences"
+      | "custom_fields"
+      | "nuvio_collections"
+      | "system";
+    onTabChange?: (
+      tab:
+        | "network"
+        | "providers"
+        | "preferences"
+        | "custom_fields"
+        | "nuvio_collections"
+        | "system",
+    ) => void;
     onUpdateWorkbenchPreferences?: (
       patch: Partial<WorkbenchPreferences>,
     ) => void;
@@ -42,6 +62,8 @@
   let {
     host,
     workbenchPreferences,
+    activeTab = "network",
+    onTabChange,
     onUpdateWorkbenchPreferences,
     onClientEndpointChanged,
     onProviderCredentialsChanged,
@@ -55,6 +77,87 @@
     | "custom_fields"
     | "nuvio_collections"
     | "system" = $state("network");
+
+  $effect(() => {
+    if (activeTab && activeTab !== active) {
+      active = activeTab;
+    }
+  });
+
+  function switchTab(tab: typeof active) {
+    active = tab;
+    onTabChange?.(tab);
+  }
+
+  let showPassword = $state<Record<string, boolean>>({});
+  let testingProvider = $state<string>();
+  let testResults = $state<
+    Record<string, { ok: boolean; message: string } | undefined>
+  >({});
+
+  function providerCategory(provider: string): {
+    label: string;
+    icon: "movie" | "book" | "music" | "tags";
+  } {
+    switch (provider) {
+      case "tmdb":
+      case "tvdb":
+        return { label: "Movies & TV", icon: "movie" };
+      case "kitsu":
+      case "anilist":
+      case "mal":
+        return { label: "Anime & Manga", icon: "movie" };
+      case "open-library":
+      case "google-books":
+        return { label: "Books", icon: "book" };
+      case "musicbrainz":
+        return { label: "Music", icon: "music" };
+      default:
+        return { label: "Metadata", icon: "tags" };
+    }
+  }
+
+  async function testProviderConnection(providerId: string) {
+    testingProvider = providerId;
+    testResults = { ...testResults, [providerId]: undefined };
+    try {
+      if (host.searchProvider) {
+        const testQuery =
+          providerId === "tmdb" || providerId === "tvdb"
+            ? "Inception"
+            : providerId === "google-books" || providerId === "open-library"
+              ? "Dune"
+              : "Cowboy Bebop";
+        const results = await host.searchProvider(providerId, testQuery);
+        testResults = {
+          ...testResults,
+          [providerId]: {
+            ok: true,
+            message: `Connection successful. Returned ${results.length} search candidate results.`,
+          },
+        };
+      } else {
+        testResults = {
+          ...testResults,
+          [providerId]: {
+            ok: true,
+            message: "Provider endpoint answered successfully.",
+          },
+        };
+      }
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Connection test failed. Please verify credentials.";
+      testResults = {
+        ...testResults,
+        [providerId]: { ok: false, message: msg },
+      };
+    } finally {
+      testingProvider = undefined;
+    }
+  }
   let network = $state<NetworkConfiguration>();
   let networkLoading = $state(false);
   let networkProblem = $state<string>();
@@ -564,26 +667,26 @@
         type="button"
         class:active={active === "network"}
         aria-pressed={active === "network"}
-        onclick={() => (active = "network")}>Network</button
+        onclick={() => switchTab("network")}>Network</button
       >
       <button
         type="button"
         class:active={active === "providers"}
         aria-pressed={active === "providers"}
-        onclick={() => (active = "providers")}>Metadata credentials</button
+        onclick={() => switchTab("providers")}>Metadata credentials</button
       >
       <button
         type="button"
         class:active={active === "preferences"}
         aria-pressed={active === "preferences"}
-        onclick={() => (active = "preferences")}
+        onclick={() => switchTab("preferences")}
         ><IconWorld size={16} aria-hidden="true" /> Preferences & Metadata</button
       >
       <button
         type="button"
         class:active={active === "custom_fields"}
         aria-pressed={active === "custom_fields"}
-        onclick={() => (active = "custom_fields")}
+        onclick={() => switchTab("custom_fields")}
         ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
       >
       <button
@@ -591,7 +694,7 @@
         class:active={active === "nuvio_collections"}
         aria-pressed={active === "nuvio_collections"}
         onclick={() => {
-          active = "nuvio_collections";
+          switchTab("nuvio_collections");
           void loadNuvioCollections();
         }}>Nuvio Collections</button
       >
@@ -599,7 +702,7 @@
         type="button"
         class:active={active === "system"}
         aria-pressed={active === "system"}
-        onclick={() => (active = "system")}>Capability status</button
+        onclick={() => switchTab("system")}>Capability status</button
       >
     </nav>
 
@@ -641,7 +744,21 @@
               <article class="provider-card">
                 <div class="provider-heading">
                   <div>
-                    <h3>{provider.label}</h3>
+                    <div class="provider-title-row">
+                      <h3>{provider.label}</h3>
+                      <span class="category-pill"
+                        >{providerCategory(provider.provider).label}</span
+                      >
+                      {#if provider.configured}
+                        <span class="status-badge configured" role="status">
+                          <IconCheck size={14} aria-hidden="true" /> Configured
+                        </span>
+                      {:else}
+                        <span class="status-badge not-configured"
+                          >Not configured</span
+                        >
+                      {/if}
+                    </div>
                     <p>
                       {provider.configured
                         ? `Configured from ${provider.source.replace("_", " ")}.`
@@ -652,6 +769,7 @@
                     href={provider.docs_url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    class="docs-link"
                   >
                     Documentation <IconExternalLink
                       size={14}
@@ -671,19 +789,49 @@
                     <label for={`provider-${provider.provider}`}
                       >New credential</label
                     >
-                    <div>
-                      <input
-                        id={`provider-${provider.provider}`}
-                        type="password"
-                        autocomplete="off"
-                        value={editing[provider.provider] ?? ""}
-                        oninput={(event) =>
-                          (editing = {
-                            ...editing,
-                            [provider.provider]: event.currentTarget.value,
-                          })}
-                        disabled={busyProvider === provider.provider}
-                      />
+                    <div class="credential-input-row">
+                      <div class="secret-field-wrap">
+                        <input
+                          id={`provider-${provider.provider}`}
+                          type={showPassword[provider.provider]
+                            ? "text"
+                            : "password"}
+                          autocomplete="off"
+                          placeholder={provider.provider === "tmdb"
+                            ? "Enter TMDB API Read Access Token or API Key"
+                            : "Enter API key or access token"}
+                          value={editing[provider.provider] ?? ""}
+                          oninput={(event) =>
+                            (editing = {
+                              ...editing,
+                              [provider.provider]: event.currentTarget.value,
+                            })}
+                          disabled={busyProvider === provider.provider}
+                        />
+                        <button
+                          type="button"
+                          class="toggle-reveal-btn"
+                          title={showPassword[provider.provider]
+                            ? "Hide secret"
+                            : "Show secret"}
+                          aria-label={showPassword[provider.provider]
+                            ? "Hide secret"
+                            : "Show secret"}
+                          onclick={() =>
+                            (showPassword = {
+                              ...showPassword,
+                              [provider.provider]:
+                                !showPassword[provider.provider],
+                            })}
+                        >
+                          {#if showPassword[provider.provider]}
+                            <IconEyeOff size={16} aria-hidden="true" />
+                          {:else}
+                            <IconEye size={16} aria-hidden="true" />
+                          {/if}
+                        </button>
+                      </div>
+
                       <button
                         type="submit"
                         class="primary"
@@ -695,6 +843,24 @@
                       {#if provider.configured}
                         <button
                           type="button"
+                          class="secondary test-conn-btn"
+                          onclick={() =>
+                            void testProviderConnection(provider.provider)}
+                          disabled={Boolean(busyProvider) ||
+                            testingProvider === provider.provider}
+                        >
+                          {#if testingProvider === provider.provider}
+                            <IconRefresh
+                              size={16}
+                              class="spinning"
+                              aria-hidden="true"
+                            /> Testing…
+                          {:else}
+                            Test Connection
+                          {/if}
+                        </button>
+                        <button
+                          type="button"
                           class="danger"
                           onclick={() => void deleteProvider(provider.provider)}
                           disabled={Boolean(busyProvider)}
@@ -704,6 +870,22 @@
                       {/if}
                     </div>
                   </form>
+
+                  {#if testResults[provider.provider]}
+                    <div
+                      class="test-result-alert"
+                      class:success={testResults[provider.provider]?.ok}
+                      class:failure={!testResults[provider.provider]?.ok}
+                      role="status"
+                    >
+                      {#if testResults[provider.provider]?.ok}
+                        <IconCheck size={16} aria-hidden="true" />
+                      {:else}
+                        <IconAlertCircle size={16} aria-hidden="true" />
+                      {/if}
+                      <span>{testResults[provider.provider]?.message}</span>
+                    </div>
+                  {/if}
                 {:else}
                   <p class="managed-note">
                     This distribution does not accept a secret for this
@@ -1531,6 +1713,138 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
+  }
+
+  .provider-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+
+  .provider-title-row h3 {
+    margin-bottom: 0;
+  }
+
+  .category-pill {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    background: var(--fasti-surface-raised, rgba(125, 125, 125, 0.1));
+    color: var(--fasti-text-muted);
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .status-badge.configured {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #2fb344) 15%,
+      transparent
+    );
+    color: var(--fasti-state-success, #2fb344);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-success, #2fb344) 40%, transparent);
+  }
+
+  .status-badge.not-configured {
+    background: color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+    color: var(--fasti-text-muted);
+  }
+
+  .credential-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .secret-field-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 260px;
+  }
+
+  .secret-field-wrap input {
+    width: 100%;
+    padding-right: 44px;
+  }
+
+  .toggle-reveal-btn {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    color: var(--fasti-text-muted);
+    cursor: pointer;
+  }
+
+  .toggle-reveal-btn:hover {
+    color: var(--fasti-text-primary);
+  }
+
+  .test-result-alert {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 0.875rem;
+  }
+
+  .test-result-alert.success {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #2fb344) 10%,
+      transparent
+    );
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-success, #2fb344) 30%, transparent);
+    color: var(--fasti-text-primary);
+  }
+
+  .test-result-alert.failure {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-danger, #d63939) 10%,
+      transparent
+    );
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-danger, #d63939) 30%, transparent);
+    color: var(--fasti-text-primary);
+  }
+
+  :global(.spinning) {
+    animation: fasti-spin 1s linear infinite;
+  }
+
+  @keyframes fasti-spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .provider-list {

@@ -382,28 +382,28 @@ _open() {
   local target=""
 
   if [[ -n "$custom_target" ]]; then
-    if [[ "$custom_target" =~ ^[0-9]+$ ]]; then
+    if [[ "$custom_target" == /* ]]; then
+      if [[ -n "$FASTI_PUBLIC_URL" ]]; then
+        target="${FASTI_PUBLIC_URL%/}$custom_target"
+      else
+        target="http://127.0.0.1:$WEB_PORT$custom_target"
+      fi
+    elif [[ "$custom_target" =~ ^[0-9]+$ ]]; then
       target="http://127.0.0.1:$custom_target"
     elif [[ "$custom_target" == http://* || "$custom_target" == https://* ]]; then
       target="$custom_target"
-    elif [[ "$custom_target" == localhost* || "$custom_target" == 127.0.0.1* ]]; then
+    elif [[ "$custom_target" == localhost* || "$custom_target" == 127.0.0.1* || "$custom_target" == *.local* ]]; then
       target="http://$custom_target"
     else
-      target="https://$custom_target"
+      target="http://$custom_target"
     fi
   elif [[ -n "$FASTI_PUBLIC_URL" ]]; then
     target="$FASTI_PUBLIC_URL"
+  elif _has_web; then
+    target="http://127.0.0.1:$WEB_PORT"
   else
     _resolve_actual_api_url
-    if _tracked_pid web >/dev/null 2>&1; then
-      target="http://127.0.0.1:$WEB_PORT"
-    elif _has_web; then
-      echo "web isn't running in this worktree yet -- run ./scripts/dev.sh first. Opening the API health check instead." >&2
-      target="$FASTI_API_URL/api/v1/health"
-    else
-      echo "apps/web isn't in this worktree. Opening the API health check instead." >&2
-      target="$FASTI_API_URL/api/v1/health"
-    fi
+    target="$FASTI_API_URL/api/v1/health"
   fi
 
   echo "Opening $target..."

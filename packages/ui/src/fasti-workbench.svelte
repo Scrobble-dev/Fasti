@@ -98,12 +98,58 @@
     };
   }
 
+  type SettingsTab =
+    | "network"
+    | "providers"
+    | "preferences"
+    | "custom_fields"
+    | "nuvio_collections"
+    | "system";
+
+  let settingsTab = $state<SettingsTab>("network");
+
+  function settingsTabFromPath(path: string): SettingsTab {
+    if (path === "/settings/metadata" || path === "/settings/providers")
+      return "providers";
+    if (path === "/settings/preferences") return "preferences";
+    if (
+      path === "/settings/custom-fields" ||
+      path === "/settings/custom_fields"
+    )
+      return "custom_fields";
+    if (
+      path === "/settings/collections" ||
+      path === "/settings/nuvio_collections"
+    )
+      return "nuvio_collections";
+    if (path === "/settings/status" || path === "/settings/system")
+      return "system";
+    return "network";
+  }
+
+  function pathForSettingsTab(tab: SettingsTab): string {
+    switch (tab) {
+      case "providers":
+        return "/settings/metadata";
+      case "preferences":
+        return "/settings/preferences";
+      case "custom_fields":
+        return "/settings/custom-fields";
+      case "nuvio_collections":
+        return "/settings/collections";
+      case "system":
+        return "/settings/status";
+      default:
+        return "/settings";
+    }
+  }
+
   function pathForSection(section: Section): string {
     switch (section) {
       case "connections":
         return "/connections";
       case "settings":
-        return "/settings";
+        return pathForSettingsTab(settingsTab);
       case "discover":
         return "/discover";
       case "reconciliation":
@@ -123,7 +169,10 @@
     if (typeof window === "undefined") return "home";
     const path = window.location.pathname;
     if (path === "/connections") return "connections";
-    if (path === "/settings") return "settings";
+    if (path.startsWith("/settings")) {
+      settingsTab = settingsTabFromPath(path);
+      return "settings";
+    }
     if (path === "/discover") return "discover";
     if (path === "/reconciliation" || path === "/reviews")
       return "reconciliation";
@@ -761,6 +810,16 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          activeTab={settingsTab}
+          onTabChange={(tab: SettingsTab) => {
+            settingsTab = tab;
+            if (typeof window !== "undefined") {
+              const newPath = pathForSettingsTab(tab);
+              if (window.location.pathname !== newPath) {
+                window.history.pushState(null, "", newPath);
+              }
+            }
+          }}
           onClientEndpointChanged={resetClientEndpoint}
           onProviderCredentialsChanged={invalidateDiscoverProviders}
           onUpdateWorkbenchPreferences={(patch) =>
