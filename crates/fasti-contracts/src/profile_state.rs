@@ -36,4 +36,5 @@ pub struct TrackingDispositionStateDto {
 #[serde(deny_unknown_fields)]
 pub struct ListTrackingDispositionsResponse {
     pub states: Vec<TrackingDispositionStateDto>,
+    pub truncated: bool,
 }

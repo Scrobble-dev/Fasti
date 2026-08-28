@@ -325,15 +325,19 @@
         ? host.listTrackingDispositions().catch((error) => {
             const detail = hostProblemText(error, "Fasti request failed.");
             recordActionProblem = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
-            return [];
+            return { states: [], truncated: false };
           })
-        : Promise.resolve([]);
-      const [summaries, states] = await Promise.all([
+        : Promise.resolve({ states: [], truncated: false });
+      const [summaries, statePage] = await Promise.all([
         host.listRecords(),
         statesPromise,
       ]);
+      if (statePage.truncated) {
+        recordActionProblem =
+          "Only the first 500 profile tracking states are shown. Additional states remain stored.";
+      }
       const dispositions = new Map(
-        states.map((state) => [state.record_id, state.disposition]),
+        statePage.states.map((state) => [state.record_id, state.disposition]),
       );
       mediaRecords = summaries.map((summary) =>
         projectRecordSummary(summary, dispositions.get(summary.record_id)),

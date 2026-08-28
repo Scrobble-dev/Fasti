@@ -403,7 +403,7 @@ test("record metadata can refresh or switch through a configured provider", asyn
               },
             ];
           case "list_tracking_dispositions":
-            return [];
+            return { states: [], truncated: false };
           case "list_records":
             return [
               {

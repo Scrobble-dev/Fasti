@@ -302,10 +302,14 @@
               "$ref": "#/components/schemas/TrackingDispositionStateDto"
             },
             "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
           }
         },
         "required": [
-          "states"
+          "states",
+          "truncated"
         ],
         "type": "object"
       },

@@ -87,11 +87,31 @@ impl TrackingDispositionView {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackingDispositionListView {
+    states: Vec<TrackingDispositionView>,
+    truncated: bool,
+}
+
+impl TrackingDispositionListView {
+    pub fn new(states: Vec<TrackingDispositionView>, truncated: bool) -> Self {
+        Self { states, truncated }
+    }
+
+    pub fn into_states(self) -> Vec<TrackingDispositionView> {
+        self.states
+    }
+
+    pub const fn truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
 pub trait ProfileRecordStatePort: Send + Sync {
     fn list_tracking_dispositions(
         &self,
         query: ListTrackingDispositionsQuery,
-    ) -> ApplicationResult<Vec<TrackingDispositionView>>;
+    ) -> ApplicationResult<TrackingDispositionListView>;
 
     fn set_tracking_disposition(
         &self,

@@ -1001,9 +1001,11 @@
             </div>
           </div>
 
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (the overflow region must accept keyboard scrolling) -->
           <div
             class="assertions-scroll"
             role="region"
+            tabindex="0"
             aria-label="External identifiers"
           >
             <table class="assertions-table">

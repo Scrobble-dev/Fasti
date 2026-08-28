@@ -368,10 +368,14 @@ const PRODUCTION_SCHEMAS = {
           "$ref": "#/components/schemas/TrackingDispositionStateDto"
         },
         "type": "array"
+      },
+      "truncated": {
+        "type": "boolean"
       }
     },
     "required": [
-      "states"
+      "states",
+      "truncated"
     ],
     "type": "object"
   },
@@ -1387,6 +1391,7 @@ export interface TrackingDispositionStateDto {
 
 export interface ListTrackingDispositionsResponse {
   readonly states: ReadonlyArray<TrackingDispositionStateDto>;
+  readonly truncated: boolean;
 }
 
 export interface CreateBrowserSessionRequest {

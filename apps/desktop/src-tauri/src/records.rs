@@ -8,7 +8,8 @@ use fasti_application::{
     RequestAccessContext, SetTrackingDispositionCommand,
 };
 use fasti_contracts::{
-    TrackingDispositionDto, TrackingDispositionStateDto, TrackingDispositionUpdateDto,
+    ListTrackingDispositionsResponse, TrackingDispositionDto, TrackingDispositionStateDto,
+    TrackingDispositionUpdateDto,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, Grain, InterpretationState, NamespaceDefinition,
@@ -310,19 +311,24 @@ fn disposition_dto(disposition: TrackingDisposition) -> TrackingDispositionDto {
 pub(crate) fn list_tracking_dispositions(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
-) -> Result<Vec<TrackingDispositionStateDto>, DesktopProblem> {
+) -> Result<ListTrackingDispositionsResponse, DesktopProblem> {
     let access = require_access(kernel, store)?;
     let correlation_id = RequestCorrelationId::new_v7();
     kernel
         .list_tracking_dispositions(ListTrackingDispositionsQuery::new(correlation_id, access))
-        .map(|states| {
-            states
-                .into_iter()
-                .map(|state| TrackingDispositionStateDto {
-                    record_id: state.record_id().to_string(),
-                    disposition: Some(disposition_dto(state.disposition())),
-                })
-                .collect()
+        .map(|page| {
+            let truncated = page.truncated();
+            ListTrackingDispositionsResponse {
+                states: page
+                    .into_states()
+                    .into_iter()
+                    .map(|state| TrackingDispositionStateDto {
+                        record_id: state.record_id().to_string(),
+                        disposition: Some(disposition_dto(state.disposition())),
+                    })
+                    .collect(),
+                truncated,
+            }
         })
         .map_err(|problem| DesktopProblem::application(&problem))
 }
@@ -553,7 +559,10 @@ mod tests {
 
         assert_eq!(
             list_tracking_dispositions(&kernel, &store).expect("list dispositions"),
-            vec![updated]
+            ListTrackingDispositionsResponse {
+                states: vec![updated],
+                truncated: false,
+            }
         );
     }
 }

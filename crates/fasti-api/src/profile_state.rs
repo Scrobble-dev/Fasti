@@ -56,7 +56,7 @@ pub(crate) async fn list_tracking_dispositions(
     let capability = CapabilityKey::ListTrackingDispositions;
     let authentication = request_authentication(&headers, capability, correlation_id, false)?;
     let kernel = state.kernel;
-    let states = run_kernel(capability, correlation_id, move || {
+    let page = run_kernel(capability, correlation_id, move || {
         let access = authenticate_request(
             kernel.as_ref(),
             authentication,
@@ -69,14 +69,17 @@ pub(crate) async fn list_tracking_dispositions(
     })
     .await?;
 
+    let truncated = page.truncated();
     Ok(Json(ListTrackingDispositionsResponse {
-        states: states
+        states: page
+            .into_states()
             .into_iter()
             .map(|state| TrackingDispositionStateDto {
                 record_id: state.record_id().to_string(),
                 disposition: Some(disposition_dto(state.disposition())),
             })
             .collect(),
+        truncated,
     }))
 }
 

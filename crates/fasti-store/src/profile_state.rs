@@ -2,7 +2,8 @@ use crate::identity::load_record_grain;
 use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
 use fasti_application::{
     ApplicationResult, CapabilityKey, FastiProblem, ListTrackingDispositionsQuery,
-    ProfileRecordStatePort, SetTrackingDispositionCommand, TrackingDispositionView,
+    ProfileRecordStatePort, SetTrackingDispositionCommand, TrackingDispositionListView,
+    TrackingDispositionView,
 };
 use fasti_domain::{RecordId, TrackingDisposition};
 use rusqlite::{params, TransactionBehavior};
@@ -14,7 +15,7 @@ impl ProfileRecordStatePort for SqliteKernel {
     fn list_tracking_dispositions(
         &self,
         query: ListTrackingDispositionsQuery,
-    ) -> ApplicationResult<Vec<TrackingDispositionView>> {
+    ) -> ApplicationResult<TrackingDispositionListView> {
         let capability = CapabilityKey::ListTrackingDispositions;
         let correlation_id = query.correlation_id();
         let mut connection = self.lock_connection(capability, correlation_id)?;
@@ -43,7 +44,7 @@ impl ProfileRecordStatePort for SqliteKernel {
                 params![
                     query.access().workspace_id().to_string(),
                     query.access().profile_id().to_string(),
-                    MAX_TRACKING_DISPOSITIONS_PAGE
+                    MAX_TRACKING_DISPOSITIONS_PAGE + 1
                 ],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
             ),
@@ -62,9 +63,11 @@ impl ProfileRecordStatePort for SqliteKernel {
                 })?,
             ));
         }
+        let truncated = dispositions.len() > MAX_TRACKING_DISPOSITIONS_PAGE as usize;
+        dispositions.truncate(MAX_TRACKING_DISPOSITIONS_PAGE as usize);
         drop(statement);
         map_sql(transaction.commit(), capability, correlation_id)?;
-        Ok(dispositions)
+        Ok(TrackingDispositionListView::new(dispositions, truncated))
     }
 
     fn set_tracking_disposition(
@@ -158,7 +161,7 @@ mod tests {
     fn list(
         node: &TestNode,
         access: fasti_application::RequestAccessContext,
-    ) -> Vec<TrackingDispositionView> {
+    ) -> TrackingDispositionListView {
         node.kernel
             .list_tracking_dispositions(ListTrackingDispositionsQuery::new(
                 RequestCorrelationId::new_v7(),
@@ -182,7 +185,7 @@ mod tests {
 
         let second = node
             .add_profile_with_scopes(&[ScopeKey::ProfileStateRead, ScopeKey::ProfileStateWrite]);
-        assert!(list(&node, second).is_empty());
+        assert!(list(&node, second).into_states().is_empty());
         node.kernel
             .set_tracking_disposition(SetTrackingDispositionCommand::new(
                 RequestCorrelationId::new_v7(),
@@ -193,14 +196,14 @@ mod tests {
             .expect("set second profile disposition");
 
         assert_eq!(
-            list(&node, node.access),
+            list(&node, node.access).into_states(),
             vec![TrackingDispositionView::new(
                 record_id,
                 TrackingDisposition::Watching
             )]
         );
         assert_eq!(
-            list(&node, second),
+            list(&node, second).into_states(),
             vec![TrackingDispositionView::new(
                 record_id,
                 TrackingDisposition::Dropped
@@ -218,8 +221,8 @@ mod tests {
                 .expect("clear disposition"),
             None
         );
-        assert!(list(&node, node.access).is_empty());
-        assert_eq!(list(&node, second).len(), 1);
+        assert!(list(&node, node.access).into_states().is_empty());
+        assert_eq!(list(&node, second).into_states().len(), 1);
     }
 
     #[test]
@@ -235,5 +238,40 @@ mod tests {
             ))
             .expect_err("missing record must fail");
         assert_eq!(problem.code(), ProblemCode::RecordNotFound);
+    }
+
+    #[test]
+    fn tracking_disposition_page_reports_truncation() {
+        let node = TestNode::new();
+        let mut connection =
+            rusqlite::Connection::open(node.kernel.database_path()).expect("open test database");
+        let transaction = connection.transaction().expect("start seed transaction");
+        for _ in 0..=MAX_TRACKING_DISPOSITIONS_PAGE {
+            let record_id = RecordId::new_v7();
+            transaction
+                .execute(
+                    "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, 'film', 'active', '2026-08-28T00:00:00Z')",
+                    params![record_id.to_string(), node.access.workspace_id().to_string()],
+                )
+                .expect("seed record");
+            transaction
+                .execute(
+                    "INSERT INTO profile_record_tracking_dispositions(workspace_id, profile_id, record_id, disposition, updated_at) VALUES (?1, ?2, ?3, 'watching', '2026-08-28T00:00:00Z')",
+                    params![
+                        node.access.workspace_id().to_string(),
+                        node.access.profile_id().to_string(),
+                        record_id.to_string()
+                    ],
+                )
+                .expect("seed tracking disposition");
+        }
+        transaction.commit().expect("commit seed transaction");
+
+        let page = list(&node, node.access);
+        assert!(page.truncated());
+        assert_eq!(
+            page.into_states().len(),
+            MAX_TRACKING_DISPOSITIONS_PAGE as usize
+        );
     }
 }

@@ -138,18 +138,49 @@ test("browser session SDK uses generated DTOs, cookies, CSRF, and exact empty re
   });
 
   assert.deepEqual(
-    calls.map(({ method, csrf: header, credentials }) => ({
+    calls.map(({ path, method, csrf: header, credentials }) => ({
+      path,
       method,
       csrf: header,
       credentials,
     })),
     [
-      { method: "POST", csrf: null, credentials: "include" },
-      { method: "GET", csrf: null, credentials: "include" },
-      { method: "DELETE", csrf, credentials: "include" },
-      { method: "GET", csrf: null, credentials: "include" },
-      { method: "PATCH", csrf, credentials: "include" },
-      { method: "DELETE", csrf, credentials: "include" },
+      {
+        path: "/api/v1/browser/session",
+        method: "POST",
+        csrf: null,
+        credentials: "include",
+      },
+      {
+        path: "/api/v1/browser/session",
+        method: "GET",
+        csrf: null,
+        credentials: "include",
+      },
+      {
+        path: "/api/v1/browser/session",
+        method: "DELETE",
+        csrf,
+        credentials: "include",
+      },
+      {
+        path: "/api/v1/browser/users",
+        method: "GET",
+        csrf: null,
+        credentials: "include",
+      },
+      {
+        path: `/api/v1/browser/users/${contractIds.user}`,
+        method: "PATCH",
+        csrf,
+        credentials: "include",
+      },
+      {
+        path: `/api/v1/browser/users/${contractIds.user}`,
+        method: "DELETE",
+        csrf,
+        credentials: "include",
+      },
     ],
   );
   assert.throws(
@@ -839,7 +870,7 @@ test("profile tracking disposition SDK is authenticated, exact, and record-bound
       const body = String(url).endsWith(
         "/api/v1/profile/record-tracking-dispositions",
       )
-        ? { states: [] }
+        ? { states: [], truncated: false }
         : { record_id: contractIds.record, disposition: "watching" };
       return new Response(JSON.stringify(body), {
         headers: { "content-type": "application/json" },
@@ -847,7 +878,10 @@ test("profile tracking disposition SDK is authenticated, exact, and record-bound
     },
   });
 
-  assert.deepEqual(await client.listTrackingDispositions(), { states: [] });
+  assert.deepEqual(await client.listTrackingDispositions(), {
+    states: [],
+    truncated: false,
+  });
   assert.deepEqual(
     await client.setTrackingDisposition(contractIds.record, {
       disposition: "watching",

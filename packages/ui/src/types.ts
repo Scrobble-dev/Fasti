@@ -21,6 +21,11 @@ export interface TrackingDispositionState {
   readonly disposition: TrackingDisposition | null;
 }
 
+export interface TrackingDispositionList {
+  readonly states: ReadonlyArray<TrackingDispositionState>;
+  readonly truncated: boolean;
+}
+
 export interface ExternalId {
   readonly namespace: string;
   readonly value: string;
@@ -323,7 +328,7 @@ export interface WorkbenchHost {
   registerNamespace?(
     input: RegisterNamespaceInput,
   ): Promise<RegisterNamespaceResult>;
-  listTrackingDispositions?(): Promise<TrackingDispositionState[]>;
+  listTrackingDispositions?(): Promise<TrackingDispositionList>;
   setTrackingDisposition?(
     recordId: string,
     disposition: TrackingDispositionUpdate,

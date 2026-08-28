@@ -181,7 +181,9 @@ impl ArtworkCache {
             ));
         }
         set_file_permissions(&destination)?;
-        prune_cache(&self.root, &destination)
+        // The artwork is already committed; cache cleanup must not turn that success into a failure.
+        let _ = prune_cache(&self.root, &destination);
+        Ok(())
     }
 
     fn path_for(&self, provider: &str, url: &str) -> PathBuf {

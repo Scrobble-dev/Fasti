@@ -316,7 +316,7 @@ fn register_namespace(
 #[tauri::command(async)]
 fn list_tracking_dispositions(
     state: tauri::State<'_, DesktopState>,
-) -> Result<Vec<fasti_contracts::TrackingDispositionStateDto>, DesktopProblem> {
+) -> Result<fasti_contracts::ListTrackingDispositionsResponse, DesktopProblem> {
     let kernel = state.kernel()?;
     records::list_tracking_dispositions(
         &kernel,
