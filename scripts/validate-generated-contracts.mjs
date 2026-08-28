@@ -105,12 +105,11 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     { bearer_credential: [] },
     { browser_session: [] },
   ]);
-  for (const method of ["delete", "get", "put"]) {
-    assert.deepEqual(
-      openapi.paths["/api/v1/profile/nuvio-collections"][method].security,
-      [{ bearer_credential: [] }, { browser_session: [] }],
-    );
-  }
+  const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
+  const profileSecurity = [{ bearer_credential: [] }, { browser_session: [] }];
+  assert.deepEqual(nuvioCollections.delete.security, profileSecurity);
+  assert.deepEqual(nuvioCollections.get.security, profileSecurity);
+  assert.deepEqual(nuvioCollections.put.security, profileSecurity);
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   ajv.addFormat("uint16", {

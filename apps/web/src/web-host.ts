@@ -1,4 +1,5 @@
 import {
+  connectionEndpoint,
   FastiClient,
   parseBrowserSessionResponse,
   parseBrowserUserDto,
@@ -100,10 +101,14 @@ const PROVIDERS: ReadonlyArray<{
 function defaultNetworkConfiguration(
   defaultApiUrl: string,
 ): NetworkConfiguration {
+  const serviceUrl = connectionEndpoint(
+    defaultApiUrl || "http://127.0.0.1:8420",
+    "default",
+  ).url;
   return {
     connection: {
       service_url: {
-        value: defaultApiUrl || "http://127.0.0.1:8420",
+        value: serviceUrl,
         source: "default",
         managed: false,
       },
@@ -138,6 +143,9 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
     ) {
       return defaultNetworkConfiguration(defaultApiUrl);
     }
+    connectionEndpoint(value.connection.service_url.value);
+    const publicUrl = value.connection.public_url?.value;
+    if (typeof publicUrl === "string") connectionEndpoint(publicUrl);
     return value as NetworkConfiguration;
   } catch {
     return defaultNetworkConfiguration(defaultApiUrl);
@@ -158,7 +166,10 @@ function csrfToken(): string {
 }
 
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
-  let serviceUrl = defaultApiUrl.replace(/\/+$/, "");
+  let serviceUrl = connectionEndpoint(
+    defaultApiUrl || "http://127.0.0.1:8420",
+    "default",
+  ).url;
   const createClient = (baseUrl: string): FastiClient =>
     new FastiClient({
       baseUrl,
@@ -183,7 +194,7 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         );
       headers.set("X-Fasti-CSRF", csrf);
     }
-    const response = await fetch(`${serviceUrl}${path}`, {
+    const response = await fetch(new URL(path, `${serviceUrl}/`), {
       method,
       headers,
       credentials: "include",
@@ -213,15 +224,20 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
+      const endpoint = connectionEndpoint(input.service_url);
+      const publicUrl = input.public_url
+        ? connectionEndpoint(input.public_url).url
+        : null;
+      const nextClient = createClient(endpoint.url);
       const config: NetworkConfiguration = {
         connection: {
           service_url: {
-            value: input.service_url,
+            value: endpoint.url,
             source: "saved",
             managed: false,
           },
           public_url: {
-            value: input.public_url,
+            value: publicUrl,
             source: "saved",
             managed: false,
           },
@@ -239,28 +255,16 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       }
       // Recreate the client with the saved service URL so subsequent SDK
       // calls use the new endpoint rather than the original defaultApiUrl.
-      serviceUrl = input.service_url.replace(/\/+$/, "");
-      client = createClient(serviceUrl);
+      serviceUrl = endpoint.url;
+      client = nextClient;
       return config;
     },
 
     async testEndpointConnection(
       endpoint: string,
     ): Promise<EndpointConnectionStatus> {
-      const normalized = endpoint.replace(/\/+$/, "");
-      const parsed = new URL(normalized);
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
-      }
-      if (
-        parsed.protocol === "http:" &&
-        !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
-      ) {
-        throw unavailable(
-          "Cleartext HTTP is allowed only for loopback endpoints.",
-        );
-      }
-      const response = await fetch(`${normalized}/api/v1/health`, {
+      const target = connectionEndpoint(endpoint);
+      const response = await fetch(new URL("/api/v1/health", target.url), {
         signal: AbortSignal.timeout(3_000),
       });
       if (!response.ok) {
@@ -271,8 +275,8 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
         version?: string;
       };
       return {
-        endpoint: normalized,
-        scheme: parsed.protocol === "https:" ? "https" : "http",
+        endpoint: target.url,
+        scheme: target.scheme,
         status: data.status ?? "healthy",
         version: data.version ?? "unknown",
       };

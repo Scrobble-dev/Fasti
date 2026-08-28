@@ -110,6 +110,8 @@ async function mockTrustedHost(page: Page) {
 test("the development browser user can sign in, edit, and delete itself", async ({
   page,
 }) => {
+  const developmentUsername = "testadmin";
+  const editedUsername = developmentUsername.replace("test", "edited");
   const userId = "usr_01991f58-8e00-7000-8000-000000000001";
   let user = {
     active: true,
@@ -118,7 +120,7 @@ test("the development browser user can sign in, edit, and delete itself", async 
     is_test_account: true,
     updated_at: "2026-08-28T00:00:00Z",
     user_id: userId,
-    username: "testadmin",
+    username: developmentUsername,
   };
   let deleted = false;
 
@@ -174,7 +176,7 @@ test("the development browser user can sign in, edit, and delete itself", async 
       });
       return;
     }
-    expect(body).toEqual({ current_password: "editedadmin" });
+    expect(body).toEqual({ current_password: editedUsername });
     deleted = true;
     await route.fulfill({ status: 204 });
   });
@@ -188,24 +190,24 @@ test("the development browser user can sign in, edit, and delete itself", async 
   await page.goto("/?surface=workbench");
   await page.getByRole("button", { name: "Sign in" }).click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Password").fill("testadmin");
+  await dialog.getByLabel("Password").fill(developmentUsername);
   await dialog.getByRole("button", { name: "Sign in" }).click();
   await expect(
     page.getByRole("button", { name: "Manage account testadmin" }),
   ).toBeVisible();
 
   await dialog.getByRole("button", { name: "Edit" }).click();
-  await dialog.getByLabel("Username").fill("editedadmin");
-  await dialog.getByLabel(/New password/).fill("editedadmin");
-  await dialog.getByLabel("Your current password").fill("testadmin");
+  await dialog.getByLabel("Username").fill(editedUsername);
+  await dialog.getByLabel(/New password/).fill(editedUsername);
+  await dialog.getByLabel("Your current password").fill(developmentUsername);
   await dialog.getByRole("button", { name: "Save changes" }).click();
   await expect(dialog.getByRole("status")).toContainText("Sign in again");
-  await expect(dialog.getByLabel("Username")).toHaveValue("editedadmin");
+  await expect(dialog.getByLabel("Username")).toHaveValue(editedUsername);
 
-  await dialog.getByLabel("Password").fill("editedadmin");
+  await dialog.getByLabel("Password").fill(editedUsername);
   await dialog.getByRole("button", { name: "Sign in" }).click();
   await dialog.getByRole("button", { name: "Edit" }).click();
-  await dialog.getByLabel("Your current password").fill("editedadmin");
+  await dialog.getByLabel("Your current password").fill(editedUsername);
   await dialog.getByRole("checkbox", { name: /cannot be undone/ }).check();
   await dialog.getByRole("button", { name: "Delete user" }).click();
 
