@@ -565,6 +565,8 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await page.addInitScript(() => {
     let googleConfigured = false;
     let tmdbConfigured = true;
+    const completedSearches = new Set<string>();
+    const trackedCandidates = new Set<string>();
     const providerStatus = () => [
       {
         provider: "google-books",
@@ -604,9 +606,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
       },
     };
     const browserWindow = window as typeof window & {
-      __SEARCH_INPUT__?: unknown;
-      __TRACK_INPUT__?: unknown;
-      __TRACK_CALLS__?: number;
       __PROVIDER_STATUS_CALLS__?: number;
       __SET_TMDB_CONFIGURED__?: (configured: boolean) => void;
       __TAURI_INTERNALS__: {
@@ -614,7 +613,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
       };
     };
     browserWindow.__PROVIDER_STATUS_CALLS__ = 0;
-    browserWindow.__TRACK_CALLS__ = 0;
     browserWindow.__SET_TMDB_CONFIGURED__ = (configured) => {
       tmdbConfigured = configured;
     };
@@ -641,12 +639,21 @@ test("Discover selects configured providers and refreshes explicit setup state",
             }
             googleConfigured = true;
             return providerStatus();
-          case "search_provider":
-            browserWindow.__SEARCH_INPUT__ = arguments_;
+          case "search_provider": {
+            const input = (
+              arguments_ as {
+                input?: { provider?: string; query?: string };
+              }
+            )?.input;
+            const searchKey = `${input?.provider}:${input?.query}`;
             if (
-              (arguments_ as { input?: { provider?: string } })?.input
-                ?.provider === "google-books"
+              !["tmdb:Breaking Bad", "google-books:Dune"].includes(searchKey) ||
+              completedSearches.has(searchKey)
             ) {
+              throw new Error(`Unexpected provider search: ${searchKey}`);
+            }
+            completedSearches.add(searchKey);
+            if (input?.provider === "google-books") {
               return [
                 {
                   provider: "google-books",
@@ -676,14 +683,26 @@ test("Discover selects configured providers and refreshes explicit setup state",
                 image_url: null,
               },
             ];
-          case "track_provider_candidate":
-            browserWindow.__TRACK_INPUT__ = arguments_;
-            browserWindow.__TRACK_CALLS__ =
-              (browserWindow.__TRACK_CALLS__ ?? 0) + 1;
+          }
+          case "track_provider_candidate": {
+            const input = (
+              arguments_ as {
+                input?: {
+                  provider?: string;
+                  provider_id?: string;
+                  kind?: string;
+                };
+              }
+            )?.input;
+            const candidateKey = `${input?.provider}:${input?.kind}:${input?.provider_id}`;
             if (
-              (arguments_ as { input?: { kind?: string } })?.input?.kind ===
-              "movie"
+              !["tmdb:show:1396", "tmdb:movie:1396"].includes(candidateKey) ||
+              trackedCandidates.has(candidateKey)
             ) {
+              throw new Error(`Unexpected Record creation: ${candidateKey}`);
+            }
+            trackedCandidates.add(candidateKey);
+            if (input?.kind === "movie") {
               throw {
                 detail: "TMDB could not return the selected movie.",
                 next_action: "Try the search again.",
@@ -693,6 +712,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
               record_id: "rec_01991f588e0070008000000000000010",
               grain: "show",
             };
+          }
           case "list_records":
           case "list_reviews":
             return [];
@@ -743,28 +763,12 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await search.fill("é".repeat(129));
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("256 UTF-8 bytes");
-  expect(
-    await page.evaluate(
-      () =>
-        (window as typeof window & { __SEARCH_INPUT__?: unknown })
-          .__SEARCH_INPUT__,
-    ),
-  ).toBeUndefined();
 
   await search.fill("Breaking Bad");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Breaking Bad", exact: true }),
   ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        (window as typeof window & { __SEARCH_INPUT__?: unknown })
-          .__SEARCH_INPUT__,
-    ),
-  ).toEqual({
-    input: { provider: "tmdb", query: "Breaking Bad" },
-  });
   await expect(page.getByRole("button", { name: "Create Record" })).toHaveCount(
     2,
   );
@@ -787,22 +791,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
       })
       .getByRole("button", { name: "Create Record" }),
   ).toBeEnabled();
-  expect(
-    await page.evaluate(
-      () =>
-        (window as typeof window & { __TRACK_INPUT__?: unknown })
-          .__TRACK_INPUT__,
-    ),
-  ).toEqual({
-    input: { provider: "tmdb", provider_id: "1396", kind: "show" },
-  });
-  expect(
-    await page.evaluate(
-      () =>
-        (window as typeof window & { __TRACK_CALLS__?: number })
-          .__TRACK_CALLS__,
-    ),
-  ).toBe(1);
   const movieResult = page.getByRole("listitem").filter({
     has: page.getByRole("heading", { name: "Breaking Bad: The Movie" }),
   });
@@ -816,13 +804,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await expect(
     movieResult.getByRole("button", { name: "Record created" }),
   ).toHaveCount(0);
-  expect(
-    await page.evaluate(
-      () =>
-        (window as typeof window & { __TRACK_CALLS__?: number })
-          .__TRACK_CALLS__,
-    ),
-  ).toBe(2);
 
   await provider.selectOption("google-books");
   await expect(
@@ -866,13 +847,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
       .getByRole("status")
       .filter({ hasText: "Search succeeded. 1 candidate returned." }),
   ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        (window as typeof window & { __SEARCH_INPUT__?: unknown })
-          .__SEARCH_INPUT__,
-    ),
-  ).toEqual({ input: { provider: "google-books", query: "Dune" } });
 
   await openWorkbenchSection(page, "Discover");
   await expect(page.getByLabel("Metadata provider")).toHaveValue(

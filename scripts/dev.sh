@@ -934,7 +934,7 @@ Environment Variables:
   FASTI_PORT_FALLBACK       Port conflict strategy: auto | fail (default: fail)
   FASTI_CONTAINER_RUNTIME   Container runtime: podman | docker (default: podman)
   FASTI_IMAGE               Container image name (default: fasti:b0)
-  FASTI_DATA_ROOT           Data storage path (default: .dev-data)
+  FASTI_DATA_ROOT           Data storage path (default: .dev-data; required explicitly for --desktop)
   FASTI_PUBLIC_URL          Public reverse-proxy HTTPS URL (optional)
 
 Examples:
