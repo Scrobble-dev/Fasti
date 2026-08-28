@@ -42,7 +42,7 @@
     embedded = false,
     actionLabel = "Create Record",
     pendingLabel = "Creating…",
-    completedLabel = "Record created",
+    completedLabel = "Record ready",
     actionProblemFallback = "Fasti could not create this Record.",
     actionUnavailableLabel = "Record creation unavailable",
     actionUnavailableText = "Search does not create a Record. Record creation is unavailable until the host can save the Record, identifier, and metadata together.",

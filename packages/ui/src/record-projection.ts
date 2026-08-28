@@ -28,6 +28,7 @@ function mediaKindForGrain(grain: string): MediaKind {
     case "track":
       return "music";
     case "chapter":
+    case "edition":
     case "work":
       return "book";
     case "podcast_feed":

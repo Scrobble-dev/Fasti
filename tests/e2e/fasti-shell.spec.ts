@@ -40,11 +40,15 @@ async function mockTrustedHost(
   page: Page,
   providerConfigured = false,
   holdProviderSearch = false,
+  environmentManaged = false,
 ) {
   const mockOptions =
-    (providerConfigured ? 1 : 0) | (holdProviderSearch ? 2 : 0);
+    (providerConfigured ? 1 : 0) |
+    (holdProviderSearch ? 2 : 0) |
+    (environmentManaged ? 4 : 0);
   await page.addInitScript((options) => {
-    const configured = Boolean(options & 1);
+    const managed = Boolean(options & 4);
+    const configured = Boolean(options & 1) || managed;
     const holdSearch = Boolean(options & 2);
     const networkConfiguration = {
       connection: {
@@ -72,8 +76,12 @@ async function mockTrustedHost(
         provider: "google-books",
         label: "Google Books",
         configured: providerIsConfigured,
-        source: providerIsConfigured ? "credential_store" : "none",
-        writable: true,
+        source: managed
+          ? "environment"
+          : providerIsConfigured
+            ? "credential_store"
+            : "none",
+        writable: !managed,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
     ];
@@ -148,6 +156,7 @@ async function mockTrustedHost(
               });
               return [];
             }
+            if (managed) return [];
             throw new Error("Trusted provider execution is unavailable.");
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
@@ -470,116 +479,223 @@ test("record metadata can refresh or switch through a configured provider", asyn
   page,
 }) => {
   const recordId = "rec_01991f588e0070008000000000000003";
+  const showRecordId = "rec_01991f588e0070008000000000000004";
+  const bookRecordId = "rec_01991f588e0070008000000000000005";
   await page.setViewportSize({ width: 320, height: 900 });
-  await page.addInitScript((id) => {
-    let title = "Dune";
-    let overview = "A noble family becomes involved in a war for Arrakis.";
-    let identifiers = [{ namespace: "tmdb", grain: "film", value: "438631" }];
-    const browserWindow = window as typeof window & {
-      __METADATA_CALLS__?: unknown[];
-      __TAURI_INTERNALS__: {
-        invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+  await page.addInitScript(
+    ({ id, showId, bookId }) => {
+      let title = "Dune";
+      let overview = "A noble family becomes involved in a war for Arrakis.";
+      let identifiers = [
+        { namespace: "tmdb.movie", grain: "film", value: "438631" },
+      ];
+      const browserWindow = window as typeof window & {
+        __METADATA_CALLS__?: unknown[];
+        __TAURI_INTERNALS__: {
+          invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+        };
       };
-    };
-    browserWindow.__METADATA_CALLS__ = [];
-    browserWindow.__TAURI_INTERNALS__ = {
-      invoke: async (command, arguments_) => {
-        switch (command) {
-          case "setup_status":
-            return { phase: "ready", proof_cleanup_pending: false };
-          case "provider_credential_status":
-            return [
-              {
-                provider: "tmdb",
-                label: "TMDB",
-                configured: true,
-                source: "credential_store",
-                writable: true,
-                docs_url: "https://developer.themoviedb.org/",
-              },
-            ];
-          case "list_tracking_dispositions":
-            return { states: [], truncated: false };
-          case "list_records":
-            return [
-              {
-                grain: "film",
-                identifiers,
-                latest_activity: null,
-                original_title: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: title,
-                  source: "tmdb",
+      browserWindow.__METADATA_CALLS__ = [];
+      browserWindow.__TAURI_INTERNALS__ = {
+        invoke: async (command, arguments_) => {
+          switch (command) {
+            case "setup_status":
+              return { phase: "ready", proof_cleanup_pending: false };
+            case "provider_credential_status":
+              return [
+                {
+                  provider: "tmdb",
+                  label: "TMDB",
+                  configured: true,
+                  source: "credential_store",
+                  writable: true,
+                  docs_url: "https://developer.themoviedb.org/",
                 },
-                overview: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: overview,
-                  source: "tmdb",
+                {
+                  provider: "google-books",
+                  label: "Google Books",
+                  configured: true,
+                  source: "credential_store",
+                  writable: true,
+                  docs_url: "https://developers.google.com/books/",
                 },
-                poster: {
-                  is_stale: false,
-                  tier: "empty",
-                  value: null,
-                  source: null,
-                },
-                record_id: id,
-                release_year: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: "2021",
-                  source: "tmdb",
-                },
-                status: "active",
-                title: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: title,
-                  source: "tmdb",
-                },
-              },
-            ];
-          case "search_provider":
-            return [
-              {
-                provider: "tmdb",
-                provider_id: "693134",
-                title: "Dune: Part Two",
-                original_title: "Dune: Part Two",
-                kind: "movie",
-                release_year: 2024,
-                authors: [],
-                image_url: null,
-                overview: "Paul Atreides unites with Chani and the Fremen.",
-              },
-            ];
-          case "apply_provider_metadata": {
-            const call = (arguments_ as { input: unknown }).input as {
-              record_id: string;
-              selection: {
-                provider: string;
-                provider_id: string;
-                kind: string;
-              };
-            };
-            browserWindow.__METADATA_CALLS__?.push(call);
-            if (call.selection.provider_id === "693134") {
-              title = "Dune: Part Two";
-              overview = "Paul Atreides unites with Chani and the Fremen.";
-              identifiers = [
-                ...identifiers,
-                { namespace: "tmdb", grain: "film", value: "693134" },
               ];
+            case "list_tracking_dispositions":
+              return { states: [], truncated: false };
+            case "list_records":
+              return [
+                {
+                  grain: "film",
+                  identifiers,
+                  latest_activity: null,
+                  original_title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: title,
+                    source: "tmdb.movie",
+                  },
+                  overview: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: overview,
+                    source: "tmdb.movie",
+                  },
+                  poster: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  record_id: id,
+                  release_year: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "2021",
+                    source: "tmdb.movie",
+                  },
+                  status: "active",
+                  title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: title,
+                    source: "tmdb.movie",
+                  },
+                },
+                {
+                  grain: "series",
+                  identifiers: [
+                    { namespace: "tmdb.tv", grain: "series", value: "1396" },
+                  ],
+                  latest_activity: null,
+                  original_title: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  overview: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value:
+                      "A chemistry teacher becomes a methamphetamine producer.",
+                    source: "tmdb.tv",
+                  },
+                  poster: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  record_id: showId,
+                  release_year: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "2008",
+                    source: "tmdb.tv",
+                  },
+                  status: "active",
+                  title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "Breaking Bad",
+                    source: "tmdb.tv",
+                  },
+                },
+                {
+                  grain: "edition",
+                  identifiers: [
+                    {
+                      namespace: "googlebooks.volume",
+                      grain: "edition",
+                      value: "dune-volume",
+                    },
+                  ],
+                  latest_activity: null,
+                  original_title: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  overview: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "A science fiction novel.",
+                    source: "googlebooks.volume",
+                  },
+                  poster: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  record_id: bookId,
+                  release_year: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "1965",
+                    source: "googlebooks.volume",
+                  },
+                  status: "active",
+                  title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "Dune edition",
+                    source: "googlebooks.volume",
+                  },
+                },
+              ];
+            case "search_provider":
+              return [
+                {
+                  provider: "tmdb",
+                  provider_id: "693134",
+                  title: "Dune: Part Two",
+                  original_title: "Dune: Part Two",
+                  kind: "movie",
+                  release_year: 2024,
+                  authors: [],
+                  image_url: null,
+                  overview: "Paul Atreides unites with Chani and the Fremen.",
+                },
+              ];
+            case "apply_provider_metadata": {
+              const call = (arguments_ as { input: unknown }).input as {
+                record_id: string;
+                selection: {
+                  provider: string;
+                  provider_id: string;
+                  kind: string;
+                };
+              };
+              browserWindow.__METADATA_CALLS__?.push(call);
+              if (call.selection.provider_id === "693134") {
+                title = "Dune: Part Two";
+                overview = "Paul Atreides unites with Chani and the Fremen.";
+                identifiers = [
+                  ...identifiers,
+                  { namespace: "tmdb.movie", grain: "film", value: "693134" },
+                ];
+              }
+              return undefined;
             }
-            return undefined;
+            default:
+              throw new Error(`Unexpected trusted-host command: ${command}`);
           }
-          default:
-            throw new Error(`Unexpected trusted-host command: ${command}`);
-        }
-      },
-    };
-  }, recordId);
+        },
+      };
+    },
+    { id: recordId, showId: showRecordId, bookId: bookRecordId },
+  );
+  const metadataCalls = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __METADATA_CALLS__?: unknown[];
+          }
+        ).__METADATA_CALLS__,
+    );
 
   await page.goto(`/records/${recordId}`);
   await expect(
@@ -588,7 +704,7 @@ test("record metadata can refresh or switch through a configured provider", asyn
   await page.getByRole("button", { name: /Sources & Identity/ }).click();
 
   await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("Refreshed metadata from tmdb.")).toBeVisible();
+  await expect(page.getByText("Refreshed metadata from TMDB.")).toBeVisible();
   await page
     .getByRole("searchbox", { name: "Search TMDB" })
     .fill("Dune Part Two");
@@ -598,17 +714,7 @@ test("record metadata can refresh or switch through a configured provider", asyn
   await expect(
     page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
   ).toBeVisible();
-
-  expect(
-    await page.evaluate(
-      () =>
-        (
-          window as typeof window & {
-            __METADATA_CALLS__?: unknown[];
-          }
-        ).__METADATA_CALLS__,
-    ),
-  ).toEqual([
+  expect(await metadataCalls()).toEqual([
     {
       record_id: recordId,
       selection: { provider: "tmdb", provider_id: "438631", kind: "movie" },
@@ -616,6 +722,35 @@ test("record metadata can refresh or switch through a configured provider", asyn
     {
       record_id: recordId,
       selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
+    },
+  ]);
+
+  await page.goto(`/records/${showRecordId}`);
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Refreshed metadata from TMDB.")).toBeVisible();
+  expect(await metadataCalls()).toEqual([
+    {
+      record_id: showRecordId,
+      selection: { provider: "tmdb", provider_id: "1396", kind: "show" },
+    },
+  ]);
+
+  await page.goto(`/records/${bookRecordId}`);
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(
+    page.getByText("Refreshed metadata from Google Books."),
+  ).toBeVisible();
+
+  expect(await metadataCalls()).toEqual([
+    {
+      record_id: bookRecordId,
+      selection: {
+        provider: "google-books",
+        provider_id: "dune-volume",
+        kind: "book",
+      },
     },
   ]);
   expect(
@@ -1007,12 +1142,15 @@ test("trusted-host provider settings retain a rejected secret for correction", a
   const credential = page.getByLabel("Google Books API key");
   await expect(credential).toHaveAttribute("type", "password");
   await credential.fill("test-secret-for-correction");
+  await page.getByRole("button", { name: "Show secret" }).click();
+  await expect(credential).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByRole("alert")).toContainText(
     "The credential store rejected the test value.",
   );
   await expect(credential).toHaveValue("test-secret-for-correction");
+  await expect(credential).toHaveAttribute("type", "password");
   expect(
     await page.evaluate(
       () =>
@@ -1029,11 +1167,14 @@ test("trusted-host provider settings retain a rejected secret for correction", a
   );
 
   await credential.fill("test-secret-stored");
+  await page.getByRole("button", { name: "Show secret" }).click();
+  await expect(credential).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Save" }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Credential saved" }),
   ).toBeVisible();
   await expect(credential).toHaveValue("");
+  await expect(credential).toHaveAttribute("type", "password");
 
   const undersizedControls = await page
     .locator("button:visible, input:visible")
@@ -1069,6 +1210,32 @@ test("provider search tests fail closed when trusted execution is unavailable", 
   const result = page.locator(".test-result-alert");
   await expect(result).toHaveText("Trusted provider execution is unavailable.");
   await expect(result).not.toContainText("Search succeeded");
+});
+
+test("environment-managed credentials remain testable and read-only", async ({
+  page,
+}) => {
+  await mockTrustedHost(page, false, false, true);
+  await page.goto("/settings/metadata");
+
+  await expect(
+    page.getByText(
+      "This credential is managed by the process environment and is read-only in Settings.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Test search" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SEARCH_CALLS__?: number })
+          .__PROVIDER_SEARCH_CALLS__,
+    ),
+  ).toBe(1);
 });
 
 test("provider credential operations remain single-flight", async ({

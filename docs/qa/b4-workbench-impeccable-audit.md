@@ -1,6 +1,6 @@
 # B4 Workbench Impeccable audit
 
-Checked: 2026-08-28
+Checked: 2026-08-29
 
 Surface: local Workbench at `/` and service diagnostic at `/status`
 
@@ -9,11 +9,10 @@ conformity claim
 
 ## Metadata credential acceptance
 
-The metadata credential slice was verified on implementation head
-`85978b4caddb5980a330dba4d288848c1462b497`, rebased on merged `dev` head
+The metadata credential slice is carried by PR #84, based on merged `dev` head
 `e5e56a93b065ac3d969f7db7886d6c4867375f4d`.
 
-- The full CI-mode browser suite passed 84 of 84 tests. It includes Axe,
+- The full CI-mode browser suite passed 85 of 85 tests. It includes Axe,
   keyboard, target-size, text-spacing, reduced-motion, theme, and 320-pixel
   reflow checks.
 - Rendered Settings and Discover checks covered 320, 768, and 1440 CSS pixels

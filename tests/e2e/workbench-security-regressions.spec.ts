@@ -768,7 +768,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
   });
   await showResult.getByRole("button", { name: "Create Record" }).click();
   await expect(
-    showResult.getByRole("button", { name: "Record created" }),
+    showResult.getByRole("button", { name: "Record ready" }),
   ).toBeDisabled();
   await expect(showResult.getByRole("status")).toHaveText(
     "Record ID: rec_01991f588e0070008000000000000010",
@@ -793,7 +793,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
     movieResult.getByRole("button", { name: "Create Record" }),
   ).toBeEnabled();
   await expect(
-    movieResult.getByRole("button", { name: "Record created" }),
+    movieResult.getByRole("button", { name: "Record ready" }),
   ).toHaveCount(0);
 
   await provider.selectOption("google-books");
@@ -832,7 +832,11 @@ test("Discover selects configured providers and refreshes explicit setup state",
       ),
   ).not.toContain("provider-secret");
 
-  await page.getByRole("button", { name: "Test search" }).click();
+  await page
+    .getByRole("article")
+    .filter({ has: page.getByRole("heading", { name: "Google Books" }) })
+    .getByRole("button", { name: "Test search" })
+    .click();
   await expect(
     page
       .getByRole("status")

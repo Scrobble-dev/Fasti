@@ -1,4 +1,5 @@
 use crate::{access::V8_NODE_OWNER_SCOPE_BACKFILL, kernel::scope_storage_key};
+use fasti_domain::{Grain, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
@@ -48,6 +49,13 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 8 {
         migrate_v9(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == SCHEMA_VERSION {
+        let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+        repair_legacy_provider_coordinates_v1(&transaction)?;
+        transaction.commit()?;
     }
     Ok(())
 }
@@ -819,6 +827,449 @@ fn migrate_v9(connection: &Connection) -> Result<()> {
     connection.execute_batch(&sql)
 }
 
+fn migration_conflict(message: &str) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
+        Some(message.to_owned()),
+    )
+}
+
+// This immutable snapshot keeps the schema-neutral v9 data repair
+// reproducible if the live provider policy changes later.
+#[derive(Clone, Copy)]
+struct ProviderCoordinateRepairV1 {
+    legacy_namespace: &'static str,
+    legacy_label: &'static str,
+    legacy_grains: &'static str,
+    legacy_pattern: &'static str,
+    legacy_grain: Grain,
+    namespace: &'static str,
+    label: &'static str,
+    grain: Grain,
+    value_kind: RepairIdentifierValueKindV1,
+}
+
+#[derive(Clone, Copy)]
+enum RepairIdentifierValueKindV1 {
+    PositiveDecimal,
+    AsciiToken,
+}
+
+impl RepairIdentifierValueKindV1 {
+    const fn pattern(self) -> &'static str {
+        match self {
+            Self::PositiveDecimal => "^[1-9][0-9]*$",
+            Self::AsciiToken => "[A-Za-z0-9_-]+",
+        }
+    }
+
+    fn accepts(self, value: &str) -> bool {
+        value == value.trim()
+            && !value.is_empty()
+            && value.len() <= MAX_EXTERNAL_IDENTIFIER_BYTES
+            && match self {
+                Self::PositiveDecimal => {
+                    let mut bytes = value.bytes();
+                    bytes.next().is_some_and(|byte| matches!(byte, b'1'..=b'9'))
+                        && bytes.all(|byte| byte.is_ascii_digit())
+                }
+                Self::AsciiToken => value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')),
+            }
+    }
+}
+
+const GOOGLE_BOOKS_PROVIDER_ID: &str = "google-books";
+const TMDB_PROVIDER_ID: &str = "tmdb";
+const GOOGLE_BOOKS_REPAIR_V1: ProviderCoordinateRepairV1 = ProviderCoordinateRepairV1 {
+    legacy_namespace: GOOGLE_BOOKS_PROVIDER_ID,
+    legacy_label: GOOGLE_BOOKS_PROVIDER_ID,
+    legacy_grains: "chapter",
+    legacy_pattern: ".+",
+    legacy_grain: Grain::Chapter,
+    namespace: "googlebooks.volume",
+    label: "Google Books Volume",
+    grain: Grain::Edition,
+    value_kind: RepairIdentifierValueKindV1::AsciiToken,
+};
+const TMDB_MOVIE_REPAIR_V1: ProviderCoordinateRepairV1 = ProviderCoordinateRepairV1 {
+    legacy_namespace: TMDB_PROVIDER_ID,
+    legacy_label: "The Movie Database (TMDB)",
+    legacy_grains: "film,series",
+    legacy_pattern: "[0-9]+",
+    legacy_grain: Grain::Film,
+    namespace: "tmdb.movie",
+    label: "TMDB Movie",
+    grain: Grain::Film,
+    value_kind: RepairIdentifierValueKindV1::PositiveDecimal,
+};
+const TMDB_SHOW_REPAIR_V1: ProviderCoordinateRepairV1 = ProviderCoordinateRepairV1 {
+    legacy_namespace: TMDB_PROVIDER_ID,
+    legacy_label: "The Movie Database (TMDB)",
+    legacy_grains: "film,series",
+    legacy_pattern: "[0-9]+",
+    legacy_grain: Grain::Series,
+    namespace: "tmdb.tv",
+    label: "TMDB TV",
+    grain: Grain::Series,
+    value_kind: RepairIdentifierValueKindV1::PositiveDecimal,
+};
+const PROVIDER_COORDINATE_REPAIRS_V1: [ProviderCoordinateRepairV1; 3] = [
+    GOOGLE_BOOKS_REPAIR_V1,
+    TMDB_MOVIE_REPAIR_V1,
+    TMDB_SHOW_REPAIR_V1,
+];
+
+fn install_canonical_provider_namespace(
+    transaction: &Transaction<'_>,
+    mapping: ProviderCoordinateRepairV1,
+) -> Result<()> {
+    transaction.execute(
+        r#"
+        INSERT OR IGNORE INTO namespace_definitions(
+            workspace_id, namespace, label, supported_grains, id_pattern,
+            normalization, licence_posture, created_at
+        )
+        SELECT workspace_id, ?1, ?2, ?3, ?4, ?5, ?6, created_at
+        FROM namespace_definitions
+        WHERE namespace = ?7
+          AND label = ?8
+          AND supported_grains = ?9
+          AND id_pattern = ?10
+          AND normalization = 'identity'
+          AND licence_posture = 'identifiers_only'
+        "#,
+        rusqlite::params![
+            mapping.namespace,
+            mapping.label,
+            mapping.grain.as_str(),
+            mapping.value_kind.pattern(),
+            "identity",
+            "identifiers_only",
+            mapping.legacy_namespace,
+            mapping.legacy_label,
+            mapping.legacy_grains,
+            mapping.legacy_pattern,
+        ],
+    )?;
+    let incompatible: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM namespace_definitions legacy
+            LEFT JOIN namespace_definitions canonical
+              ON canonical.workspace_id = legacy.workspace_id
+             AND canonical.namespace = ?1
+             AND canonical.label = ?2
+             AND canonical.supported_grains = ?3
+             AND canonical.id_pattern = ?4
+             AND canonical.normalization = ?5
+             AND canonical.licence_posture = ?6
+            WHERE legacy.namespace = ?7
+              AND legacy.label = ?8
+              AND legacy.supported_grains = ?9
+              AND legacy.id_pattern = ?10
+              AND legacy.normalization = 'identity'
+              AND legacy.licence_posture = 'identifiers_only'
+              AND canonical.workspace_id IS NULL
+        )
+        "#,
+        rusqlite::params![
+            mapping.namespace,
+            mapping.label,
+            mapping.grain.as_str(),
+            mapping.value_kind.pattern(),
+            "identity",
+            "identifiers_only",
+            mapping.legacy_namespace,
+            mapping.legacy_label,
+            mapping.legacy_grains,
+            mapping.legacy_pattern,
+        ],
+        |row| row.get(0),
+    )?;
+    if incompatible {
+        return Err(migration_conflict(
+            "canonical provider namespace conflicts with an existing definition",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_legacy_provider_values(
+    transaction: &Transaction<'_>,
+    mapping: ProviderCoordinateRepairV1,
+) -> Result<()> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT identifier.value
+        FROM external_identifiers identifier
+        JOIN namespace_definitions definition
+          ON definition.workspace_id = identifier.workspace_id
+         AND definition.namespace = identifier.namespace
+         AND definition.label = ?3
+         AND definition.supported_grains = ?4
+         AND definition.id_pattern = ?5
+         AND definition.normalization = 'identity'
+         AND definition.licence_posture = 'identifiers_only'
+        WHERE identifier.namespace = ?1 AND identifier.grain = ?2
+        "#,
+    )?;
+    let values = statement.query_map(
+        rusqlite::params![
+            mapping.legacy_namespace,
+            mapping.legacy_grain.as_str(),
+            mapping.legacy_label,
+            mapping.legacy_grains,
+            mapping.legacy_pattern,
+        ],
+        |row| row.get::<_, String>(0),
+    )?;
+    for value in values {
+        if !mapping.value_kind.accepts(&value?) {
+            return Err(migration_conflict(
+                "legacy provider identifier does not satisfy the canonical value pattern",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn repair_legacy_provider_coordinates_v1(transaction: &Transaction<'_>) -> Result<()> {
+    let books = GOOGLE_BOOKS_REPAIR_V1;
+
+    for mapping in PROVIDER_COORDINATE_REPAIRS_V1 {
+        install_canonical_provider_namespace(transaction, mapping)?;
+    }
+
+    let mixed_google_identity: bool = transaction.query_row(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM external_identifiers legacy
+            JOIN namespace_definitions definition
+              ON definition.workspace_id = legacy.workspace_id
+             AND definition.namespace = legacy.namespace
+             AND definition.label = 'google-books'
+             AND definition.supported_grains = 'chapter'
+             AND definition.id_pattern = '.+'
+             AND definition.normalization = 'identity'
+             AND definition.licence_posture = 'identifiers_only'
+            WHERE legacy.namespace = 'google-books'
+              AND legacy.grain = 'chapter'
+              AND EXISTS (
+                  SELECT 1 FROM external_identifiers other
+                  WHERE other.record_id = legacy.record_id
+                    AND (other.namespace <> 'google-books' OR other.grain <> 'chapter')
+              )
+        )
+        "#,
+        [],
+        |row| row.get(0),
+    )?;
+    if mixed_google_identity {
+        return Err(migration_conflict(
+            "legacy Google Books record has mixed identity grains",
+        ));
+    }
+
+    for mapping in PROVIDER_COORDINATE_REPAIRS_V1 {
+        let mismatched_record_grain: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM external_identifiers legacy
+                JOIN records record ON record.record_id = legacy.record_id
+                JOIN namespace_definitions definition
+                  ON definition.workspace_id = legacy.workspace_id
+                 AND definition.namespace = legacy.namespace
+                 AND definition.label = ?3
+                 AND definition.supported_grains = ?4
+                 AND definition.id_pattern = ?5
+                 AND definition.normalization = 'identity'
+                 AND definition.licence_posture = 'identifiers_only'
+                WHERE legacy.namespace = ?1
+                  AND legacy.grain = ?2
+                  AND record.grain <> legacy.grain
+            )
+            "#,
+            rusqlite::params![
+                mapping.legacy_namespace,
+                mapping.legacy_grain.as_str(),
+                mapping.legacy_label,
+                mapping.legacy_grains,
+                mapping.legacy_pattern,
+            ],
+            |row| row.get(0),
+        )?;
+        if mismatched_record_grain {
+            return Err(migration_conflict(
+                "legacy provider record and identifier grains disagree",
+            ));
+        }
+
+        validate_legacy_provider_values(transaction, mapping)?;
+        let conflict: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM external_identifiers legacy
+                JOIN namespace_definitions definition
+                  ON definition.workspace_id = legacy.workspace_id
+                 AND definition.namespace = legacy.namespace
+                 AND definition.label = ?5
+                 AND definition.supported_grains = ?6
+                 AND definition.id_pattern = ?7
+                 AND definition.normalization = 'identity'
+                 AND definition.licence_posture = 'identifiers_only'
+                JOIN external_identifiers canonical
+                  ON canonical.workspace_id = legacy.workspace_id
+                 AND canonical.namespace = ?1
+                 AND canonical.grain = ?2
+                 AND canonical.value = legacy.value
+                WHERE legacy.namespace = ?3 AND legacy.grain = ?4
+            )
+            "#,
+            rusqlite::params![
+                mapping.namespace,
+                mapping.grain.as_str(),
+                mapping.legacy_namespace,
+                mapping.legacy_grain.as_str(),
+                mapping.legacy_label,
+                mapping.legacy_grains,
+                mapping.legacy_pattern,
+            ],
+            |row| row.get(0),
+        )?;
+        if conflict {
+            return Err(migration_conflict(
+                "legacy provider identifier conflicts with a canonical coordinate",
+            ));
+        }
+
+        let claim_conflict: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM metadata_field_claims legacy_claim
+                JOIN external_identifiers legacy_identifier
+                  ON legacy_identifier.record_id = legacy_claim.record_id
+                 AND legacy_identifier.workspace_id = legacy_claim.workspace_id
+                 AND legacy_identifier.namespace = ?1
+                 AND legacy_identifier.grain = ?2
+                JOIN namespace_definitions definition
+                  ON definition.workspace_id = legacy_identifier.workspace_id
+                 AND definition.namespace = legacy_identifier.namespace
+                 AND definition.label = ?4
+                 AND definition.supported_grains = ?5
+                 AND definition.id_pattern = ?6
+                 AND definition.normalization = 'identity'
+                 AND definition.licence_posture = 'identifiers_only'
+                JOIN metadata_field_claims canonical_claim
+                  ON canonical_claim.record_id = legacy_claim.record_id
+                 AND canonical_claim.field_key = legacy_claim.field_key
+                 AND canonical_claim.source = ?3
+                 AND canonical_claim.fetched_at = legacy_claim.fetched_at
+                WHERE legacy_claim.source = ?1
+            )
+            "#,
+            rusqlite::params![
+                mapping.legacy_namespace,
+                mapping.legacy_grain.as_str(),
+                mapping.namespace,
+                mapping.legacy_label,
+                mapping.legacy_grains,
+                mapping.legacy_pattern,
+            ],
+            |row| row.get(0),
+        )?;
+        if claim_conflict {
+            return Err(migration_conflict(
+                "legacy provider metadata conflicts with a canonical claim",
+            ));
+        }
+    }
+
+    transaction.execute(
+        r#"
+        UPDATE records SET grain = ?1
+        WHERE grain = ?2 AND record_id IN (
+            SELECT identifier.record_id
+            FROM external_identifiers identifier
+            JOIN namespace_definitions definition
+              ON definition.workspace_id = identifier.workspace_id
+             AND definition.namespace = identifier.namespace
+             AND definition.label = 'google-books'
+             AND definition.supported_grains = 'chapter'
+             AND definition.id_pattern = '.+'
+             AND definition.normalization = 'identity'
+             AND definition.licence_posture = 'identifiers_only'
+            WHERE identifier.namespace = ?3 AND identifier.grain = ?2
+        )
+        "#,
+        rusqlite::params![
+            books.grain.as_str(),
+            Grain::Chapter.as_str(),
+            GOOGLE_BOOKS_PROVIDER_ID,
+        ],
+    )?;
+    for mapping in PROVIDER_COORDINATE_REPAIRS_V1 {
+        transaction.execute(
+            r#"
+            UPDATE metadata_field_claims SET source = ?1
+            WHERE source = ?2 AND record_id IN (
+                SELECT identifier.record_id
+                FROM external_identifiers identifier
+                JOIN namespace_definitions definition
+                  ON definition.workspace_id = identifier.workspace_id
+                 AND definition.namespace = identifier.namespace
+                 AND definition.label = ?4
+                 AND definition.supported_grains = ?5
+                 AND definition.id_pattern = ?6
+                 AND definition.normalization = 'identity'
+                 AND definition.licence_posture = 'identifiers_only'
+                WHERE identifier.namespace = ?2 AND identifier.grain = ?3
+            )
+            "#,
+            rusqlite::params![
+                mapping.namespace,
+                mapping.legacy_namespace,
+                mapping.legacy_grain.as_str(),
+                mapping.legacy_label,
+                mapping.legacy_grains,
+                mapping.legacy_pattern,
+            ],
+        )?;
+        transaction.execute(
+            r#"
+            UPDATE external_identifiers SET namespace = ?1, grain = ?2
+            WHERE namespace = ?3 AND grain = ?4
+              AND EXISTS (
+                  SELECT 1 FROM namespace_definitions definition
+                  WHERE definition.workspace_id = external_identifiers.workspace_id
+                    AND definition.namespace = external_identifiers.namespace
+                    AND definition.label = ?5
+                    AND definition.supported_grains = ?6
+                    AND definition.id_pattern = ?7
+                    AND definition.normalization = 'identity'
+                    AND definition.licence_posture = 'identifiers_only'
+              )
+            "#,
+            rusqlite::params![
+                mapping.namespace,
+                mapping.grain.as_str(),
+                mapping.legacy_namespace,
+                mapping.legacy_grain.as_str(),
+                mapping.legacy_label,
+                mapping.legacy_grains,
+                mapping.legacy_pattern,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -844,6 +1295,67 @@ mod tests {
             .expect("enable foreign keys");
         migrate(&connection).expect("migrate database");
         connection
+    }
+
+    fn version_nine_connection() -> Connection {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("version one");
+        migrate_v2(&connection).expect("version two");
+        migrate_v3(&connection).expect("version three");
+        migrate_v4(&connection).expect("version four");
+        migrate_v5(&connection).expect("version five");
+        migrate_v6(&connection).expect("version six");
+        migrate_v7(&connection).expect("version seven");
+        migrate_v8(&connection).expect("version eight");
+        migrate_v9(&connection).expect("version nine");
+        connection
+    }
+
+    fn seed_legacy_provider_records(connection: &Connection) {
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("workspace");
+        for (namespace, label, grains, pattern) in [
+            ("google-books", "google-books", "chapter", ".+"),
+            ("tmdb", "The Movie Database (TMDB)", "film,series", "[0-9]+"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO namespace_definitions(workspace_id, namespace, label, supported_grains, id_pattern, normalization, licence_posture, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'identity', 'identifiers_only', ?6)",
+                    params![WORKSPACE, namespace, label, grains, pattern, CREATED_AT],
+                )
+                .expect("legacy provider namespace");
+        }
+        for (record, grain, identifier, namespace, value) in [
+            ("rec_book", "chapter", "xid_book", "google-books", "book-1"),
+            ("rec_movie", "film", "xid_movie", "tmdb", "42"),
+            ("rec_show", "series", "xid_show", "tmdb", "42"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, ?3, 'active', ?4)",
+                    params![record, WORKSPACE, grain, CREATED_AT],
+                )
+                .expect("legacy provider record");
+            connection
+                .execute(
+                    "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![identifier, WORKSPACE, record, namespace, grain, value, CREATED_AT],
+                )
+                .expect("legacy provider identifier");
+            connection
+                .execute(
+                    "INSERT INTO metadata_field_claims(workspace_id, record_id, field_key, source, value, fetched_at, created_at) VALUES (?1, ?2, 'core.title', ?3, ?4, ?5, ?5)",
+                    params![WORKSPACE, record, namespace, record, CREATED_AT],
+                )
+                .expect("legacy provider claim");
+        }
     }
 
     fn seed_review_graph(connection: &Connection) {
@@ -994,6 +1506,326 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read current version");
         assert_eq!(after, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_preserves_schema_and_existing_records() {
+        let connection = version_nine_connection();
+        seed_legacy_provider_records(&connection);
+
+        migrate(&connection).expect("repair legacy provider coordinates");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("schema version");
+        assert_eq!(version, 9);
+
+        let mut statement = connection
+            .prepare(
+                "SELECT record_id, namespace, grain, value FROM external_identifiers ORDER BY record_id",
+            )
+            .expect("identifier query");
+        let identifiers = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .expect("identifiers")
+            .collect::<Result<Vec<_>>>()
+            .expect("identifier rows");
+        assert_eq!(
+            identifiers,
+            vec![
+                (
+                    "rec_book".to_owned(),
+                    "googlebooks.volume".to_owned(),
+                    "edition".to_owned(),
+                    "book-1".to_owned(),
+                ),
+                (
+                    "rec_movie".to_owned(),
+                    "tmdb.movie".to_owned(),
+                    "film".to_owned(),
+                    "42".to_owned(),
+                ),
+                (
+                    "rec_show".to_owned(),
+                    "tmdb.tv".to_owned(),
+                    "series".to_owned(),
+                    "42".to_owned(),
+                ),
+            ]
+        );
+        let book_grain: String = connection
+            .query_row(
+                "SELECT grain FROM records WHERE record_id = 'rec_book'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("book grain");
+        assert_eq!(book_grain, "edition");
+        let sources = connection
+            .prepare("SELECT source FROM metadata_field_claims ORDER BY record_id")
+            .expect("claim query")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("claims")
+            .collect::<Result<Vec<_>>>()
+            .expect("claim rows");
+        assert_eq!(sources, ["googlebooks.volume", "tmdb.movie", "tmdb.tv"]);
+        let canonical_definitions = connection
+            .prepare(
+                "SELECT namespace, label, supported_grains, id_pattern FROM namespace_definitions WHERE namespace IN ('googlebooks.volume', 'tmdb.movie', 'tmdb.tv') ORDER BY namespace",
+            )
+            .expect("canonical namespace query")
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .expect("canonical definitions")
+            .collect::<Result<Vec<_>>>()
+            .expect("canonical definition rows");
+        assert_eq!(
+            canonical_definitions,
+            [
+                (
+                    "googlebooks.volume".to_owned(),
+                    "Google Books Volume".to_owned(),
+                    "edition".to_owned(),
+                    "[A-Za-z0-9_-]+".to_owned(),
+                ),
+                (
+                    "tmdb.movie".to_owned(),
+                    "TMDB Movie".to_owned(),
+                    "film".to_owned(),
+                    "^[1-9][0-9]*$".to_owned(),
+                ),
+                (
+                    "tmdb.tv".to_owned(),
+                    "TMDB TV".to_owned(),
+                    "series".to_owned(),
+                    "^[1-9][0-9]*$".to_owned(),
+                ),
+            ]
+        );
+        let legacy_definitions: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM namespace_definitions WHERE namespace IN ('google-books', 'tmdb')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("legacy definitions");
+        assert_eq!(
+            legacy_definitions, 2,
+            "legacy import definitions remain available"
+        );
+        let changes = connection.total_changes();
+        migrate(&connection).expect("repeat provider repair");
+        assert_eq!(connection.total_changes(), changes);
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_rolls_back_on_canonical_coordinate_collision() {
+        let connection = version_nine_connection();
+        seed_legacy_provider_records(&connection);
+        connection
+            .execute(
+                "INSERT INTO namespace_definitions(workspace_id, namespace, label, supported_grains, id_pattern, normalization, licence_posture, created_at) VALUES (?1, 'tmdb.movie', 'TMDB Movie', 'film', '^[1-9][0-9]*$', 'identity', 'identifiers_only', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("canonical namespace");
+        connection
+            .execute(
+                "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES ('rec_existing', ?1, 'film', 'active', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("canonical record");
+        connection
+            .execute(
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_existing', ?1, 'rec_existing', 'tmdb.movie', 'film', '42', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("canonical identifier");
+
+        let error = migrate(&connection).expect_err("coordinate conflict must fail closed");
+        assert!(error
+            .to_string()
+            .contains("conflicts with a canonical coordinate"));
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("schema version");
+        assert_eq!(version, 9);
+        let legacy: String = connection
+            .query_row(
+                "SELECT namespace FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("legacy identifier preserved");
+        assert_eq!(legacy, "tmdb");
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_rolls_back_on_incompatible_namespace() {
+        let connection = version_nine_connection();
+        seed_legacy_provider_records(&connection);
+        connection
+            .execute(
+                "INSERT INTO namespace_definitions(workspace_id, namespace, label, supported_grains, id_pattern, normalization, licence_posture, created_at) VALUES (?1, 'tmdb.movie', 'Wrong TMDB label', 'film', '^[1-9][0-9]*$', 'identity', 'identifiers_only', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("incompatible canonical namespace");
+
+        let error = migrate(&connection).expect_err("namespace conflict must fail closed");
+        assert!(error
+            .to_string()
+            .contains("conflicts with an existing definition"));
+        let state: (i64, String, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), (SELECT namespace FROM external_identifiers WHERE external_identifier_id = 'xid_movie'), (SELECT COUNT(*) FROM namespace_definitions WHERE namespace IN ('googlebooks.volume', 'tmdb.movie', 'tmdb.tv'))",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("rollback state");
+        assert_eq!(state, (9, "tmdb".to_owned(), 1));
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_rolls_back_on_mixed_google_books_identity() {
+        let connection = version_nine_connection();
+        seed_legacy_provider_records(&connection);
+        connection
+            .execute(
+                "INSERT INTO namespace_definitions(workspace_id, namespace, label, supported_grains, id_pattern, normalization, licence_posture, created_at) VALUES (?1, 'other-book-id', 'Other book ID', 'chapter', '.+', 'identity', 'identifiers_only', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("other book namespace");
+        connection
+            .execute(
+                "INSERT INTO external_identifiers(external_identifier_id, workspace_id, record_id, namespace, grain, value, created_at) VALUES ('xid_book_other', ?1, 'rec_book', 'other-book-id', 'chapter', 'other-1', ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("mixed Google Books identity");
+
+        let error = migrate(&connection).expect_err("mixed identity must fail closed");
+        assert!(error.to_string().contains("mixed identity grains"));
+        let state: (i64, String, String, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), record.grain, identifier.namespace, (SELECT COUNT(*) FROM namespace_definitions WHERE namespace IN ('googlebooks.volume', 'tmdb.movie', 'tmdb.tv')) FROM records record JOIN external_identifiers identifier ON identifier.record_id = record.record_id WHERE identifier.external_identifier_id = 'xid_book'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("rollback state");
+        assert_eq!(
+            state,
+            (9, "chapter".to_owned(), "google-books".to_owned(), 0)
+        );
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_rolls_back_on_metadata_claim_collision() {
+        let connection = version_nine_connection();
+        seed_legacy_provider_records(&connection);
+        connection
+            .execute(
+                "INSERT INTO metadata_field_claims(workspace_id, record_id, field_key, source, value, fetched_at, created_at) VALUES (?1, 'rec_movie', 'core.title', 'tmdb.movie', 'Existing title', ?2, ?2)",
+                params![WORKSPACE, CREATED_AT],
+            )
+            .expect("canonical metadata claim");
+
+        let error = migrate(&connection).expect_err("claim conflict must fail closed");
+        assert!(error
+            .to_string()
+            .contains("metadata conflicts with a canonical claim"));
+        let state: (i64, String, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), (SELECT namespace FROM external_identifiers WHERE external_identifier_id = 'xid_movie'), (SELECT COUNT(*) FROM metadata_field_claims WHERE record_id = 'rec_movie'), (SELECT COUNT(*) FROM namespace_definitions WHERE namespace IN ('googlebooks.volume', 'tmdb.movie', 'tmdb.tv'))",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("rollback state");
+        assert_eq!(state, (9, "tmdb".to_owned(), 2, 0));
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_rejects_malformed_values_atomically() {
+        for malformed in ["not-a-number", "0", "00042", " 42 "] {
+            let connection = version_nine_connection();
+            seed_legacy_provider_records(&connection);
+            connection
+                .execute(
+                    "UPDATE external_identifiers SET value = ?1 WHERE external_identifier_id = 'xid_movie'",
+                    [malformed],
+                )
+                .expect("simulate malformed legacy TMDB value");
+
+            let error = migrate(&connection).expect_err("malformed legacy value must fail closed");
+            assert!(error
+                .to_string()
+                .contains("does not satisfy the canonical value pattern"));
+            let version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("schema version");
+            assert_eq!(version, 9);
+            let legacy: (String, String) = connection
+                .query_row(
+                    "SELECT namespace, value FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("legacy identifier preserved");
+            assert_eq!(legacy, ("tmdb".to_owned(), malformed.to_owned()));
+            let canonical_definitions: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM namespace_definitions WHERE namespace IN ('googlebooks.volume', 'tmdb.movie', 'tmdb.tv')",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("canonical definitions rolled back");
+            assert_eq!(canonical_definitions, 0);
+        }
+    }
+
+    #[test]
+    fn provider_coordinate_repair_v1_rolls_back_on_record_identifier_grain_mismatch() {
+        let connection = version_nine_connection();
+        seed_legacy_provider_records(&connection);
+        connection
+            .execute(
+                "UPDATE records SET grain = 'series' WHERE record_id = 'rec_movie'",
+                [],
+            )
+            .expect("simulate damaged legacy record grain");
+
+        let error = migrate(&connection).expect_err("grain mismatch must fail closed");
+        assert!(error
+            .to_string()
+            .contains("record and identifier grains disagree"));
+        let state: (i64, String, String, String) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), record.grain, identifier.namespace, identifier.grain FROM records record JOIN external_identifiers identifier ON identifier.record_id = record.record_id WHERE record.record_id = 'rec_movie'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("legacy state preserved");
+        assert_eq!(
+            state,
+            (9, "series".to_owned(), "tmdb".to_owned(), "film".to_owned())
+        );
+        let canonical_definitions: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM namespace_definitions WHERE namespace IN ('googlebooks.volume', 'tmdb.movie', 'tmdb.tv')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("canonical definitions rolled back");
+        assert_eq!(canonical_definitions, 0);
     }
 
     #[test]

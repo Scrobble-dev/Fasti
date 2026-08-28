@@ -536,7 +536,21 @@
     providerProblem = undefined;
     testResults = {};
     try {
-      providers = await host.providerCredentialStatus();
+      const loaded = await host.providerCredentialStatus();
+      const writable = new Set(
+        loaded
+          .filter((provider) => provider.writable)
+          .map((provider) => provider.provider),
+      );
+      editing = Object.fromEntries(
+        Object.entries(editing).filter(([provider]) => writable.has(provider)),
+      );
+      showPassword = Object.fromEntries(
+        Object.entries(showPassword).filter(([provider]) =>
+          writable.has(provider),
+        ),
+      );
+      providers = loaded;
     } catch (error) {
       providerProblem = hostProblemText(
         error,
@@ -550,6 +564,7 @@
   async function saveProvider(provider: string): Promise<void> {
     const credential = editing[provider]?.trim();
     if (!credential || credentialOperationBusy) return;
+    showPassword = { ...showPassword, [provider]: false };
     busyProvider = provider;
     providerProblem = undefined;
     providerNotice = undefined;
@@ -565,6 +580,7 @@
         "Fasti rejected the provider credential.",
       );
     } finally {
+      showPassword = { ...showPassword, [provider]: false };
       busyProvider = undefined;
     }
   }
@@ -587,6 +603,8 @@
     let removed = false;
     try {
       providers = await host.deleteProviderCredential(provider);
+      editing = { ...editing, [provider]: "" };
+      showPassword = { ...showPassword, [provider]: false };
       testResults = { ...testResults, [provider]: undefined };
       providerNotice = "Credential removed from the platform credential store.";
       onProviderCredentialsChanged?.();
@@ -957,23 +975,6 @@
                       {#if provider.configured}
                         <button
                           type="button"
-                          class="secondary test-conn-btn"
-                          onclick={() =>
-                            void testProviderSearch(provider.provider)}
-                          disabled={credentialOperationBusy}
-                        >
-                          {#if testingProvider === provider.provider}
-                            <IconRefresh
-                              size={16}
-                              class="spinning"
-                              aria-hidden="true"
-                            /> Testing…
-                          {:else}
-                            Test search
-                          {/if}
-                        </button>
-                        <button
-                          type="button"
                           class="danger"
                           onclick={() => void deleteProvider(provider.provider)}
                           disabled={credentialOperationBusy}
@@ -983,7 +984,33 @@
                       {/if}
                     </div>
                   </form>
+                {:else}
+                  <p class="managed-note">
+                    {provider.source === "environment"
+                      ? "This credential is managed by the process environment and is read-only in Settings."
+                      : "This host does not accept or store provider credentials. Open Fasti Desktop to configure one."}
+                  </p>
+                {/if}
 
+                {#if provider.configured}
+                  <div class="provider-test-row">
+                    <button
+                      type="button"
+                      class="secondary test-conn-btn"
+                      onclick={() => void testProviderSearch(provider.provider)}
+                      disabled={credentialOperationBusy}
+                    >
+                      {#if testingProvider === provider.provider}
+                        <IconRefresh
+                          size={16}
+                          class="spinning"
+                          aria-hidden="true"
+                        /> Testing…
+                      {:else}
+                        Test search
+                      {/if}
+                    </button>
+                  </div>
                   {#if testResults[provider.provider]}
                     <div
                       class="test-result-alert"
@@ -1001,12 +1028,6 @@
                       <span>{testResults[provider.provider]?.message}</span>
                     </div>
                   {/if}
-                {:else}
-                  <p class="managed-note">
-                    This distribution does not accept a secret for this
-                    provider. Use the native or server host when the provider
-                    requires protected credentials.
-                  </p>
                 {/if}
               </article>
             {/each}
@@ -1896,6 +1917,10 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+  }
+
+  .provider-test-row {
+    margin-top: 10px;
   }
 
   .secret-field-wrap {
