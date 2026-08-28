@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 const health = { status: "healthy", version: "0.1.0" };
 const healthEndpoint = /\/api\/v1\/health$/;
@@ -51,6 +52,7 @@ async function mockTrustedHost(page: Page) {
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
     ];
+    let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
       __TAURI_INTERNALS__: {
@@ -66,6 +68,16 @@ async function mockTrustedHost(page: Page) {
             return networkConfiguration;
           case "provider_credential_status":
             return providerStatus;
+          case "get_nuvio_collections":
+            return { document: nuvioDocument };
+          case "replace_nuvio_collections": {
+            const candidate = arguments_ as { document?: unknown };
+            nuvioDocument = candidate.document;
+            return { document: nuvioDocument };
+          }
+          case "clear_nuvio_collections":
+            nuvioDocument = null;
+            return { document: null };
           case "test_endpoint_connection":
             return {
               endpoint: "http://127.0.0.1:8420",
@@ -95,311 +107,435 @@ async function mockTrustedHost(page: Page) {
   });
 }
 
-async function mockRecords(page: Page, credential: string) {
-  const authorizations: Array<string | undefined> = [];
-  await page.route(/\/api\/v1\/records$/, (route) => {
-    authorizations.push(route.request().headers().authorization);
-    return route.fulfill({
+test("the development browser user can sign in, edit, and delete itself", async ({
+  page,
+}) => {
+  const developmentUsername = "testadmin";
+  const editedUsername = developmentUsername.replace("test", "edited");
+  const csrfToken = "a".repeat(64);
+  const userId = "usr_01991f588e0070008000000000000001";
+  let user = {
+    active: true,
+    created_at: "2026-08-28T00:00:00Z",
+    is_admin: true,
+    is_test_account: true,
+    updated_at: "2026-08-28T00:00:00Z",
+    user_id: userId,
+    username: developmentUsername,
+  };
+  let deleted = false;
+
+  await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/problem+json",
+        body: JSON.stringify({ detail: "Sign in to continue." }),
+      });
+      return;
+    }
+    const body = request.postDataJSON();
+    expect(body).toMatchObject({
+      username: user.username,
+      password: user.username,
+      session_timeout_minutes: 60,
+    });
+    await route.fulfill({
       status: 200,
+      contentType: "application/json",
+      headers: {
+        "set-cookie": `fasti_csrf=${csrfToken}; Path=/; SameSite=Strict`,
+      },
+      body: JSON.stringify({
+        expires_at: "2026-08-28T01:00:00Z",
+        user,
+      }),
+    });
+  });
+  await page.route(/\/api\/v1\/browser\/users(?:\/[^/]+)?$/, async (route) => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ users: deleted ? [] : [user] }),
+      });
+      return;
+    }
+    expect(request.headers()["x-fasti-csrf"]).toBe(csrfToken);
+    const body = request.postDataJSON();
+    if (request.method() === "PATCH") {
+      expect(body.current_password).toBe(user.username);
+      user = {
+        ...user,
+        username: body.username,
+        updated_at: "2026-08-28T00:05:00Z",
+      };
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(user),
+      });
+      return;
+    }
+    expect(body).toEqual({ current_password: editedUsername });
+    deleted = true;
+    await route.fulfill({ status: 204 });
+  });
+  await page.route(/\/api\/v1\/records$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ records: [] }),
+    }),
+  );
+
+  await page.goto("/?surface=workbench");
+  await page
+    .locator("#main-content")
+    .getByRole("button", { name: "Sign in", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Password").fill(developmentUsername);
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("button", { name: "Manage account testadmin" }),
+  ).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Edit" }).click();
+  await dialog.getByLabel("Username").fill(editedUsername);
+  await dialog.getByLabel(/New password/).fill(editedUsername);
+  await dialog.getByLabel("Your current password").fill(developmentUsername);
+  await dialog.getByRole("button", { name: "Save changes" }).click();
+  await expect(dialog.getByRole("status")).toContainText("Sign in again");
+  await expect(dialog.getByLabel("Username")).toHaveValue(editedUsername);
+
+  await dialog.getByLabel("Password").fill(editedUsername);
+  await dialog.getByRole("button", { name: "Sign in" }).click();
+  await dialog.getByRole("button", { name: "Edit" }).click();
+  await dialog.getByLabel("Your current password").fill(editedUsername);
+  await dialog.getByRole("checkbox", { name: /cannot be undone/ }).check();
+  await dialog.getByRole("button", { name: "Delete user" }).click();
+
+  await expect(dialog.getByRole("status")).toHaveText(
+    "Account deleted. The development seed will not recreate it.",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Sign in", exact: true }),
+  ).toBeVisible();
+  expect(deleted).toBe(true);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
+test("global search and configured record actions use durable tracking state", async ({
+  page,
+  context,
+}) => {
+  const recordId = "rec_01991f588e0070008000000000000002";
+  const csrf = "a".repeat(64);
+  let updatedDisposition: string | null = null;
+
+  await context.addCookies([
+    {
+      name: "fasti_csrf",
+      value: csrf,
+      url: "http://127.0.0.1:4173",
+      sameSite: "Strict",
+    },
+  ]);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "fasti-workbench-preferences",
+      JSON.stringify({
+        contextMenuItems: [
+          { id: "view", label: "View Details", visible: false, order: 0 },
+        ],
+      }),
+    );
+  });
+  await page.route(/\/api\/v1\/browser\/session$/, (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        expires_at: "2026-08-28T12:00:00Z",
+        user: {
+          active: true,
+          created_at: "2026-08-28T00:00:00Z",
+          is_admin: true,
+          is_test_account: true,
+          updated_at: "2026-08-28T00:00:00Z",
+          user_id: "usr_01991f58-8e00-7000-8000-000000000001",
+          username: "testadmin",
+        },
+      }),
+    }),
+  );
+  await page.route(/\/api\/v1\/records$/, (route) =>
+    route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
         records: [
           {
-            record_id: "018f7f2d-8f58-7a0a-8000-000000000001",
-            grain: "work",
-            status: "active",
-            title: {
-              tier: "preferred_provider_claim",
-              value: "A real local record",
-              source: "google-books",
-              is_stale: false,
+            grain: "film",
+            latest_activity: {
+              occurred_at: null,
+              interpretation_state: "resolved",
             },
             poster: {
+              is_stale: false,
               tier: "empty",
               value: null,
               source: null,
-              is_stale: false,
             },
-            latest_activity: {
-              interpretation_state: "resolved",
-              occurred_at: {
-                original: "2026-08-27T12:00:00Z",
-                precision: "second",
-                trust: "device_observed",
-              },
+            record_id: recordId,
+            status: "active",
+            title: {
+              is_stale: false,
+              tier: "user_override",
+              value: "Alpha Film",
+              source: "local",
             },
           },
         ],
       }),
-    });
-  });
-  return authorizations;
-}
-
-async function connectBrowserRecords(page: Page, credential: string) {
-  const authorizations = await mockRecords(page, credential);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Connect records" }).click();
-  await page.getByLabel("API client credential").fill(credential);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "A real local record" }),
-  ).toBeVisible();
-  expect(authorizations).toEqual([`Bearer ${credential}`]);
-}
-
-test("the product root restores the Workbench and ignores the retired surface preference", async ({
-  page,
-}) => {
-  await page.addInitScript(() =>
-    localStorage.setItem("fasti-surface", "status"),
+    }),
   );
-  await page.goto("/");
+  await page.route(
+    /\/api\/v1\/profile\/record-tracking-dispositions(?:\/[^/]+)?$/,
+    async (route) => {
+      const request = route.request();
+      if (request.method() === "GET") {
+        await route.abort("failed");
+        return;
+      }
+      expect(request.method()).toBe("PUT");
+      expect(request.headers()["x-fasti-csrf"]).toBe(csrf);
+      updatedDisposition = request.postDataJSON().disposition;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          record_id: recordId,
+          disposition: updatedDisposition,
+        }),
+      });
+    },
+  );
 
-  await expect(page).toHaveTitle("Fasti · Living Chronicle");
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+  await expect(page.getByText("Alpha Film", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(
+    "Records still use their activity fallback.",
+  );
+
+  const search = page.getByRole("combobox", {
+    name: "Search records or commands",
+  });
+  await search.fill("Alpha");
+  await expect(page.getByRole("option", { name: /Alpha Film/ })).toBeVisible();
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "Alpha Film" })).toBeVisible();
   await expect(
-    page.getByRole("complementary", { name: "Main Navigation" }),
+    page.getByRole("combobox", { name: "Profile tracking state" }),
+  ).toHaveValue("unset");
+  await page.getByRole("button", { name: "Back to Library" }).click();
+
+  await page.getByRole("group", { name: "Alpha Film card" }).click({
+    button: "right",
+  });
+  const menu = page.getByRole("menu");
+  await expect(
+    menu.getByText("Playback & tracking", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Overview" })).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Connect local credential" }),
+    menu.getByText("Library & lists", { exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Open Workbench" }),
+    menu.getByText("Identity & metadata", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    menu.getByRole("menuitem", { name: /View media details/ }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "Local service status" }),
-  ).toHaveCount(0);
+    menu.getByRole("menuitem", { name: /Update progress and episodes/ }),
+  ).toBeDisabled();
+  await menu.getByRole("menuitem", { name: "Mark as on hold" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "Tracking state set to on hold.",
+  );
+  await expect(page.getByText("on hold", { exact: true })).toBeVisible();
+  expect(updatedDisposition).toBe("on_hold");
+
+  await page.keyboard.press("Control+K");
+  await expect(search).toBeFocused();
+  await search.fill("Settings");
+  await search.press("Enter");
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });
 
-test("browser record access uses a real memory-only bearer and exposes unsupported actions honestly", async ({
+test("record metadata can refresh or switch through a configured provider", async ({
   page,
 }) => {
-  const credential = "a".repeat(64);
-  await page.addInitScript((retiredCredential) => {
-    localStorage.setItem("fasti-bearer-credential", retiredCredential);
-  }, credential);
-  const authorizations = await mockRecords(page, credential);
-  await page.goto("/");
+  const recordId = "rec_01991f588e0070008000000000000003";
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.addInitScript((id) => {
+    let title = "Dune";
+    let overview = "A noble family becomes involved in a war for Arrakis.";
+    let identifiers = [{ namespace: "tmdb", grain: "film", value: "438631" }];
+    const browserWindow = window as typeof window & {
+      __METADATA_CALLS__?: unknown[];
+      __TAURI_INTERNALS__: {
+        invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+      };
+    };
+    browserWindow.__METADATA_CALLS__ = [];
+    browserWindow.__TAURI_INTERNALS__ = {
+      invoke: async (command, arguments_) => {
+        switch (command) {
+          case "setup_status":
+            return { phase: "ready", proof_cleanup_pending: false };
+          case "provider_credential_status":
+            return [
+              {
+                provider: "tmdb",
+                label: "TMDB",
+                configured: true,
+                source: "credential_store",
+                writable: true,
+                docs_url: "https://developer.themoviedb.org/",
+              },
+            ];
+          case "list_tracking_dispositions":
+            return { states: [], truncated: false };
+          case "list_records":
+            return [
+              {
+                grain: "film",
+                identifiers,
+                latest_activity: null,
+                original_title: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: title,
+                  source: "tmdb",
+                },
+                overview: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: overview,
+                  source: "tmdb",
+                },
+                poster: {
+                  is_stale: false,
+                  tier: "empty",
+                  value: null,
+                  source: null,
+                },
+                record_id: id,
+                release_year: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: "2021",
+                  source: "tmdb",
+                },
+                status: "active",
+                title: {
+                  is_stale: false,
+                  tier: "fallback_provider_claim",
+                  value: title,
+                  source: "tmdb",
+                },
+              },
+            ];
+          case "search_provider":
+            return [
+              {
+                provider: "tmdb",
+                provider_id: "693134",
+                title: "Dune: Part Two",
+                original_title: "Dune: Part Two",
+                kind: "movie",
+                release_year: 2024,
+                authors: [],
+                image_url: null,
+                overview: "Paul Atreides unites with Chani and the Fremen.",
+              },
+            ];
+          case "apply_provider_metadata": {
+            const call = (arguments_ as { input: unknown }).input as {
+              record_id: string;
+              selection: {
+                provider: string;
+                provider_id: string;
+                kind: string;
+              };
+            };
+            browserWindow.__METADATA_CALLS__?.push(call);
+            if (call.selection.provider_id === "693134") {
+              title = "Dune: Part Two";
+              overview = "Paul Atreides unites with Chani and the Fremen.";
+              identifiers = [
+                ...identifiers,
+                { namespace: "tmdb", grain: "film", value: "693134" },
+              ];
+            }
+            return undefined;
+          }
+          default:
+            throw new Error(`Unexpected trusted-host command: ${command}`);
+        }
+      },
+    };
+  }, recordId);
 
-  await expect(page.getByRole("alert")).toContainText(
-    "Records need an active local bearer credential",
-  );
-  await page.getByRole("button", { name: "Connect local credential" }).click();
-  await page.getByRole("tab", { name: "Passkey" }).click();
+  await page.goto(`/records/${recordId}`);
   await expect(
-    page.getByRole("heading", { name: "Passkey sign-in is not active" }),
+    page.getByRole("heading", { level: 1, name: "Dune" }),
   ).toBeVisible();
-  await page.getByRole("tab", { name: "OIDC / SSO" }).click();
-  await expect(
-    page.getByRole("heading", { name: "OIDC and SSO are not active" }),
-  ).toBeVisible();
-  await page.getByRole("tab", { name: "NuvioTV Device" }).click();
-  await expect(
-    page.getByRole("heading", {
-      name: "NuvioTV device pairing is not active",
-    }),
-  ).toBeVisible();
-  await page.getByRole("tab", { name: "Master Password" }).click();
-  await expect(
-    page.getByRole("heading", {
-      name: "Master-password sign-in is not active",
-    }),
-  ).toBeVisible();
-  await page.getByRole("tab", { name: "API Credential" }).click();
-  const input = page.getByLabel("API client credential");
-  await input.fill("not-a-credential");
-  await expect(
-    page.getByText("Enter exactly 64 hexadecimal characters."),
-  ).toHaveClass(/problem/);
-  await expect(input).toHaveAttribute("aria-invalid", "true");
-  await expect(
-    page.getByRole("button", { name: "Connect", exact: true }),
-  ).toBeDisabled();
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
 
-  await input.fill(credential);
-  await expect(input).toHaveAttribute("aria-invalid", "false");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "A real local record" }),
-  ).toBeVisible();
-  expect(authorizations).toEqual([`Bearer ${credential}`]);
-  await expect(
-    page.getByRole("button", { name: "Clear browser credential" }),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("button", { name: "Watch-state changes unavailable" })
-      .first(),
-  ).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Watchlists unavailable" }).first(),
-  ).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Collections unavailable" }).first(),
-  ).toBeDisabled();
-  await expect(
-    page
-      .getByRole("button", { name: "Ratings and reviews unavailable" })
-      .first(),
-  ).toBeDisabled();
-
-  await page.getByRole("button", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
-  await expect(page.getByText("tracking state unavailable")).toBeVisible();
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Refreshed metadata from tmdb.")).toBeVisible();
   await page
-    .getByRole("button", { name: "A real local record", exact: true })
-    .click();
+    .getByRole("searchbox", { name: "Search TMDB" })
+    .fill("Dune Part Two");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await expect(page.getByText("Dune: Part Two", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Use metadata" }).click();
   await expect(
-    page.getByRole("combobox", { name: "User rating unavailable" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByRole("combobox", { name: "Watch status unavailable" }),
-  ).toBeDisabled();
-  await page.getByRole("button", { name: "Actions & Progress" }).click();
-  const iconActions = page.locator(".icon-action-btn");
-  expect(await iconActions.count()).toBeGreaterThan(0);
-  for (const control of await iconActions.all()) {
-    const box = await control.boundingBox();
-    expect(box?.width).toBeGreaterThanOrEqual(44);
-    expect(box?.height).toBeGreaterThanOrEqual(44);
-  }
-  await expect(
-    page.getByText("This host exposes this record as read-only."),
+    page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Update Progress/ }),
-  ).toBeDisabled();
 
   expect(
-    await page.evaluate(() =>
-      Object.keys(localStorage).filter((key) => key.includes("credential")),
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __METADATA_CALLS__?: unknown[];
+          }
+        ).__METADATA_CALLS__,
     ),
-  ).toEqual([]);
-  await page.reload();
-  await expect(page.getByRole("alert")).toContainText(
-    "Records need an active local bearer credential",
-  );
-});
-
-for (const theme of ["light", "dark"] as const) {
-  for (const viewport of viewports) {
-    test(`Workbench ${theme} theme at ${viewport.width}px is reflowable and accessible`, async ({
-      page,
-    }, testInfo) => {
-      const credential = "b".repeat(64);
-      await page.setViewportSize(viewport);
-      await page.addInitScript((mode) => {
-        localStorage.setItem(
-          "fasti-theme-settings",
-          JSON.stringify({
-            mode,
-            accentColor: "#a22f2b",
-            density: "normal",
-          }),
-        );
-      }, theme);
-      await connectBrowserRecords(page, credential);
-
-      await expect(page.locator("html")).toHaveAttribute(
-        "data-bs-theme",
-        theme,
-      );
-      expect(
-        await page.evaluate(
-          () =>
-            document.documentElement.scrollWidth -
-            document.documentElement.clientWidth,
-        ),
-      ).toBeLessThanOrEqual(0);
-      const undersizedControls = await page
-        .locator("button:visible, input:visible, select:visible")
-        .evaluateAll((controls) =>
-          controls.flatMap((control) => {
-            const box = control.getBoundingClientRect();
-            return box.width < 44 || box.height < 44
-              ? [
-                  `${control.getAttribute("aria-label") ?? control.textContent?.trim()}: ${box.width}x${box.height}`,
-                ]
-              : [];
-          }),
-        );
-      expect(undersizedControls).toEqual([]);
-      const accessibility = await new AxeBuilder({ page }).analyze();
-      expect(accessibility.violations).toEqual([]);
-      await page.screenshot({
-        path: testInfo.outputPath(
-          `fasti-workbench-${theme}-${viewport.width}.png`,
-        ),
-        fullPage: true,
-        animations: "disabled",
-      });
-    });
-  }
-}
-
-test("semantic badge contrast remains AA in both themes", async ({ page }) => {
-  await page.goto("/");
-  for (const theme of ["light", "dark"] as const) {
-    const ratios = await page.evaluate((mode) => {
-      document.documentElement.setAttribute("data-bs-theme", mode);
-      const parseColor = (value: string): number[] => {
-        const parts = value.match(/-?[\d.]+/g)?.map(Number) ?? [];
-        const isRgb = value.startsWith("rgb");
-        const isSrgb = value.startsWith("color(srgb ");
-        if ((!isRgb && !isSrgb) || (parts.length !== 3 && parts.length !== 4)) {
-          throw new Error(`Unsupported color value: ${value}`);
-        }
-        if (parts.length === 4 && parts[3] !== 1) {
-          throw new Error(`Color is not opaque: ${value}`);
-        }
-        const channels = parts.slice(0, 3);
-        const maximum = isSrgb ? 1 : 255;
-        if (
-          channels.some(
-            (channel) =>
-              !Number.isFinite(channel) || channel < 0 || channel > maximum,
-          )
-        ) {
-          throw new Error(`Color channel is out of range: ${value}`);
-        }
-        return isSrgb ? channels.map((channel) => channel * 255) : channels;
-      };
-      const luminance = (channels: number[]): number =>
-        channels
-          .map((channel) => channel / 255)
-          .map((channel) =>
-            channel <= 0.04045
-              ? channel / 12.92
-              : ((channel + 0.055) / 1.055) ** 2.4,
-          )
-          .reduce(
-            (sum, channel, index) =>
-              sum + channel * [0.2126, 0.7152, 0.0722][index],
-            0,
-          );
-      const contrast = (background: string, foreground: string): number => {
-        const left = luminance(parseColor(background));
-        const right = luminance(parseColor(foreground));
-        return (Math.max(left, right) + 0.05) / (Math.min(left, right) + 0.05);
-      };
-      return [
-        ["--fasti-brand-mark", "--fasti-brand-contrast"],
-        ["--fasti-state-verified", "--fasti-verified-contrast"],
-      ].map(([background, foreground]) => {
-        const sample = document.createElement("span");
-        sample.style.background = `var(${background})`;
-        sample.style.color = `var(${foreground})`;
-        sample.textContent = "Status";
-        document.body.append(sample);
-        const style = getComputedStyle(sample);
-        const ratio = contrast(style.backgroundColor, style.color);
-        sample.remove();
-        return ratio;
-      });
-    }, theme);
-    for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
-  }
+  ).toEqual([
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "438631", kind: "movie" },
+    },
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
+    },
+  ]);
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth -
+        document.documentElement.clientWidth,
+    ),
+  ).toBeLessThanOrEqual(0);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });
 
 for (const theme of ["light", "dark"] as const) {
@@ -800,4 +936,75 @@ test("trusted-host provider settings clear a rejected secret", async ({
     fullPage: true,
     animations: "disabled",
   });
+});
+
+test("profile Nuvio Collections import, export, and clear stay local", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await mockTrustedHost(page);
+  const externalOrigins = new Set<string>();
+  page.on("request", (request) => {
+    const origin = new URL(request.url()).origin;
+    if (origin !== "http://127.0.0.1:4173") externalOrigins.add(origin);
+  });
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Nuvio Collections" }).click();
+
+  await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
+  const input = [
+    {
+      id: "collection",
+      title: "Collection",
+      folders: [
+        {
+          id: "folder",
+          title: "Folder",
+          coverImageUrl: "https://example.invalid/never-requested.jpg",
+          sources: [
+            {
+              id: "source",
+              provider: "tmdb",
+              tmdbSourceType: "discover",
+              filters: { vote_count_gte: 10 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  await page.getByLabel("Nuvio JSON file").setInputFiles({
+    name: "nuvio.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(input)),
+  });
+  await page.getByRole("button", { name: "Import and replace" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Imported 1 collections, 1 folders, and 1 sources",
+  );
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("nuvio-collections-imported-320.png"),
+    fullPage: true,
+    animations: "disabled",
+  });
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  expect(download.suggestedFilename()).toMatch(
+    /^fasti-nuvio-collections-\d{4}-\d{2}-\d{2}\.json$/,
+  );
+  expect(JSON.parse(await readFile(downloadPath!, "utf8"))).toEqual(input);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Clear saved document" }).click();
+  await expect(page.getByRole("status")).toHaveText(
+    "This profile's Nuvio Collections document was cleared.",
+  );
+  await expect(page.getByText("Not imported", { exact: true })).toBeVisible();
+  expect(externalOrigins).toEqual(new Set());
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });

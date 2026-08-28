@@ -2,6 +2,7 @@
 
 mod access;
 pub mod archive;
+mod browser_auth;
 mod client_credentials;
 mod correction;
 mod crypto;
@@ -9,9 +10,11 @@ mod evidence;
 mod identity;
 mod kernel;
 mod metadata;
+mod nuvio_collections;
 mod observation;
 mod online_archive;
 mod portability;
+mod profile_state;
 mod recovery_coordinator;
 mod restore;
 mod restore_activation;

@@ -16,7 +16,7 @@
     onToggleWatchlist?: (record: MediaRecord) => void;
     onOpenCollection?: (record: MediaRecord) => void;
     onOpenReview?: (record: MediaRecord) => void;
-    onOpenContextMenu?: (record: MediaRecord, event: MouseEvent) => void;
+    onOpenContextMenu: (record: MediaRecord, event: MouseEvent) => void;
   }
 
   let {
@@ -41,6 +41,7 @@
     type="button"
     class="btn btn-icon fast-btn"
     class:active={isWatched}
+    disabled={!onToggleWatched}
     onclick={(e) => {
       e.stopPropagation();
       onToggleWatched?.(record);
@@ -49,12 +50,9 @@
       ? isWatched
         ? "Marked as completed / seen"
         : "Mark as seen"
-      : "Watch-state changes are not available on this host"}
-    aria-label={onToggleWatched
-      ? "Toggle watched"
-      : "Watch-state changes unavailable"}
+      : "Completion needs Chronicle progress history"}
+    aria-label="Toggle watched"
     aria-pressed={isWatched}
-    disabled={!onToggleWatched}
   >
     {#if isWatched}
       <IconEyeCheck size={16} stroke={2.5} class="icon-watched" />
@@ -68,6 +66,7 @@
     type="button"
     class="btn btn-icon fast-btn"
     class:active={isWatchlist}
+    disabled={!onToggleWatchlist}
     onclick={(e) => {
       e.stopPropagation();
       onToggleWatchlist?.(record);
@@ -76,12 +75,9 @@
       ? isWatchlist
         ? "In your watchlist"
         : "Add to watchlist"
-      : "Watchlists are not available on this host"}
-    aria-label={onToggleWatchlist
-      ? "Toggle watchlist"
-      : "Watchlists unavailable"}
+      : "Watchlist membership is not active on this host"}
+    aria-label="Toggle watchlist"
     aria-pressed={isWatchlist}
-    disabled={!onToggleWatchlist}
   >
     {#if isWatchlist}
       <IconBookmarkFilled size={16} class="icon-bookmark-active" />
@@ -93,7 +89,8 @@
   <!-- 3. Add to Collection Fast Button -->
   <button
     type="button"
-    class="btn btn-icon fast-btn"
+    class="fast-btn"
+    disabled={!onOpenCollection}
     onclick={(e) => {
       e.stopPropagation();
       onOpenCollection?.(record);
@@ -102,11 +99,8 @@
       ? record.collectionName
         ? `In collection: ${record.collectionName}`
         : "Add to collection / lists"
-      : "Collections are not available on this host"}
-    aria-label={onOpenCollection
-      ? "Add to collection"
-      : "Collections unavailable"}
-    disabled={!onOpenCollection}
+      : "Collections are not active on this host"}
+    aria-label="Add to collection"
   >
     <IconFolder size={16} stroke={2} />
   </button>
@@ -114,7 +108,8 @@
   <!-- 4. Review / Rating Fast Button -->
   <button
     type="button"
-    class="btn btn-icon fast-btn"
+    class="fast-btn"
+    disabled={!onOpenReview}
     onclick={(e) => {
       e.stopPropagation();
       onOpenReview?.(record);
@@ -123,11 +118,8 @@
       ? record.userRating
         ? `Rated ${record.userRating}/10`
         : "Add rating or review"
-      : "Ratings and reviews are not available on this host"}
-    aria-label={onOpenReview
-      ? "Add rating or review"
-      : "Ratings and reviews unavailable"}
-    disabled={!onOpenReview}
+      : "Personal ratings and reviews are not active on this host"}
+    aria-label="Add rating or review"
   >
     <IconMessage size={16} stroke={2} />
   </button>
@@ -138,15 +130,10 @@
     class="btn btn-icon fast-btn menu-dots"
     onclick={(e) => {
       e.stopPropagation();
-      onOpenContextMenu?.(record, e);
+      onOpenContextMenu(record, e);
     }}
-    title={onOpenContextMenu
-      ? "More actions"
-      : "More actions are not available on this host"}
-    aria-label={onOpenContextMenu
-      ? "More actions context menu"
-      : "More actions unavailable"}
-    disabled={!onOpenContextMenu}
+    title="More actions"
+    aria-label="More actions context menu"
   >
     <IconDotsVertical size={16} stroke={2} />
   </button>

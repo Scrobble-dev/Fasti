@@ -52,6 +52,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2.0"
 anyhow = "1.0"
+argon2 = "0.5.3"
 serde-saphyr = "1.0.1"
 proptest = "1.6"
 static_assertions = "1.1"

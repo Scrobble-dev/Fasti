@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
   FastiAbortError,
   FastiClient,
+  FastiContractParseError,
   FastiProblemError,
   FastiProtocolError,
   FastiTimeoutError,
@@ -16,6 +17,7 @@ import {
   connectionEndpoint,
   normalizeBaseUrl,
   parseAcceptObservationRequest,
+  parseBrowserSessionResponse,
   parseHealthResponse,
   parseListRecordsResponse,
   parseReceiptCommittedEvent,
@@ -45,7 +47,151 @@ const contractIds = {
   client: v7("cli", "5"),
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
+  record: v7("rec", "8"),
+  user: v7("usr", "9"),
 };
+
+test("browser session DTOs enforce generated boolean schemas", () => {
+  const session = {
+    expires_at: "2026-08-28T12:00:00Z",
+    user: {
+      active: true,
+      created_at: "2026-08-28T10:00:00Z",
+      is_admin: true,
+      is_test_account: true,
+      updated_at: "2026-08-28T10:00:00Z",
+      user_id: "usr_01991f58-8e00-7000-8000-000000000001",
+      username: "testadmin",
+    },
+  };
+
+  assert.deepEqual(parseBrowserSessionResponse(session), session);
+  assert.throws(
+    () =>
+      parseBrowserSessionResponse({
+        ...session,
+        user: { ...session.user, active: "true" },
+      }),
+    FastiContractParseError,
+  );
+});
+
+test("browser session SDK uses generated DTOs, cookies, CSRF, and exact empty responses", async () => {
+  const csrf = "a".repeat(64);
+  const user = {
+    active: true,
+    created_at: "2026-08-28T10:00:00Z",
+    is_admin: true,
+    is_test_account: true,
+    updated_at: "2026-08-28T10:00:00Z",
+    user_id: contractIds.user,
+    username: "testadmin",
+  };
+  const session = { expires_at: "2026-08-28T12:00:00Z", user };
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    useBrowserSession: true,
+    csrfToken: csrf,
+    fetch: async (url, init) => {
+      const method = init?.method ?? "GET";
+      const path = new URL(url).pathname;
+      calls.push({
+        path,
+        method,
+        csrf: new Headers(init?.headers).get("x-fasti-csrf"),
+        credentials: init?.credentials,
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      if (method === "DELETE") return new Response(null, { status: 204 });
+      const body =
+        path === "/api/v1/browser/users"
+          ? { users: [user] }
+          : path.startsWith("/api/v1/browser/users/")
+            ? user
+            : session;
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(
+    await client.createBrowserSession({
+      username: user.username,
+      password: user.username,
+      session_timeout_minutes: 60,
+    }),
+    session,
+  );
+  assert.deepEqual(await client.readBrowserSession(), session);
+  await client.endBrowserSession();
+  assert.deepEqual(await client.listBrowserUsers(), { users: [user] });
+  assert.deepEqual(
+    await client.updateBrowserUser(contractIds.user, {
+      current_password: user.username,
+      username: "editedadmin",
+    }),
+    user,
+  );
+  await client.deleteBrowserUser(contractIds.user, {
+    current_password: user.username,
+  });
+
+  assert.deepEqual(
+    calls.map(({ path, method, csrf: header, credentials }) => ({
+      path,
+      method,
+      csrf: header,
+      credentials,
+    })),
+    [
+      {
+        path: "/api/v1/browser/session",
+        method: "POST",
+        csrf: null,
+        credentials: "include",
+      },
+      {
+        path: "/api/v1/browser/session",
+        method: "GET",
+        csrf: null,
+        credentials: "include",
+      },
+      {
+        path: "/api/v1/browser/session",
+        method: "DELETE",
+        csrf,
+        credentials: "include",
+      },
+      {
+        path: "/api/v1/browser/users",
+        method: "GET",
+        csrf: null,
+        credentials: "include",
+      },
+      {
+        path: `/api/v1/browser/users/${contractIds.user}`,
+        method: "PATCH",
+        csrf,
+        credentials: "include",
+      },
+      {
+        path: `/api/v1/browser/users/${contractIds.user}`,
+        method: "DELETE",
+        csrf,
+        credentials: "include",
+      },
+    ],
+  );
+  assert.throws(
+    () =>
+      client.updateBrowserUser("not-a-user", {
+        current_password: user.username,
+      }),
+    /userId does not match the generated contract/,
+  );
+});
 
 test("health omits credentials and returns the exact public contract", async () => {
   const credential = "local-secret-that-must-not-leak";
@@ -477,23 +623,34 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         assert.deepEqual(methods, [
           "acceptObservation",
           "attachIdentifier",
+          "clearNuvioCollections",
           "configureListener",
           "constructor",
+          "createBrowserSession",
           "createRecord",
+          "deleteBrowserUser",
           "discoverCapabilities",
+          "endBrowserSession",
           "enrollDurableFirstClient",
           "enrollFirstClient",
+          "getNuvioCollections",
           "health",
           "initializeDurableNode",
           "initializeNode",
+          "listBrowserUsers",
           "listRecords",
+          "listTrackingDispositions",
+          "readBrowserSession",
           "receiptEvents",
           "registerNamespace",
+          "replaceNuvioCollections",
           "replayReceipt",
           "revokeCredential",
           "rotateCredential",
           "selectProfile",
+          "setTrackingDisposition",
           "submitObservation",
+          "updateBrowserUser",
         ]);
       },
     );
@@ -681,10 +838,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 24);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 35);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    9,
+    11,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -715,6 +872,138 @@ test("generated public metadata preserves complete registry and surface disposit
   assert.equal(
     RECEIPT_STREAM_CONTRACT.sseIdPointer,
     "$message.payload#/receipt_id",
+  );
+  assert.deepEqual(
+    PUBLIC_CAPABILITY_REGISTRY.surface_profiles.b2_profile_state.ui,
+    {
+      binding: "ui:{capability_id}",
+      binding_visibility: "public",
+      state: "required",
+    },
+  );
+});
+
+test("profile tracking disposition SDK is authenticated, exact, and record-bound", async () => {
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "profile-state-secret",
+    fetch: async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      const body = String(url).endsWith(
+        "/api/v1/profile/record-tracking-dispositions",
+      )
+        ? { states: [], truncated: true }
+        : { record_id: contractIds.record, disposition: "watching" };
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await client.listTrackingDispositions(), {
+    states: [],
+    truncated: true,
+  });
+  assert.deepEqual(
+    await client.setTrackingDisposition(contractIds.record, {
+      disposition: "watching",
+    }),
+    { record_id: contractIds.record, disposition: "watching" },
+  );
+  assert.deepEqual(calls, [
+    {
+      url: "http://127.0.0.1:8420/api/v1/profile/record-tracking-dispositions",
+      method: "GET",
+      authorization: "Bearer profile-state-secret",
+      body: undefined,
+    },
+    {
+      url: `http://127.0.0.1:8420/api/v1/profile/record-tracking-dispositions/${contractIds.record}`,
+      method: "PUT",
+      authorization: "Bearer profile-state-secret",
+      body: { disposition: "watching" },
+    },
+  ]);
+  assert.throws(
+    () =>
+      client.setTrackingDisposition("not-a-record", {
+        disposition: "dropped",
+      }),
+    /recordId does not match the generated contract/,
+  );
+});
+
+test("Nuvio Collections SDK preserves the bare document and its larger bounded response", async () => {
+  const largeDocument = Array.from({ length: 64 }, (_, index) => ({
+    id: `collection-${index}`,
+    title: `Collection ${index}`,
+    folders: [],
+    extension: "x".repeat(8_192),
+  }));
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "profile-state-secret",
+    fetch: async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      const document =
+        init?.method === "DELETE"
+          ? null
+          : init?.method === "PUT"
+            ? JSON.parse(init.body)
+            : largeDocument;
+      return new Response(JSON.stringify({ document }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await client.getNuvioCollections(), {
+    document: largeDocument,
+  });
+  const replacement = [{ id: "collection", title: "Collection", folders: [] }];
+  assert.deepEqual(await client.replaceNuvioCollections(replacement), {
+    document: replacement,
+  });
+  assert.deepEqual(await client.clearNuvioCollections(), { document: null });
+  assert.deepEqual(
+    calls.map(({ url, method, authorization, body }) => ({
+      url,
+      method,
+      authorization,
+      body,
+    })),
+    [
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
+        method: "GET",
+        authorization: "Bearer profile-state-secret",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
+        method: "PUT",
+        authorization: "Bearer profile-state-secret",
+        body: replacement,
+      },
+      {
+        url: "http://127.0.0.1:8420/api/v1/profile/nuvio-collections",
+        method: "DELETE",
+        authorization: "Bearer profile-state-secret",
+        body: undefined,
+      },
+    ],
   );
 });
 
@@ -980,7 +1269,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 24);
+    assert.equal(discovery.capabilities.length, 35);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

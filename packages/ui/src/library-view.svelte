@@ -2,6 +2,7 @@
   import type {
     MediaRecord,
     MediaKind,
+    TrackingDispositionUpdate,
     WatchStatus,
     ContextMenuItemConfig,
   } from "./types.js";
@@ -10,26 +11,27 @@
     IconLayoutGrid,
     IconList,
     IconStarFilled,
-    IconCheck,
     IconBookmark,
     IconEye,
     IconEyeCheck,
     IconFolder,
-    IconMessage,
-    IconDotsVertical,
-    IconAdjustments,
-    IconRepeat,
   } from "@tabler/icons-svelte";
   import FastActionBar from "./fast-action-bar.svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
 
   interface Props {
     records: MediaRecord[];
     availableCollections: string[];
-    onSelectRecord: (recordId: string) => void;
+    onSelectRecord: (recordId: string, tab?: "overview" | "sources") => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
     onUpdateProgress?: (
@@ -47,6 +49,8 @@
     records,
     availableCollections,
     onSelectRecord,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
     onUpdateStatus,
     onUpdateRating,
     onUpdateProgress,
@@ -132,84 +136,49 @@
 
   function handleOpenContextMenu(rec: MediaRecord, e: MouseEvent): void {
     e.preventDefault();
-    const allItems: Record<string, ContextMenuItem> = {
-      view: {
-        id: "view",
-        label: "View Details...",
-        icon: IconEye,
-        action: () => onSelectRecord(rec.id),
-      },
-      progress: {
-        id: "progress",
-        label: "Update Progress...",
-        icon: IconAdjustments,
-        action: () => {
-          activeModalRecord = rec;
-          showProgressModal = true;
-        },
-      },
-      review: {
-        id: "review",
-        label: "Post a Review...",
-        icon: IconMessage,
-        action: () => {
-          activeModalRecord = rec;
-          showReviewModal = true;
-        },
-      },
-      collection: {
-        id: "collection",
-        label: "Add to Collection...",
-        icon: IconFolder,
-        action: () => {
-          activeModalRecord = rec;
-          showCollectionModal = true;
-        },
-      },
-      watched: {
-        id: "watched",
-        label: "Log Occurrence (Rewatch)",
-        icon: IconRepeat,
-        action: () => onUpdateStatus?.(rec.id, "completed"),
-      },
-      watchlist: {
-        id: "watchlist",
-        label:
-          rec.status === "plan_to_watch"
-            ? "Remove from Watchlist"
-            : "Add to Watchlist",
-        icon: IconBookmark,
-        action: () => handleToggleWatchlist(rec),
-      },
-      manage_ids: {
-        id: "manage_ids",
-        label: `Copy Fasti ID (${rec.id})`,
-        action: () => navigator.clipboard.writeText(rec.id),
-      },
-    };
-
-    if (!onUpdateStatus) {
-      delete allItems.watched;
-      delete allItems.watchlist;
-    }
-    if (!onUpdateProgress) delete allItems.progress;
-    if (!onSaveReview) delete allItems.review;
-    if (!onSaveCollection) delete allItems.collection;
-
-    let items: ContextMenuItem[] = [];
-    if (contextMenuConfigs && contextMenuConfigs.length > 0) {
-      items = [...contextMenuConfigs]
-        .filter((cfg) => cfg.visible && allItems[cfg.id])
-        .sort((a, b) => a.order - b.order)
-        .map((cfg) => allItems[cfg.id]);
-    } else {
-      items = Object.values(allItems);
-    }
-
     contextMenuState = {
       x: e.clientX,
       y: e.clientY,
-      items,
+      items: recordContextMenuItems(
+        rec,
+        {
+          onView: () => onSelectRecord(rec.id),
+          onSetTrackingDisposition: onSetTrackingDisposition
+            ? (disposition) => onSetTrackingDisposition(rec.id, disposition)
+            : undefined,
+          onMarkCompleted: onUpdateStatus
+            ? () => handleToggleWatched(rec)
+            : undefined,
+          onUpdateProgress: onUpdateProgress
+            ? () => {
+                activeModalRecord = rec;
+                showProgressModal = true;
+              }
+            : undefined,
+          onToggleWatchlist: onUpdateStatus
+            ? () => handleToggleWatchlist(rec)
+            : undefined,
+          onOpenCollection: onSaveCollection
+            ? () => {
+                activeModalRecord = rec;
+                showCollectionModal = true;
+              }
+            : undefined,
+          onOpenReview: onSaveReview
+            ? () => {
+                activeModalRecord = rec;
+                showReviewModal = true;
+              }
+            : undefined,
+          onInspectIds: () => onSelectRecord(rec.id, "sources"),
+          onReconcile: onOpenReconciliation,
+          onCopyId:
+            typeof navigator !== "undefined" && navigator.clipboard
+              ? () => void navigator.clipboard.writeText(rec.id).catch(() => {})
+              : undefined,
+        },
+        contextMenuConfigs,
+      ),
     };
   }
 </script>
@@ -464,15 +433,14 @@
                   <button
                     type="button"
                     class="table-btn"
-                    class:active={rec.status === "completed"}
+                    class:active={Boolean(
+                      onUpdateStatus && rec.status === "completed",
+                    )}
+                    disabled={!onUpdateStatus}
                     onclick={() => handleToggleWatched(rec)}
                     title={onUpdateStatus
-                      ? "Toggle seen"
-                      : "Watch-state changes are not available on this host"}
-                    aria-label={onUpdateStatus
-                      ? "Toggle seen"
-                      : "Watch-state changes unavailable"}
-                    disabled={!onUpdateStatus}
+                      ? "Toggle Seen"
+                      : "Completion needs Chronicle progress history"}
                   >
                     {#if rec.status === "completed"}
                       <IconEyeCheck size={16} />
@@ -483,29 +451,25 @@
                   <button
                     type="button"
                     class="table-btn"
-                    class:active={rec.status === "plan_to_watch"}
+                    class:active={Boolean(
+                      onUpdateStatus && rec.status === "plan_to_watch",
+                    )}
+                    disabled={!onUpdateStatus}
                     onclick={() => handleToggleWatchlist(rec)}
                     title={onUpdateStatus
-                      ? "Toggle watchlist"
-                      : "Watchlists are not available on this host"}
-                    aria-label={onUpdateStatus
-                      ? "Toggle watchlist"
-                      : "Watchlists unavailable"}
-                    disabled={!onUpdateStatus}
+                      ? "Toggle Watchlist"
+                      : "Watchlist membership is not active on this host"}
                   >
                     <IconBookmark size={16} />
                   </button>
                   <button
                     type="button"
                     class="table-btn"
+                    disabled={!onSaveCollection}
                     onclick={() => handleOpenCollection(rec)}
                     title={onSaveCollection
                       ? "Collection"
-                      : "Collections are not available on this host"}
-                    aria-label={onSaveCollection
-                      ? "Collection"
-                      : "Collections unavailable"}
-                    disabled={!onSaveCollection}
+                      : "Collections are not active on this host"}
                   >
                     <IconFolder size={16} />
                   </button>

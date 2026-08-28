@@ -23,12 +23,15 @@ use std::sync::{
     Arc,
 };
 
+/// Frozen first archive format retained for restore compatibility.
+pub const WORKSPACE_ARCHIVE_V1_FORMAT_VERSION: u32 = 1;
+
 /// Internal staged archive format version written by the export adapter.
 ///
 /// A restore implementation must reject any version it does not understand
 /// rather than guessing at the framing. The archive-v1 stream inventory is
 /// frozen, but this does not activate a public format, capability, or route.
-pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 1;
+pub const WORKSPACE_ARCHIVE_FORMAT_VERSION: u32 = 2;
 
 /// The sole archive-v1 contract version understood by this executable.
 ///
@@ -171,14 +174,14 @@ pub enum WorkspaceExportEntity {
     Corrections,
     Receipts,
     Operations,
+    MetadataFieldClaims,
+    MetadataFieldOverrides,
+    ProfileRecordTrackingDispositions,
 }
 
 impl WorkspaceExportEntity {
-    /// Every exported entity, in the frozen archive-v1 section order.
-    ///
-    /// Freezing these archive bytes does not activate the staged public
-    /// export capability or any runtime route.
-    pub const ALL: [Self; 16] = [
+    /// Every archive-v1 entity, in its frozen section order.
+    pub const V1: [Self; 16] = [
         Self::Workspaces,
         Self::Profiles,
         Self::Clients,
@@ -196,6 +199,40 @@ impl WorkspaceExportEntity {
         Self::Receipts,
         Self::Operations,
     ];
+
+    /// Every archive-v2 entity. The frozen v1 order is an exact prefix.
+    ///
+    /// Freezing these archive bytes does not activate the staged public
+    /// export capability or any runtime route.
+    pub const ALL: [Self; 19] = [
+        Self::Workspaces,
+        Self::Profiles,
+        Self::Clients,
+        Self::Records,
+        Self::NamespaceDefinitions,
+        Self::ExternalIdentifiers,
+        Self::Evidence,
+        Self::Observations,
+        Self::ObservationClues,
+        Self::Occurrences,
+        Self::Interpretations,
+        Self::ReviewItems,
+        Self::ReviewCandidates,
+        Self::Corrections,
+        Self::Receipts,
+        Self::Operations,
+        Self::MetadataFieldClaims,
+        Self::MetadataFieldOverrides,
+        Self::ProfileRecordTrackingDispositions,
+    ];
+
+    pub const fn for_format(format_version: u32) -> Option<&'static [Self]> {
+        match format_version {
+            WORKSPACE_ARCHIVE_V1_FORMAT_VERSION => Some(&Self::V1),
+            WORKSPACE_ARCHIVE_FORMAT_VERSION => Some(&Self::ALL),
+            _ => None,
+        }
+    }
 
     /// Stable section name written into the archive and the manifest.
     pub const fn as_str(self) -> &'static str {
@@ -216,6 +253,9 @@ impl WorkspaceExportEntity {
             Self::Corrections => "corrections",
             Self::Receipts => "receipts",
             Self::Operations => "operations",
+            Self::MetadataFieldClaims => "metadata_field_claims",
+            Self::MetadataFieldOverrides => "metadata_field_overrides",
+            Self::ProfileRecordTrackingDispositions => "profile_record_tracking_dispositions",
         }
     }
 
@@ -332,6 +372,7 @@ impl WorkspaceBlobDescriptor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceManifestError {
+    UnsupportedFormatVersion,
     EmptyContractVersion,
     ContractVersionTooLong,
     PortableIntegerOutOfRange,
@@ -347,6 +388,7 @@ pub enum WorkspaceManifestError {
 /// application layer owns only the representation-independent manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceManifest {
+    format_version: u32,
     workspace_id: WorkspaceId,
     workspace_revision: u64,
     contract_version: String,
@@ -358,6 +400,29 @@ pub struct WorkspaceManifest {
 
 impl WorkspaceManifest {
     pub fn try_new(
+        workspace_id: WorkspaceId,
+        workspace_revision: u64,
+        contract_version: String,
+        migration_version: u32,
+        migration_digest: Sha256Digest,
+        streams: Vec<WorkspaceStreamDescriptor>,
+        blobs: Vec<WorkspaceBlobDescriptor>,
+    ) -> Result<Self, WorkspaceManifestError> {
+        Self::try_new_for_format(
+            WORKSPACE_ARCHIVE_FORMAT_VERSION,
+            workspace_id,
+            workspace_revision,
+            contract_version,
+            migration_version,
+            migration_digest,
+            streams,
+            blobs,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_for_format(
+        format_version: u32,
         workspace_id: WorkspaceId,
         workspace_revision: u64,
         contract_version: String,
@@ -383,11 +448,14 @@ impl WorkspaceManifest {
         {
             return Err(WorkspaceManifestError::PortableIntegerOutOfRange);
         }
-        if streams.len() != WorkspaceExportEntity::ALL.len()
+        let Some(expected_streams) = WorkspaceExportEntity::for_format(format_version) else {
+            return Err(WorkspaceManifestError::UnsupportedFormatVersion);
+        };
+        if streams.len() != expected_streams.len()
             || streams
                 .iter()
                 .map(WorkspaceStreamDescriptor::entity)
-                .ne(WorkspaceExportEntity::ALL)
+                .ne(expected_streams.iter().copied())
         {
             return Err(WorkspaceManifestError::IncompleteStreamSet);
         }
@@ -410,6 +478,7 @@ impl WorkspaceManifest {
         }
 
         Ok(Self {
+            format_version,
             workspace_id,
             workspace_revision,
             contract_version,
@@ -421,7 +490,7 @@ impl WorkspaceManifest {
     }
 
     pub const fn format_version(&self) -> u32 {
-        WORKSPACE_ARCHIVE_FORMAT_VERSION
+        self.format_version
     }
 
     pub const fn workspace_id(&self) -> WorkspaceId {

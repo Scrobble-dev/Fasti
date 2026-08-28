@@ -5,6 +5,9 @@
     id: string;
     label: string;
     icon?: any;
+    group?: string;
+    description?: string;
+    disabled?: boolean;
     danger?: boolean;
     divider?: boolean;
     action: () => void;
@@ -110,15 +113,23 @@
   role="menu"
   tabindex="-1"
 >
-  {#each items as item}
+  {#each items as item, index}
     {#if item.divider}
       <div class="dropdown-divider" role="separator"></div>
     {:else}
+      {#if item.group && item.group !== items[index - 1]?.group}
+        <div class="menu-group-label" role="presentation">{item.group}</div>
+      {/if}
       <button
         type="button"
         class="dropdown-item d-flex align-items-center gap-2 py-2"
         class:text-danger={item.danger}
+        aria-disabled={item.disabled || undefined}
+        aria-describedby={item.description
+          ? `context-${item.id}-description`
+          : undefined}
         onclick={() => {
+          if (item.disabled) return;
           item.action();
           onClose();
         }}
@@ -132,7 +143,14 @@
             <Icon size={16} />
           </span>
         {/if}
-        <span>{item.label}</span>
+        <span class="menu-item-copy">
+          <span>{item.label}</span>
+          {#if item.description}
+            <small id={`context-${item.id}-description`}
+              >{item.description}</small
+            >
+          {/if}
+        </span>
       </button>
     {/if}
   {/each}
@@ -140,8 +158,38 @@
 
 <style>
   .fasti-context-menu {
-    min-width: 210px;
+    min-width: 260px;
+    max-width: min(360px, calc(100vw - 16px));
     animation: fastiMenuFade 90ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .menu-group-label {
+    padding: 8px 12px 4px;
+    color: var(--fasti-text-muted);
+    font-family: var(--fasti-font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .menu-item-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    white-space: normal;
+  }
+
+  .menu-item-copy small {
+    color: var(--fasti-text-muted);
+    font-size: 0.72rem;
+    line-height: 1.3;
+  }
+
+  .dropdown-item[aria-disabled="true"] {
+    cursor: not-allowed;
+    opacity: 0.62;
   }
 
   @keyframes fastiMenuFade {

@@ -1,21 +1,28 @@
-import { FastiClient } from "@fasti/sdk";
+import { connectionEndpoint, FastiClient } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
   AttachIdentifierResult,
+  BrowserSession,
+  BrowserUser,
+  BrowserUserUpdate,
   CreateRecordResult,
   EndpointConnectionStatus,
   NetworkConfiguration,
+  NuvioCollectionsDocument,
+  NuvioCollectionsState,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
   RecordSummary,
   RegisterNamespaceInput,
   RegisterNamespaceResult,
   SaveNetworkConfigurationRequest,
+  TrackingDispositionState,
+  TrackingDispositionList,
+  TrackingDispositionUpdate,
   WorkbenchHost,
 } from "@fasti/ui";
 
 const NETWORK_STORAGE_KEY = "fasti-network-config";
-const RETIRED_CREDENTIAL_STORAGE_KEY = "fasti-bearer-credential";
 
 const PROVIDERS: ReadonlyArray<{
   provider: string;
@@ -88,10 +95,14 @@ function defaultNetworkConfiguration(
   defaultApiUrl: string,
   source: "default" | "saved" = "default",
 ): NetworkConfiguration {
+  const serviceUrl = connectionEndpoint(
+    defaultApiUrl || "http://127.0.0.1:8420",
+    "default",
+  ).url;
   return {
     connection: {
       service_url: {
-        value: defaultApiUrl || "http://127.0.0.1:8420",
+        value: serviceUrl,
         source,
         managed: false,
       },
@@ -114,37 +125,14 @@ function unavailable(message: string): Error {
   return new Error(message);
 }
 
-function validatedEndpoint(endpoint: string): {
-  normalized: string;
-  parsed: URL;
-} {
-  let parsed: URL;
+function checkedEndpoint(value: string) {
   try {
-    parsed = new URL(endpoint.trim());
+    return connectionEndpoint(value);
   } catch {
-    throw unavailable("Enter a valid Fasti service URL.");
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw unavailable("Only HTTP and HTTPS Fasti endpoints are supported.");
-  }
-  if (
-    parsed.protocol === "http:" &&
-    !["127.0.0.1", "localhost", "::1", "[::1]"].includes(parsed.hostname)
-  ) {
-    throw unavailable("Cleartext HTTP is allowed only for loopback endpoints.");
-  }
-  if (
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash ||
-    (parsed.pathname !== "" && parsed.pathname !== "/")
-  ) {
     throw unavailable(
-      "The Fasti service URL must contain only a scheme, host, and optional port.",
+      "The Fasti service URL must contain only a scheme, host, and optional port. Cleartext HTTP is allowed only for loopback endpoints.",
     );
   }
-  return { normalized: parsed.origin, parsed };
 }
 
 function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
@@ -154,65 +142,69 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
   try {
     const raw = localStorage.getItem(NETWORK_STORAGE_KEY);
     if (!raw) return defaultNetworkConfiguration(defaultApiUrl);
-    const value = JSON.parse(raw) as {
+    const value = JSON.parse(raw) as Partial<NetworkConfiguration> & {
       service_url?: unknown;
-      connection?: { service_url?: { value?: unknown } };
     };
     const candidate =
       typeof value.service_url === "string"
         ? value.service_url
         : value.connection?.service_url?.value;
-    if (typeof candidate !== "string")
+    if (typeof candidate !== "string") {
       return defaultNetworkConfiguration(defaultApiUrl);
-    return defaultNetworkConfiguration(
-      validatedEndpoint(candidate).normalized,
-      "saved",
-    );
+    }
+    const serviceUrl = checkedEndpoint(candidate).url;
+    if (
+      !value.connection ||
+      !value.outbound_policy ||
+      !Array.isArray(value.outbound_policy.allow_networks) ||
+      !Array.isArray(value.outbound_policy.deny_networks)
+    ) {
+      return defaultNetworkConfiguration(serviceUrl, "saved");
+    }
+    const publicUrl = value.connection.public_url?.value;
+    return {
+      connection: {
+        service_url: { value: serviceUrl, source: "saved", managed: false },
+        public_url: {
+          value:
+            typeof publicUrl === "string"
+              ? checkedEndpoint(publicUrl).url
+              : null,
+          source: "saved",
+          managed: false,
+        },
+      },
+      outbound_policy: value.outbound_policy,
+    };
   } catch {
     return defaultNetworkConfiguration(defaultApiUrl);
   }
 }
 
+function csrfToken(): string {
+  if (typeof document === "undefined") return "";
+  const values = document.cookie
+    .split(";")
+    .map((part) => part.trim().split("="))
+    .filter(([name]) => name === "fasti_csrf");
+  return values.length === 1 ? (values[0][1] ?? "") : "";
+}
+
 export function createWebHost(defaultApiUrl: string): WorkbenchHost {
-  if (typeof localStorage !== "undefined") {
-    try {
-      localStorage.removeItem(RETIRED_CREDENTIAL_STORAGE_KEY);
-    } catch {
-      // The browser host still fails closed when storage is unavailable.
-    }
-  }
-  let sessionCredential: string | undefined;
-  const requireCredential = (): string => {
-    if (!sessionCredential) {
-      throw unavailable(
-        "Records need an active local bearer credential. Select Connect records and paste a credential with identity_read scope.",
-      );
-    }
-    return sessionCredential;
-  };
+  const createClient = (baseUrl: string): FastiClient =>
+    new FastiClient({
+      baseUrl,
+      useBrowserSession: true,
+      csrfToken,
+    });
   let network = loadNetworkConfiguration(defaultApiUrl);
-  let client = new FastiClient({
-    baseUrl: network.connection.service_url.value,
-    credential: requireCredential,
-  });
+  let client = createClient(network.connection.service_url.value);
 
   return {
     networkConfigurationScope: "client",
-
-    setSessionCredential(credential: string): void {
-      const normalized = credential.trim();
-      if (!/^[0-9a-f]{64}$/i.test(normalized)) {
-        throw unavailable(
-          "The bearer credential must contain exactly 64 hexadecimal characters.",
-        );
-      }
-      sessionCredential = normalized.toLowerCase();
-    },
-
-    clearSessionCredential(): void {
-      sessionCredential = undefined;
-    },
-
+    developmentTestAccountHint: import.meta.env.DEV
+      ? "Fresh development data root: testadmin / testadmin"
+      : undefined,
     async loadNetworkConfiguration(): Promise<NetworkConfiguration> {
       return network;
     },
@@ -220,29 +212,39 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     async saveNetworkConfiguration(
       input: SaveNetworkConfigurationRequest,
     ): Promise<NetworkConfiguration> {
-      const serviceUrl = validatedEndpoint(input.service_url).normalized;
-      const config = defaultNetworkConfiguration(serviceUrl, "saved");
-      if (typeof localStorage === "undefined") {
-        throw unavailable("Browser storage is unavailable.");
+      const endpoint = checkedEndpoint(input.service_url);
+      const publicUrl = input.public_url
+        ? checkedEndpoint(input.public_url).url
+        : null;
+      const nextClient = createClient(endpoint.url);
+      const config: NetworkConfiguration = {
+        connection: {
+          service_url: {
+            value: endpoint.url,
+            source: "saved",
+            managed: false,
+          },
+          public_url: {
+            value: publicUrl,
+            source: "saved",
+            managed: false,
+          },
+        },
+        outbound_policy: input.outbound_policy,
+      };
+      if (typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(config));
+        } catch {
+          // Best-effort: a blocked or full localStorage should not fail a
+          // save the caller already validated -- the returned config is
+          // still correct, it just won't survive a reload.
+        }
       }
-      try {
-        localStorage.setItem(
-          NETWORK_STORAGE_KEY,
-          JSON.stringify({ service_url: serviceUrl }),
-        );
-      } catch {
-        throw unavailable(
-          "The browser could not save the Fasti service URL. Check site storage permissions and try again.",
-        );
-      }
-      if (network.connection.service_url.value !== serviceUrl) {
-        sessionCredential = undefined;
-      }
+      // Recreate the client with the saved service URL so subsequent SDK
+      // calls use the new endpoint rather than the original defaultApiUrl.
       network = config;
-      client = new FastiClient({
-        baseUrl: serviceUrl,
-        credential: requireCredential,
-      });
+      client = nextClient;
       return config;
     },
 
@@ -250,15 +252,15 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       endpoint: string,
       signal?: AbortSignal,
     ): Promise<EndpointConnectionStatus> {
-      const { normalized, parsed } = validatedEndpoint(endpoint);
+      const target = checkedEndpoint(endpoint);
       const health = await new FastiClient({
-        baseUrl: normalized,
+        baseUrl: target.url,
         timeoutMs: 3_000,
         retryPolicy: { maxAttempts: 1 },
       }).health({ signal });
       return {
-        endpoint: normalized,
-        scheme: parsed.protocol === "https:" ? "https" : "http",
+        endpoint: target.url,
+        scheme: target.scheme,
         status: health.status,
         version: health.version,
       };
@@ -306,28 +308,99 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
     },
 
     async listRecords(): Promise<RecordSummary[]> {
-      requireCredential();
       const response = await client.listRecords();
-      return response.records as RecordSummary[];
+      return response.records.map((record) => ({
+        ...record,
+        poster: { ...record.poster, value: null },
+      })) as RecordSummary[];
     },
 
     async createRecord(grain: string): Promise<CreateRecordResult> {
-      requireCredential();
       return client.createRecord({ grain });
     },
 
     async attachIdentifier(
       input: AttachIdentifierInput,
     ): Promise<AttachIdentifierResult> {
-      requireCredential();
       return client.attachIdentifier(input);
     },
 
     async registerNamespace(
       input: RegisterNamespaceInput,
     ): Promise<RegisterNamespaceResult> {
-      requireCredential();
       return client.registerNamespace(input);
+    },
+
+    async listTrackingDispositions(): Promise<TrackingDispositionList> {
+      const response = await client.listTrackingDispositions();
+      return {
+        states: response.states as TrackingDispositionState[],
+        truncated: response.truncated,
+      };
+    },
+
+    async setTrackingDisposition(
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ): Promise<TrackingDispositionState> {
+      return client.setTrackingDisposition(recordId, {
+        disposition,
+      }) as Promise<TrackingDispositionState>;
+    },
+
+    async getNuvioCollections(): Promise<NuvioCollectionsState> {
+      return client.getNuvioCollections();
+    },
+
+    async replaceNuvioCollections(
+      document: NuvioCollectionsDocument,
+    ): Promise<NuvioCollectionsState> {
+      return client.replaceNuvioCollections(document);
+    },
+
+    async clearNuvioCollections(): Promise<NuvioCollectionsState> {
+      return client.clearNuvioCollections();
+    },
+
+    async createBrowserSession(
+      username: string,
+      password: string,
+      sessionTimeoutMinutes: number,
+    ): Promise<BrowserSession> {
+      return client.createBrowserSession({
+        username,
+        password,
+        session_timeout_minutes: sessionTimeoutMinutes,
+      });
+    },
+
+    async currentBrowserSession(): Promise<BrowserSession> {
+      return client.readBrowserSession();
+    },
+
+    async endBrowserSession(): Promise<void> {
+      await client.endBrowserSession();
+    },
+
+    async listBrowserUsers(): Promise<BrowserUser[]> {
+      const response = await client.listBrowserUsers();
+      return [...response.users];
+    },
+
+    async updateBrowserUser(
+      userId: string,
+      input: BrowserUserUpdate,
+    ): Promise<BrowserUser> {
+      return client.updateBrowserUser(userId, input);
+    },
+
+    async deleteBrowserUser(
+      userId: string,
+      currentPassword: string,
+    ): Promise<void> {
+      await client.deleteBrowserUser(userId, {
+        current_password: currentPassword,
+      });
     },
   };
 }

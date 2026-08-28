@@ -1,48 +1,41 @@
 <script lang="ts">
   import {
-    IconDevices2,
-    IconFingerprint,
-    IconIdBadge,
-    IconLockAccess,
-    IconShieldLock,
+    IconLogin,
+    IconLogout,
+    IconPencil,
+    IconTrash,
+    IconUserShield,
     IconX,
   } from "@tabler/icons-svelte";
+  import type { BrowserSession, BrowserUser, WorkbenchHost } from "./types.js";
 
   interface Props {
     show: boolean;
-    credentialTarget: string;
+    host: WorkbenchHost;
+    session: BrowserSession | null;
     onClose: () => void;
-    onSubmit: (credential: string) => void | Promise<void>;
+    onSessionChange: (session: BrowserSession | null) => void;
   }
 
-  let { show, credentialTarget, onClose, onSubmit }: Props = $props();
+  let { show, host, session, onClose, onSessionChange }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
-  let credential = $state("");
+  let username = $state("testadmin");
+  let password = $state("");
+  let sessionTimeoutMinutes = $state(60);
+  let users = $state<BrowserUser[]>([]);
+  let selectedUserId = $state<string | null>(null);
+  let editUsername = $state("");
+  let editPassword = $state("");
+  let editActive = $state(true);
+  let currentPassword = $state("");
+  let confirmDelete = $state(false);
+  let busy = $state(false);
   let problem = $state("");
-  let submitting = $state(false);
-  let externalTargetConfirmed = $state(false);
-  type AuthMethod = "passkey" | "oidc" | "device" | "password" | "token";
-  let activeMethod = $state<AuthMethod>("token");
-  const methods = [
-    { id: "passkey", label: "Passkey", icon: IconFingerprint },
-    { id: "oidc", label: "OIDC / SSO", icon: IconShieldLock },
-    { id: "device", label: "NuvioTV Device", icon: IconDevices2 },
-    { id: "password", label: "Master Password", icon: IconLockAccess },
-    { id: "token", label: "API Credential", icon: IconIdBadge },
-  ] as const;
-  const credentialValid = $derived(/^[0-9a-f]{64}$/i.test(credential.trim()));
-  const externalCredentialTarget = $derived.by(() => {
-    try {
-      const hostname = new URL(credentialTarget).hostname;
-      return !["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
-    } catch {
-      return true;
-    }
-  });
-  const credentialReady = $derived(
-    credentialValid &&
-      credentialTarget.length > 0 &&
-      (!externalCredentialTarget || externalTargetConfirmed),
+  let notice = $state("");
+  const usernamePattern = "[a-z0-9][a-z0-9._\\-]{2,63}";
+
+  const selectedUser = $derived(
+    users.find((user) => user.user_id === selectedUserId) ?? null,
   );
 
   $effect(() => {
@@ -51,215 +44,406 @@
     else if (!show && dialog.open) dialog.close();
   });
 
-  function close(): void {
-    credential = "";
-    problem = "";
-    externalTargetConfirmed = false;
-    activeMethod = "token";
-    onClose();
+  $effect(() => {
+    if (show && session?.user.is_admin) void loadUsers();
+  });
+
+  function messageFor(error: unknown): string {
+    if (
+      error &&
+      typeof error === "object" &&
+      "problem" in error &&
+      (error as { problem?: { code?: unknown } }).problem?.code ===
+        "authentication_failed"
+    ) {
+      return "The username or password is incorrect.";
+    }
+    return error instanceof Error
+      ? error.message
+      : "Fasti could not complete the account request. Try again.";
   }
 
-  async function submit(event: SubmitEvent): Promise<void> {
+  function formatExpiry(value: string): string {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? value
+      : new Intl.DateTimeFormat(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(date);
+  }
+
+  async function loadUsers(): Promise<void> {
+    if (!host.listBrowserUsers) return;
+    try {
+      users = await host.listBrowserUsers();
+    } catch (error) {
+      problem = messageFor(error);
+    }
+  }
+
+  async function signIn(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    if (!credentialReady || submitting) return;
-    submitting = true;
+    if (!host.createBrowserSession || busy) return;
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      const result = await host.createBrowserSession(
+        username.trim(),
+        password,
+        sessionTimeoutMinutes,
+      );
+      password = "";
+      onSessionChange(result);
+      notice = `Signed in as ${result.user.username}.`;
+      if (result.user.is_admin) await loadUsers();
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function signOut(): Promise<void> {
+    if (!host.endBrowserSession || busy) return;
+    busy = true;
     problem = "";
     try {
-      await onSubmit(credential.trim());
-      close();
+      await host.endBrowserSession();
+      users = [];
+      selectedUserId = null;
+      onSessionChange(null);
+      notice = "Signed out.";
     } catch (error) {
-      problem =
-        error instanceof Error
-          ? error.message
-          : "Fasti rejected this local bearer credential.";
+      problem = messageFor(error);
     } finally {
-      submitting = false;
+      busy = false;
     }
   }
 
-  function handleMethodKeydown(
-    event: KeyboardEvent,
-    currentIndex: number,
-  ): void {
-    let nextIndex: number;
-    switch (event.key) {
-      case "ArrowRight":
-        nextIndex = (currentIndex + 1) % methods.length;
-        break;
-      case "ArrowLeft":
-        nextIndex = (currentIndex - 1 + methods.length) % methods.length;
-        break;
-      case "Home":
-        nextIndex = 0;
-        break;
-      case "End":
-        nextIndex = methods.length - 1;
-        break;
-      default:
-        return;
-    }
+  function beginEdit(user: BrowserUser): void {
+    selectedUserId = user.user_id;
+    editUsername = user.username;
+    editPassword = "";
+    editActive = user.active;
+    currentPassword = "";
+    confirmDelete = false;
+    problem = "";
+    notice = "";
+  }
+
+  async function saveUser(event: SubmitEvent): Promise<void> {
     event.preventDefault();
-    const nextMethod = methods[nextIndex]?.id;
-    if (!nextMethod) return;
-    activeMethod = nextMethod;
-    document.getElementById(`auth-tab-${nextMethod}`)?.focus();
+    if (!selectedUser || !host.updateBrowserUser || busy) return;
+    const usernameChanged = editUsername.trim() !== selectedUser.username;
+    const activeChanged = editActive !== selectedUser.active;
+    if (!usernameChanged && !editPassword && !activeChanged) {
+      problem = "Change the username, password, or active state before saving.";
+      return;
+    }
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      const updated = await host.updateBrowserUser(selectedUser.user_id, {
+        current_password: currentPassword,
+        ...(usernameChanged ? { username: editUsername.trim() } : {}),
+        ...(editPassword ? { password: editPassword } : {}),
+        ...(activeChanged ? { active: editActive } : {}),
+      });
+      users = users.map((user) =>
+        user.user_id === updated.user_id ? updated : user,
+      );
+      currentPassword = "";
+      const currentUserUpdated = updated.user_id === session?.user.user_id;
+      const sessionInvalidated =
+        currentUserUpdated &&
+        (usernameChanged || Boolean(editPassword) || !updated.active);
+      editPassword = "";
+      if (sessionInvalidated) {
+        username = updated.username;
+        users = [];
+        onSessionChange(null);
+        notice = "Account updated. Sign in again with the new details.";
+      } else {
+        if (currentUserUpdated && session) {
+          onSessionChange({ ...session, user: updated });
+        }
+        notice = `Saved ${updated.username}.`;
+      }
+      selectedUserId = null;
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteUser(): Promise<void> {
+    if (!selectedUser || !host.deleteBrowserUser || !confirmDelete || busy)
+      return;
+    const user = selectedUser;
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      await host.deleteBrowserUser(user.user_id, currentPassword);
+      users = users.filter((candidate) => candidate.user_id !== user.user_id);
+      const deletedCurrentUser = user.user_id === session?.user.user_id;
+      selectedUserId = null;
+      currentPassword = "";
+      confirmDelete = false;
+      if (deletedCurrentUser) onSessionChange(null);
+      notice = deletedCurrentUser
+        ? "Account deleted. The development seed will not recreate it."
+        : "Account deleted.";
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
   }
 </script>
 
 <dialog
   bind:this={dialog}
-  class="modal modal-blur show modal-backdrop"
+  class="auth-dialog"
   aria-labelledby="auth-modal-title"
-  oncancel={close}
+  oncancel={(event) => {
+    event.preventDefault();
+    onClose();
+  }}
   onclick={(event) => {
-    if (event.target === event.currentTarget) close();
+    if (event.target === event.currentTarget) onClose();
   }}
 >
-  <div class="modal-dialog modal-dialog-centered">
-    <form class="modal-content modal-card" onsubmit={submit}>
-      <div class="modal-header">
-        <h2 id="auth-modal-title">Connect to Fasti records</h2>
-        <button
-          type="button"
-          class="btn btn-icon btn-ghost-secondary close-btn"
-          onclick={close}
-          aria-label="Close dialog"
-        >
-          <IconX size={18} />
-        </button>
+  <section class="modal-card">
+    <header class="modal-header">
+      <div>
+        <h2 id="auth-modal-title">Account access</h2>
+        <p>Browser sessions stay separate from integration tokens.</p>
       </div>
-
-      <div
-        class="nav nav-tabs method-tabs"
-        role="tablist"
-        aria-label="Authentication method"
+      <button
+        type="button"
+        class="icon-button"
+        onclick={onClose}
+        aria-label="Close account dialog"
       >
-        {#each methods as method, index}
-          <button
-            id={`auth-tab-${method.id}`}
-            type="button"
-            role="tab"
-            class="nav-link method-tab"
-            class:active={activeMethod === method.id}
-            aria-selected={activeMethod === method.id}
-            aria-controls="auth-panel"
-            tabindex={activeMethod === method.id ? 0 : -1}
-            onclick={() => (activeMethod = method.id)}
-            onkeydown={(event) => handleMethodKeydown(event, index)}
-          >
-            <method.icon size={16} aria-hidden="true" />
-            {method.label}
-          </button>
-        {/each}
-      </div>
+        <IconX size={18} />
+      </button>
+    </header>
 
-      <div
-        id="auth-panel"
-        class="modal-body"
-        role="tabpanel"
-        aria-labelledby={`auth-tab-${activeMethod}`}
-        tabindex="0"
-      >
-        {#if activeMethod === "token"}
-          <p id="credential-help">
-            Paste an active 64-character scoped API credential. Record access
-            needs <code>identity_read</code>. Fasti keeps the secret only in
-            this tab's memory and sends it only to
-            <code>{credentialTarget}</code>. Reloading clears it.
-          </p>
-          <label class="form-label" for="session-credential"
-            >API client credential</label
-          >
-          <input
-            id="session-credential"
-            type="password"
-            class="form-control credential-input"
-            autocomplete="off"
-            spellcheck="false"
-            aria-invalid={credential.length > 0 && !credentialValid}
-            aria-describedby="credential-help credential-format"
-            bind:value={credential}
-          />
-          <p
-            id="credential-format"
-            class:problem={credential.length > 0 && !credentialValid}
-          >
-            Enter exactly 64 hexadecimal characters.
-          </p>
-          {#if externalCredentialTarget}
-            <label class="form-check target-confirmation">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                bind:checked={externalTargetConfirmed}
-              />
-              <span class="form-check-label">
-                I trust <code>{credentialTarget}</code> and want to send this credential
-                to it.
-              </span>
-            </label>
-          {/if}
-          {#if problem}
-            <p class="problem" role="alert">{problem}</p>
+    <div class="modal-body">
+      {#if notice}
+        <p class="notice" role="status">{notice}</p>
+      {/if}
+      {#if problem}
+        <p class="problem" role="alert">{problem}</p>
+      {/if}
+
+      {#if !session}
+        <form class="form-stack" onsubmit={signIn}>
+          <div class="form-field">
+            <label for="auth-username">Username</label>
+            <input
+              id="auth-username"
+              type="text"
+              autocomplete="username"
+              minlength="3"
+              maxlength="64"
+              pattern={usernamePattern}
+              bind:value={username}
+              required
+            />
+          </div>
+          <div class="form-field">
+            <label for="auth-password">Password</label>
+            <input
+              id="auth-password"
+              type="password"
+              autocomplete="current-password"
+              minlength="8"
+              maxlength="128"
+              bind:value={password}
+              required
+            />
+          </div>
+          <div class="form-field">
+            <label for="auth-session-timeout">Session duration</label>
+            <select
+              id="auth-session-timeout"
+              bind:value={sessionTimeoutMinutes}
+            >
+              <option value={15}>15 minutes</option>
+              <option value={60}>1 hour</option>
+              <option value={480}>8 hours</option>
+              <option value={1440}>24 hours</option>
+            </select>
+          </div>
+          {#if host.developmentTestAccountHint}
+            <p class="hint"><code>{host.developmentTestAccountHint}</code></p>
           {/if}
           <button
             type="submit"
-            class="btn btn-primary submit-btn"
-            disabled={!credentialReady || submitting}
+            class="primary-button"
+            disabled={busy || !host.createBrowserSession}
           >
-            {submitting ? "Connecting…" : "Connect"}
+            <IconLogin size={18} />
+            {busy ? "Signing in…" : "Sign in"}
           </button>
-        {:else if activeMethod === "passkey"}
-          <div class="unavailable-state">
-            <IconFingerprint size={28} aria-hidden="true" />
-            <h3>Passkey sign-in is not active</h3>
-            <p>
-              Fasti needs a host-owned WebAuthn relying party, server-issued
-              challenges, credential registration, and recovery before this
-              method can accept input. The Workbench does not create local
-              placeholder challenges.
+          {#if !host.createBrowserSession}
+            <p class="hint">
+              This host does not provide browser account sessions.
             </p>
+          {/if}
+        </form>
+      {:else}
+        <div class="session-summary">
+          <IconUserShield size={22} aria-hidden="true" />
+          <div>
+            <strong>{session.user.username}</strong>
+            <span>
+              {session.user.is_admin ? "Administrator" : "User"}
+              {session.user.is_test_account ? " · test account" : ""}
+            </span>
+            <span>Session expires {formatExpiry(session.expires_at)}</span>
           </div>
-        {:else if activeMethod === "oidc"}
-          <div class="unavailable-state">
-            <IconShieldLock size={28} aria-hidden="true" />
-            <h3>OIDC and SSO are not active</h3>
-            <p>
-              This method needs a registered issuer, browser session policy,
-              consent, refresh, revocation, and the same canonical Fasti scope
-              vocabulary as API credentials. Dynamic client registration stays
-              off until that contract is governed.
-            </p>
-          </div>
-        {:else if activeMethod === "device"}
-          <div class="unavailable-state">
-            <IconDevices2 size={28} aria-hidden="true" />
-            <h3>NuvioTV device pairing is not active</h3>
-            <p>
-              Device pairing needs a server-issued device code, a separate
-              browser approval step, bounded expiry, client scopes, polling, and
-              revocation. Fasti does not display an unregistered local PIN.
-            </p>
-          </div>
-        {:else}
-          <div class="unavailable-state">
-            <IconLockAccess size={28} aria-hidden="true" />
-            <h3>Master-password sign-in is not active</h3>
-            <p>
-              Account passwords belong to a host-owned browser session with rate
-              limits, CSRF protection, recent-authentication policy, and
-              recovery. The Workbench never sends a raw password to the records
-              API.
-            </p>
-          </div>
+          <button
+            type="button"
+            class="secondary-button"
+            onclick={signOut}
+            disabled={busy}
+          >
+            <IconLogout size={17} /> Sign out
+          </button>
+        </div>
+
+        {#if session.user.is_admin && host.listBrowserUsers}
+          <section class="users" aria-labelledby="browser-users-title">
+            <div class="section-heading">
+              <h3 id="browser-users-title">Browser users</h3>
+              <button
+                type="button"
+                class="text-button"
+                onclick={loadUsers}
+                disabled={busy}>Refresh</button
+              >
+            </div>
+            {#if users.length === 0}
+              <p class="hint">No browser users are available.</p>
+            {:else}
+              <ul>
+                {#each users as user (user.user_id)}
+                  <li>
+                    <div class="user-name">
+                      <strong>{user.username}</strong>
+                      <span>
+                        {user.active
+                          ? "Active"
+                          : "Inactive"}{user.is_test_account ? " · test" : ""}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      class="secondary-button"
+                      onclick={() => beginEdit(user)}
+                    >
+                      <IconPencil size={16} /> Edit
+                    </button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
         {/if}
-      </div>
-    </form>
-  </div>
+
+        {#if selectedUser}
+          <form class="edit-panel form-stack" onsubmit={saveUser}>
+            <div class="section-heading">
+              <h3>Edit {selectedUser.username}</h3>
+              <button
+                type="button"
+                class="text-button"
+                onclick={() => (selectedUserId = null)}>Cancel</button
+              >
+            </div>
+            <div class="form-field">
+              <label for="edit-username">Username</label>
+              <input
+                id="edit-username"
+                type="text"
+                autocomplete="username"
+                minlength="3"
+                maxlength="64"
+                pattern={usernamePattern}
+                bind:value={editUsername}
+                required
+              />
+            </div>
+            <div class="form-field">
+              <label for="edit-password">
+                New password <span>(leave blank to keep it)</span>
+              </label>
+              <input
+                id="edit-password"
+                type="password"
+                autocomplete="new-password"
+                minlength="8"
+                maxlength="128"
+                bind:value={editPassword}
+              />
+            </div>
+            <label class="check-row">
+              <input type="checkbox" bind:checked={editActive} />
+              Account is active
+            </label>
+            <div class="form-field">
+              <label for="current-password">Your current password</label>
+              <input
+                id="current-password"
+                type="password"
+                autocomplete="current-password"
+                minlength="8"
+                maxlength="128"
+                bind:value={currentPassword}
+                required
+              />
+              <span>Required to save changes or delete this user.</span>
+            </div>
+            <div class="form-actions">
+              <button
+                type="submit"
+                class="primary-button"
+                disabled={busy || !host.updateBrowserUser}>Save changes</button
+              >
+            </div>
+            <div class="delete-zone">
+              <label class="check-row">
+                <input type="checkbox" bind:checked={confirmDelete} />
+                I understand that deleting {selectedUser.username} cannot be undone.
+              </label>
+              <button
+                type="button"
+                class="danger-button"
+                onclick={deleteUser}
+                disabled={busy ||
+                  !confirmDelete ||
+                  !currentPassword ||
+                  !host.deleteBrowserUser}
+              >
+                <IconTrash size={17} /> Delete user
+              </button>
+            </div>
+          </form>
+        {/if}
+      {/if}
+    </div>
+  </section>
 </dialog>
 
 <style>
-  .modal-backdrop {
+  .auth-dialog {
     position: fixed;
     inset: 0;
     z-index: 9999;
@@ -274,167 +458,250 @@
     place-items: center;
     padding: 16px;
   }
-
-  .modal-backdrop::backdrop {
+  .auth-dialog::backdrop {
     background: rgba(0, 0, 0, 0.55);
   }
-
-  .modal-backdrop:not([open]) {
+  .auth-dialog:not([open]) {
     display: none;
   }
-
   .modal-card {
-    width: min(100%, 480px);
-    overflow: hidden;
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 8px;
+    width: min(100%, 680px);
+    max-height: min(88dvh, 760px);
+    overflow: auto;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
+    border-radius: 12px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
   }
-
   .modal-header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    padding: 18px 20px;
+    padding: 20px 24px 16px;
     border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
   }
-
-  h2 {
+  h2,
+  h3,
+  p {
     margin: 0;
+  }
+  h2 {
     font-family: var(--fasti-font-display);
     font-size: 1.25rem;
   }
-
-  .close-btn {
-    display: inline-grid;
-    min-width: 44px;
-    min-height: 44px;
-    place-items: center;
-    border: 0;
-    background: transparent;
+  h3 {
+    font-size: 1rem;
+  }
+  .modal-header p,
+  .hint,
+  .session-summary span,
+  .user-name span,
+  .form-field span {
     color: var(--fasti-text-muted);
-    cursor: pointer;
+    font-size: 0.875rem;
   }
-
-  .method-tabs {
-    display: flex;
-    overflow-x: auto;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    background: var(--fasti-surface-archive);
+  .modal-header p {
+    margin-top: 4px;
   }
-
-  .method-tab {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 6px;
-    min-height: 44px;
-    padding: 8px 12px;
-    border: 0;
-    border-bottom: 3px solid transparent;
-    background: transparent;
-    color: var(--fasti-text-muted);
-    font-size: 0.8rem;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .method-tab.active {
-    border-bottom-color: var(--fasti-action-primary);
-    color: var(--fasti-action-primary);
-  }
-
   .modal-body {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 20px;
+    padding: 24px;
   }
-
-  .modal-body > p {
-    margin: 0;
-    color: var(--fasti-text-muted);
-    line-height: 1.5;
-  }
-
-  .unavailable-state {
+  .form-stack {
     display: grid;
-    gap: 10px;
-    color: var(--fasti-text-muted);
+    gap: 16px;
   }
-
-  .unavailable-state > :global(svg) {
-    color: var(--fasti-action-primary);
+  .form-field {
+    display: grid;
+    gap: 6px;
   }
-
-  .unavailable-state h3,
-  .unavailable-state p {
-    margin: 0;
+  .form-field label {
+    font-weight: 650;
+    font-size: 0.875rem;
   }
-
-  .unavailable-state h3 {
-    color: var(--fasti-text-primary);
-    font-family: var(--fasti-font-display);
-  }
-
-  .unavailable-state p {
-    line-height: 1.55;
-  }
-
-  label {
-    font-weight: 700;
-  }
-
-  .credential-input {
+  input,
+  select {
+    width: 100%;
     min-height: 44px;
-    padding: 8px 12px;
+    padding: 9px 11px;
     border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
-    border-radius: 4px;
+      color-mix(in srgb, var(--fasti-text-muted) 38%, transparent);
+    border-radius: 6px;
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
-    font-family: var(--fasti-font-mono);
+    font: inherit;
+    font-size: max(1rem, 16px);
   }
-
-  .target-confirmation {
-    min-height: var(--fasti-touch-target-min);
-    display: flex;
-    align-items: center;
-    gap: 0.625rem;
+  button {
+    font: inherit;
   }
-
-  #credential-help code,
-  .target-confirmation .form-check-label {
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .modal-body > .problem {
-    color: var(--fasti-state-error, #b42318);
-  }
-
-  .submit-btn {
-    min-height: 44px;
-    border: 0;
-    border-radius: 4px;
-    background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast);
-    font-weight: 750;
-    cursor: pointer;
-  }
-
-  .submit-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-
-  :is(button, input):focus-visible {
+  :is(button, input, select):focus-visible {
     outline: 3px solid var(--fasti-action-primary);
     outline-offset: 2px;
+  }
+  .icon-button,
+  .primary-button,
+  .secondary-button,
+  .danger-button,
+  .text-button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+  }
+  .icon-button {
+    min-width: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--fasti-text-muted);
+  }
+  .primary-button,
+  .secondary-button,
+  .danger-button {
+    padding: 9px 14px;
+    border-radius: 6px;
+    font-weight: 650;
+  }
+  .primary-button {
+    border: 0;
+    background: var(--fasti-action-primary);
+    color: var(--fasti-action-contrast);
+  }
+  .secondary-button {
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+  }
+  .danger-button {
+    border: 1px solid var(--fasti-state-error, #b42318);
+    background: transparent;
+    color: var(--fasti-state-error, #b42318);
+  }
+  .text-button {
+    border: 0;
+    background: transparent;
+    color: var(--fasti-action-primary);
+    font-weight: 650;
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .notice,
+  .problem {
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border-radius: 6px;
+    overflow-wrap: anywhere;
+  }
+  .notice {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #087a55) 12%,
+      transparent
+    );
+  }
+  .problem {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-error, #b42318) 11%,
+      transparent
+    );
+    color: var(--fasti-state-error, #b42318);
+  }
+  .session-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+  .session-summary div,
+  .user-name {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    overflow-wrap: anywhere;
+  }
+  .users {
+    margin-top: 28px;
+  }
+  .section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .users ul {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+  }
+  .users li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+  }
+  .edit-panel {
+    margin-top: 28px;
+    padding-top: 20px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 28%, transparent);
+  }
+  .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.4;
+  }
+  .check-row input {
+    width: 20px;
+    min-height: 20px;
+    margin-top: 1px;
+    accent-color: var(--fasti-action-primary);
+  }
+  .form-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .delete-zone {
+    display: grid;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-state-error, #b42318) 35%, transparent);
+  }
+  code {
+    font-family: var(--fasti-font-mono);
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 36rem) {
+    .modal-card {
+      max-height: calc(100dvh - 16px);
+    }
+    .modal-header,
+    .modal-body {
+      padding-inline: 16px;
+    }
+    .session-summary {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    .session-summary .secondary-button {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+    .users li {
+      align-items: flex-start;
+    }
   }
 </style>

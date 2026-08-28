@@ -10,6 +10,7 @@ description = "Fasti SQLite and filesystem adapters for the local kernel"
 
 [dependencies]
 chrono = { workspace = true }
+argon2 = { workspace = true }
 fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }

@@ -20,7 +20,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, Write};
 
 const INITIALIZATION_LIFETIME_MINUTES: i64 = 10;
-const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
+pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::CapabilityRead,
     ScopeKey::ProfileSelect,
     ScopeKey::CredentialManage,
@@ -29,12 +29,27 @@ const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::ReceiptRead,
     ScopeKey::IdentityWrite,
     ScopeKey::IdentityRead,
+    ScopeKey::ProfileStateRead,
+    ScopeKey::ProfileStateWrite,
     ScopeKey::ReviewRead,
     ScopeKey::ReviewWrite,
     ScopeKey::CorrectionRead,
     ScopeKey::CorrectionWrite,
     ScopeKey::WorkspaceExport,
     ScopeKey::WorkspaceVerify,
+    ScopeKey::BrowserUserManage,
+];
+
+pub(crate) const V8_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] = &[
+    ScopeKey::ProfileStateRead,
+    ScopeKey::ProfileStateWrite,
+    ScopeKey::ReviewRead,
+    ScopeKey::ReviewWrite,
+    ScopeKey::CorrectionRead,
+    ScopeKey::CorrectionWrite,
+    ScopeKey::WorkspaceExport,
+    ScopeKey::WorkspaceVerify,
+    ScopeKey::BrowserUserManage,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

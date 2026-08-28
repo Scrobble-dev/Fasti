@@ -4,6 +4,11 @@
     WatchStatus,
     ExternalId,
     ChronicleOccurrence,
+    ContextMenuItemConfig,
+    ProviderCredentialStatus,
+    ProviderSearchCandidate,
+    ProviderSelection,
+    TrackingDispositionUpdate,
   } from "./types.js";
   import {
     IconArrowLeft,
@@ -26,12 +31,17 @@
     IconClock,
     IconDeviceTv,
     IconPhoto,
+    IconRefresh,
   } from "@tabler/icons-svelte";
   import ProgressModal from "./progress-modal.svelte";
   import RatingReviewModal from "./rating-review-modal.svelte";
   import CollectionModal from "./collection-modal.svelte";
   import ArtworkModal, { type ArtworkCandidate } from "./artwork-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
+  import DiscoverView from "./discover-view.svelte";
+  import { hostProblemText } from "./host-problem.js";
+  import TmdbAttribution from "./tmdb-attribution.svelte";
+  import { recordContextMenuItems } from "./record-actions.js";
 
   /** Namespaces whose external ID value is a real key an image CDN can
    * resolve directly, and the resolver for that namespace. Providers whose
@@ -54,7 +64,27 @@
     record: MediaRecord;
     availableCollections: string[];
     occurrences?: ChronicleOccurrence[];
+    initialTab?: "overview" | "sources";
+    contextMenuConfigs?: ContextMenuItemConfig[];
+    providerCredentials?: ProviderCredentialStatus[];
+    providerLoading?: boolean;
+    providerHostProblem?: string;
     onBack: () => void;
+    onSearchMetadata?: (
+      provider: string,
+      query: string,
+    ) => Promise<ProviderSearchCandidate[]>;
+    onApplyMetadata?: (
+      recordId: string,
+      selection: ProviderSelection,
+    ) => Promise<void>;
+    onOpenProviderSettings?: () => void;
+    onRetryProviders?: () => void;
+    onSetTrackingDisposition?: (
+      recordId: string,
+      disposition: TrackingDispositionUpdate,
+    ) => void;
+    onOpenReconciliation?: () => void;
     onUpdateStatus?: (recordId: string, status: WatchStatus) => void;
     onUpdateRating?: (recordId: string, rating: number) => void;
     onToggleEpisode?: (recordId: string, episodeId: string) => void;
@@ -80,7 +110,18 @@
     record,
     availableCollections,
     occurrences = [],
+    initialTab = "overview",
+    contextMenuConfigs,
+    providerCredentials,
+    providerLoading = false,
+    providerHostProblem,
     onBack,
+    onSearchMetadata,
+    onApplyMetadata,
+    onOpenProviderSettings,
+    onRetryProviders,
+    onSetTrackingDisposition,
+    onOpenReconciliation,
     onUpdateStatus,
     onUpdateRating,
     onToggleEpisode,
@@ -107,6 +148,10 @@
   let showCollectionModal = $state(false);
   let showArtworkModal = $state(false);
 
+  let metadataRefreshingId = $state("");
+  let metadataProblem = $state("");
+  let metadataNotice = $state("");
+
   // Context Menu State
   let contextMenuState = $state<{
     x: number;
@@ -117,8 +162,11 @@
   $effect(() => {
     if (record.id !== syncedRecordId) {
       syncedRecordId = record.id;
+      activeTab = initialTab;
       editedNotesText = record.userNotes ?? "";
       isEditingNotes = false;
+      metadataProblem = "";
+      metadataNotice = "";
     }
     const seasonCount = record.seasons?.length ?? 0;
     if (seasonCount === 0) {
@@ -163,18 +211,84 @@
       .filter((c): c is ArtworkCandidate => c !== null),
   );
 
-  const statusOptions: Array<{ id: WatchStatus; label: string }> = [
+  const trackingOptions: Array<{
+    id: TrackingDispositionUpdate;
+    label: string;
+  }> = [
+    { id: "unset", label: "Automatic from activity" },
     { id: "watching", label: "In Progress / Watching" },
-    { id: "completed", label: "Completed" },
-    { id: "plan_to_watch", label: "Plan to Watch" },
     { id: "on_hold", label: "On Hold" },
     { id: "dropped", label: "Dropped" },
   ];
+
+  const selectedTrackingDisposition = $derived<TrackingDispositionUpdate>(
+    record.trackingDisposition ?? "unset",
+  );
 
   function handleSaveNotes(): void {
     if (!onUpdateNotes) return;
     onUpdateNotes(record.id, editedNotesText);
     isEditingNotes = false;
+  }
+
+  function providerKindForRecord(): "book" | "movie" | "show" | null {
+    if (record.mediaKind === "book") return "book";
+    if (record.mediaKind === "movie") return "movie";
+    if (record.mediaKind === "show" || record.mediaKind === "anime") {
+      return "show";
+    }
+    return null;
+  }
+
+  function refreshSelection(xid: ExternalId): ProviderSelection | null {
+    const provider = xid.namespace.toLowerCase();
+    const kind = providerKindForRecord();
+    if (
+      (provider === "google-books" && kind === "book") ||
+      (provider === "tmdb" && (kind === "movie" || kind === "show"))
+    ) {
+      return { provider, provider_id: xid.value, kind };
+    }
+    return null;
+  }
+
+  async function searchCompatibleMetadata(
+    provider: string,
+    query: string,
+  ): Promise<ProviderSearchCandidate[]> {
+    if (!onSearchMetadata) return [];
+    const kind = providerKindForRecord();
+    if (!kind) return [];
+    const candidates = await onSearchMetadata(provider, query);
+    return candidates.filter((candidate) => candidate.kind === kind);
+  }
+
+  async function chooseMetadata(
+    candidate: ProviderSearchCandidate,
+  ): Promise<void> {
+    if (!onApplyMetadata) return;
+    await onApplyMetadata(record.id, {
+      provider: candidate.provider,
+      provider_id: candidate.provider_id,
+      kind: candidate.kind,
+    });
+    metadataNotice = `Applied metadata from ${candidate.title}.`;
+  }
+
+  async function refreshMetadata(xid: ExternalId): Promise<void> {
+    const selection = refreshSelection(xid);
+    if (!selection || !onApplyMetadata || metadataRefreshingId) return;
+    metadataRefreshingId = `${xid.namespace}:${xid.value}`;
+    metadataProblem = "";
+    metadataNotice = "";
+    try {
+      await onApplyMetadata(record.id, selection);
+      metadataNotice = `Refreshed metadata from ${xid.namespace}.`;
+    } catch (error) {
+      metadataProblem = hostProblemText(error, "Metadata refresh failed.");
+    } finally {
+      metadataRefreshingId = "";
+    }
   }
 
   function handleAddTagSubmit(e: Event): void {
@@ -219,40 +333,56 @@
 
   function handleOpenContextMenu(e: MouseEvent): void {
     e.preventDefault();
-    const items: ContextMenuItem[] = [];
-    if (onUpdateProgress) {
-      items.push({
-        id: "prog",
-        label: "Update Progress...",
-        icon: IconAdjustments,
-        action: () => (showProgressModal = true),
-      });
-    }
-    if (onSaveReview) {
-      items.push({
-        id: "review",
-        label: "Post a Review...",
-        icon: IconMessage,
-        action: () => (showReviewModal = true),
-      });
-    }
-    if (onSaveCollection) {
-      items.push({
-        id: "coll",
-        label: "Add to Collection...",
-        icon: IconFolderPlus,
-        action: () => (showCollectionModal = true),
-      });
-    }
-    if (items.length > 0) {
-      items.push({ id: "d1", label: "", divider: true, action: () => {} });
-    }
-    items.push({
-      id: "copy_id",
-      label: `Copy Fasti ID (${record.id})`,
-      action: () => navigator.clipboard.writeText(record.id),
-    });
-    contextMenuState = { x: e.clientX, y: e.clientY, items };
+    contextMenuState = {
+      x: e.clientX,
+      y: e.clientY,
+      items: recordContextMenuItems(
+        record,
+        {
+          onView: () => (activeTab = "overview"),
+          onSetTrackingDisposition: onSetTrackingDisposition
+            ? (disposition) => onSetTrackingDisposition(record.id, disposition)
+            : undefined,
+          onMarkCompleted: onUpdateStatus
+            ? () =>
+                onUpdateStatus(
+                  record.id,
+                  record.status === "completed" ? "watching" : "completed",
+                )
+            : undefined,
+          onUpdateProgress: onUpdateProgress
+            ? () => (showProgressModal = true)
+            : undefined,
+          onToggleWatchlist: onUpdateStatus
+            ? () =>
+                onUpdateStatus(
+                  record.id,
+                  record.status === "plan_to_watch"
+                    ? "watching"
+                    : "plan_to_watch",
+                )
+            : undefined,
+          onOpenCollection: onSaveCollection
+            ? () => (showCollectionModal = true)
+            : undefined,
+          onOpenReview: onSaveReview
+            ? () => (showReviewModal = true)
+            : undefined,
+          onEditTags:
+            onAddTag || onRemoveTag
+              ? () => (activeTab = "overview")
+              : undefined,
+          onInspectIds: () => (activeTab = "sources"),
+          onReconcile: onOpenReconciliation,
+          onCopyId:
+            typeof navigator !== "undefined" && navigator.clipboard
+              ? () =>
+                  void navigator.clipboard.writeText(record.id).catch(() => {})
+              : undefined,
+        },
+        contextMenuConfigs,
+      ),
+    };
   }
 </script>
 
@@ -341,6 +471,7 @@
           <select
             class="rating-select"
             value={record.userRating ?? 0}
+            disabled={!onUpdateRating}
             onchange={(e) =>
               onUpdateRating?.(record.id, Number(e.currentTarget.value))}
             aria-label={onUpdateRating
@@ -349,7 +480,6 @@
             title={onUpdateRating
               ? "User rating"
               : "Ratings are not available on this host"}
-            disabled={!onUpdateRating}
           >
             <option value="0">Unrated</option>
             {#each [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as num}
@@ -358,25 +488,21 @@
           </select>
         </div>
 
-        <!-- Status Selector Dropdown -->
+        <!-- Profile-owned tracking state. Completion and watchlist intent are
+             separate domains and are not folded into this selector. -->
         <div class="status-select-wrap">
           <select
             class="status-select {record.status}"
-            value={record.status}
+            value={selectedTrackingDisposition}
+            disabled={!onSetTrackingDisposition}
             onchange={(e) =>
-              onUpdateStatus?.(record.id, e.currentTarget.value as WatchStatus)}
-            aria-label={onUpdateStatus
-              ? "Watch status"
-              : "Watch status unavailable"}
-            title={onUpdateStatus
-              ? "Watch status"
-              : "Watch-state changes are not available on this host"}
-            disabled={!onUpdateStatus}
+              onSetTrackingDisposition?.(
+                record.id,
+                e.currentTarget.value as TrackingDispositionUpdate,
+              )}
+            aria-label="Profile tracking state"
           >
-            {#if record.status === "unknown"}
-              <option value="unknown">Tracking state unavailable</option>
-            {/if}
-            {#each statusOptions as opt}
+            {#each trackingOptions as opt}
               <option value={opt.id}>{opt.label}</option>
             {/each}
           </select>
@@ -386,14 +512,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onSaveCollection}
           onclick={() => (showCollectionModal = true)}
           title={onSaveCollection
-            ? "Add to collection"
-            : "Collections are not available on this host"}
-          aria-label={onSaveCollection
-            ? "Add to collection"
-            : "Collections unavailable"}
-          disabled={!onSaveCollection}
+            ? "Add to Collection"
+            : "Collections are not active on this host"}
         >
           <IconBookmark size={18} />
         </button>
@@ -401,14 +524,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onUpdatePoster}
           onclick={() => (showArtworkModal = true)}
           title={onUpdatePoster
-            ? "Edit artwork"
-            : "Artwork changes are not available on this host"}
-          aria-label={onUpdatePoster
-            ? "Edit artwork"
-            : "Artwork changes unavailable"}
-          disabled={!onUpdatePoster}
+            ? "Edit Artwork"
+            : "Artwork editing is not active on this host"}
         >
           <IconPhoto size={18} />
         </button>
@@ -416,14 +536,11 @@
         <button
           type="button"
           class="icon-action-btn"
+          disabled={!onUpdateProgress}
           onclick={() => (showProgressModal = true)}
           title={onUpdateProgress
-            ? "Update progress"
-            : "Progress changes are not available on this host"}
-          aria-label={onUpdateProgress
-            ? "Update progress"
-            : "Progress changes unavailable"}
-          disabled={!onUpdateProgress}
+            ? "Update Progress"
+            : "Progress editing is not active on this host"}
         >
           <IconAdjustments size={18} />
         </button>
@@ -579,7 +696,7 @@
     </aside>
 
     <!-- Right Main Tabbed Content Area (Ryot 5-Tab System) -->
-    <main class="main-content-pane">
+    <section class="main-content-pane" aria-label="Media record sections">
       <!-- Section Tabs -->
       <nav class="content-tabs" aria-label="Media section tabs">
         <button
@@ -812,11 +929,11 @@
             <button
               type="button"
               class="ryot-action-btn"
-              onclick={() => (showProgressModal = true)}
+              disabled={!onUpdateProgress}
               title={onUpdateProgress
                 ? "Update progress"
-                : "Progress changes are not available on this host"}
-              disabled={!onUpdateProgress}
+                : "Progress editing is not active on this host"}
+              onclick={() => (showProgressModal = true)}
             >
               <div class="action-btn-icon"><IconAdjustments size={22} /></div>
               <div class="action-btn-text">
@@ -828,11 +945,11 @@
             <button
               type="button"
               class="ryot-action-btn"
-              onclick={() => (showReviewModal = true)}
+              disabled={!onSaveReview}
               title={onSaveReview
                 ? "Post a review"
-                : "Reviews are not available on this host"}
-              disabled={!onSaveReview}
+                : "Personal ratings and reviews are not active on this host"}
+              onclick={() => (showReviewModal = true)}
             >
               <div class="action-btn-icon"><IconMessage size={22} /></div>
               <div class="action-btn-text">
@@ -844,11 +961,11 @@
             <button
               type="button"
               class="ryot-action-btn"
-              onclick={() => (showCollectionModal = true)}
+              disabled={!onSaveCollection}
               title={onSaveCollection
                 ? "Add to collection"
-                : "Collections are not available on this host"}
-              disabled={!onSaveCollection}
+                : "Collections are not active on this host"}
+              onclick={() => (showCollectionModal = true)}
             >
               <div class="action-btn-icon"><IconFolderPlus size={22} /></div>
               <div class="action-btn-text">
@@ -954,22 +1071,19 @@
                 Fasti maintains a stable, immutable identity (<code
                   >{record.id}</code
                 >) independent of TMDB, TVDB, or MyAnimeList. Provider claims
-                remain evidence. Metadata projection switching is not active in
-                this build.
+                remain evidence. Refresh appends a new provider claim; it does
+                not replace the record identity.
               </p>
             </div>
           </div>
 
-          {#if isSummary}
-            <div class="empty-history-box">
-              <h4>Identity claims are unavailable in this view</h4>
-              <p>The active host returned only record summary fields.</p>
-            </div>
-          {:else if record.externalIds.length === 0}
-            <div class="empty-history-box">
-              <h4>No external identity claims are recorded</h4>
-            </div>
-          {:else}
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex (the overflow region must accept keyboard scrolling) -->
+          <div
+            class="assertions-scroll"
+            role="region"
+            tabindex="0"
+            aria-label="External identifiers"
+          >
             <table class="assertions-table">
               <thead>
                 <tr>
@@ -977,10 +1091,12 @@
                   <th scope="col">Identifier</th>
                   <th scope="col">Status</th>
                   <th scope="col">Provenance Route</th>
+                  <th scope="col">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {#each record.externalIds as xid}
+                  {@const selection = refreshSelection(xid)}
                   <tr>
                     <td class="mono">{xid.namespace}</td>
                     <td class="mono"><strong>{xid.value}</strong></td>
@@ -990,11 +1106,74 @@
                       ></td
                     >
                     <td>{xid.source}</td>
+                    <td>
+                      {#if selection && onApplyMetadata}
+                        <button
+                          type="button"
+                          class="metadata-action"
+                          disabled={Boolean(metadataRefreshingId)}
+                          onclick={() => refreshMetadata(xid)}
+                        >
+                          <IconRefresh size={16} aria-hidden="true" />
+                          {metadataRefreshingId ===
+                          `${xid.namespace}:${xid.value}`
+                            ? "Refreshing…"
+                            : "Refresh"}
+                        </button>
+                      {:else}
+                        <span class="muted">No live adapter</span>
+                      {/if}
+                    </td>
+                  </tr>
+                {:else}
+                  <tr>
+                    <td colspan="5" class="muted"
+                      >No external identifiers are attached.</td
+                    >
                   </tr>
                 {/each}
               </tbody>
             </table>
-          {/if}
+          </div>
+
+          <section
+            class="metadata-chooser"
+            aria-labelledby="metadata-chooser-title"
+          >
+            <div>
+              <h3 id="metadata-chooser-title">Choose metadata</h3>
+              <p>
+                Search a configured provider. The trusted host fetches the
+                selected item again before it stores claims.
+              </p>
+            </div>
+
+            {#key record.id}
+              <DiscoverView
+                embedded
+                {providerCredentials}
+                loading={providerLoading}
+                hostProblem={providerHostProblem}
+                onSearch={searchCompatibleMetadata}
+                onOpenSettings={onOpenProviderSettings ?? (() => {})}
+                onRetry={onRetryProviders ?? (() => {})}
+                onTrackRecord={onApplyMetadata ? chooseMetadata : undefined}
+                actionLabel="Use metadata"
+                completedLabel="Metadata applied"
+                actionProblemFallback="Fasti could not apply metadata to this record."
+              />
+            {/key}
+
+            {#if metadataNotice}
+              <p class="metadata-notice" role="status">{metadataNotice}</p>
+            {/if}
+            {#if metadataProblem}
+              <p class="metadata-problem" role="alert">{metadataProblem}</p>
+            {/if}
+            {#if record.externalIds.some((identifier) => identifier.namespace.toLowerCase() === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
+              <TmdbAttribution />
+            {/if}
+          </section>
         </section>
 
         <!-- TAB 5: PERSONAL REVIEWS & NOTES -->
@@ -1006,14 +1185,14 @@
               <button
                 type="button"
                 class="edit-notes-btn"
+                disabled={!onUpdateNotes}
+                title={onUpdateNotes
+                  ? "Edit notes"
+                  : "Personal notes are not active on this host"}
                 onclick={() => {
                   editedNotesText = record.userNotes ?? "";
                   isEditingNotes = true;
                 }}
-                title={onUpdateNotes
-                  ? "Edit notes"
-                  : "Notes are not editable on this host"}
-                disabled={!onUpdateNotes}
               >
                 <IconEdit size={14} /> Edit Notes
               </button>
@@ -1064,12 +1243,12 @@
                 <button
                   type="button"
                   class="tag-delete-btn"
+                  disabled={!onRemoveTag}
                   onclick={() => onRemoveTag?.(record.id, tag)}
                   aria-label="Remove tag {tag}"
                   title={onRemoveTag
                     ? `Remove tag ${tag}`
                     : "Tags are not editable on this host"}
-                  disabled={!onRemoveTag}
                 >
                   <IconX size={12} />
                 </button>
@@ -1079,6 +1258,7 @@
             <form onsubmit={handleAddTagSubmit} class="add-tag-form">
               <input
                 type="text"
+                disabled={!onAddTag}
                 placeholder="+ Add tag..."
                 bind:value={newTagInput}
                 class="add-tag-input"
@@ -1086,13 +1266,12 @@
                 title={onAddTag
                   ? "Add tag"
                   : "Tags are not editable on this host"}
-                disabled={!onAddTag}
               />
             </form>
           </div>
         </section>
       {/if}
-    </main>
+    </section>
   </div>
 </div>
 
@@ -1143,6 +1322,9 @@
 
 <style>
   .detail-container {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     max-width: 1200px;
     margin: 0 auto;
     padding: 24px;
@@ -1155,20 +1337,25 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
   }
   .back-btn {
     display: inline-flex;
     align-items: center;
+    min-height: 44px;
     gap: 6px;
     background: transparent;
     border: none;
-    color: var(--fasti-action-primary);
+    color: var(--fasti-text-primary);
     font-weight: 600;
     font-size: 0.92rem;
     cursor: pointer;
     padding: 6px 0;
   }
   .top-id-badge {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: right;
     font-family: var(--fasti-font-mono);
     font-size: 0.78rem;
     color: var(--fasti-text-muted);
@@ -1430,6 +1617,7 @@
   }
 
   .main-content-pane {
+    min-width: 0;
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
@@ -1789,9 +1977,15 @@
       transparent
     );
     border: 1px solid
-      color-mix(in srgb, var(--fasti-state-verified) 45%, transparent);
+      color-mix(in srgb, var(--fasti-state-verified) 32%, transparent);
     border-radius: 4px;
     margin-bottom: 20px;
+  }
+  .provider-banner > div {
+    min-width: 0;
+  }
+  .provider-banner code {
+    overflow-wrap: anywhere;
   }
   .banner-title {
     font-size: 0.95rem;
@@ -1806,9 +2000,18 @@
 
   .assertions-table {
     width: 100%;
+    min-width: 720px;
     border-collapse: collapse;
     font-size: 0.88rem;
     text-align: left;
+  }
+  .assertions-scroll {
+    overflow-x: auto;
+  }
+
+  .assertions-scroll:focus-visible {
+    outline: 3px solid var(--fasti-action-primary);
+    outline-offset: 2px;
   }
   .assertions-table th,
   .assertions-table td {
@@ -1831,6 +2034,50 @@
       transparent
     );
     color: var(--fasti-state-verified);
+  }
+  .metadata-chooser {
+    display: grid;
+    gap: 16px;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+  .metadata-chooser h3,
+  .metadata-chooser p {
+    margin: 0;
+  }
+  .metadata-chooser > div > p,
+  .muted {
+    color: var(--fasti-text-muted);
+  }
+  .metadata-action {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .metadata-action {
+    min-height: 44px;
+    justify-content: center;
+    padding: 8px 12px;
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
+    border-radius: 4px;
+    background: var(--fasti-surface-archive);
+    color: var(--fasti-text-primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .metadata-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  .metadata-notice {
+    color: var(--fasti-state-verified);
+  }
+  .metadata-problem {
+    color: var(--fasti-state-problem, #b42318);
   }
 
   .notes-header-row {

@@ -70,6 +70,7 @@ const rawSvg = gitGrep([
   "--",
   ...sourcePaths,
   ":(exclude)packages/ui/src/nav-sidebar.svelte",
+  ":(exclude)packages/ui/src/tmdb-attribution.svelte",
 ]);
 if (rawSvg) {
   failures.push("Raw SVG needs a documented brand-only exception");
@@ -86,6 +87,28 @@ const brandSvg = gitGrep([
 if (brandSvg.split("\n").filter(Boolean).length !== 1) {
   failures.push(
     "packages/ui/src/nav-sidebar.svelte must contain exactly one documented brand SVG",
+  );
+}
+// eslint-disable-next-line xss/no-mixed-html -- static repository search; this script does not generate HTML
+const tmdbBrandSvg = gitGrep([
+  "-n",
+  "-o",
+  "-F",
+  "<svg",
+  "--",
+  "packages/ui/src/tmdb-attribution.svelte",
+]);
+if (
+  !gitGrep([
+    "-nF",
+    "FASTI_BRAND_SVG_EXCEPTION",
+    "--",
+    "packages/ui/src/tmdb-attribution.svelte",
+  ]) ||
+  tmdbBrandSvg.split("\n").filter(Boolean).length !== 1
+) {
+  failures.push(
+    "packages/ui/src/tmdb-attribution.svelte must contain one documented provider-brand SVG",
   );
 }
 

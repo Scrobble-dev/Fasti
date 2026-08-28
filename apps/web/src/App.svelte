@@ -1,6 +1,10 @@
 <script lang="ts">
   import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
-  import type { NetworkConfiguration, WorkbenchHost } from "@fasti/ui";
+  import type {
+    NetworkConfiguration,
+    RecordSummary,
+    WorkbenchHost,
+  } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
     type SetupViewState,
@@ -181,7 +185,7 @@
 
   async function inspectDesktop(): Promise<void> {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
+      const { convertFileSrc, invoke } = await import("@tauri-apps/api/core");
       host = {
         networkConfigurationScope: "node",
         loadNetworkConfiguration: () => invoke("load_network_configuration"),
@@ -211,6 +215,12 @@
           invoke("delete_provider_credential", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
+        trackProviderCandidate: (selection) =>
+          invoke("track_provider_candidate", { input: selection }),
+        applyProviderMetadata: (recordId, selection) =>
+          invoke("apply_provider_metadata", {
+            input: { record_id: recordId, selection },
+          }),
         listApiClients: () => invoke("list_api_clients"),
         createApiClient: (scopes) =>
           invoke("create_api_client", { input: { scopes } }),
@@ -220,10 +230,29 @@
           }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
-        listRecords: () => invoke("list_records"),
+        listRecords: async () =>
+          (await invoke<RecordSummary[]>("list_records")).map((record) => {
+            const { poster_asset_path: path, ...summary } = record;
+            return {
+              ...summary,
+              poster: {
+                ...record.poster,
+                value: path ? convertFileSrc(path) : null,
+              },
+            };
+          }),
         createRecord: (grain) => invoke("create_record", { grain }),
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),
+        listTrackingDispositions: () => invoke("list_tracking_dispositions"),
+        setTrackingDisposition: (recordId, disposition) =>
+          invoke("set_tracking_disposition", {
+            input: { record_id: recordId, disposition },
+          }),
+        getNuvioCollections: () => invoke("get_nuvio_collections"),
+        replaceNuvioCollections: (document) =>
+          invoke("replace_nuvio_collections", { document }),
+        clearNuvioCollections: () => invoke("clear_nuvio_collections"),
       };
       try {
         applySetupStatus(await invoke<SetupStatus>("setup_status"));

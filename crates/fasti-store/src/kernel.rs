@@ -817,12 +817,15 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::ReceiptRead => "receipt_read",
         ScopeKey::IdentityWrite => "identity_write",
         ScopeKey::IdentityRead => "identity_read",
+        ScopeKey::ProfileStateRead => "profile_state_read",
+        ScopeKey::ProfileStateWrite => "profile_state_write",
         ScopeKey::ReviewRead => "review_read",
         ScopeKey::ReviewWrite => "review_write",
         ScopeKey::CorrectionRead => "correction_read",
         ScopeKey::CorrectionWrite => "correction_write",
         ScopeKey::WorkspaceExport => "workspace_export",
         ScopeKey::WorkspaceVerify => "workspace_verify",
+        ScopeKey::BrowserUserManage => "browser_user_manage",
     }
 }
 

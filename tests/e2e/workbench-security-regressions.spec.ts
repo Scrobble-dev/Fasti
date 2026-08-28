@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-const credential = "c".repeat(64);
+const browserOrigin = "http://127.0.0.1:4173";
 
 function recordResponse(
   title = "A bounded local record",
@@ -10,7 +10,7 @@ function recordResponse(
   return {
     records: [
       {
-        record_id: "018f7f2d-8f58-7a0a-8000-000000000002",
+        record_id: "rec_01991f588e0070008000000000000002",
         grain: "work",
         status: "active",
         title: {
@@ -39,7 +39,7 @@ function recordResponse(
 }
 
 async function fulfillRecords(route: Route, title?: string, poster?: string) {
-  expect(route.request().headers().authorization).toBe(`Bearer ${credential}`);
+  expect(route.request().headers().authorization).toBeUndefined();
   await route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -47,10 +47,32 @@ async function fulfillRecords(route: Route, title?: string, poster?: string) {
   });
 }
 
-async function submitCredential(page: Page) {
-  await page.getByRole("button", { name: "Connect records" }).click();
-  await page.getByLabel("API client credential").fill(credential);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
+async function installBrowserSession(
+  page: Page,
+  origin = browserOrigin,
+): Promise<void> {
+  await page.route(`${origin}/api/v1/browser/session`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: {
+        "access-control-allow-origin": browserOrigin,
+        "access-control-allow-credentials": "true",
+      },
+      body: JSON.stringify({
+        expires_at: "2026-08-28T23:00:00Z",
+        user: {
+          user_id: "usr_01991f588e0070008000000000000001",
+          username: "testadmin",
+          is_admin: true,
+          is_test_account: true,
+          active: true,
+          created_at: "2026-08-28T00:00:00Z",
+          updated_at: "2026-08-28T00:00:00Z",
+        },
+      }),
+    }),
+  );
 }
 
 test("browser history keeps the Workbench and status route synchronized", async ({
@@ -83,50 +105,65 @@ test("browser history keeps the Workbench and status route synchronized", async 
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 });
 
-test("authentication tabs expose and implement the keyboard tab pattern", async ({
+test("browser account dialog supports keyboard navigation and escape", async ({
   page,
 }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Connect records" }).click();
+  await page.getByRole("button", { name: "Open account access" }).click();
 
-  await expect(page.locator('[role="tab"][tabindex="0"]')).toHaveCount(1);
-  const token = page.getByRole("tab", { name: "API Credential" });
-  await expect(token).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("tabpanel")).toHaveAttribute(
-    "aria-labelledby",
-    "auth-tab-token",
-  );
-
-  await token.focus();
-  await page.keyboard.press("ArrowRight");
-  const passkey = page.getByRole("tab", { name: "Passkey" });
-  await expect(passkey).toBeFocused();
-  await expect(passkey).toHaveAttribute("aria-selected", "true");
-  await page.keyboard.press("End");
-  await expect(token).toBeFocused();
-  await page.keyboard.press("Home");
-  await expect(passkey).toBeFocused();
-  await page.keyboard.press("ArrowLeft");
-  await expect(token).toBeFocused();
+  const dialog = page.getByRole("dialog", { name: "Account access" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Username").focus();
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByLabel("Password")).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });
 
-test("a rejected browser credential stays disconnected and recoverable", async ({
+test("a rejected browser sign-in stays disconnected and recoverable", async ({
   page,
 }) => {
-  await page.route(/\/api\/v1\/records$/, (route) =>
-    route.fulfill({ status: 401, contentType: "application/json", body: "{}" }),
+  await page.route(/\/api\/v1\/browser\/session$/, (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/problem+json",
+      body: JSON.stringify({
+        type: "https://fasti.scrobble.dev/v1/problems/authentication-failed",
+        title: "Authentication failed",
+        status: 401,
+        detail: "the presented local credential is not active",
+        code: "authentication_failed",
+        capability_id: "browser.session.create",
+        safe_state: "no_mutation",
+        retryability: "not_retryable",
+        next_actions: [
+          {
+            id: "use_active_credential",
+            label: "Use an active local credential or enroll again",
+          },
+        ],
+        correlation_id: "req_01991f588e0070008000000000000002",
+        param: null,
+        actual: null,
+        violations: [],
+      }),
+    }),
   );
   await page.goto("/");
-  await submitCredential(page);
+  await page
+    .locator("#main-content")
+    .getByRole("button", { name: "Sign in", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Account access" });
+  await dialog.getByLabel("Password").fill("incorrect-password");
+  await dialog.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
+  await expect(dialog.getByRole("alert")).toContainText("username or password");
   await expect(
-    page.getByRole("button", { name: "Connect local credential" }),
+    page
+      .locator("#main-content")
+      .getByRole("button", { name: "Sign in", exact: true }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Clear browser credential" }),
-  ).toHaveCount(0);
 });
 
 test("endpoint testing rejects a contract-invalid health response", async ({
@@ -160,26 +197,28 @@ test("a saved service URL owns browser record and status requests after reload",
       JSON.stringify({ service_url: serviceUrl }),
     );
   }, savedOrigin);
+  await installBrowserSession(page, savedOrigin);
   await page.route(`${savedOrigin}/api/v1/records`, async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") {
       await route.fulfill({
         status: 204,
         headers: {
-          "access-control-allow-origin": "http://127.0.0.1:4173",
-          "access-control-allow-headers": "authorization",
+          "access-control-allow-origin": browserOrigin,
           "access-control-allow-methods": "GET",
+          "access-control-allow-credentials": "true",
         },
       });
       return;
     }
     recordUrls.push(request.url());
-    expect(request.headers().authorization).toBe(`Bearer ${credential}`);
+    expect(request.headers().authorization).toBeUndefined();
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       headers: {
-        "access-control-allow-origin": "http://127.0.0.1:4173",
+        "access-control-allow-origin": browserOrigin,
+        "access-control-allow-credentials": "true",
       },
       body: JSON.stringify(recordResponse("Saved endpoint record")),
     });
@@ -198,29 +237,8 @@ test("a saved service URL owns browser record and status requests after reload",
 
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/");
-  await page.getByRole("button", { name: "Connect records" }).click();
   await expect(
-    page
-      .locator("#credential-help code")
-      .getByText(savedOrigin, { exact: true }),
-  ).toBeVisible();
-  const modalCard = page.locator(".modal-card");
-  expect(
-    await modalCard.evaluate(
-      (element) => element.scrollWidth - element.clientWidth,
-    ),
-  ).toBeLessThanOrEqual(0);
-  await page.getByLabel("API client credential").fill(credential.toUpperCase());
-  const connect = page.getByRole("button", { name: "Connect", exact: true });
-  await expect(connect).toBeDisabled();
-  await page
-    .getByLabel(
-      `I trust ${savedOrigin} and want to send this credential to it.`,
-    )
-    .check();
-  await connect.click();
-  await expect(
-    page.getByRole("heading", { name: "Saved endpoint record" }),
+    page.getByRole("heading", { name: "Saved endpoint record" }).first(),
   ).toBeVisible();
   expect(recordUrls).toEqual([`${savedOrigin}/api/v1/records`]);
 
@@ -232,25 +250,42 @@ test("a saved service URL owns browser record and status requests after reload",
   await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
 });
 
-test("changing the browser service URL clears the origin-bound credential", async ({
+test("changing the browser service URL resets the origin-bound session state", async ({
   page,
 }) => {
+  await installBrowserSession(page);
   await page.route(/\/api\/v1\/records$/, (route) => fulfillRecords(route));
   await page.goto("/");
-  await submitCredential(page);
   await expect(
-    page.getByRole("button", { name: "Clear browser credential" }),
+    page.getByRole("heading", { name: "A bounded local record" }).first(),
   ).toBeVisible();
+
+  await page.route("https://new.fasti.test/api/v1/browser/session", (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: "application/problem+json",
+      headers: {
+        "access-control-allow-origin": browserOrigin,
+        "access-control-allow-credentials": "true",
+      },
+      body: JSON.stringify({
+        type: "about:blank",
+        title: "Unauthorized",
+        status: 401,
+        detail: "Sign in is required.",
+      }),
+    }),
+  );
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByLabel("Service URL").fill("https://new.fasti.test");
   await page.getByRole("button", { name: "Save service URL" }).click();
   await expect(page.getByRole("status")).toHaveText("Settings saved.");
   await expect(
-    page.getByRole("button", { name: "Connect local credential" }),
+    page.getByRole("button", { name: "Open account access" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Clear browser credential" }),
+    page.getByRole("button", { name: /Manage account/ }),
   ).toHaveCount(0);
 });
 
@@ -270,10 +305,10 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
       "https://tracker.example/poster.jpg",
     ),
   );
+  await installBrowserSession(page);
   await page.goto("/");
-  await submitCredential(page);
   await expect(
-    page.getByRole("heading", { name: "Summary-only record" }),
+    page.getByRole("heading", { name: "Summary-only record" }).first(),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Library", exact: true }).click();
@@ -291,23 +326,26 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
     .getByRole("button", { name: "Summary-only record", exact: true })
     .click();
   await expect(
-    page.getByText("External identifiers are not included"),
+    page.getByText("No external identifiers are recorded."),
   ).toBeVisible();
-  await expect(page.getByText("Custom fields are not included")).toBeVisible();
+  await expect(page.getByText("No custom fields are recorded.")).toBeVisible();
 
   const history = page.getByRole("button", { name: "History" });
   await history.click();
   await expect(history).toHaveAttribute("aria-pressed", "true");
   await expect(
-    page.getByText("History is unavailable in this view"),
+    page.getByRole("heading", { name: "No occurrences recorded yet" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Sources & Identity" }).click();
-  await expect(page.getByText("Identity claims are unavailable")).toBeVisible();
+  await expect(
+    page.getByText("No external identifiers are attached."),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Active state is unavailable" }),
+    page.getByRole("heading", { name: "Up Next & Calendar" }),
   ).toBeVisible();
+  await expect(page.getByText("No episode progress recorded")).toBeVisible();
   expect(thirdPartyRequests).toEqual([]);
 });
 
@@ -501,12 +539,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
   ).toEqual({
     input: { provider: "tmdb", query: "Breaking Bad" },
   });
-  await expect(
-    page.getByRole("button", { name: "Tracking unavailable" }),
-  ).toBeDisabled();
-  await expect(
-    page.getByText("Search does not change your library"),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Track Now" })).toBeEnabled();
 
   await provider.selectOption("google-books");
   await expect(

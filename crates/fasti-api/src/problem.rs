@@ -19,7 +19,10 @@ impl IntoResponse for HttpProblem {
     fn into_response(self) -> Response {
         (
             self.status,
-            [(header::CONTENT_TYPE, "application/problem+json")],
+            [
+                (header::CONTENT_TYPE, "application/problem+json"),
+                (header::CACHE_CONTROL, "private, no-store"),
+            ],
             Json(self.body),
         )
             .into_response()

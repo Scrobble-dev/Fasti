@@ -14,6 +14,7 @@
     IconUserCircle,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
+  import GlobalSearch from "./global-search.svelte";
   import HomeView from "./home-view.svelte";
   import ConnectionsView from "./connections-view.svelte";
   import RuntimeSettingsView from "./runtime-settings-view.svelte";
@@ -31,11 +32,15 @@
   import { hostProblemText } from "./host-problem.js";
   import { projectRecordSummary } from "./record-projection.js";
   import type {
+    BrowserSession,
     MediaRecord,
     ProviderCredentialStatus,
+    ProviderSearchCandidate,
+    ProviderSelection,
     ResolveReviewInput,
     ReviewItem,
     ThemeSettings,
+    TrackingDispositionUpdate,
     WorkbenchHost,
     WorkbenchPreferences,
   } from "./types.js";
@@ -134,6 +139,7 @@
 
   let activeSection = $state<Section>("home");
   let selectedRecordId = $state<string | null>(null);
+  let selectedRecordTab = $state<"overview" | "sources">("overview");
 
   // A prior session's localStorage predates nav items or context-menu items
   // added since (e.g. "settings", "connections") -- without this, those
@@ -187,7 +193,8 @@
   );
   let themeDrawerOpen = $state(false);
   let authModalOpen = $state(false);
-  let sessionCredentialActive = $state(false);
+  let browserSession = $state<BrowserSession | null>(null);
+  let browserSessionChecked = $state(false);
 
   $effect(() => {
     try {
@@ -253,8 +260,12 @@
     select(section as Section);
   }
 
-  function openRecord(recordId: string): void {
+  function openRecord(
+    recordId: string,
+    tab: "overview" | "sources" = "overview",
+  ): void {
     selectedRecordId = recordId;
+    selectedRecordTab = tab;
     select("detail");
   }
 
@@ -267,6 +278,7 @@
   let discoverSelectedProviderId = $state("");
   let discoverSelectionExplicit = $state(false);
   let discoverLoadId = 0;
+  let discoverSectionActive = false;
 
   async function loadDiscover(): Promise<void> {
     const loadId = ++discoverLoadId;
@@ -343,6 +355,8 @@
   let mediaRecords = $state<MediaRecord[]>([]);
   let recordsLoading = $state(false);
   let recordsProblem = $state<string | undefined>(undefined);
+  let recordActionProblem = $state<string | undefined>(undefined);
+  let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
 
   async function loadRecords(restoreRetryFocus = false): Promise<boolean> {
@@ -350,70 +364,145 @@
       recordsProblem = "This host does not support record listing yet.";
       return false;
     }
-    recordsLoading = true;
+    const showLoading = mediaRecords.length === 0;
+    if (showLoading) recordsLoading = true;
     recordsProblem = undefined;
-    let failed = false;
     try {
-      mediaRecords = (await host.listRecords()).map(projectRecordSummary);
-      return true;
+      const statesPromise = host.listTrackingDispositions
+        ? host.listTrackingDispositions().catch((error) => {
+            const detail = hostProblemText(error, "Fasti request failed.");
+            recordActionNotice = `Could not load profile tracking state. Records still use their activity fallback. ${detail}`;
+            return { states: [], truncated: false };
+          })
+        : Promise.resolve({ states: [], truncated: false });
+      const [summaries, statePage] = await Promise.all([
+        host.listRecords(),
+        statesPromise,
+      ]);
+      if (statePage.truncated) {
+        recordActionProblem =
+          "Only the first 500 profile tracking states are shown. Additional states remain stored.";
+      }
+      const dispositions = new Map(
+        statePage.states.map((state) => [state.record_id, state.disposition]),
+      );
+      mediaRecords = summaries.map((summary) =>
+        projectRecordSummary(summary, dispositions.get(summary.record_id)),
+      );
     } catch (error) {
       recordsProblem = hostProblemText(
         error,
         "Could not load records from the host.",
       );
-      failed = true;
       return false;
     } finally {
-      recordsLoading = false;
-      if (failed && restoreRetryFocus) {
+      if (showLoading) recordsLoading = false;
+      if (restoreRetryFocus) {
         await tick();
         document.getElementById("retry-records")?.focus();
       }
     }
+    return true;
   }
 
-  async function connectSessionCredential(credential: string): Promise<void> {
-    if (!host.setSessionCredential) {
-      throw new Error("This host does not accept browser session credentials.");
+  async function setTrackingDisposition(
+    recordId: string,
+    disposition: TrackingDispositionUpdate,
+  ): Promise<void> {
+    if (!host.setTrackingDisposition) {
+      recordActionProblem =
+        "Profile tracking state is not available on this host.";
+      return;
     }
-    host.setSessionCredential(credential);
-    recordsLoaded = true;
-    if (!(await loadRecords())) {
-      const problem =
-        recordsProblem ?? "The host rejected this browser credential.";
-      host.clearSessionCredential?.();
-      sessionCredentialActive = false;
-      mediaRecords = [];
-      throw new Error(problem);
-    }
-    sessionCredentialActive = true;
-  }
-
-  async function openAuthModal(): Promise<void> {
+    recordActionProblem = undefined;
+    recordActionNotice = undefined;
     try {
-      credentialTarget = (await host.loadNetworkConfiguration()).connection
-        .service_url.value;
-      authModalOpen = true;
+      const state = await host.setTrackingDisposition(recordId, disposition);
+      mediaRecords = mediaRecords.map((record) =>
+        record.id === recordId
+          ? {
+              ...record,
+              status:
+                state.disposition ??
+                (record.lastActivityAt ? "watching" : "plan_to_watch"),
+              trackingDisposition: state.disposition,
+            }
+          : record,
+      );
+      recordActionNotice =
+        disposition === "unset"
+          ? "Tracking state now follows recorded activity."
+          : `Tracking state set to ${disposition.replaceAll("_", " ")}.`;
     } catch (error) {
-      recordsProblem = hostProblemText(
+      recordActionProblem = hostProblemText(
         error,
-        "Could not identify the service that would receive this credential.",
+        "Could not update the profile tracking state.",
       );
     }
   }
 
-  function clearSessionCredential(): void {
-    host.clearSessionCredential?.();
-    sessionCredentialActive = false;
+  async function trackRecordFromDiscover(
+    candidate: ProviderSearchCandidate,
+  ): Promise<void> {
+    if (host.trackProviderCandidate) {
+      await host.trackProviderCandidate({
+        provider: candidate.provider,
+        provider_id: candidate.provider_id,
+        kind: candidate.kind,
+      });
+      recordsLoaded = false;
+      await loadRecords();
+      return;
+    }
+    if (
+      !host.createRecord ||
+      !host.attachIdentifier ||
+      !host.registerNamespace
+    ) {
+      throw new Error(
+        "Adding titles to your library is not available on this host.",
+      );
+    }
+  }
+
+  function resetClientEndpoint(): void {
+    browserSession = null;
+    browserSessionChecked = false;
     mediaRecords = [];
     recordsLoaded = false;
-    recordsProblem =
-      "Records need an active local bearer credential. Select Connect records and paste a credential with identity_read scope.";
+    recordsProblem = undefined;
+    recordActionNotice = undefined;
+    recordActionProblem = undefined;
+    void refreshBrowserSession();
   }
 
   function retryRecords(): void {
     recordsLoaded = true;
     void loadRecords(true);
+  }
+
+  async function applyProviderMetadata(
+    recordId: string,
+    selection: ProviderSelection,
+  ): Promise<void> {
+    if (!host.applyProviderMetadata) {
+      throw new Error(
+        "Metadata refresh is only available in the trusted desktop host.",
+      );
+    }
+    recordActionProblem = undefined;
+    recordActionNotice = undefined;
+    try {
+      await host.applyProviderMetadata(recordId, selection);
+      await loadRecords();
+      recordActionNotice = `Metadata refreshed from ${selection.provider}.`;
+    } catch (error) {
+      recordActionProblem = hostProblemText(
+        error,
+        "Could not refresh metadata for this record.",
+      );
+      throw error;
+    }
   }
 
   const watchingRecords = $derived(
@@ -422,18 +511,29 @@
   const selectedRecord = $derived(
     mediaRecords.find((record) => record.id === selectedRecordId),
   );
+  const showsRecordFeedback = $derived(
+    activeSection === "home" ||
+      activeSection === "library" ||
+      activeSection === "calendar" ||
+      activeSection === "detail",
+  );
 
   $effect(() => {
-    if (activeSection === "discover") void loadDiscover();
+    const needsDiscoverProviders =
+      activeSection === "discover" || activeSection === "detail";
+    if (needsDiscoverProviders && !discoverSectionActive) {
+      discoverSectionActive = true;
+      void loadDiscover();
+    } else if (!needsDiscoverProviders) {
+      discoverSectionActive = false;
+    }
     if (activeSection === "reconciliation" && !reviewsLoaded) {
       reviewsLoaded = true;
       void loadReviews();
     }
     if (
-      (activeSection === "home" ||
-        activeSection === "library" ||
-        activeSection === "calendar" ||
-        activeSection === "detail") &&
+      (!host.currentBrowserSession ||
+        (browserSessionChecked && browserSession !== null)) &&
       !recordsLoaded
     ) {
       recordsLoaded = true;
@@ -453,6 +553,22 @@
       window.matchMedia("(max-width: 61.99rem)").matches,
   );
 
+  async function refreshBrowserSession(): Promise<void> {
+    if (!host.currentBrowserSession) {
+      browserSessionChecked = true;
+      return;
+    }
+    browserSessionChecked = false;
+    try {
+      browserSession = await host.currentBrowserSession();
+    } catch {
+      browserSession = null;
+      recordsProblem = "Sign in to load records from this Fasti service.";
+    } finally {
+      browserSessionChecked = true;
+    }
+  }
+
   onMount(() => {
     activeSection = sectionFromPath();
     const sync = () => (activeSection = sectionFromPath());
@@ -461,6 +577,7 @@
     const syncViewport = () => (isNarrowViewport = media.matches);
     syncViewport();
     media.addEventListener("change", syncViewport);
+    void refreshBrowserSession();
     return () => {
       window.removeEventListener("popstate", sync);
       media.removeEventListener("change", syncViewport);
@@ -493,11 +610,11 @@
         <strong class="record-access-title">Records are unavailable</strong>
         <p>{recordsProblem}</p>
       </div>
-      {#if host.setSessionCredential && !sessionCredentialActive}
+      {#if host.currentBrowserSession && !browserSession}
         <button
           type="button"
           class="btn btn-primary"
-          onclick={() => void openAuthModal()}>Connect records</button
+          onclick={() => (authModalOpen = true)}>Sign in</button
         >
       {:else}
         <button
@@ -579,6 +696,13 @@
         <span class="section-title">{formatSectionTitle(activeSection)}</span>
       </div>
 
+      <GlobalSearch
+        records={mediaRecords}
+        navItems={workbenchPreferences.navItems}
+        onSelectRecord={openRecord}
+        onSelectSection={handleSelectSection}
+      />
+
       <div class="top-bar-actions">
         <a
           class="icon-btn"
@@ -604,38 +728,40 @@
           <IconPalette size={18} />
         </button>
 
-        {#if host.setSessionCredential}
-          <button
-            type="button"
-            class="icon-btn"
-            onclick={sessionCredentialActive
-              ? clearSessionCredential
-              : () => void openAuthModal()}
-            title={sessionCredentialActive
-              ? "Clear browser credential"
-              : "Connect local credential"}
-            aria-label={sessionCredentialActive
-              ? "Clear browser credential"
-              : "Connect local credential"}
-          >
-            {#if sessionCredentialActive}
-              <IconLogout size={18} />
-            {:else}
-              <IconUserCircle size={18} />
-            {/if}
-          </button>
-        {/if}
+        <button
+          type="button"
+          class="icon-btn"
+          onclick={() => (authModalOpen = true)}
+          title={browserSession
+            ? `Account: ${browserSession.user.username}`
+            : "Account access"}
+          aria-label={browserSession
+            ? `Manage account ${browserSession.user.username}`
+            : "Open account access"}
+        >
+          <IconUserCircle size={18} />
+        </button>
       </div>
     </header>
 
     <main id="main-content" class="main-content" tabindex="-1">
+      {#if showsRecordFeedback && recordActionNotice}
+        <p class="record-action-feedback" role="status">
+          {recordActionNotice}
+        </p>
+      {/if}
+      {#if showsRecordFeedback && recordActionProblem}
+        <p class="record-action-feedback problem" role="alert">
+          {recordActionProblem}
+        </p>
+      {/if}
       {#if activeSection === "connections"}
         <ConnectionsView {host} />
       {:else if activeSection === "settings"}
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
-          onClientEndpointChanged={clearSessionCredential}
+          onClientEndpointChanged={resetClientEndpoint}
           onProviderCredentialsChanged={invalidateDiscoverProviders}
           onUpdateWorkbenchPreferences={(patch) =>
             (workbenchPreferences = { ...workbenchPreferences, ...patch })}
@@ -650,6 +776,10 @@
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
+          onTrackRecord={host.trackProviderCandidate ||
+          (host.createRecord && host.attachIdentifier && host.registerNamespace)
+            ? trackRecordFromDiscover
+            : undefined}
         />
       {:else if activeSection === "reconciliation"}
         <ReconciliationView
@@ -680,6 +810,10 @@
           records={recordsProblem ? [] : mediaRecords}
           availableCollections={[]}
           onSelectRecord={openRecord}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSetTrackingDisposition={(recordId, disposition) =>
+            void setTrackingDisposition(recordId, disposition)}
+          onOpenReconciliation={() => select("reconciliation")}
         />
       {:else if activeSection === "calendar"}
         {@render recordStatus()}
@@ -695,7 +829,22 @@
           <MediaDetailView
             record={selectedRecord}
             availableCollections={[]}
+            initialTab={selectedRecordTab}
+            contextMenuConfigs={workbenchPreferences.contextMenuItems}
+            providerCredentials={discoverProviders}
+            providerLoading={discoverLoading}
+            providerHostProblem={discoverHostProblem}
             onBack={() => select("library")}
+            onSearchMetadata={(provider, query) =>
+              host.searchProvider(provider, query)}
+            onApplyMetadata={host.applyProviderMetadata
+              ? applyProviderMetadata
+              : undefined}
+            onOpenProviderSettings={() => select("settings")}
+            onRetryProviders={() => loadDiscover()}
+            onSetTrackingDisposition={(recordId, disposition) =>
+              void setTrackingDisposition(recordId, disposition)}
+            onOpenReconciliation={() => select("reconciliation")}
           />
         {:else}
           <div class="state-message">
@@ -714,6 +863,10 @@
           records={recordsProblem ? [] : mediaRecords}
           availableCollections={[]}
           onSelectRecord={openRecord}
+          contextMenuConfigs={workbenchPreferences.contextMenuItems}
+          onSetTrackingDisposition={(recordId, disposition) =>
+            void setTrackingDisposition(recordId, disposition)}
+          onOpenReconciliation={() => select("reconciliation")}
         />
       {:else}
         <div class="overview">
@@ -832,14 +985,22 @@
   onUpdateTheme={updateTheme}
 />
 
-{#if host.setSessionCredential}
-  <AuthModal
-    show={authModalOpen}
-    {credentialTarget}
-    onClose={() => (authModalOpen = false)}
-    onSubmit={connectSessionCredential}
-  />
-{/if}
+<AuthModal
+  show={authModalOpen}
+  {host}
+  session={browserSession}
+  onClose={() => (authModalOpen = false)}
+  onSessionChange={(session) => {
+    browserSession = session;
+    if (!session) {
+      mediaRecords = [];
+      recordsLoaded = false;
+      recordsProblem = undefined;
+      recordActionNotice = undefined;
+      recordActionProblem = undefined;
+    }
+  }}
+/>
 
 <style>
   .workbench-shell {
@@ -890,6 +1051,13 @@
     align-items: center;
     gap: 10px;
     min-width: 0;
+    flex: 0 1 220px;
+  }
+
+  .top-bar-actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
   }
 
   .top-bar-actions {
@@ -936,6 +1104,29 @@
   .main-content {
     min-width: 0;
     flex: 1;
+  }
+
+  .record-action-feedback {
+    margin: 0;
+    padding: 9px 16px;
+    border-bottom: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-verified) 10%,
+      var(--fasti-surface-paper)
+    );
+    color: var(--fasti-text-primary);
+    font-size: 0.86rem;
+  }
+
+  .record-action-feedback.problem {
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-error, #b42318) 10%,
+      var(--fasti-surface-paper)
+    );
+    color: var(--fasti-state-error, #b42318);
   }
 
   .state-message {
@@ -1094,14 +1285,18 @@
   }
 
   @media (max-width: 56rem) {
-    .record-load-status,
-    .record-access-alert {
-      margin-inline: 20px;
+    .top-bar {
+      flex-wrap: wrap;
     }
 
-    .record-access-alert {
-      align-items: stretch;
-      flex-direction: column;
+    .top-bar-left {
+      flex: 1 1 auto;
+    }
+
+    .top-bar :global(.global-search) {
+      order: 3;
+      flex: 1 0 100%;
+      width: 100%;
     }
 
     .overview {

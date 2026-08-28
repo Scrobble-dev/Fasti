@@ -3,16 +3,21 @@
 Fasti keeps the listener, client URL, and public URL separate. This prevents a
 reverse-proxy address from changing the daemon bind address.
 
-| Variable                  | Owner                    | Purpose                                                                                              |
-| ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `FASTI_LISTEN`            | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                |
-| `FASTI_PORT`              | launcher                 | Native or container host port. Default: `8420`.                                                      |
-| `FASTI_PORT_FALLBACK`     | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.  |
-| `FASTI_API_URL`           | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment. |
-| `FASTI_PUBLIC_URL`        | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                     |
-| `FASTI_CONTAINER_RUNTIME` | launcher                 | `podman` or `docker`. Default: `podman`.                                                             |
-| `FASTI_EXTERNAL_BIND_IP`  | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP is accepted.            |
-| `FASTI_BOUND_ADDR_FILE`   | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                           |
+| Variable                         | Owner                    | Purpose                                                                                                                           |
+| -------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `FASTI_LISTEN`                   | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                                             |
+| `FASTI_PORT`                     | launcher                 | Native or container host port. Default: `8420`.                                                                                   |
+| `FASTI_PORT_FALLBACK`            | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.                               |
+| `FASTI_DATA_ROOT`                | `fastid`                 | Required private directory for every durable router. It is never inferred.                                                        |
+| `FASTI_API_URL`                  | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment.                              |
+| `FASTI_PUBLIC_URL`               | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
+| `FASTI_REMOTE_TRUSTED_PROXY`     | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
+| `FASTI_DEVELOPMENT_TEST_ACCOUNT` | `fastid`                 | Exact `true` seeds the one-time `testadmin` development account. Debug default: `true`; release default: `false`.                 |
+| `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
+| `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
+| `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
+| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP is accepted.                                        |
+| `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
 `127.0.0.1` are interchangeable when local name resolution uses IPv4. `[::1]`
@@ -68,10 +73,33 @@ HTTPS port. Set the external address separately:
 FASTI_PUBLIC_URL=https://fasti.internal ./scripts/dev.sh
 ```
 
-This variable does not create DNS, TLS, or a reverse proxy. Fasti does not yet
-publish a remote-exposure recipe. A reverse proxy can erase the daemon's
-loopback trust boundary, so public routing remains blocked until authenticated
-inbound access and its threat-model gate are active.
+This variable does not create DNS, TLS, or a reverse proxy. A development
+Remote instance can mount authenticated durable routes only when all of these
+conditions are true:
+
+```bash
+FASTI_LISTEN=0.0.0.0:8420 \
+FASTI_DATA_ROOT=/path/to/private/fasti-data \
+FASTI_REMOTE_TRUSTED_PROXY=true \
+FASTI_PUBLIC_URL=https://fasti.internal \
+FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
+cargo run --locked -p fastid
+```
+
+The trusted proxy must terminate HTTPS and must not expose the cleartext
+upstream directly. The remote router omits node initialization and first-client
+enrollment. It accepts browser sessions or existing scoped bearer credentials
+for durable data routes. Remote session cookies are `Secure`, `HttpOnly`, and
+`SameSite=Strict`; the readable strict CSRF cookie is required as an exact
+`X-Fasti-CSRF` proof for browser mutations.
+
+`FASTI_DEVELOPMENT_TEST_ACCOUNT=true` creates `testadmin` with password
+`testadmin` once per fresh data root and marks it explicitly as a test account.
+The account can be renamed, have its password changed, be deactivated, or be
+deleted. Its durable seed marker prevents recreation after rename or deletion.
+Debug builds enable this seed by default. Release builds disable it unless the
+operator explicitly opts in. Change or delete the account before sharing any
+development instance; this is not a supported production provisioning path.
 
 `.internal` needs working name resolution and a certificate whose subject
 includes that host. Fasti uses the platform trust store. It does not issue a
@@ -89,15 +117,9 @@ FASTI_PUBLIC_URL=https://fasti.internal \
 cargo build --release --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-The browser Workbench uses the Vite `/api` proxy by default. It can save one
-non-secret client service URL in browser storage. It never stores a bearer.
-Before sending a memory-only bearer, the connection dialog names the exact
-service origin and requires explicit confirmation for a non-loopback origin.
-Changing the URL changes the browser client only; it does not bind `fastid`.
-A cross-origin URL requires an HTTPS reverse proxy that explicitly permits the
-Workbench page origin through CORS. Direct `fastid` does not provide CORS.
-Listener and collision variables belong to `fastid`, not to the browser,
-embedded Tauri host, or APK kernel.
+The browser Workbench development server deliberately uses its configured Vite
+proxy. Listener and collision variables belong to `fastid`, not to the browser,
+embedded Tauri, or APK kernel.
 
 ## Edit desktop settings
 
@@ -147,19 +169,47 @@ lookup. Provider credentials must use headers or a platform credential store.
 They must not enter URLs, arguments, logs, browser storage, screenshots,
 fixtures, or proof bundles.
 
-The Google Books review runtime requires `GOOGLE_BOOKS_API_KEY` or a credential
-saved by the trusted Tauri host. The TMDB review runtime requires
-`TMDB_API_KEY` or a saved credential. For TMDB, this value must be the API Read
-Access Token shown in the TMDB account API settings. Fasti does not put the
-TMDB v3 `api_key` query parameter in a URL.
+The Google Books adapter requires `GOOGLE_BOOKS_API_KEY` or a credential saved
+by the trusted Tauri host. The TMDB adapter uses the corresponding
+`TMDB_API_READ_ACCESS_TOKEN` or stored credential. Environment credentials take
+precedence and are read-only in Settings. The host loads a credential only
+after outbound access is authorized. It sends Google Books keys in the
+sensitive `X-Goog-Api-Key` header and TMDB tokens in the sensitive
+`Authorization: Bearer` header.
 
-An environment credential takes precedence and is read-only in Settings. The
-host loads either credential only after outbound access is authorized. It sends
-the Google key as a sensitive `X-Goog-Api-Key` header and the TMDB token as a
-sensitive `Authorization: Bearer` header. Discover returns at most ten neutral
-book, film, or series candidates and does not create or modify a local media
-record during search. TMDB people and adult results are excluded. The browser
-does not receive credentials or execute provider requests.
+Search returns at most ten neutral candidates. Selecting a candidate does not
+trust the earlier search body: the host performs a bounded `metadata.read` for
+the exact provider ID. If that exact response contains artwork, the host then
+authorizes a separate `metadata.artwork` request to `image.tmdb.org`,
+`books.google.com`, or `books.googleusercontent.com`. It resolves and
+authorizes every address, pins a proxy-free and redirect-free client, sends no
+provider credential, and accepts only JPEG, PNG, or WebP content up to 2 MB and
+4096 pixels per dimension. A failure occurs before the metadata write.
+
+Validated artwork is written atomically to an owner-only app cache. The cache
+keeps at most 128 content-addressed files. `list_records` exposes a local path
+only when the file is regular, bounded, and still has safe image dimensions.
+The Desktop adapter converts that path through Tauri's asset protocol, whose
+runtime scope contains only the artwork cache directory. Remote provider URLs
+remain provenance claims and never reach a Desktop image element.
+
+After network work succeeds, the host passes validated identifiers and field
+claims to the local application port. Creating a provider record commits the
+Record, identifier, and claims atomically. Refresh attaches or verifies the
+selected identifier and appends claims without rewriting earlier provider
+evidence. Provider failure leaves existing identity and Chronicle state
+unchanged. The browser does not receive credentials or execute provider
+requests.
+
+TMDB's [API FAQ](https://developer.themoviedb.org/docs/faq) requires attribution
+for applications that use its API. The Workbench
+includes the approved TMDB mark and required non-endorsement notice in Provider
+credits. Commercial deployments need the appropriate TMDB licence; configuring
+a token does not grant one. Poster URLs are stored as provider claims. The
+Desktop CSP still rejects remote images; it permits only the narrowly scoped
+local Tauri asset protocol in addition to self-contained image sources.
+
+TMDB people and adult results are excluded before candidates reach the UI.
 
 An app-managed provider credential is scoped to the identity of the opened
 physical Fasti data root. Fasti derives that identity from the retained root
@@ -178,10 +228,12 @@ real authenticated profile context.
 
 ## Contract disposition
 
-Desktop connection values and provider searches use local Tauri IPC. The
-browser service URL is non-secret client configuration. The container exposure
-assertion changes only which existing production router is composed. None of
-these settings adds a route, payload, event, domain entity, or linked-data term.
-OpenAPI, AsyncAPI, JSON Schema, and JSON-LD are therefore not applicable to the
-settings themselves. Tauri command types, browser host types, and this document
-own the local client contracts until a public capability is authorized.
+Provider credentials, search, exact-item fetch, and metadata mutations use
+local Tauri IPC. They do not add a public Fasti HTTP route, event, domain
+entity, or linked-data term. The existing public Record read response gains
+additive resolved metadata fields and external identifiers, so production
+OpenAPI and the generated TypeScript SDK change. AsyncAPI and JSON-LD remain
+unchanged. The container exposure assertion changes only which existing
+production router is composed; it adds no route or payload. The Tauri command
+types and this document own the local mutation contract until a public
+capability is authorized.

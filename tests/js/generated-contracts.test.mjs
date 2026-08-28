@@ -40,10 +40,10 @@ const mutateJson = async (root, relativePath, mutate) => {
 
 test("checked-in generated contracts validate", async () => {
   assert.deepEqual(await validateGeneratedContracts(), {
-    capabilityCount: 24,
+    capabilityCount: 35,
     conformanceOpenApiPathCount: 9,
-    openApiPathCount: 7,
-    problemCount: 100,
+    openApiPathCount: 13,
+    problemCount: 169,
     schemaCount: 2,
   });
 });
@@ -119,7 +119,7 @@ test("OpenAPI authorization posture mutation is rejected", async () => {
   );
 });
 
-test("production OpenAPI bearer requirements cannot be removed", async () => {
+test("production OpenAPI authenticated requirements cannot be removed", async () => {
   await withArtifacts(
     (root) =>
       mutateJson(root, "contracts/generated/v1/openapi.json", (document) => {

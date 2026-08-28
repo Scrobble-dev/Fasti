@@ -16,7 +16,8 @@ test("signed-out Workbench keeps the product and compact rail usable", async ({
   );
 
   const connect = await page
-    .getByRole("button", { name: "Connect records" })
+    .locator("#main-content")
+    .getByRole("button", { name: "Sign in", exact: true })
     .boundingBox();
   expect(connect?.width).toBeGreaterThanOrEqual(44);
   expect(connect?.height).toBeGreaterThanOrEqual(44);

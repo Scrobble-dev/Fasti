@@ -40,9 +40,11 @@ Stop the daemon with `Ctrl-C`. This health call does not prove any B1 fixture ro
 
 ## Durable local setup
 
-Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry.
+Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. Debug builds seed the one-time `testadmin` browser account unless `FASTI_DEVELOPMENT_TEST_ACCOUNT=false`; disable the seed when testing manual bootstrap.
 
-The initialization proof and bearer credential exist only in JSON bodies. A trusted local host shell must store them in permission-restricted credential storage. Do not print them or put them in URLs, command arguments, logs, `localStorage`, or `sessionStorage`. The same local production surface exposes authenticated observation, Record, identifier, and namespace operations. Identity review, receipts, and portability remain absent from production.
+The initialization proof and bearer credential exist only in JSON bodies. A trusted local host shell must store them in permission-restricted credential storage. Do not print them or put them in URLs, command arguments, logs, `localStorage`, or `sessionStorage`.
+
+First-party browser requests use `credentials: "include"` and the `HttpOnly` session cookie. Browser mutations also present the readable CSRF cookie through `X-Fasti-CSRF`. Integration clients use separately revocable scoped bearer credentials. Configure `FastiClient` with `useBrowserSession: true` and a `csrfToken` resolver for the browser path; do not copy a session or bearer secret into browser storage. The generated production parsers cover browser account, observation, identity-record, and profile-state DTOs.
 
 ## Exercise the B1 contract
 
@@ -53,7 +55,7 @@ pnpm --filter @fasti/sdk build
 node --test tests/js/sdk-client.test.mjs
 ```
 
-Fixture successes always declare `fixture_only` availability and `none` durability. Production separately mounts health, durable setup, observation, Record, identifier, and namespace operations. Run the full governed gate before treating a contract change as complete:
+Fixture successes always declare `fixture_only` availability and `none` durability. Production runtime operations remain distinct from that fixture. Run the full governed gate before treating a contract change as complete:
 
 ```bash
 cargo xtask contract verify --locked

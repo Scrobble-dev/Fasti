@@ -1,7 +1,8 @@
-use rusqlite::{Connection, Result};
+use crate::{access::V8_NODE_OWNER_SCOPE_BACKFILL, kernel::scope_storage_key};
+use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 6;
+pub(crate) const SCHEMA_VERSION: i64 = 9;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -32,6 +33,21 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 5 {
         migrate_v6(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 6 {
+        migrate_v7(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 7 {
+        migrate_v8(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 8 {
+        migrate_v9(connection)?;
     }
     Ok(())
 }
@@ -608,6 +624,201 @@ fn migrate_v6(connection: &Connection) -> Result<()> {
     connection.execute_batch(&sql)
 }
 
+fn migrate_v7(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE profile_record_tracking_dispositions (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            disposition TEXT NOT NULL CHECK (disposition IN ('watching', 'on_hold', 'dropped')),
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id, record_id)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX profile_record_tracking_dispositions_profile_idx
+            ON profile_record_tracking_dispositions(workspace_id, profile_id, record_id);
+
+        CREATE TRIGGER profile_record_tracking_dispositions_scope_insert
+        BEFORE INSERT ON profile_record_tracking_dispositions
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'profile tracking disposition crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER profile_record_tracking_dispositions_scope_update
+        BEFORE UPDATE ON profile_record_tracking_dispositions
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'profile tracking disposition crosses a workspace boundary');
+        END;
+        "#,
+    );
+    append_revision_triggers(
+        &mut sql,
+        &RevisionSource {
+            table: "profile_record_tracking_dispositions",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 7;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
+fn migrate_v8(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE browser_users (
+            user_id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            client_id TEXT NOT NULL REFERENCES clients(client_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            is_admin INTEGER NOT NULL CHECK (is_admin IN (0, 1)),
+            is_test_account INTEGER NOT NULL CHECK (is_test_account IN (0, 1)),
+            active INTEGER NOT NULL CHECK (active IN (0, 1)),
+            failed_login_count INTEGER NOT NULL DEFAULT 0 CHECK (failed_login_count >= 0),
+            locked_until TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TRIGGER browser_users_scope_insert
+        BEFORE INSERT ON browser_users
+        WHEN NOT EXISTS (
+            SELECT 1
+            FROM clients c
+            JOIN profiles p ON p.profile_id = NEW.profile_id
+            WHERE c.client_id = NEW.client_id
+              AND c.workspace_id = p.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'browser user crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER browser_users_scope_update
+        BEFORE UPDATE ON browser_users
+        WHEN NOT EXISTS (
+            SELECT 1
+            FROM clients c
+            JOIN profiles p ON p.profile_id = NEW.profile_id
+            WHERE c.client_id = NEW.client_id
+              AND c.workspace_id = p.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'browser user crosses a workspace boundary');
+        END;
+
+        CREATE TABLE browser_sessions (
+            session_digest TEXT PRIMARY KEY,
+            csrf_digest TEXT NOT NULL,
+            user_id TEXT NOT NULL REFERENCES browser_users(user_id) ON DELETE CASCADE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX browser_sessions_user_idx
+            ON browser_sessions(user_id, expires_at);
+
+        -- This marker intentionally survives deletion or renaming of the
+        -- development account so startup never recreates a deleted user.
+        CREATE TABLE browser_auth_bootstrap (
+            singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+            seeded_at TEXT NOT NULL
+        ) STRICT;
+
+        "#,
+    )?;
+    for scope in V8_NODE_OWNER_SCOPE_BACKFILL {
+        transaction.execute(
+            r#"
+            INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
+            SELECT pg.grant_id, ?1
+            FROM profile_grants pg
+            JOIN node_state ns
+              ON ns.singleton = 1
+             AND ns.client_id = pg.client_id
+             AND ns.profile_id = pg.profile_id
+            WHERE pg.status = 'active'
+            "#,
+            [scope_storage_key(*scope)],
+        )?;
+    }
+    transaction.pragma_update(None, "user_version", 8)?;
+    transaction.commit()
+}
+
+fn migrate_v9(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE profile_nuvio_collections (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            document_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER profile_nuvio_collections_scope_insert
+        BEFORE INSERT ON profile_nuvio_collections
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'Nuvio Collections document crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER profile_nuvio_collections_scope_update
+        BEFORE UPDATE ON profile_nuvio_collections
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'Nuvio Collections document crosses a workspace boundary');
+        END;
+        "#,
+    );
+    append_revision_triggers(
+        &mut sql,
+        &RevisionSource {
+            table: "profile_nuvio_collections",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 9;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -619,6 +830,7 @@ pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::access::FULL_ADMIN_SCOPES;
     use rusqlite::params;
     use std::fs;
 
@@ -754,10 +966,15 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("count revision triggers");
-        // +3 for namespace_definitions (migrate_v4) and +6 for the two
-        // metadata field tables (migrate_v6), none of which are in the
+        // +3 for namespace_definitions (migrate_v4), +6 for the two metadata
+        // field tables (migrate_v6), +3 for profile tracking disposition
+        // (migrate_v7), and +3 for profile Nuvio Collections (migrate_v9),
+        // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
-        assert_eq!(trigger_count, (REVISION_SOURCES.len() * 3 + 3 + 6) as i64);
+        assert_eq!(
+            trigger_count,
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3) as i64
+        );
     }
 
     #[test]
@@ -777,6 +994,112 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("read current version");
         assert_eq!(after, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn version_six_upgrade_backfills_the_full_node_owner_scope_set() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("version one");
+        migrate_v2(&connection).expect("version two");
+        migrate_v3(&connection).expect("version three");
+        migrate_v4(&connection).expect("version four");
+        migrate_v5(&connection).expect("version five");
+        migrate_v6(&connection).expect("version six");
+        seed_version_one_rows(&connection);
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO profile_grants(
+                    grant_id, workspace_id, profile_id, client_id, status, created_at
+                ) VALUES (
+                    'grt_seed', 'wsp_seed', 'prf_seed', 'cli_seed', 'active',
+                    '2026-08-24T00:00:05Z'
+                );
+                INSERT INTO node_state(
+                    singleton, initialized, workspace_id, profile_id, client_id, created_at
+                ) VALUES (
+                    1, 1, 'wsp_seed', 'prf_seed', 'cli_seed',
+                    '2026-08-24T00:00:06Z'
+                );
+                "#,
+            )
+            .expect("seed enrolled version-six node");
+        for scope in FULL_ADMIN_SCOPES
+            .iter()
+            .filter(|scope| !V8_NODE_OWNER_SCOPE_BACKFILL.contains(scope))
+        {
+            connection
+                .execute(
+                    "INSERT INTO grant_scopes(grant_id, scope_key) VALUES ('grt_seed', ?1)",
+                    [scope_storage_key(*scope)],
+                )
+                .expect("seed version-six scope");
+        }
+
+        migrate(&connection).expect("upgrade version-six database");
+
+        let scopes: Vec<String> = connection
+            .prepare(
+                "SELECT scope_key FROM grant_scopes WHERE grant_id = 'grt_seed' ORDER BY scope_key",
+            )
+            .expect("prepare scope query")
+            .query_map([], |row| row.get(0))
+            .expect("query scopes")
+            .collect::<Result<_, _>>()
+            .expect("collect scopes");
+        let mut expected: Vec<_> = FULL_ADMIN_SCOPES
+            .iter()
+            .map(|scope| scope_storage_key(*scope).to_owned())
+            .collect();
+        expected.sort_unstable();
+        assert_eq!(scopes, expected);
+    }
+
+    #[test]
+    fn browser_users_cannot_cross_workspace_client_and_profile_ownership() {
+        let connection = migrated_connection();
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_browser_a', '2026-08-24T00:00:00Z');
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_browser_b', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_browser_a', 'wsp_browser_a', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_browser_b', 'wsp_browser_b', '2026-08-24T00:00:00Z');
+                INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at)
+                    VALUES ('cli_browser_a', 'wsp_browser_a', 'active', 1, '2026-08-24T00:00:00Z');
+                "#,
+            )
+            .expect("seed browser ownership graph");
+        let insert_user = |user_id: &str, profile_id: &str| {
+            connection.execute(
+                r#"
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, created_at, updated_at
+                ) VALUES (?1, ?1, 'hash', 'cli_browser_a', ?2, 1, 1, 1, ?3, ?3)
+                "#,
+                params![user_id, profile_id, CREATED_AT],
+            )
+        };
+
+        assert!(insert_user("usr_cross", "prf_browser_b").is_err());
+        assert_eq!(
+            insert_user("usr_same", "prf_browser_a").expect("same workspace"),
+            1
+        );
+        assert!(connection
+            .execute(
+                "UPDATE browser_users SET profile_id = 'prf_browser_b' WHERE user_id = 'usr_same'",
+                [],
+            )
+            .is_err());
     }
 
     /// Seed the minimum row set that a real version-one database would hold.
@@ -949,7 +1272,7 @@ mod tests {
     }
 
     #[test]
-    fn version_four_upgrade_adds_only_the_nullable_recovery_attempt_marker() {
+    fn version_four_upgrade_preserves_existing_schema_and_adds_later_tables() {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
         connection
             .pragma_update(None, "foreign_keys", "ON")
@@ -997,14 +1320,21 @@ mod tests {
             .collect::<Result<_, _>>()
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
-        // column and migrate_v6's two new metadata field tables -- both
-        // additive, so every v4 table and column is still present unchanged.
+        // column, migrate_v6's two metadata tables, and migrate_v7's profile
+        // tracking table, migrate_v8's browser authentication tables, and
+        // migrate_v9's Nuvio Collections table -- all additive, so every v4
+        // table and column remains.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
             .chain([
                 "metadata_field_claims".to_owned(),
                 "metadata_field_overrides".to_owned(),
+                "profile_record_tracking_dispositions".to_owned(),
+                "profile_nuvio_collections".to_owned(),
+                "browser_auth_bootstrap".to_owned(),
+                "browser_sessions".to_owned(),
+                "browser_users".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

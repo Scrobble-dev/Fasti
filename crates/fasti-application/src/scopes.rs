@@ -31,12 +31,15 @@ define_scope_keys!(
     (ReceiptRead, "receipt_read"),
     (IdentityWrite, "identity_write"),
     (IdentityRead, "identity_read"),
+    (ProfileStateRead, "profile_state_read"),
+    (ProfileStateWrite, "profile_state_write"),
     (ReviewRead, "review_read"),
     (ReviewWrite, "review_write"),
     (CorrectionRead, "correction_read"),
     (CorrectionWrite, "correction_write"),
     (WorkspaceExport, "workspace_export"),
     (WorkspaceVerify, "workspace_verify"),
+    (BrowserUserManage, "browser_user_manage"),
 );
 
 #[cfg(test)]

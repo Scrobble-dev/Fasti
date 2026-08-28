@@ -19,6 +19,7 @@
     CustomMediaTypeDefinition,
     MediaKind,
     NetworkConfiguration,
+    NuvioCollectionsDocument,
     ProviderCredentialStatus,
     SaveNetworkConfigurationRequest,
     WorkbenchHost,
@@ -48,8 +49,12 @@
   }: Props = $props();
 
   let active:
-    "network" | "providers" | "preferences" | "custom_fields" | "system" =
-    $state("network");
+    | "network"
+    | "providers"
+    | "preferences"
+    | "custom_fields"
+    | "nuvio_collections"
+    | "system" = $state("network");
   let network = $state<NetworkConfiguration>();
   let networkLoading = $state(false);
   let networkProblem = $state<string>();
@@ -59,6 +64,131 @@
   let providerNotice = $state<string>();
   let editing = $state<Record<string, string>>({});
   let busyProvider = $state<string>();
+  let nuvioDocument = $state<NuvioCollectionsDocument | null>(null);
+  let nuvioFile = $state<File>();
+  let nuvioFileInput = $state<HTMLInputElement>();
+  let nuvioLoading = $state(false);
+  let nuvioProblem = $state<string>();
+  let nuvioNotice = $state<string>();
+
+  const MAX_NUVIO_COLLECTIONS_BYTES = 4 * 1_024 * 1_024;
+
+  function nuvioCounts(document: NuvioCollectionsDocument | null): {
+    collections: number;
+    folders: number;
+    sources: number;
+  } {
+    let folders = 0;
+    let sources = 0;
+    for (const collection of document ?? []) {
+      if (!collection || typeof collection !== "object") continue;
+      const value = collection as Record<string, unknown>;
+      const collectionFolders = Array.isArray(value.folders)
+        ? value.folders
+        : [];
+      folders += collectionFolders.length;
+      for (const folder of collectionFolders) {
+        if (!folder || typeof folder !== "object") continue;
+        const value = folder as Record<string, unknown>;
+        const folderSources = Array.isArray(value.sources)
+          ? value.sources
+          : Array.isArray(value.catalogSources)
+            ? value.catalogSources
+            : [];
+        sources += folderSources.length;
+      }
+    }
+    return { collections: document?.length ?? 0, folders, sources };
+  }
+
+  async function loadNuvioCollections(): Promise<void> {
+    if (!host.getNuvioCollections || nuvioLoading) return;
+    nuvioLoading = true;
+    nuvioProblem = undefined;
+    try {
+      const state = await host.getNuvioCollections();
+      nuvioDocument = state.document ?? null;
+    } catch (error) {
+      nuvioProblem = hostProblemText(
+        error,
+        "Fasti could not load this profile's Nuvio Collections document.",
+      );
+    } finally {
+      nuvioLoading = false;
+    }
+  }
+
+  async function importNuvioCollections(): Promise<void> {
+    if (!host.replaceNuvioCollections || !nuvioFile || nuvioLoading) return;
+    nuvioProblem = undefined;
+    nuvioNotice = undefined;
+    if (nuvioFile.size > MAX_NUVIO_COLLECTIONS_BYTES) {
+      nuvioProblem = "The selected file exceeds the 4 MiB import limit.";
+      return;
+    }
+    nuvioLoading = true;
+    try {
+      const value: unknown = JSON.parse(await nuvioFile.text());
+      if (!Array.isArray(value)) {
+        throw new Error("The document must be a top-level JSON array.");
+      }
+      const inputCounts = nuvioCounts(value);
+      const state = await host.replaceNuvioCollections(value);
+      nuvioDocument = state.document ?? null;
+      const storedCounts = nuvioCounts(nuvioDocument);
+      nuvioNotice = `Imported ${inputCounts.collections} collections, ${inputCounts.folders} folders, and ${inputCounts.sources} sources. Stored ${storedCounts.collections} collections, ${storedCounts.folders} folders, and ${storedCounts.sources} sources after Nuvio normalization.`;
+      nuvioFile = undefined;
+      if (nuvioFileInput) nuvioFileInput.value = "";
+    } catch (error) {
+      nuvioProblem = hostProblemText(
+        error,
+        "Fasti could not import the selected Nuvio Collections document.",
+      );
+    } finally {
+      nuvioLoading = false;
+    }
+  }
+
+  function exportNuvioCollections(): void {
+    if (!nuvioDocument) return;
+    const blob = new Blob([JSON.stringify(nuvioDocument, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fasti-nuvio-collections-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  async function clearNuvioCollections(): Promise<void> {
+    if (
+      !host.clearNuvioCollections ||
+      nuvioLoading ||
+      !confirm(
+        "Clear this profile's saved Nuvio Collections document? Export it first if you need a backup.",
+      )
+    )
+      return;
+    nuvioLoading = true;
+    nuvioProblem = undefined;
+    nuvioNotice = undefined;
+    try {
+      const state = await host.clearNuvioCollections();
+      nuvioDocument = state.document ?? null;
+      nuvioNotice = "This profile's Nuvio Collections document was cleared.";
+    } catch (error) {
+      nuvioProblem = hostProblemText(
+        error,
+        "Fasti could not clear this profile's Nuvio Collections document.",
+      );
+    } finally {
+      nuvioLoading = false;
+    }
+  }
 
   async function loadNetwork(): Promise<void> {
     if (networkLoading) return;
@@ -158,7 +288,7 @@
   }
 
   onMount(() => {
-    void Promise.all([loadNetwork(), loadProviders()]);
+    void Promise.all([loadNetwork(), loadProviders(), loadNuvioCollections()]);
   });
 
   let newFieldName = $state("");
@@ -329,6 +459,15 @@
         aria-pressed={active === "custom_fields"}
         onclick={() => (active = "custom_fields")}
         ><IconTags size={16} aria-hidden="true" /> Custom Types & Fields</button
+      >
+      <button
+        type="button"
+        class:active={active === "nuvio_collections"}
+        aria-pressed={active === "nuvio_collections"}
+        onclick={() => {
+          active = "nuvio_collections";
+          void loadNuvioCollections();
+        }}>Nuvio Collections</button
       >
       <button
         type="button"
@@ -833,6 +972,105 @@
             {/if}
           </div>
         </section>
+      {:else if active === "nuvio_collections"}
+        <section aria-labelledby="nuvio-collections-settings-title">
+          <div class="section-heading">
+            <div>
+              <h2 id="nuvio-collections-settings-title">
+                Nuvio custom Collections
+              </h2>
+              <p id="nuvio-collections-help">
+                Import or export NuvioTV's bare JSON array for this Fasti
+                profile. Fasti validates and normalizes the document but never
+                fetches URLs found inside it. This does not enable native Nuvio
+                pairing or tracking sync.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="secondary"
+              onclick={() => void loadNuvioCollections()}
+              disabled={!host.getNuvioCollections || nuvioLoading}
+            >
+              <IconRefresh size={18} aria-hidden="true" />
+              {nuvioLoading ? "Working…" : "Refresh"}
+            </button>
+          </div>
+
+          {#if host.getNuvioCollections && host.replaceNuvioCollections && host.clearNuvioCollections}
+            {@const counts = nuvioCounts(nuvioDocument)}
+            <dl class="nuvio-summary" aria-label="Saved document summary">
+              <div>
+                <dt>Collections</dt>
+                <dd>{counts.collections}</dd>
+              </div>
+              <div>
+                <dt>Folders</dt>
+                <dd>{counts.folders}</dd>
+              </div>
+              <div>
+                <dt>Sources</dt>
+                <dd>{counts.sources}</dd>
+              </div>
+              <div>
+                <dt>Profile document</dt>
+                <dd>{nuvioDocument ? "Saved" : "Not imported"}</dd>
+              </div>
+            </dl>
+
+            <div class="nuvio-import">
+              <label for="nuvio-collections-file">Nuvio JSON file</label>
+              <input
+                bind:this={nuvioFileInput}
+                id="nuvio-collections-file"
+                type="file"
+                accept="application/json,.json"
+                aria-describedby="nuvio-collections-help nuvio-file-limit"
+                onchange={(event) =>
+                  (nuvioFile = event.currentTarget.files?.[0])}
+                disabled={nuvioLoading}
+              />
+              <small id="nuvio-file-limit">Maximum file size: 4 MiB.</small>
+            </div>
+
+            <div class="nuvio-actions">
+              <button
+                type="button"
+                class="primary"
+                onclick={() => void importNuvioCollections()}
+                disabled={!nuvioFile || nuvioLoading}>Import and replace</button
+              >
+              <button
+                type="button"
+                class="secondary"
+                onclick={exportNuvioCollections}
+                disabled={!nuvioDocument || nuvioLoading}
+              >
+                <IconFileDownload size={16} aria-hidden="true" /> Export JSON
+              </button>
+              <button
+                type="button"
+                class="danger"
+                onclick={() => void clearNuvioCollections()}
+                disabled={!nuvioDocument || nuvioLoading}
+              >
+                <IconTrash size={16} aria-hidden="true" /> Clear saved document
+              </button>
+            </div>
+          {:else}
+            <p class="managed-note">
+              This host does not provide profile-scoped Nuvio Collections
+              storage.
+            </p>
+          {/if}
+
+          {#if nuvioNotice}<p class="notice" role="status">
+              {nuvioNotice}
+            </p>{/if}
+          {#if nuvioProblem}<p class="problem" role="alert">
+              {nuvioProblem}
+            </p>{/if}
+        </section>
       {:else}
         <section aria-labelledby="capability-settings-title">
           <h2 id="capability-settings-title">
@@ -876,8 +1114,12 @@
               <dd>Not active</dd>
             </div>
             <div>
-              <dt>Source-specific importers</dt>
+              <dt>Other source-specific importers</dt>
               <dd>Not active</dd>
+            </div>
+            <div>
+              <dt>Nuvio custom Collections import and export</dt>
+              <dd>Active per profile</dd>
             </div>
             <div>
               <dt>Native Nuvio pairing</dt>
@@ -1212,6 +1454,52 @@
     margin: 20px 0 16px;
   }
 
+  .nuvio-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 1px;
+    margin: 20px 0;
+    border: 1px solid
+      var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
+    border-radius: 7px;
+    overflow: hidden;
+  }
+
+  .nuvio-summary div {
+    padding: 12px 14px;
+    background: var(--fasti-surface-paper);
+  }
+
+  .nuvio-summary dt {
+    color: var(--fasti-text-muted);
+    font-size: 0.78rem;
+  }
+
+  .nuvio-summary dd {
+    margin: 3px 0 0;
+    font-weight: 700;
+  }
+
+  .nuvio-import {
+    display: grid;
+    gap: 6px;
+  }
+
+  .nuvio-import label {
+    font-weight: 650;
+  }
+
+  .nuvio-import small {
+    color: var(--fasti-text-muted);
+  }
+
+  .nuvio-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
   .cache-card {
     display: flex;
     flex-direction: column;
@@ -1329,8 +1617,20 @@
     }
 
     nav {
-      display: grid;
-      grid-template-columns: 1fr;
+      flex-direction: row;
+      overflow-x: auto;
+      padding-block-end: 4px;
+      scroll-snap-type: inline proximity;
+    }
+
+    nav button {
+      flex: 0 0 auto;
+      white-space: nowrap;
+      scroll-snap-align: start;
+    }
+
+    nav button.active {
+      box-shadow: inset 0 -3px 0 var(--fasti-action-primary);
     }
 
     .section-heading,

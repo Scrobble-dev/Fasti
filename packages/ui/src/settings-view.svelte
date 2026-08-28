@@ -17,6 +17,7 @@
   } from "./types.js";
   import { createDefaultWorkbenchPreferences } from "./defaults.js";
   import NetworkSettings from "./network-settings.svelte";
+  import TmdbAttribution from "./tmdb-attribution.svelte";
   import { hostProblemText } from "./host-problem.js";
   import {
     IconKey,
@@ -324,7 +325,13 @@
   }
 
   function handleResetNavPreferences(): void {
-    onUpdateWorkbenchPreferences?.(createDefaultWorkbenchPreferences());
+    const defaults = createDefaultWorkbenchPreferences();
+    onUpdateWorkbenchPreferences?.({
+      sidebarCollapsed: defaults.sidebarCollapsed,
+      sidebarHidden: defaults.sidebarHidden,
+      navItems: defaults.navItems,
+      contextMenuItems: defaults.contextMenuItems,
+    });
   }
 
   async function saveProviderKey(provider: string): Promise<void> {
@@ -1365,9 +1372,11 @@
                     Source: platform credential store. This value is shared by
                     all profiles on this Fasti node.
                   {:else}
-                    No key is saved for this Fasti node.
+                    No credential is saved for this Fasti node.
                   {/if}
-                  Google Books is required for Discover book search.
+                  {prov.provider === "tmdb"
+                    ? "TMDB enables movie and TV metadata search and refresh. Use an API Read Access Token."
+                    : "Google Books enables book metadata search and refresh."}
                 </p>
                 <form
                   class="key-input-row"
@@ -1379,13 +1388,15 @@
                   <input
                     type="password"
                     placeholder={prov.writable
-                      ? "Enter a new API key"
+                      ? prov.provider === "tmdb"
+                        ? "Enter an API Read Access Token"
+                        : "Enter a new API key"
                       : "Managed by the environment"}
                     value={editingKeyMap[prov.provider] ?? ""}
                     oninput={(e) =>
                       (editingKeyMap[prov.provider] = e.currentTarget.value)}
                     class="api-key-input"
-                    aria-label="API Key for {prov.label}"
+                    aria-label="Provider credential for {prov.label}"
                     autocomplete="off"
                     spellcheck="false"
                     disabled={!prov.writable || providerBusy === prov.provider}
@@ -1397,7 +1408,9 @@
                       !editingKeyMap[prov.provider]?.trim() ||
                       !!providerBusy}
                   >
-                    {providerBusy === prov.provider ? "Saving…" : "Save key"}
+                    {providerBusy === prov.provider
+                      ? "Saving…"
+                      : "Save credential"}
                   </button>
                   {#if prov.writable && prov.configured}
                     <button
@@ -1406,7 +1419,7 @@
                       disabled={!!providerBusy}
                       onclick={() => confirmProviderDelete(prov.provider)}
                     >
-                      Remove key
+                      Remove credential
                     </button>
                   {/if}
                 </form>
@@ -1419,6 +1432,7 @@
           {#if providerProblem}
             <p class="provider-problem" role="alert">{providerProblem}</p>
           {/if}
+          <TmdbAttribution />
         </section>
       {:else if activeSettingsSection === "advanced"}
         {#if onSaveNetworkConfiguration && onTestEndpoint}

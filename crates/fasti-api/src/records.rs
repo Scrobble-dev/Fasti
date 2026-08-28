@@ -1,4 +1,4 @@
-use crate::local::{bearer_secret, run_kernel, LocalApiState};
+use crate::local::{authenticate_request, request_authentication, run_kernel, LocalApiState};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use axum::{
     extract::{rejection::JsonRejection, State},
@@ -7,14 +7,14 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    AttachIdentifierCommand, AuthenticateCredentialQuery, CapabilityKey, CreateRecordCommand,
-    FastiProblem, ListRecordsQuery, RegisterNamespaceDefinitionCommand, Violation,
+    AttachIdentifierCommand, CapabilityKey, CreateRecordCommand, FastiProblem, ListRecordsQuery,
+    RegisterNamespaceDefinitionCommand, Violation,
 };
 use fasti_contracts::{
     AttachIdentifierRequest, AttachIdentifierResponse, ClaimedPrecisionDto, ClaimedTrustDto,
     CreateRecordRequest, CreateRecordResponse, ListRecordsResponse, OccurredTimeDto,
-    ProblemDetails, RecordActivityDto, RecordSummaryDto, RegisterNamespaceRequest,
-    RegisterNamespaceResponse, ResolvedFieldDto,
+    ProblemDetails, RecordActivityDto, RecordIdentifierDto, RecordSummaryDto,
+    RegisterNamespaceRequest, RegisterNamespaceResponse, ResolvedFieldDto,
 };
 use fasti_domain::{
     ClaimedPrecision, ClaimedTime, ClaimedTrust, ExternalIdentifierClaim, Grain,
@@ -89,13 +89,13 @@ fn resolved_field_dto(field: &ResolvedField) -> ResolvedFieldDto {
     post,
     path = "/api/v1/records",
     tag = "records",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = CreateRecordRequest,
     responses(
         (status = 200, description = "The new record's identity", body = CreateRecordResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks record-write scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks record-write scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request body exceeds the bounded transport limit", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Grain is not a registered Fasti grain", body = ProblemDetails, content_type = "application/problem+json"),
@@ -113,17 +113,19 @@ pub(crate) async fn create_record(
     let capability = CapabilityKey::CreateRecord;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let secret = bearer_secret(&headers, capability, correlation_id)?;
+    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
     let grain = Grain::from_str(&request.grain)
         .map_err(|_| invalid_identifier_input(capability, correlation_id))?;
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
+        let access = authenticate_request(
+            kernel.as_ref(),
+            authentication,
             capability,
-            secret,
-        ))?;
+            correlation_id,
+            true,
+        )?;
         kernel.create_record(CreateRecordCommand::new(correlation_id, access, grain))
     })
     .await?;
@@ -138,13 +140,13 @@ pub(crate) async fn create_record(
     post,
     path = "/api/v1/records/identifiers",
     tag = "records",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = AttachIdentifierRequest,
     responses(
         (status = 200, description = "The attached (or already-present) identifier claim", body = AttachIdentifierResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks record-write scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks record-write scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "Record does not exist", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "This identifier is already attached to a different active record", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request body exceeds the bounded transport limit", body = ProblemDetails, content_type = "application/problem+json"),
@@ -164,7 +166,7 @@ pub(crate) async fn attach_identifier(
     let capability = CapabilityKey::AttachIdentifier;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let secret = bearer_secret(&headers, capability, correlation_id)?;
+    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
     let record_id = request
         .record_id
         .parse()
@@ -176,11 +178,13 @@ pub(crate) async fn attach_identifier(
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
+        let access = authenticate_request(
+            kernel.as_ref(),
+            authentication,
             capability,
-            secret,
-        ))?;
+            correlation_id,
+            true,
+        )?;
         kernel.attach_identifier(AttachIdentifierCommand::new(
             correlation_id,
             access,
@@ -201,11 +205,11 @@ pub(crate) async fn attach_identifier(
     get,
     path = "/api/v1/records",
     tag = "records",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     responses(
         (status = 200, description = "Records visible to this credential's workspace", body = ListRecordsResponse),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks record-read scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks record-read scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "This capability is not available in the current runtime body", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
@@ -217,15 +221,17 @@ pub(crate) async fn list_records(
 ) -> HttpResult<ListRecordsResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListRecords;
-    let secret = bearer_secret(&headers, capability, correlation_id)?;
+    let authentication = request_authentication(&headers, capability, correlation_id, false)?;
 
     let kernel = state.kernel;
     let summaries = run_kernel(capability, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
+        let access = authenticate_request(
+            kernel.as_ref(),
+            authentication,
             capability,
-            secret,
-        ))?;
+            correlation_id,
+            false,
+        )?;
         kernel.list_records(ListRecordsQuery::new(correlation_id, access))
     })
     .await?;
@@ -242,6 +248,18 @@ pub(crate) async fn list_records(
                     .unwrap_or_else(|| "active".to_owned()),
                 title: resolved_field_dto(summary.title()),
                 poster: resolved_field_dto(summary.poster()),
+                original_title: Some(resolved_field_dto(summary.original_title())),
+                overview: Some(resolved_field_dto(summary.overview())),
+                release_year: Some(resolved_field_dto(summary.release_year())),
+                identifiers: summary
+                    .identifiers()
+                    .iter()
+                    .map(|identifier| RecordIdentifierDto {
+                        namespace: identifier.namespace().to_string(),
+                        grain: identifier.grain().as_str().to_owned(),
+                        value: identifier.value().to_owned(),
+                    })
+                    .collect(),
                 latest_activity: summary.latest_activity().map(|activity| RecordActivityDto {
                     occurred_at: activity
                         .occurred_at()
@@ -260,13 +278,13 @@ pub(crate) async fn list_records(
     post,
     path = "/api/v1/namespaces",
     tag = "records",
-    security(("credential_bearer" = [])),
+    security(("credential_bearer" = []), ("browser_session" = [])),
     request_body = RegisterNamespaceRequest,
     responses(
         (status = 200, description = "The registered (or already-present) namespace", body = RegisterNamespaceResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Bearer credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "Credential lacks record-write scope", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Authenticated principal lacks record-write scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "Request body exceeds the bounded transport limit", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "Content-Type is not application/json", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Namespace definition does not satisfy the domain contract", body = ProblemDetails, content_type = "application/problem+json"),
@@ -284,7 +302,7 @@ pub(crate) async fn register_namespace(
     let capability = CapabilityKey::RegisterNamespace;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let secret = bearer_secret(&headers, capability, correlation_id)?;
+    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
 
     let mut grains = Vec::with_capacity(request.grains.len());
     for grain in &request.grains {
@@ -313,11 +331,13 @@ pub(crate) async fn register_namespace(
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
-        let access = kernel.authenticate_credential(AuthenticateCredentialQuery::new(
-            correlation_id,
+        let access = authenticate_request(
+            kernel.as_ref(),
+            authentication,
             capability,
-            secret,
-        ))?;
+            correlation_id,
+            true,
+        )?;
         kernel.register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
             correlation_id,
             access,

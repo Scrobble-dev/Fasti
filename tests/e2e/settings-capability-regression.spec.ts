@@ -16,10 +16,13 @@ test("inactive settings stay visible without reporting false success", async ({
   await expect(
     page.getByText("current provider searches and Records do not read"),
   ).toBeVisible();
-  for (const control of await page.getByRole("combobox").all()) {
+  const preferencePanel = page.locator(
+    'section[aria-labelledby="preferences-settings-title"]',
+  );
+  for (const control of await preferencePanel.getByRole("combobox").all()) {
     await expect(control).toBeDisabled();
   }
-  await expect(page.getByRole("checkbox")).toBeDisabled();
+  await expect(preferencePanel.getByRole("checkbox")).toBeDisabled();
 
   const customTypes = page.getByRole("button", {
     name: "Custom Types & Fields",

@@ -3,8 +3,10 @@
 #![cfg_attr(not(feature = "desktop-runtime"), allow(dead_code))]
 
 mod api_clients;
+mod artwork;
 mod endpoint;
 mod network_config;
+mod nuvio_collections;
 mod outbound_http;
 mod providers;
 mod records;
@@ -17,11 +19,13 @@ use endpoint::{EndpointConnectionInput, EndpointConnectionStatus};
 #[cfg(feature = "desktop-runtime")]
 use fasti_store::SqliteKernel;
 #[cfg(feature = "desktop-runtime")]
+use fasti_domain::RecordId;
+#[cfg(feature = "desktop-runtime")]
 use network_config::{NetworkConfigStore, NetworkConfiguration, SaveNetworkConfigurationInput};
 #[cfg(feature = "desktop-runtime")]
 use providers::{
     DeleteProviderCredentialInput, ProviderCandidate, ProviderCredentialStatus,
-    ProviderSearchInput, SaveProviderCredentialInput,
+    ProviderSearchInput, ProviderSelectionInput, SaveProviderCredentialInput,
 };
 #[cfg(feature = "desktop-runtime")]
 use setup::{DesktopProblem, KeyringSetupSecretStore, SetupStatus};
@@ -39,6 +43,7 @@ struct DesktopState {
     kernel: Mutex<Option<Arc<SqliteKernel>>>,
     setup_gate: Mutex<()>,
     network: NetworkConfigStore,
+    artwork: artwork::ArtworkCache,
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -51,10 +56,10 @@ impl DesktopState {
         if let Some(kernel) = current.as_ref() {
             return Ok(Arc::clone(kernel));
         }
-        let kernel = Arc::new(
-            SqliteKernel::open(&self.data_root)
-                .map_err(|_| DesktopProblem::storage("Fasti could not open its local data root."))?,
-        );
+        let kernel =
+            Arc::new(SqliteKernel::open(&self.data_root).map_err(|_| {
+                DesktopProblem::storage("Fasti could not open its local data root.")
+            })?);
         *current = Some(Arc::clone(&kernel));
         Ok(kernel)
     }
@@ -195,6 +200,64 @@ async fn search_provider(
 }
 
 #[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn track_provider_candidate(
+    state: tauri::State<'_, DesktopState>,
+    input: ProviderSelectionInput,
+) -> Result<records::CreateRecordView, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
+    let access = records::require_access(&kernel, &store)?;
+    let configuration = state.network.load()?;
+    let candidate = providers::fetch_selection(
+        input,
+        configuration.outbound_policy(),
+        kernel.data_root_identity(),
+    )
+    .await?;
+    state
+        .artwork
+        .cache_candidate(&candidate, configuration.outbound_policy())
+        .await?;
+    records::create_provider_record(&kernel, access, candidate)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplyProviderMetadataInput {
+    record_id: String,
+    selection: ProviderSelectionInput,
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn apply_provider_metadata(
+    state: tauri::State<'_, DesktopState>,
+    input: ApplyProviderMetadataInput,
+) -> Result<(), DesktopProblem> {
+    let kernel = state.kernel()?;
+    let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
+    let access = records::require_access(&kernel, &store)?;
+    let record_id = input
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
+    let configuration = state.network.load()?;
+    let candidate = providers::fetch_selection(
+        input.selection,
+        configuration.outbound_policy(),
+        kernel.data_root_identity(),
+    )
+    .await?;
+    state
+        .artwork
+        .cache_candidate(&candidate, configuration.outbound_policy())
+        .await?;
+    records::apply_provider_metadata(&kernel, access, record_id, candidate)
+}
+
+#[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
 fn list_records(
     state: tauri::State<'_, DesktopState>,
@@ -203,6 +266,7 @@ fn list_records(
     records::list_records(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        &state.artwork,
     )
 }
 
@@ -245,6 +309,70 @@ fn register_namespace(
         &kernel,
         &KeyringSetupSecretStore::new(kernel.data_root_identity()),
         input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn list_tracking_dispositions(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<fasti_contracts::ListTrackingDispositionsResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::list_tracking_dispositions(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn set_tracking_disposition(
+    state: tauri::State<'_, DesktopState>,
+    input: records::SetTrackingDispositionInput,
+) -> Result<fasti_contracts::TrackingDispositionStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    records::set_tracking_disposition(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        input,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn get_nuvio_collections(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<fasti_contracts::NuvioCollectionsStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    nuvio_collections::get(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn replace_nuvio_collections(
+    state: tauri::State<'_, DesktopState>,
+    document: fasti_contracts::NuvioCollectionsDocumentDto,
+) -> Result<fasti_contracts::NuvioCollectionsStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    nuvio_collections::replace(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        document,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn clear_nuvio_collections(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<fasti_contracts::NuvioCollectionsStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    nuvio_collections::clear(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
     )
 }
 
@@ -333,12 +461,20 @@ pub fn run() {
                 io::Error::other("Fasti could not initialize the platform credential store")
             })?;
             let config_root = app.path().app_config_dir()?;
+            let artwork_root = app.path().app_cache_dir()?.join("provider-artwork");
             let data_root = data_root(app)?;
+            let artwork = artwork::ArtworkCache::new(artwork_root);
+            artwork.prepare().map_err(|_| {
+                io::Error::other("Fasti could not prepare its private artwork cache")
+            })?;
+            app.asset_protocol_scope()
+                .allow_directory(artwork.root(), false)?;
             app.manage(DesktopState {
                 data_root,
                 kernel: Mutex::new(None),
                 setup_gate: Mutex::new(()),
                 network: NetworkConfigStore::new(&config_root),
+                artwork,
             });
             Ok(())
         })
@@ -355,10 +491,17 @@ pub fn run() {
             save_provider_credential,
             delete_provider_credential,
             search_provider,
+            track_provider_candidate,
+            apply_provider_metadata,
             list_records,
             create_record,
             attach_identifier,
             register_namespace,
+            list_tracking_dispositions,
+            set_tracking_disposition,
+            get_nuvio_collections,
+            replace_nuvio_collections,
+            clear_nuvio_collections,
             list_reviews,
             resolve_review
         ])

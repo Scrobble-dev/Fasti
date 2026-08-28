@@ -186,22 +186,25 @@ pub(crate) fn preflight_workspace_archive(
         let archive_summary =
             visit_archive_entries(&mut source, archive_limits, |path, size, reader| {
                 enforce_configured_path(path, limits)?;
-                if streams.len() < WorkspaceExportEntity::ALL.len() {
-                    let entity = WorkspaceExportEntity::ALL[streams.len()];
+                if let Some(entity) = WorkspaceExportEntity::ALL.get(streams.len()).copied() {
                     let expected = format!("{}.ndjson", entity.as_str());
-                    if path != expected {
+                    if path == expected {
+                        streams.push(inspect_stream(
+                            path,
+                            size,
+                            reader,
+                            limits.max_rows_per_stream.get(),
+                        )?);
+                        return Ok(());
+                    }
+                    if streams.len() < WorkspaceExportEntity::V1.len() {
                         return Err(RestorePreflightError::EntryOrder {
                             expected,
                             actual: path.to_owned(),
                         });
                     }
-                    streams.push(inspect_stream(
-                        path,
-                        size,
-                        reader,
-                        limits.max_rows_per_stream.get(),
-                    )?);
-                } else if path == "manifest.json" {
+                }
+                if path == "manifest.json" {
                     let bytes = read_manifest(path, size, reader)?;
                     manifest = Some(VerifiedInboundWorkspaceManifest::try_from_canonical_json(
                         &bytes, limits,

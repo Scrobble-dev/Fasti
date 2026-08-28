@@ -89,6 +89,14 @@ pub struct RecordActivityDto {
     pub interpretation_state: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordIdentifierDto {
+    pub namespace: String,
+    pub grain: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RecordSummaryDto {
@@ -97,6 +105,14 @@ pub struct RecordSummaryDto {
     pub status: String,
     pub title: ResolvedFieldDto,
     pub poster: ResolvedFieldDto,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_title: Option<ResolvedFieldDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overview: Option<ResolvedFieldDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_year: Option<ResolvedFieldDto>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identifiers: Vec<RecordIdentifierDto>,
     pub latest_activity: Option<RecordActivityDto>,
 }
 

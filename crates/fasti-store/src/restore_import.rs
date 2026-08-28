@@ -33,11 +33,12 @@ use fasti_application::{
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
-    ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, Grain,
-    InterpretationId, InterpretationState, NamespaceDefinition, NamespaceLicencePosture,
-    ObservationId, ObservedAt, OccurredAt, OccurrenceId, OperationId, ProfileId, ReceiptId,
-    RecordId, RecordStatus, RequestCorrelationId, RestoreAttemptId, RestoreStatus, ReviewItemId,
-    ReviewStatus, Sha256Digest, WorkspaceId,
+    ClientId, CorrectionId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, FieldClaim,
+    FieldKey, FieldOverride, Grain, InterpretationId, InterpretationState, NamespaceDefinition,
+    NamespaceKey, NamespaceLicencePosture, ObservationId, ObservedAt, OccurredAt, OccurrenceId,
+    OperationId, ProfileId, ReceiptId, ReceivedAt, RecordId, RecordStatus, RequestCorrelationId,
+    RestoreAttemptId, RestoreStatus, ReviewItemId, ReviewStatus, Sha256Digest, TrackingDisposition,
+    WorkspaceId,
 };
 use rusqlite::{params, Connection, OpenFlags, Transaction, TransactionBehavior};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -553,8 +554,8 @@ fn visit_import_entries(
     let mut manifest_seen = false;
     let summary = visit_archive_entries(&mut digesting, archive_limits, |path, size, reader| {
         check_cancellation(cancellation)?;
-        if stream_index < WorkspaceExportEntity::ALL.len() {
-            let entity = WorkspaceExportEntity::ALL[stream_index];
+        if stream_index < manifest.streams().len() {
+            let entity = manifest.streams()[stream_index].entity();
             let expected_path = format!("{}.ndjson", entity.as_str());
             if path != expected_path {
                 return Err(RestoreImportError::EntryOrder {
@@ -602,7 +603,7 @@ fn visit_import_entries(
         Ok(())
     })?;
 
-    if stream_index != WorkspaceExportEntity::ALL.len()
+    if stream_index != manifest.streams().len()
         || blob_index != manifest.blobs().len()
         || !manifest_seen
     {
@@ -902,6 +903,9 @@ fn verify_sql_counts(
         "corrections",
         "receipts",
         "operations",
+        "metadata_field_claims",
+        "metadata_field_overrides",
+        "profile_record_tracking_dispositions",
     ];
     for (index, table) in TABLES.iter().enumerate() {
         let count: i64 = transaction
@@ -1110,6 +1114,7 @@ fn verify_import_domain_invariants(
 enum RowKey {
     One(String),
     Two(String, String),
+    Four(String, String, String, String),
     TextInteger(String, u64),
 }
 
@@ -1563,6 +1568,120 @@ fn import_row(
                 row.operation_id.to_string(),
             ))
         }
+        WorkspaceExportEntity::MetadataFieldClaims => {
+            let row: MetadataFieldClaimRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            let field_key = FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.fetched_at)?;
+            validate_timestamp(&row.created_at)?;
+            let expires_at = row
+                .expires_at
+                .as_deref()
+                .map(|value| {
+                    validate_timestamp(value)?;
+                    parse_timestamp(value)
+                })
+                .transpose()?;
+            FieldClaim::try_new(
+                row.source.clone(),
+                row.value.clone(),
+                row.locale.clone(),
+                ReceivedAt::from_application_clock(parse_timestamp(&row.fetched_at)?),
+                expires_at,
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"
+                    INSERT INTO metadata_field_claims(
+                        workspace_id, record_id, field_key, source, value, locale,
+                        fetched_at, expires_at, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                    "#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.record_id.to_string(),
+                        field_key.as_str(),
+                        row.source.as_str(),
+                        row.value,
+                        row.locale,
+                        row.fetched_at,
+                        row.expires_at,
+                        row.created_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::Four(
+                row.record_id.to_string(),
+                field_key.as_str().to_owned(),
+                row.source.as_str().to_owned(),
+                row.fetched_at,
+            ))
+        }
+        WorkspaceExportEntity::MetadataFieldOverrides => {
+            let row: MetadataFieldOverrideRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            let field_key = FieldKey::try_new(row.field_key.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            validate_timestamp(&row.created_at)?;
+            FieldOverride::try_new(
+                row.value.clone(),
+                ReceivedAt::from_application_clock(parse_timestamp(&row.created_at)?),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"
+                    INSERT INTO metadata_field_overrides(
+                        workspace_id, record_id, field_key, value, created_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5)
+                    "#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.record_id.to_string(),
+                        field_key.as_str(),
+                        row.value,
+                        row.created_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.record_id.to_string(),
+                field_key.as_str().to_owned(),
+            ))
+        }
+        WorkspaceExportEntity::ProfileRecordTrackingDispositions => {
+            let row: ProfileRecordTrackingDispositionRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.updated_at)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    r#"
+                    INSERT INTO profile_record_tracking_dispositions(
+                        workspace_id, profile_id, record_id, disposition, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5)
+                    "#,
+                    params![
+                        row.workspace_id.to_string(),
+                        row.profile_id.to_string(),
+                        row.record_id.to_string(),
+                        row.disposition.as_str(),
+                        row.updated_at,
+                    ],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.profile_id.to_string(),
+                row.record_id.to_string(),
+            ))
+        }
     }
 }
 
@@ -1882,6 +2001,31 @@ archive_row!(OperationRow {
     semantic_digest: Sha256Digest,
     workspace_id: WorkspaceId,
 });
+archive_row!(MetadataFieldClaimRow {
+    created_at: String,
+    expires_at: Option<String>,
+    fetched_at: String,
+    field_key: String,
+    locale: Option<String>,
+    record_id: RecordId,
+    source: NamespaceKey,
+    value: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(MetadataFieldOverrideRow {
+    created_at: String,
+    field_key: String,
+    record_id: RecordId,
+    value: String,
+    workspace_id: WorkspaceId,
+});
+archive_row!(ProfileRecordTrackingDispositionRow {
+    disposition: TrackingDisposition,
+    profile_id: ProfileId,
+    record_id: RecordId,
+    updated_at: String,
+    workspace_id: WorkspaceId,
+});
 
 #[cfg(target_os = "linux")]
 fn descriptor_child_path(directory: &File, name: &str) -> PathBuf {
@@ -2153,11 +2297,12 @@ mod tests {
         AccessAdministrationPort, AppendCorrectionCommand, AuthenticateCredentialQuery,
         CancellationSignal, CompleteRecoveryBootstrapRequest, CorrectionPort, CorrectionTarget,
         CreateRecordCommand, ExportWorkspaceQuery, ExportWorkspaceRequest, IdentityPort,
-        ObservationAcceptancePort, PrepareRecoveryBootstrapRequest, RecoveryBootstrapPort,
-        RegisterNamespaceDefinitionCommand, ResolveReviewCommand, RestoreWorkspaceRequest,
-        ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial, VerifyWorkspaceQuery,
-        WorkspaceArchiveDestination, WorkspaceManifest, WorkspaceRestorePort,
-        WorkspaceStreamDescriptor, WorkspaceVerificationPort,
+        ObservationAcceptancePort, PrepareRecoveryBootstrapRequest, ProfileRecordStatePort,
+        RecoveryBootstrapPort, RegisterNamespaceDefinitionCommand, ResolveReviewCommand,
+        RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial,
+        SetTrackingDispositionCommand, VerifyWorkspaceQuery, WorkspaceArchiveDestination,
+        WorkspaceManifest, WorkspaceRestorePort, WorkspaceStreamDescriptor,
+        WorkspaceVerificationPort, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
     };
     use fasti_contracts::CanonicalWorkspaceManifestProjection;
     use fasti_domain::{ClaimedTrust, ExternalIdentifierClaim, ObservedAt};
@@ -2284,6 +2429,54 @@ mod tests {
             ))
             .expect("second record")
             .record_id();
+        let metadata_time = ReceivedAt::from_application_clock(
+            DateTime::parse_from_rfc3339("2026-08-24T11:00:00Z")
+                .expect("metadata time")
+                .with_timezone(&Utc),
+        );
+        {
+            let connection = node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            crate::metadata::write_field_claim(
+                &connection,
+                node.access.workspace_id(),
+                first,
+                &FieldKey::try_new("core.title").expect("field key"),
+                &FieldClaim::try_new(
+                    NamespaceKey::try_new("fixture").expect("metadata source"),
+                    "Provider title",
+                    Some("en".to_owned()),
+                    metadata_time,
+                    None,
+                )
+                .expect("field claim"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("persist field claim");
+            crate::metadata::write_field_override(
+                &connection,
+                node.access.workspace_id(),
+                first,
+                &FieldKey::try_new("core.title").expect("field key"),
+                &FieldOverride::try_new("Preferred title", metadata_time).expect("field override"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("persist field override");
+        }
+        node.kernel
+            .set_tracking_disposition(SetTrackingDispositionCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                first,
+                Some(TrackingDisposition::Watching),
+            ))
+            .expect("persist tracking disposition");
         node.kernel
             .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
                 RequestCorrelationId::new_v7(),
@@ -2467,6 +2660,49 @@ mod tests {
                 .expect("append rewritten entry");
         }
         writer.finish().expect("finish rewritten archive")
+    }
+
+    fn archive_v1_from_v2(archive: &[u8]) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        entries.retain(|(entry_path, _)| {
+            WorkspaceExportEntity::ALL[WorkspaceExportEntity::V1.len()..]
+                .iter()
+                .all(|entity| entry_path != &format!("{}.ndjson", entity.as_str()))
+        });
+
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            manifest.migration_version(),
+            manifest.migration_digest().clone(),
+            manifest.streams()[..WorkspaceExportEntity::V1.len()].to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt archive-v1 application manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt archive-v1 wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append archive-v1 entry");
+        }
+        writer.finish().expect("finish archive-v1 fixture")
     }
 
     fn assert_attempt_removed(root: &Path, attempt_id: RestoreAttemptId) {
@@ -2773,7 +3009,7 @@ mod tests {
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .expect("open staged database");
-        let expected_counts = [1_i64, 1, 1, 2, 1, 2, 1, 1, 2, 1, 3, 1, 2, 1, 1, 1];
+        let expected_counts = [1_i64, 1, 1, 2, 1, 2, 1, 1, 2, 1, 3, 1, 2, 1, 1, 1, 1, 1, 1];
         for (table, expected) in [
             "workspaces",
             "profiles",
@@ -2791,6 +3027,9 @@ mod tests {
             "corrections",
             "receipts",
             "operations",
+            "metadata_field_claims",
+            "metadata_field_overrides",
+            "profile_record_tracking_dispositions",
         ]
         .into_iter()
         .zip(expected_counts)
@@ -2824,6 +3063,50 @@ mod tests {
         );
         assert!(!descriptor_child_path(&staged.attempt, "COMPLETE").exists());
         assert!(!restore_root.path().join("current").exists());
+
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v1_restore_keeps_legacy_rows_and_leaves_v2_tables_empty() {
+        let fixture = full_fixture();
+        let archive = archive_v1_from_v2(&fixture.archive);
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage archive-v1 fixture");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let record_count: i64 = database
+            .query_row("SELECT COUNT(*) FROM records", [], |row| row.get(0))
+            .expect("restored legacy record count");
+        assert_eq!(record_count, 2);
+        for table in [
+            "metadata_field_claims",
+            "metadata_field_overrides",
+            "profile_record_tracking_dispositions",
+        ] {
+            let count: i64 = database
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("archive-v2 table count");
+            assert_eq!(count, 0, "{table}");
+        }
+        drop(database);
 
         staged.cleanup().expect("remove staged attempt");
         assert_attempt_removed(restore_root.path(), attempt_id);

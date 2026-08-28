@@ -15,9 +15,10 @@ required-features = ["desktop-runtime"]
 
 [features]
 default = ["desktop-runtime"]
-desktop-runtime = ["dep:tauri", "dep:tauri-build", "tauri/wry"]
+desktop-runtime = ["dep:tauri", "dep:tauri-build", "tauri/protocol-asset", "tauri/wry"]
 
 [dependencies]
+chrono = "0.4"
 fasti-application = { path = "../../../crates/fasti-application" }
 fasti-contracts = { path = "../../../crates/fasti-contracts" }
 fasti-domain = { path = "../../../crates/fasti-domain" }

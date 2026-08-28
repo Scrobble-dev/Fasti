@@ -22,6 +22,53 @@ pub enum Grain {
     Custom,
 }
 
+/// A profile's current tracking disposition for one media Record.
+///
+/// This is not record identity, watchlist intent, completion history, or
+/// measured progress. Absence means the profile has not chosen a disposition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackingDisposition {
+    Watching,
+    OnHold,
+    Dropped,
+}
+
+impl TrackingDisposition {
+    pub const ALL: &'static [Self] = &[Self::Watching, Self::OnHold, Self::Dropped];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Watching => "watching",
+            Self::OnHold => "on_hold",
+            Self::Dropped => "dropped",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackingDispositionParseError;
+
+impl fmt::Display for TrackingDispositionParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("tracking disposition is not registered")
+    }
+}
+
+impl std::error::Error for TrackingDispositionParseError {}
+
+impl FromStr for TrackingDisposition {
+    type Err = TrackingDispositionParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|disposition| disposition.as_str() == value)
+            .ok_or(TrackingDispositionParseError)
+    }
+}
+
 impl Grain {
     pub const ALL: &'static [Self] = &[
         Self::Work,
@@ -109,5 +156,17 @@ mod tests {
             assert_eq!(grain.as_str().parse::<Grain>(), Ok(*grain));
         }
         assert!("movie".parse::<Grain>().is_err());
+    }
+
+    #[test]
+    fn every_tracking_disposition_has_one_stable_storage_spelling() {
+        for disposition in TrackingDisposition::ALL {
+            assert_eq!(
+                disposition.as_str().parse::<TrackingDisposition>(),
+                Ok(*disposition)
+            );
+        }
+        assert!("completed".parse::<TrackingDisposition>().is_err());
+        assert!("plan_to_watch".parse::<TrackingDisposition>().is_err());
     }
 }

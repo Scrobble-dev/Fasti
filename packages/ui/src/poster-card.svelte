@@ -16,7 +16,7 @@
     onToggleWatchlist?: (rec: MediaRecord) => void;
     onOpenCollection?: (rec: MediaRecord) => void;
     onOpenReview?: (rec: MediaRecord) => void;
-    onOpenContextMenu?: (rec: MediaRecord, e: MouseEvent) => void;
+    onOpenContextMenu: (rec: MediaRecord, e: MouseEvent) => void;
   }
 
   let {
@@ -120,7 +120,7 @@
       {onToggleWatchlist}
       {onOpenCollection}
       {onOpenReview}
-      {onOpenContextMenu}
+      onOpenContextMenu={(r, e) => onOpenContextMenu(r, e)}
     />
   </div>
 </div>
