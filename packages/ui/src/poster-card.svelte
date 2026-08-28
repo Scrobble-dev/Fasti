@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { MediaRecord } from "./types.js";
+  import { recordProgressPercent } from "./progress.js";
   import FastActionBar from "./fast-action-bar.svelte";
   import {
     IconDeviceTv,
@@ -48,19 +49,8 @@
     }
   }
 
-  function calculateProgress(rec: MediaRecord): number {
-    if (rec.status === "completed") return 100;
-    if (rec.totalEpisodes && rec.progressEpisodes) {
-      return Math.round((rec.progressEpisodes / rec.totalEpisodes) * 100);
-    }
-    if (rec.totalDurationSeconds && rec.progressSeconds) {
-      return Math.round((rec.progressSeconds / rec.totalDurationSeconds) * 100);
-    }
-    return 0;
-  }
-
   const KindIcon = $derived(getKindIcon(record.mediaKind));
-  const pct = $derived(calculateProgress(record));
+  const pct = $derived(recordProgressPercent(record));
 </script>
 
 <div class="poster-card" role="group" aria-label="{record.title} card">

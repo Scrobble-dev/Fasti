@@ -29,7 +29,7 @@ User ran `fasti`, `fasti --podman`, then `fasti open` and hit three failures in 
    before the fix landed -- it needs `source ~/.zshrc` or a new terminal.
 
 3. Real bug, fixed in `scripts/dev.sh:402` (`_require_container_image`).
-   The build hint ended in a bare ` .` (the build context arg) which is
+   The build hint ended in a bare `.` (the build context arg) which is
    visually indistinguishable from a sentence-ending period, so users drop
    it. It was also cwd-dependent (a bare `.` only resolves correctly when
    run from the repo root). Fixed by printing `$PROJECT_ROOT` (absolute

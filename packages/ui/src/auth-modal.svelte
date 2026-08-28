@@ -360,13 +360,13 @@
             {#if users.length === 0}
               <p class="hint">No browser users are available.</p>
             {:else}
-              <div class="profile-cards-list">
+              <ul class="profile-cards-list">
                 {#each users as user (user.user_id)}
                   {@const isCurrent = user.user_id === session?.user.user_id}
                   {@const initial = user.username
                     ? user.username.charAt(0).toUpperCase()
                     : "U"}
-                  <div class="profile-card" class:active-profile={isCurrent}>
+                  <li class="profile-card" class:active-profile={isCurrent}>
                     <div class="profile-avatar-row">
                       <div
                         class="profile-avatar"
@@ -379,7 +379,7 @@
                           <strong>{user.username}</strong>
                           {#if isCurrent}
                             <span class="badge bg-green-lt text-dark fw-bold"
-                              >Active</span
+                              >Signed in</span
                             >
                           {/if}
                         </div>
@@ -389,8 +389,8 @@
                           >
                           <span class="status-meta"
                             >{user.active
-                              ? "Active"
-                              : "Inactive"}{user.is_test_account
+                              ? "Enabled"
+                              : "Disabled"}{user.is_test_account
                               ? " · test"
                               : ""}</span
                           >
@@ -406,9 +406,9 @@
                         <IconPencil size={16} /> Edit
                       </button>
                     </div>
-                  </div>
+                  </li>
                 {/each}
-              </div>
+              </ul>
             {/if}
           </section>
         {/if}
@@ -695,6 +695,9 @@
     flex-direction: column;
     gap: 10px;
     margin-top: 12px;
+    margin-bottom: 0;
+    padding: 0;
+    list-style: none;
   }
   .profile-card {
     display: flex;
@@ -735,6 +738,7 @@
   }
   .profile-avatar.admin-avatar {
     background: var(--fasti-brand-mark, #8b2e2a);
+    color: var(--fasti-brand-contrast, #fff);
   }
   .user-title-row {
     display: flex;

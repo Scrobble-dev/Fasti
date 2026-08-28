@@ -433,17 +433,24 @@
     showNavigationTrigger?.focus();
   }
 
+  function focusNavigationEntry(): void {
+    const navigation = document.querySelector<HTMLElement>(
+      "#fasti-main-navigation",
+    );
+    (
+      navigation?.querySelector<HTMLElement>('[aria-current="page"]') ??
+      navigation?.querySelector<HTMLElement>(".nav-link[href]") ??
+      navigation?.querySelector<HTMLElement>("button:not([disabled])")
+    )?.focus();
+  }
+
   async function showNavigation(): Promise<void> {
     if (isNarrowViewport) {
       flushSync(() => (mobileNavigationOpen = true));
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           if (!mobileNavigationOpen) return;
-          document
-            .querySelector<HTMLElement>(
-              '#fasti-main-navigation [aria-current="page"]',
-            )
-            ?.focus();
+          focusNavigationEntry();
         });
       });
       return;
@@ -453,11 +460,7 @@
       sidebarHidden: false,
     };
     await tick();
-    document
-      .querySelector<HTMLElement>(
-        '#fasti-main-navigation [aria-current="page"]',
-      )
-      ?.focus();
+    focusNavigationEntry();
   }
 
   async function closeMobileNavigation(): Promise<void> {

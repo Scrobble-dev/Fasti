@@ -12,27 +12,43 @@ const server = createServer((request, response) => {
     return;
   }
   const url = new URL(request.url, "http://127.0.0.1:18422");
-  response.writeHead(200, { "content-type": "application/json" });
-
-  if (url.pathname.startsWith("/api/v1/health")) {
-    response.end(JSON.stringify({ status: "healthy", version: "0.1.0-test" }));
-  } else if (url.pathname.startsWith("/api/v1/browser/session")) {
-    response.end(JSON.stringify({ authenticated: false, session: null }));
-  } else if (url.pathname.startsWith("/api/v1/profile/nuvio-collections")) {
-    response.end(JSON.stringify([]));
-  } else if (
-    url.pathname.startsWith("/api/v1/profile/record-tracking-dispositions")
-  ) {
-    response.end(JSON.stringify([]));
-  } else if (url.pathname.startsWith("/api/v1/records")) {
-    response.end(JSON.stringify([]));
-  } else if (url.pathname.startsWith("/api/v1/reviews")) {
-    response.end(JSON.stringify([]));
-  } else if (url.pathname.startsWith("/api/v1/integrations")) {
-    response.end(JSON.stringify({ integrations: [] }));
-  } else {
-    response.end(JSON.stringify({ status: "healthy", data: [] }));
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    response.writeHead(405, { "content-type": "application/problem+json" });
+    response.end(JSON.stringify({ title: "Method not allowed", status: 405 }));
+    return;
   }
+
+  let status = 200;
+  let payload;
+  if (url.pathname === "/api/v1/health") {
+    payload = { status: "healthy", version: "0.1.0-test" };
+  } else if (url.pathname === "/api/v1/browser/session") {
+    payload = { authenticated: false, session: null };
+  } else if (url.pathname === "/api/v1/profile/nuvio-collections") {
+    payload = [];
+  } else if (url.pathname === "/api/v1/profile/record-tracking-dispositions") {
+    payload = [];
+  } else if (
+    url.pathname === "/api/v1/records" ||
+    url.pathname.startsWith("/api/v1/records/")
+  ) {
+    payload = [];
+  } else if (
+    url.pathname === "/api/v1/reviews" ||
+    url.pathname.startsWith("/api/v1/reviews/")
+  ) {
+    payload = [];
+  } else if (url.pathname === "/api/v1/integrations") {
+    payload = { integrations: [] };
+  } else {
+    status = 404;
+    payload = { title: "Not found", status };
+  }
+  response.writeHead(status, {
+    "content-type":
+      status === 200 ? "application/json" : "application/problem+json",
+  });
+  response.end(request.method === "HEAD" ? undefined : JSON.stringify(payload));
 });
 
 server.on("clientError", (err, socket) => {

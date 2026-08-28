@@ -18,7 +18,15 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGDIR="$PROJECT_ROOT/.dev-logs"
-DATADIR="$PROJECT_ROOT/.dev-data"
+
+_resolve_data_root() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "$PROJECT_ROOT" "$1" ;;
+  esac
+}
+
+DATADIR="$(_resolve_data_root "${FASTI_DATA_ROOT:-.dev-data}")"
 RUNDIR="$PROJECT_ROOT/.dev-run"
 FASTI_PORT="${FASTI_PORT:-8420}"
 FASTI_LISTEN="${FASTI_LISTEN:-127.0.0.1:$FASTI_PORT}"
@@ -113,6 +121,26 @@ _validate_origin_url() {
 
 _validate_origin_url FASTI_API_URL "$FASTI_API_URL"
 [[ -z "$FASTI_PUBLIC_URL" ]] || _validate_origin_url FASTI_PUBLIC_URL "$FASTI_PUBLIC_URL"
+
+_validate_open_target() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import urlsplit
+
+value = sys.argv[1]
+if any(character.isspace() or ord(character) < 32 for character in value):
+    raise SystemExit("browser target must not contain whitespace or control characters")
+parsed = urlsplit(value)
+if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    raise SystemExit("browser target must be an HTTP or HTTPS URL")
+if parsed.username is not None or parsed.password is not None:
+    raise SystemExit("browser target must not contain credentials")
+try:
+    parsed.port
+except ValueError as error:
+    raise SystemExit(f"invalid browser target port: {error}") from error
+PY
+}
 
 _api_url_for_addr() {
   case "$1" in
@@ -406,15 +434,17 @@ _open() {
     target="$FASTI_API_URL/api/v1/health"
   fi
 
-  echo "Opening $target..."
+  _validate_open_target "$target"
+  echo "Opening browser target..."
   if command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$target" >/dev/null 2>&1 &
   elif command -v open >/dev/null 2>&1; then
     open "$target" >/dev/null 2>&1 &
   elif command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -Command Start-Process "'$target'" >/dev/null 2>&1 &
+    FASTI_OPEN_TARGET="$target" powershell.exe -NoProfile -Command 'Start-Process -FilePath $env:FASTI_OPEN_TARGET' >/dev/null 2>&1 &
   else
-    echo "$target"
+    echo "No supported browser opener found." >&2
+    return 1
   fi
 }
 
@@ -804,6 +834,17 @@ _self_test() {
   fi
   if _validate_origin_url FASTI_API_URL 'http://127.0.0.1:' >/dev/null 2>&1; then
     echo "self-test accepted an empty URL port" >&2
+    return 1
+  fi
+  [[ "$(_resolve_data_root .custom-data)" == "$PROJECT_ROOT/.custom-data" ]]
+  [[ "$(_resolve_data_root /tmp/fasti-custom-data)" == "/tmp/fasti-custom-data" ]]
+  _validate_open_target 'https://fasti.internal/path?view=settings'
+  if _validate_open_target 'https://userinfo-marker@fasti.internal/path' >/dev/null 2>&1; then
+    echo "self-test accepted browser target credentials" >&2
+    return 1
+  fi
+  if _validate_open_target $'https://fasti.internal/path\nnext' >/dev/null 2>&1; then
+    echo "self-test accepted browser target control characters" >&2
     return 1
   fi
   systemd-run() { return 0; }

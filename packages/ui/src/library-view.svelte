@@ -22,6 +22,7 @@
   import CollectionModal from "./collection-modal.svelte";
   import ContextMenu, { type ContextMenuItem } from "./context-menu.svelte";
   import { recordContextMenuItems } from "./record-actions.js";
+  import { recordProgressPercent } from "./progress.js";
 
   interface Props {
     records: MediaRecord[];
@@ -181,17 +182,6 @@
       ),
     };
   }
-
-  function calculateProgress(rec: MediaRecord): number {
-    if (rec.status === "completed") return 100;
-    if (rec.totalEpisodes && rec.progressEpisodes) {
-      return Math.round((rec.progressEpisodes / rec.totalEpisodes) * 100);
-    }
-    if (rec.totalDurationSeconds && rec.progressSeconds) {
-      return Math.round((rec.progressSeconds / rec.totalDurationSeconds) * 100);
-    }
-    return 0;
-  }
 </script>
 
 <div class="library-container">
@@ -302,7 +292,7 @@
   {:else if viewMode === "grid"}
     <div class="media-grid">
       {#each filteredRecords as rec (rec.id)}
-        {@const pct = calculateProgress(rec)}
+        {@const pct = recordProgressPercent(rec)}
         <div
           class="card-wrapper"
           role="group"
@@ -335,7 +325,8 @@
                 <div class="progress-bar-track">
                   <div class="progress-bar-fill" style="width: {pct}%"></div>
                 </div>
-              {:else if rec.userRating}
+              {/if}
+              {#if rec.userRating}
                 <div class="card-rating">
                   <IconStarFilled size={12} class="star-icon" />
                   <span>{rec.userRating}</span>
@@ -785,7 +776,7 @@
 
   .progress-bar-fill {
     height: 100%;
-    background: var(--fasti-brand-mark);
+    background: var(--fasti-action-primary);
   }
 
   .card-rating {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import {
     IconAlertCircle,
     IconBug,
@@ -79,9 +79,11 @@
     | "system" = $state("network");
 
   $effect(() => {
-    if (activeTab && activeTab !== active) {
+    if (activeTab) {
       active = activeTab;
-      if (activeTab === "nuvio_collections") void loadNuvioCollections();
+      if (activeTab === "nuvio_collections") {
+        void untrack(loadNuvioCollections);
+      }
     }
   });
 
@@ -136,30 +138,20 @@
     testingProvider = providerId;
     testResults = { ...testResults, [providerId]: undefined };
     try {
-      if (host.searchProvider) {
-        const testQuery =
-          providerId === "tmdb" || providerId === "tvdb"
-            ? "Inception"
-            : providerId === "google-books" || providerId === "open-library"
-              ? "Dune"
-              : "Cowboy Bebop";
-        const results = await host.searchProvider(providerId, testQuery);
-        testResults = {
-          ...testResults,
-          [providerId]: {
-            ok: true,
-            message: `Connection successful. Returned ${results.length} search candidate results.`,
-          },
-        };
-      } else {
-        testResults = {
-          ...testResults,
-          [providerId]: {
-            ok: true,
-            message: "Provider endpoint answered successfully.",
-          },
-        };
-      }
+      const testQuery =
+        providerId === "tmdb" || providerId === "tvdb"
+          ? "Inception"
+          : providerId === "google-books" || providerId === "open-library"
+            ? "Dune"
+            : "Cowboy Bebop";
+      const results = await host.searchProvider(providerId, testQuery);
+      testResults = {
+        ...testResults,
+        [providerId]: {
+          ok: true,
+          message: `Connection successful. Returned ${results.length} search candidate results.`,
+        },
+      };
     } catch (err: unknown) {
       const msg =
         err instanceof Error
@@ -317,7 +309,6 @@
         {
           id: "kaptain-box-office",
           title: "Box Office & Theatrical",
-          coverImageUrl: "https://image.tmdb.org/t/p/w500/sample.jpg",
           sources: [
             {
               id: "tmdb-popular-movies",
@@ -338,7 +329,6 @@
         {
           id: "kaptain-tv-series",
           title: "Prime Time & Streaming TV",
-          coverImageUrl: "https://image.tmdb.org/t/p/w500/sample-tv.jpg",
           sources: [
             {
               id: "tmdb-popular-tv",
@@ -414,12 +404,19 @@
     preset: NuvioCollectionsDocument,
     packName: string,
   ): Promise<void> {
-    if (!host.replaceNuvioCollections || nuvioLoading) return;
+    if (
+      !host.replaceNuvioCollections ||
+      nuvioLoading ||
+      (nuvioDocument !== null &&
+        !confirm(
+          `Replace this profile's saved Nuvio Collections document with ${packName}? Export it first if you need a backup.`,
+        ))
+    )
+      return;
     nuvioLoading = true;
     nuvioProblem = undefined;
     nuvioNotice = undefined;
     try {
-      const inputCounts = nuvioCounts(preset);
       const state = await host.replaceNuvioCollections(preset);
       nuvioDocument = state.document ?? null;
       const storedCounts = nuvioCounts(nuvioDocument);

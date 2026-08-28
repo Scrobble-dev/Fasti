@@ -243,6 +243,36 @@ forbidText(
   "URL-backed Settings destinations must be links with aria-current",
 );
 forbidText(
+  "packages/ui/src/runtime-settings-view.svelte",
+  "activeTab !== active",
+  "controlled and uncontrolled Settings tabs must not reset local selection",
+);
+forbidText(
+  "packages/ui/src/runtime-settings-view.svelte",
+  "if (host.searchProvider)",
+  "required trusted-host provider execution must fail closed",
+);
+forbidText(
+  "packages/ui/src/runtime-settings-view.svelte",
+  "image.tmdb.org/t/p/w500/sample",
+  "do not persist placeholder artwork URLs",
+);
+for (const file of [
+  "packages/ui/src/library-view.svelte",
+  "packages/ui/src/poster-card.svelte",
+]) {
+  forbidText(
+    file,
+    "function calculateProgress",
+    "use the shared bounded record progress projection",
+  );
+}
+forbidText(
+  "packages/ui/src/library-view.svelte",
+  "{:else if rec.userRating}",
+  "show rating and progress as independent record facts",
+);
+forbidText(
   "apps/web/src/web-host.ts",
   "await fetch(",
   "route provider requests through the governed trusted host, never the browser host",

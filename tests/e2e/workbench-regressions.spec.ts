@@ -90,6 +90,36 @@ for (const viewport of mobileViewports) {
   });
 }
 
+test("mobile navigation focuses the first visible route when the current route is hidden", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.evaluate(() => {
+    const key = "fasti-workbench-preferences";
+    const preferences = JSON.parse(localStorage.getItem(key) ?? "{}") as {
+      navItems?: Array<{ id?: string; visible?: boolean }>;
+    };
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        ...preferences,
+        navItems: preferences.navItems?.map((item) =>
+          item.id === "home" ? { ...item, visible: false } : item,
+        ),
+      }),
+    );
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(
+    page
+      .getByRole("dialog", { name: "Main navigation" })
+      .getByRole("link", { name: "Discover" }),
+  ).toBeFocused();
+});
+
 for (const viewport of desktopViewports) {
   test(`${viewport.width}px Workbench preserves expanded, collapsed, and hidden geometry`, async ({
     page,
