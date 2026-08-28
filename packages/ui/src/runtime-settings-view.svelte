@@ -130,6 +130,16 @@
 
   async function deleteProvider(provider: string): Promise<void> {
     if (busyProvider) return;
+    const label =
+      providers.find((candidate) => candidate.provider === provider)?.label ??
+      provider;
+    if (
+      !globalThis.confirm(
+        `Remove the ${label} credential? You will need to enter it again to restore provider access.`,
+      )
+    ) {
+      return;
+    }
     busyProvider = provider;
     providerProblem = undefined;
     providerNotice = undefined;
@@ -1248,7 +1258,7 @@
   .primary {
     border: 1px solid var(--fasti-action-primary);
     background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast, white);
+    color: var(--fasti-action-contrast);
   }
 
   .secondary {

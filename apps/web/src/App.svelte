@@ -1,9 +1,5 @@
 <script lang="ts">
-  import {
-    FastiClient,
-    FastiProtocolError,
-    connectionEndpoint,
-  } from "@fasti/sdk";
+  import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
   import type { WorkbenchHost } from "@fasti/ui";
   import SetupPanel, {
     type DesktopProblem,
@@ -109,13 +105,15 @@
       const configuration = await host.loadNetworkConfiguration();
       const serviceUrl = configuration.connection.service_url;
       endpoint = connectionEndpoint(serviceUrl.value, serviceUrl.source);
-      const response = await new FastiClient({
-        baseUrl: endpoint.url,
-        timeoutMs: 3_000,
-        retryPolicy: { maxAttempts: 1 },
-      }).health({ signal: currentRequest.signal });
+      const response = await host.testEndpointConnection(serviceUrl.value);
       if (request !== currentRequest) return;
-      status = { view: "healthy", health: response };
+      if (response.status !== "healthy") {
+        throw new TypeError("The service did not return a healthy status.");
+      }
+      status = {
+        view: "healthy",
+        health: { status: "healthy", version: response.version },
+      };
     } catch (error) {
       if (currentRequest.signal.aborted || request !== currentRequest) return;
       status = { view: "blocked", problem: statusProblemFor(error) };
@@ -186,6 +184,7 @@
         registerNamespace: (input) => invoke("register_namespace", { input }),
       };
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
+      if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);
     }
@@ -196,6 +195,14 @@
     request?.abort();
     request = undefined;
     if (typeof window !== "undefined") window.history.pushState({}, "", "/");
+  }
+
+  function openStatus(): void {
+    activeSurface = "status";
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", "/status");
+    }
+    void inspectHealth();
   }
 
   function syncSurfaceFromLocation(): void {
@@ -214,6 +221,7 @@
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       applySetupStatus(await invoke<SetupStatus>("complete_setup"));
+      if (activeSurface === "status") await inspectHealth();
     } catch (error) {
       applySetupProblem(error);
     }
@@ -229,12 +237,12 @@
   }
 
   onMount(() => {
+    window.addEventListener("popstate", syncSurfaceFromLocation);
     if (isTauri) {
       void inspectDesktop();
-      return;
+    } else if (activeSurface === "status") {
+      void inspectHealth();
     }
-    window.addEventListener("popstate", syncSurfaceFromLocation);
-    if (activeSurface === "status") void inspectHealth();
     return () => {
       window.removeEventListener("popstate", syncSurfaceFromLocation);
       request?.abort();
@@ -245,31 +253,25 @@
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-{#if isTauri}
-  {#if setupState === "ready" && host}
-    <FastiWorkbench {host} />
-  {:else}
-    <SetupPanel
-      state={setupState}
-      problem={setupProblem}
-      {cleanupPending}
-      onSetup={setup}
-    />
-  {/if}
-{:else}
-  {#if activeSurface === "workbench" && host}
-    <FastiWorkbench {host} />
-  {:else}
-    <StatusPanel
-      {status}
-      {theme}
-      mark={theme === "dark" ? markDark : markLight}
-      {endpoint}
-      {publicEndpoint}
-      portFallback={configuredFallback}
-      onRetry={retryHealth}
-      onToggleTheme={toggleTheme}
-      onOpenWorkbench={openWorkbench}
-    />
-  {/if}
+{#if activeSurface === "status"}
+  <StatusPanel
+    {status}
+    {theme}
+    mark={theme === "dark" ? markDark : markLight}
+    {endpoint}
+    {publicEndpoint}
+    portFallback={configuredFallback}
+    onRetry={retryHealth}
+    onToggleTheme={toggleTheme}
+    onOpenWorkbench={openWorkbench}
+  />
+{:else if isTauri && setupState !== "ready"}
+  <SetupPanel
+    state={setupState}
+    problem={setupProblem}
+    {cleanupPending}
+    onSetup={setup}
+  />
+{:else if activeSurface === "workbench" && host}
+  <FastiWorkbench {host} onOpenStatus={openStatus} />
 {/if}

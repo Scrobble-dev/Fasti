@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import {
     IconChevronRight,
     IconActivityHeartbeat,
@@ -33,7 +33,6 @@
   import type {
     MediaRecord,
     ProviderCredentialStatus,
-    ProviderSearchCandidate,
     ResolveReviewInput,
     ReviewItem,
     ThemeSettings,
@@ -43,6 +42,7 @@
 
   interface Props {
     host: WorkbenchHost;
+    onOpenStatus?: () => void;
   }
 
   type Section =
@@ -55,7 +55,7 @@
     | "calendar"
     | "detail";
 
-  let { host }: Props = $props();
+  let { host, onOpenStatus }: Props = $props();
 
   const credentialAdministration = $derived(
     Boolean(
@@ -265,24 +265,31 @@
   let discoverHostProblem = $state<string | undefined>(undefined);
   let discoverSelectedProviderId = $state("");
   let discoverSelectionExplicit = $state(false);
+  let discoverLoadId = 0;
 
   async function loadDiscover(): Promise<void> {
+    const loadId = ++discoverLoadId;
     discoverLoading = true;
     discoverHostProblem = undefined;
     try {
-      discoverProviders = await host.providerCredentialStatus();
+      const providers = await host.providerCredentialStatus();
+      if (loadId === discoverLoadId) discoverProviders = providers;
     } catch (error) {
-      discoverProviders = undefined;
-      discoverHostProblem = hostProblemText(
-        error,
-        "Could not load provider status from the host.",
-      );
+      if (loadId === discoverLoadId) {
+        discoverProviders = undefined;
+        discoverHostProblem = hostProblemText(
+          error,
+          "Could not load provider status from the host.",
+        );
+      }
     } finally {
-      discoverLoading = false;
+      if (loadId === discoverLoadId) discoverLoading = false;
     }
   }
 
   function invalidateDiscoverProviders(): void {
+    discoverLoadId += 1;
+    discoverLoading = false;
     discoverProviders = undefined;
   }
 
@@ -291,6 +298,7 @@
   let reviewsLoading = $state(false);
   let reviewsProblem = $state<string | undefined>(undefined);
   let reviewsLoaded = false;
+  let resolvingReviewId = $state<string | undefined>(undefined);
 
   async function loadReviews(): Promise<void> {
     if (!host.listReviews) {
@@ -312,12 +320,17 @@
   }
 
   async function resolveReview(input: ResolveReviewInput): Promise<void> {
-    if (!host.resolveReview) return;
+    if (!host.resolveReview || resolvingReviewId) return;
+    resolvingReviewId = input.review_item_id;
     try {
       await host.resolveReview(input);
       await loadReviews();
     } catch (error) {
       reviewsProblem = hostProblemText(error, "Could not resolve that review.");
+    } finally {
+      if (resolvingReviewId === input.review_item_id) {
+        resolvingReviewId = undefined;
+      }
     }
   }
 
@@ -331,13 +344,14 @@
   let recordsProblem = $state<string | undefined>(undefined);
   let recordsLoaded = false;
 
-  async function loadRecords(): Promise<boolean> {
+  async function loadRecords(restoreRetryFocus = false): Promise<boolean> {
     if (!host.listRecords) {
       recordsProblem = "This host does not support record listing yet.";
       return false;
     }
     recordsLoading = true;
     recordsProblem = undefined;
+    let failed = false;
     try {
       mediaRecords = (await host.listRecords()).map(projectRecordSummary);
       return true;
@@ -346,9 +360,14 @@
         error,
         "Could not load records from the host.",
       );
+      failed = true;
       return false;
     } finally {
       recordsLoading = false;
+      if (failed && restoreRetryFocus) {
+        await tick();
+        document.getElementById("retry-records")?.focus();
+      }
     }
   }
 
@@ -378,67 +397,9 @@
       "Records need an active local bearer credential. Select Connect records and paste a credential with identity_read scope.";
   }
 
-  /** Inverse of record-projection.ts's `mediaKindForGrain` -- picks one
-   * representative grain per display kind so a provider search result can
-   * become a record. */
-  function grainForMediaKind(kind: string): string {
-    switch (kind) {
-      case "movie":
-        return "film";
-      case "show":
-      case "anime":
-        return "series";
-      case "music":
-        return "recording";
-      case "book":
-      case "manga":
-      case "comic":
-        return "chapter";
-      case "podcast":
-        return "podcast_feed";
-      case "game":
-        return "game_release";
-      default:
-        return "custom";
-    }
-  }
-
-  async function trackRecordFromDiscover(
-    candidate: ProviderSearchCandidate,
-  ): Promise<void> {
-    if (
-      !host.createRecord ||
-      !host.attachIdentifier ||
-      !host.registerNamespace
-    ) {
-      throw new Error(
-        "Adding titles to your library is not available on this host.",
-      );
-    }
-    const grain = grainForMediaKind(candidate.kind);
-    let namespace = candidate.provider;
-    if (candidate.provider === "tmdb") {
-      if (candidate.kind === "movie") namespace = "tmdb.movie";
-      else if (candidate.kind === "show") namespace = "tmdb.tv";
-      else throw new Error("TMDB returned an unsupported media kind.");
-    }
-    await host.registerNamespace({
-      namespace,
-      label: namespace,
-      grains: [grain],
-      id_pattern: ".+",
-      normalization: "identity",
-      licence_posture: "identifiers_only",
-    });
-    const created = await host.createRecord(grain);
-    await host.attachIdentifier({
-      record_id: created.record_id,
-      namespace,
-      grain,
-      value: candidate.provider_id,
-    });
-    recordsLoaded = false;
-    await loadRecords();
+  function retryRecords(): void {
+    recordsLoaded = true;
+    void loadRecords(true);
   }
 
   const watchingRecords = $derived(
@@ -518,11 +479,18 @@
         <strong class="record-access-title">Records are unavailable</strong>
         <p>{recordsProblem}</p>
       </div>
-      {#if host.setSessionCredential}
+      {#if host.setSessionCredential && !sessionCredentialActive}
         <button
           type="button"
           class="btn btn-primary"
           onclick={() => (authModalOpen = true)}>Connect records</button
+        >
+      {:else}
+        <button
+          id="retry-records"
+          type="button"
+          class="btn btn-primary"
+          onclick={retryRecords}>Retry records</button
         >
       {/if}
     </section>
@@ -603,6 +571,11 @@
           href="/status"
           title="Service status"
           aria-label="Service status"
+          onclick={(event) => {
+            if (!onOpenStatus) return;
+            event.preventDefault();
+            onOpenStatus();
+          }}
         >
           <IconActivityHeartbeat size={18} />
         </a>
@@ -663,17 +636,13 @@
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
-          onTrackRecord={host.createRecord &&
-          host.attachIdentifier &&
-          host.registerNamespace
-            ? trackRecordFromDiscover
-            : undefined}
         />
       {:else if activeSection === "reconciliation"}
         <ReconciliationView
           items={reviewsProblem ? [] : reviews}
           loading={reviewsLoading}
           unavailableReason={reviewsProblem}
+          {resolvingReviewId}
           onResolveExisting={host.resolveReview
             ? (reviewItemId, recordId) =>
                 resolveReview({

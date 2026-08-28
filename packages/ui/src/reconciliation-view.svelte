@@ -33,14 +33,19 @@
     items: ReviewItem[];
     loading?: boolean;
     unavailableReason?: string;
-    onResolveExisting?: (reviewItemId: string, recordId: string) => void;
-    onResolveNew?: (reviewItemId: string, grain: string) => void;
+    resolvingReviewId?: string;
+    onResolveExisting?: (
+      reviewItemId: string,
+      recordId: string,
+    ) => Promise<void>;
+    onResolveNew?: (reviewItemId: string, grain: string) => Promise<void>;
   }
 
   let {
     items,
     loading = false,
     unavailableReason,
+    resolvingReviewId,
     onResolveExisting,
     onResolveNew,
   }: Props = $props();
@@ -92,7 +97,10 @@
   {:else}
     <div class="cases-list">
       {#each openItems as item (item.review_item_id)}
-        <article class="case-card">
+        <article
+          class="case-card"
+          aria-busy={resolvingReviewId === item.review_item_id}
+        >
           <div class="case-header">
             <span class="case-badge">Needs review</span>
             <h2 class="case-subject">
@@ -122,14 +130,18 @@
                       <button
                         type="button"
                         class="action-btn accept"
-                        disabled={!onResolveExisting}
+                        disabled={!onResolveExisting ||
+                          Boolean(resolvingReviewId)}
                         onclick={() =>
                           onResolveExisting?.(item.review_item_id, recordId)}
                         title={!onResolveExisting
                           ? "Resolving is unavailable until a resolve command is implemented"
                           : undefined}
                       >
-                        <IconCheck size={16} stroke={2.5} /> Accept as this record
+                        <IconCheck size={16} stroke={2.5} />
+                        {resolvingReviewId === item.review_item_id
+                          ? "Resolving…"
+                          : "Accept as this record"}
                         <IconArrowRight size={14} />
                       </button>
                     </li>
@@ -164,7 +176,7 @@
               <button
                 type="button"
                 class="action-btn not-same"
-                disabled={!onResolveNew}
+                disabled={!onResolveNew || Boolean(resolvingReviewId)}
                 onclick={() =>
                   onResolveNew?.(
                     item.review_item_id,
@@ -174,7 +186,9 @@
                   ? "Resolving is unavailable until a resolve command is implemented"
                   : undefined}
               >
-                Create new record
+                {resolvingReviewId === item.review_item_id
+                  ? "Resolving…"
+                  : "Create new record"}
               </button>
             </div>
           </div>

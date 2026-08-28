@@ -60,6 +60,7 @@ export const cssVariables = `
   --fasti-action-primary: ${colors.action.primary};
   --fasti-state-verified: ${colors.state.verified};
   --fasti-state-attention: ${colors.state.attention};
+  --fasti-overlay-contrast: ${colors.surface.paper};
   --fasti-font-display: ${typography.display};
   --fasti-font-body: ${typography.body};
   --fasti-font-mono: ${typography.mono};

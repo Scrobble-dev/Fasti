@@ -237,7 +237,7 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
 }) => {
   const thirdPartyRequests: string[] = [];
   page.on("request", (request) => {
-    if (request.url().startsWith("https://tracker.example")) {
+    if (new URL(request.url()).origin === "https://tracker.example") {
       thirdPartyRequests.push(request.url());
     }
   });
@@ -367,7 +367,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
       __SEARCH_INPUT__?: unknown;
       __PROVIDER_STATUS_CALLS__?: number;
       __SET_TMDB_CONFIGURED__?: (configured: boolean) => void;
-      __TRACK_INPUTS__?: Array<{ command: string; arguments_: unknown }>;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_?: unknown) => Promise<unknown>;
       };
@@ -376,7 +375,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
     browserWindow.__SET_TMDB_CONFIGURED__ = (configured) => {
       tmdbConfigured = configured;
     };
-    browserWindow.__TRACK_INPUTS__ = [];
     browserWindow.__TAURI_INTERNALS__ = {
       invoke: async (command, arguments_) => {
         switch (command) {
@@ -403,13 +401,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
                 image_url: null,
               },
             ];
-          case "register_namespace":
-          case "attach_identifier":
-            browserWindow.__TRACK_INPUTS__?.push({ command, arguments_ });
-            return {};
-          case "create_record":
-            browserWindow.__TRACK_INPUTS__?.push({ command, arguments_ });
-            return { record_id: "record-tmdb-show" };
           case "list_records":
           case "list_reviews":
             return [];
@@ -488,52 +479,12 @@ test("Discover selects configured providers and refreshes explicit setup state",
   ).toEqual({
     input: { provider: "tmdb", query: "Breaking Bad" },
   });
-  await page.getByRole("button", { name: "Track Now" }).click();
   await expect(
-    page.getByRole("button", { name: "Added to library" }),
+    page.getByRole("button", { name: "Tracking unavailable" }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText("Search does not change your library"),
   ).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        (
-          window as typeof window & {
-            __TRACK_INPUTS__?: Array<{
-              command: string;
-              arguments_: unknown;
-            }>;
-          }
-        ).__TRACK_INPUTS__,
-    ),
-  ).toEqual([
-    {
-      command: "register_namespace",
-      arguments_: {
-        input: {
-          namespace: "tmdb.tv",
-          label: "tmdb.tv",
-          grains: ["series"],
-          id_pattern: ".+",
-          normalization: "identity",
-          licence_posture: "identifiers_only",
-        },
-      },
-    },
-    {
-      command: "create_record",
-      arguments_: { grain: "series" },
-    },
-    {
-      command: "attach_identifier",
-      arguments_: {
-        input: {
-          record_id: "record-tmdb-show",
-          namespace: "tmdb.tv",
-          grain: "series",
-          value: "1396",
-        },
-      },
-    },
-  ]);
 
   await provider.selectOption("google-books");
   await expect(

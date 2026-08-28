@@ -384,7 +384,7 @@
               class="title-link"
               onclick={() => onSelectRecord(rec.id)}
             >
-              <h3 class="card-title">{rec.title}</h3>
+              <h2 class="card-title">{rec.title}</h2>
             </button>
             <div class="card-sub-row">
               <span class="card-year">{rec.releaseYear ?? "—"}</span>
@@ -764,7 +764,7 @@
     padding: 2px 6px;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.75);
-    color: white;
+    color: var(--fasti-overlay-contrast);
   }
 
   .card-rating {
@@ -793,7 +793,7 @@
     padding: 2px 6px;
     border-radius: 3px;
     background: rgba(0, 0, 0, 0.8);
-    color: white;
+    color: var(--fasti-overlay-contrast);
   }
 
   .fast-action-toolbar-wrap {

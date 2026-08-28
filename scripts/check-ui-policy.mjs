@@ -1,95 +1,110 @@
-import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const uiRoots = ["apps/web", "packages/ui"];
-const sourceExtensions = new Set([".svelte", ".ts", ".js"]);
-const ignoredDirectories = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  ".svelte-kit",
-]);
-const forbiddenIconPackages = [
-  "lucide",
-  "heroicons",
-  "phosphor",
-  "fontawesome",
-  "react-icons",
-  "material-icons",
-  "iconify",
-];
-const inlineSvgExceptions = new Set(["packages/ui/src/nav-sidebar.svelte"]);
-const semanticBackgrounds = ["action-primary", "brand-mark", "state-verified"];
 const failures = [];
 
-async function sourceFiles(relativeDirectory) {
-  const directory = path.join(root, relativeDirectory);
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    if (entry.isDirectory() && ignoredDirectories.has(entry.name)) continue;
-    const relativePath = path.join(relativeDirectory, entry.name);
-    if (entry.isDirectory()) files.push(...(await sourceFiles(relativePath)));
-    else if (sourceExtensions.has(path.extname(entry.name)))
-      files.push(relativePath);
+function gitGrep(arguments_) {
+  const result = spawnSync("git", ["grep", ...arguments_], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0 && result.status !== 1) {
+    throw new Error(result.stderr.trim() || "git grep failed");
   }
-  return files;
+  return result.status === 0 ? result.stdout.trim() : "";
 }
 
-for (const uiRoot of uiRoots) {
-  for (const file of await sourceFiles(uiRoot)) {
-    const source = await readFile(path.join(root, file), "utf8");
-    for (const packageName of forbiddenIconPackages) {
-      if (source.includes(packageName)) {
-        failures.push(`${file}: use Tabler icons before ${packageName}`);
-      }
-    }
-    if (source.includes("<svg") && !inlineSvgExceptions.has(file)) {
-      failures.push(`${file}: raw SVG needs a documented brand-only exception`);
-    }
-    for (const background of semanticBackgrounds) {
-      const hardCodedForeground = new RegExp(
-        `\\{[^{}]*background:\\s*var\\(--fasti-${background}\\);[^{}]*color:\\s*(?:white|#fff(?:fff)?);[^{}]*\\}`,
-        "i",
-      );
-      if (hardCodedForeground.test(source)) {
-        failures.push(
-          `${file}: --fasti-${background} needs its semantic contrast token`,
-        );
-      }
-    }
-  }
+const sourcePaths = [
+  ":(glob)apps/web/**/*.{js,ts,svelte}",
+  ":(glob)packages/ui/**/*.{js,ts,svelte}",
+];
+const forbiddenIcons = gitGrep([
+  "-nEI",
+  "lucide|heroicons|phosphor|fontawesome|react-icons|material-icons|iconify",
+  "--",
+  ...sourcePaths,
+]);
+if (forbiddenIcons) {
+  failures.push(
+    `Use Tabler icons before another icon package:\n${forbiddenIcons}`,
+  );
 }
 
-const appSource = await readFile(
-  path.join(root, "apps/web/src/App.svelte"),
-  "utf8",
-);
-if (!appSource.includes("@tabler/core/dist/css/tabler.min.css")) {
+const rawSvg = gitGrep([
+  "-nF",
+  "<svg",
+  "--",
+  ...sourcePaths,
+  ":(exclude)packages/ui/src/nav-sidebar.svelte",
+]);
+if (rawSvg) {
+  failures.push(`Raw SVG needs a documented brand-only exception:\n${rawSvg}`);
+}
+
+const hardCodedSemanticContrast = gitGrep([
+  "-nEI",
+  "background:[^;]*var\\(--fasti-(action-primary|brand-mark|state-verified)\\)[^;]*;.*color:[[:space:]]*(white|#fff|#ffffff)",
+  "--",
+  ...sourcePaths,
+]);
+if (hardCodedSemanticContrast) {
+  failures.push(
+    `Semantic backgrounds need their matching contrast token:\n${hardCodedSemanticContrast}`,
+  );
+}
+
+const hardCodedLightForeground = gitGrep([
+  "-nEI",
+  "color:[[:space:]]*(white|#fff(fff)?)[[:space:]]*;",
+  "--",
+  ...sourcePaths,
+]);
+if (hardCodedLightForeground) {
+  failures.push(
+    `Use a governed contrast token instead of a hard-coded light foreground:\n${hardCodedLightForeground}`,
+  );
+}
+
+if (
+  !gitGrep([
+    "-nF",
+    "@tabler/core/dist/css/tabler.min.css",
+    "--",
+    "apps/web/src/App.svelte",
+  ])
+) {
   failures.push("apps/web/src/App.svelte: Tabler Core stylesheet is required");
 }
 
-const agentRules = await readFile(path.join(root, "AGENTS.md"), "utf8");
 for (const rule of [
   "FASTI_TABLER_POLICY_START",
   "FASTI_CHESTERTON_POLICY_START",
   "FASTI_AUTH_BOUNDARY_START",
 ]) {
-  if (!agentRules.includes(rule)) failures.push(`AGENTS.md: missing ${rule}`);
+  if (!gitGrep(["-nF", rule, "--", "AGENTS.md"])) {
+    failures.push(`AGENTS.md: missing ${rule}`);
+  }
 }
 
-const uiIndex = await readFile(
-  path.join(root, "packages/ui/src/index.ts"),
-  "utf8",
-);
-if (!uiIndex.includes('from "./runtime-settings-view.svelte"')) {
+if (
+  !gitGrep([
+    "-nF",
+    'from "./runtime-settings-view.svelte"',
+    "--",
+    "packages/ui/src/index.ts",
+  ])
+) {
   failures.push(
     "packages/ui/src/index.ts: RuntimeSettingsView export is required",
   );
 }
-if (uiIndex.includes('from "./settings-view.svelte"')) {
+if (
+  gitGrep([
+    "-nF",
+    'from "./settings-view.svelte"',
+    "--",
+    "packages/ui/src/index.ts",
+  ])
+) {
   failures.push(
     "packages/ui/src/index.ts: legacy SettingsView must stay outside the product API",
   );

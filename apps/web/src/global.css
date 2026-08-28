@@ -26,12 +26,7 @@ textarea {
   color: inherit;
 }
 
-:where(
-  button,
-  input:not([type="checkbox"]):not([type="radio"]),
-  select,
-  textarea
-) {
+:where(button, input:not([type="checkbox"], [type="radio"]), select, textarea) {
   min-height: var(--fasti-touch-target-min);
 }
 

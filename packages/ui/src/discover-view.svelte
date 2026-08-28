@@ -16,7 +16,6 @@
     ) => Promise<ProviderSearchCandidate[]>;
     onOpenSettings: () => void;
     onRetry: () => void;
-    onTrackRecord?: (candidate: ProviderSearchCandidate) => Promise<void>;
     selectedProviderId?: string;
     selectionExplicit?: boolean;
   }
@@ -28,7 +27,6 @@
     onSearch,
     onOpenSettings,
     onRetry,
-    onTrackRecord,
     selectedProviderId = $bindable(""),
     selectionExplicit = $bindable(false),
   }: Props = $props();
@@ -38,9 +36,8 @@
   let problem = $state("");
   let searched = $state(false);
   let completedQuery = $state("");
-  let trackingId = $state("");
-  let trackedIds = $state<Set<string>>(new Set());
-  let trackProblem = $state("");
+  let searchRevision = 0;
+  let searchProviderId = "";
   const supportedProviders = $derived(
     (providerCredentials ?? []).filter((provider) =>
       ["google-books", "tmdb"].includes(provider.provider),
@@ -68,35 +65,21 @@
       supportedProviders[0].provider;
   });
 
-  function selectProvider(provider: string): void {
-    selectionExplicit = true;
-    selectedProviderId = provider;
+  $effect(() => {
+    const providerId = selectedProviderId;
+    if (providerId === searchProviderId) return;
+    searchProviderId = providerId;
+    searchRevision += 1;
+    searching = false;
     results = [];
     problem = "";
     searched = false;
     completedQuery = "";
-    trackingId = "";
-    trackedIds = new Set();
-    trackProblem = "";
-  }
+  });
 
-  async function trackRecord(
-    candidate: ProviderSearchCandidate,
-  ): Promise<void> {
-    if (!onTrackRecord || trackingId) return;
-    trackingId = candidate.provider_id;
-    trackProblem = "";
-    try {
-      await onTrackRecord(candidate);
-      trackedIds = new Set([...trackedIds, candidate.provider_id]);
-    } catch (error) {
-      trackProblem = hostProblemText(
-        error,
-        "Fasti could not add this title to your library.",
-      );
-    } finally {
-      trackingId = "";
-    }
+  function selectProvider(provider: string): void {
+    selectionExplicit = true;
+    selectedProviderId = provider;
   }
   async function search(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -111,21 +94,26 @@
       searched = false;
       return;
     }
+    const provider = selectedProvider;
+    const revision = ++searchRevision;
     searching = true;
     problem = "";
     searched = false;
     try {
-      results = await onSearch(selectedProvider.provider, value);
+      const nextResults = await onSearch(provider.provider, value);
+      if (revision !== searchRevision) return;
+      results = nextResults;
       completedQuery = value;
       searched = true;
     } catch (error) {
+      if (revision !== searchRevision) return;
       results = [];
       problem = hostProblemText(
         error,
-        `${selectedProvider.label} search failed. Check the provider credential and network policy.`,
+        `${provider.label} search failed. Check the provider credential and network policy.`,
       );
     } finally {
-      searching = false;
+      if (revision === searchRevision) searching = false;
     }
   }
 </script>
@@ -239,6 +227,10 @@
             {results.length === 1 ? "result" : "results"} for
             {completedQuery}.
           </p>
+          <p id="tracking-unavailable" class="result-action-note">
+            Search does not change your library. Adding a result is unavailable
+            until the host can save the record and identifier together.
+          </p>
           <ol>
             {#each results as result (result.provider_id)}
               <li>
@@ -260,29 +252,17 @@
                     <dd><code>{result.provider_id}</code></dd>
                   </div>
                 </dl>
-                {#if onTrackRecord}
-                  <button
-                    type="button"
-                    class="track-btn"
-                    disabled={Boolean(trackingId) ||
-                      trackedIds.has(result.provider_id)}
-                    onclick={() => trackRecord(result)}
-                  >
-                    {#if trackedIds.has(result.provider_id)}
-                      Added to library
-                    {:else if trackingId === result.provider_id}
-                      Adding…
-                    {:else}
-                      Track Now
-                    {/if}
-                  </button>
-                {/if}
+                <button
+                  type="button"
+                  class="track-btn"
+                  aria-describedby="tracking-unavailable"
+                  disabled
+                >
+                  Tracking unavailable
+                </button>
               </li>
             {/each}
           </ol>
-          {#if trackProblem}
-            <p class="problem" role="alert">{trackProblem}</p>
-          {/if}
         {:else}
           <p>Enter a title or provider identifier.</p>
         {/if}
@@ -329,6 +309,7 @@
   .view-subtitle,
   .unavailable p,
   .results > p,
+  .result-action-note,
   li p {
     margin: 0;
     color: var(--fasti-text-muted);
