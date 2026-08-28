@@ -276,6 +276,12 @@ export interface BrowserUserUpdate {
   readonly active?: boolean;
 }
 
+export type NuvioCollectionsDocument = ReadonlyArray<Record<string, unknown>>;
+
+export interface NuvioCollectionsState {
+  readonly document?: NuvioCollectionsDocument | null;
+}
+
 export interface WorkbenchHost {
   readonly developmentTestAccountHint?: string;
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
@@ -322,6 +328,11 @@ export interface WorkbenchHost {
     recordId: string,
     disposition: TrackingDispositionUpdate,
   ): Promise<TrackingDispositionState>;
+  getNuvioCollections?(): Promise<NuvioCollectionsState>;
+  replaceNuvioCollections?(
+    document: NuvioCollectionsDocument,
+  ): Promise<NuvioCollectionsState>;
+  clearNuvioCollections?(): Promise<NuvioCollectionsState>;
   createBrowserSession?(
     username: string,
     password: string,

@@ -88,6 +88,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     "/api/v1/namespaces",
     "/api/v1/node/initialization",
     "/api/v1/observations",
+    "/api/v1/profile/nuvio-collections",
     "/api/v1/profile/record-tracking-dispositions",
     "/api/v1/profile/record-tracking-dispositions/{record_id}",
     "/api/v1/records",
@@ -104,6 +105,12 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     { bearer_credential: [] },
     { browser_session: [] },
   ]);
+  for (const method of ["delete", "get", "put"]) {
+    assert.deepEqual(
+      openapi.paths["/api/v1/profile/nuvio-collections"][method].security,
+      [{ bearer_credential: [] }, { browser_session: [] }],
+    );
+  }
 
   const ajv = new Ajv2020({ allErrors: true, strict: true });
   ajv.addFormat("uint16", {
@@ -152,7 +159,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 32);
+  assert.equal(registry.capabilities.length, 35);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -176,7 +183,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     ) {
       return "b2_browser_auth";
     }
-    if (capability.id.startsWith("profile.record.tracking_disposition.")) {
+    if (
+      capability.id.startsWith("profile.record.tracking_disposition.") ||
+      capability.id.startsWith("profile.nuvio_collections.")
+    ) {
       return "b2_profile_state";
     }
     if (

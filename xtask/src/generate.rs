@@ -178,7 +178,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 13] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 16] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -254,6 +254,39 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 13] = [
         authenticated: true,
         request: Some("SetTrackingDispositionRequest"),
         response: Some("TrackingDispositionStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "getNuvioCollections",
+        operation_id: "get_nuvio_collections",
+        method: "get",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.get",
+        authenticated: true,
+        request: None,
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "replaceNuvioCollections",
+        operation_id: "replace_nuvio_collections",
+        method: "put",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.replace",
+        authenticated: true,
+        request: Some("NuvioCollectionsDocumentDto"),
+        response: Some("NuvioCollectionsStateDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "clearNuvioCollections",
+        operation_id: "clear_nuvio_collections",
+        method: "delete",
+        path: "/api/v1/profile/nuvio-collections",
+        capability_id: "profile.nuvio_collections.clear",
+        authenticated: true,
+        request: None,
+        response: Some("NuvioCollectionsStateDto"),
         retry: "safe",
     },
     ConformanceOperation {
@@ -2032,6 +2065,10 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             typescript_type(schema)?
         )?;
     }
+    output.push_str(
+        "// The Nuvio wire document intentionally preserves extension fields.\n\
+         export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;\n\n",
+    );
     for name in [
         "ObservationIdentifierInput",
         "SubmitObservationRequest",
@@ -2056,6 +2093,7 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ListBrowserUsersResponse",
         "UpdateBrowserUserRequest",
         "DeleteBrowserUserRequest",
+        "NuvioCollectionsStateDto",
     ] {
         let schema = schemas
             .get(name)
@@ -2207,6 +2245,11 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         ("parseListBrowserUsersResponse", "ListBrowserUsersResponse"),
         ("parseUpdateBrowserUserRequest", "UpdateBrowserUserRequest"),
         ("parseDeleteBrowserUserRequest", "DeleteBrowserUserRequest"),
+        (
+            "parseNuvioCollectionsDocumentDto",
+            "NuvioCollectionsDocumentDto",
+        ),
+        ("parseNuvioCollectionsStateDto", "NuvioCollectionsStateDto"),
     ] {
         writeln!(
             output,
@@ -2964,6 +3007,7 @@ function parseConformanceDto<T>(schemaName: string, value: unknown): T {
 // prettier-ignore
 function validateOpenApiValue(value: unknown, schemaValue: unknown, path: string, schemas: Record<string, unknown>): void {
   const schema = schemaValue as Record<string, unknown>;
+  if (Object.keys(schema).length === 0) return;
   if (typeof schema.$ref === "string") {
     const prefix = "#/components/schemas/";
     if (!schema.$ref.startsWith(prefix)) {

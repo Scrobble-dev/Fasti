@@ -18,6 +18,8 @@ import {
   parseInitializeNodeResponse,
   parseListRecordsResponse,
   parseListTrackingDispositionsResponse,
+  parseNuvioCollectionsDocumentDto,
+  parseNuvioCollectionsStateDto,
   parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
   parseReceiptCommittedEvent,
@@ -45,6 +47,8 @@ import {
   type InitializeNodeResponse,
   type ListRecordsResponse,
   type ListTrackingDispositionsResponse,
+  type NuvioCollectionsDocumentDto,
+  type NuvioCollectionsStateDto,
   type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
@@ -211,6 +215,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_RETRY_ATTEMPTS = 10;
 const MAX_RETRY_DELAY_MS = 60_000;
 const MAX_JSON_RESPONSE_BYTES = 512 * 1_024;
+const MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES = 4 * 1_024 * 1_024 + 64 * 1_024;
 const MAX_SSE_LINE_BYTES = 64 * 1_024;
 const MAX_SSE_EVENT_BYTES = 256 * 1_024;
 const MAX_SSE_EVENT_LINES = 256;
@@ -623,6 +628,64 @@ export class FastiClient {
     });
   }
 
+  getNuvioCollections(
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.getNuvioCollections;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  replaceNuvioCollections(
+    request: NuvioCollectionsDocumentDto,
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.replaceNuvioCollections;
+    const body = parseOutgoing(
+      parseNuvioCollectionsDocumentDto,
+      request,
+      "Nuvio Collections request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      body,
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  clearNuvioCollections(
+    options: CallOptions = {},
+  ): Promise<NuvioCollectionsStateDto> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.clearNuvioCollections;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseNuvioCollectionsStateDto,
+      responseLabel: "Nuvio Collections response",
+      maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
   /**
    * Opens the governed receipt SSE fixture and performs bounded reconnects.
    * This never persists or queues events, and only reconnects the safe stream.
@@ -791,7 +854,7 @@ export class FastiClient {
   }
 
   async #jsonOperation<T>(input: {
-    readonly method: "GET" | "POST" | "PUT";
+    readonly method: "DELETE" | "GET" | "POST" | "PUT";
     readonly path: string;
     readonly authenticated: boolean;
     readonly problemContract: ProblemContractBinding;
@@ -799,6 +862,7 @@ export class FastiClient {
     readonly body?: unknown;
     readonly responseParser: JsonParser<T>;
     readonly responseLabel: string;
+    readonly maxResponseBytes?: number;
     readonly options: CallOptions;
   }): Promise<T> {
     const retryPolicy = normalizeRetryPolicy(
@@ -860,7 +924,10 @@ export class FastiClient {
             `${input.responseLabel} must use application/json`,
           );
         }
-        const value = await parseJson(response);
+        const value = await parseJson(
+          response,
+          input.maxResponseBytes ?? MAX_JSON_RESPONSE_BYTES,
+        );
         try {
           return input.responseParser(value);
         } catch (error) {
@@ -1183,7 +1250,10 @@ async function problemOrTransportError(
   );
 }
 
-async function parseJson(response: Response): Promise<unknown> {
+async function parseJson(
+  response: Response,
+  maxBytes = MAX_JSON_RESPONSE_BYTES,
+): Promise<unknown> {
   if (response.body === null) {
     throw new FastiProtocolError("JSON response has no body");
   }
@@ -1191,7 +1261,7 @@ async function parseJson(response: Response): Promise<unknown> {
   if (
     contentLength !== null &&
     /^\d+$/.test(contentLength) &&
-    Number(contentLength) > MAX_JSON_RESPONSE_BYTES
+    Number(contentLength) > maxBytes
   ) {
     await response.body.cancel().catch(() => undefined);
     throw new FastiProtocolError("JSON response exceeds the bounded body size");
@@ -1209,7 +1279,7 @@ async function parseJson(response: Response): Promise<unknown> {
       }
       if (result.done) break;
       totalBytes += result.value.byteLength;
-      if (totalBytes > MAX_JSON_RESPONSE_BYTES) {
+      if (totalBytes > maxBytes) {
         throw new FastiProtocolError(
           "JSON response exceeds the bounded body size",
         );

@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 8;
+pub(crate) const SCHEMA_VERSION: i64 = 9;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -42,6 +42,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 7 {
         migrate_v8(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 8 {
+        migrate_v9(connection)?;
     }
     Ok(())
 }
@@ -731,6 +736,57 @@ fn migrate_v8(connection: &Connection) -> Result<()> {
     )
 }
 
+fn migrate_v9(connection: &Connection) -> Result<()> {
+    let mut sql = String::from(
+        r#"
+        BEGIN IMMEDIATE;
+
+        CREATE TABLE profile_nuvio_collections (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            document_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, profile_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER profile_nuvio_collections_scope_insert
+        BEFORE INSERT ON profile_nuvio_collections
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'Nuvio Collections document crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER profile_nuvio_collections_scope_update
+        BEFORE UPDATE ON profile_nuvio_collections
+        WHEN NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'Nuvio Collections document crosses a workspace boundary');
+        END;
+        "#,
+    );
+    append_revision_triggers(
+        &mut sql,
+        &RevisionSource {
+            table: "profile_nuvio_collections",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    sql.push_str(
+        r#"
+        PRAGMA user_version = 9;
+        COMMIT;
+        "#,
+    );
+    connection.execute_batch(&sql)
+}
+
 pub(crate) fn workspace_revision(connection: &Connection, workspace_id: &str) -> Result<i64> {
     connection.query_row(
         "SELECT revision FROM workspace_revisions WHERE workspace_id = ?1",
@@ -878,12 +934,13 @@ mod tests {
             )
             .expect("count revision triggers");
         // +3 for namespace_definitions (migrate_v4), +6 for the two metadata
-        // field tables (migrate_v6), and +3 for profile tracking disposition
-        // (migrate_v7), none of which are in the
+        // field tables (migrate_v6), +3 for profile tracking disposition
+        // (migrate_v7), and +3 for profile Nuvio Collections (migrate_v9),
+        // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
         assert_eq!(
             trigger_count,
-            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3) as i64
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3) as i64
         );
     }
 
@@ -1125,8 +1182,9 @@ mod tests {
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
         // column, migrate_v6's two metadata tables, and migrate_v7's profile
-        // tracking table, and migrate_v8's browser authentication tables --
-        // all additive, so every v4 table and column remains.
+        // tracking table, migrate_v8's browser authentication tables, and
+        // migrate_v9's Nuvio Collections table -- all additive, so every v4
+        // table and column remains.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
@@ -1134,6 +1192,7 @@ mod tests {
                 "metadata_field_claims".to_owned(),
                 "metadata_field_overrides".to_owned(),
                 "profile_record_tracking_dispositions".to_owned(),
+                "profile_nuvio_collections".to_owned(),
                 "browser_auth_bootstrap".to_owned(),
                 "browser_sessions".to_owned(),
                 "browser_users".to_owned(),

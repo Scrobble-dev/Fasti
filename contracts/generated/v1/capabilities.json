@@ -673,6 +673,85 @@
     },
     {
       "authorization": "scoped",
+      "bounded_context": "profile.catalog_configuration",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "profile.nuvio_collections.clear",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "profile.catalog_configuration",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "profile.nuvio_collections.get",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_read"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "profile.catalog_configuration",
+      "contract_body": "b2",
+      "examples": [],
+      "id": "profile.nuvio_collections.replace",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "b2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "capability_unavailable",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "b2",
+      "scopes": [
+        "profile_state_write"
+      ],
+      "surface_profile": "b2_profile_state",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
       "bounded_context": "profile.tracking",
       "contract_body": "b2",
       "examples": [
@@ -1266,7 +1345,7 @@
         "state": "required"
       },
       "json_ld": {
-        "reason": "Private profile tracking state is not public linked-data identity.",
+        "reason": "Private profile tracking and catalog configuration are not public linked-data identity.",
         "state": "not_applicable"
       },
       "json_schema": {
@@ -1295,7 +1374,7 @@
         "state": "required"
       },
       "sse_asyncapi": {
-        "reason": "Profile tracking disposition is finite request state with no event channel.",
+        "reason": "Profile tracking and catalog configuration are finite request state with no event channel.",
         "state": "not_applicable"
       },
       "ui": {

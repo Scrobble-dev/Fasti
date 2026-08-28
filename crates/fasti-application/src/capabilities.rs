@@ -454,6 +454,61 @@ define_capabilities!(
         []
     ),
     (
+        GetNuvioCollections,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProfileStateRead],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ReplaceNuvioCollections,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        ClearNuvioCollections,
+        B2,
+        B2,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProfileStateWrite],
+        [
+            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
         ListTrackingDispositions,
         B2,
         B2,

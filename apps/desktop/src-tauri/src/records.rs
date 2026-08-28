@@ -70,7 +70,7 @@ pub(crate) struct RecordSummary {
     latest_activity: Option<RecordActivityView>,
 }
 
-fn require_access(
+pub(crate) fn require_access(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
 ) -> Result<fasti_application::RequestAccessContext, DesktopProblem> {

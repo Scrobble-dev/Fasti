@@ -504,12 +504,14 @@ test("credentials are header-only on authenticated surfaces and no offline queue
         assert.deepEqual(methods, [
           "acceptObservation",
           "attachIdentifier",
+          "clearNuvioCollections",
           "configureListener",
           "constructor",
           "createRecord",
           "discoverCapabilities",
           "enrollDurableFirstClient",
           "enrollFirstClient",
+          "getNuvioCollections",
           "health",
           "initializeDurableNode",
           "initializeNode",
@@ -517,6 +519,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "listTrackingDispositions",
           "receiptEvents",
           "registerNamespace",
+          "replaceNuvioCollections",
           "replayReceipt",
           "revokeCredential",
           "rotateCredential",
@@ -683,7 +686,7 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 32);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 35);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
     11,
@@ -778,6 +781,69 @@ test("profile tracking disposition SDK is authenticated, exact, and record-bound
         disposition: "dropped",
       }),
     /recordId does not match the generated contract/,
+  );
+});
+
+test("Nuvio Collections SDK preserves the bare document and its larger bounded response", async () => {
+  const largeDocument = Array.from({ length: 64 }, (_, index) => ({
+    id: `collection-${index}`,
+    title: `Collection ${index}`,
+    folders: [],
+    extension: "x".repeat(8_192),
+  }));
+  const calls = [];
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "profile-state-secret",
+    fetch: async (url, init) => {
+      calls.push({
+        method: init?.method,
+        authorization: new Headers(init?.headers).get("authorization"),
+        body: init?.body === undefined ? undefined : JSON.parse(init.body),
+      });
+      const document =
+        init?.method === "DELETE"
+          ? null
+          : init?.method === "PUT"
+            ? JSON.parse(init.body)
+            : largeDocument;
+      return new Response(JSON.stringify({ document }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.deepEqual(await client.getNuvioCollections(), {
+    document: largeDocument,
+  });
+  const replacement = [{ id: "collection", title: "Collection", folders: [] }];
+  assert.deepEqual(await client.replaceNuvioCollections(replacement), {
+    document: replacement,
+  });
+  assert.deepEqual(await client.clearNuvioCollections(), { document: null });
+  assert.deepEqual(
+    calls.map(({ method, authorization, body }) => ({
+      method,
+      authorization,
+      body,
+    })),
+    [
+      {
+        method: "GET",
+        authorization: "Bearer profile-state-secret",
+        body: undefined,
+      },
+      {
+        method: "PUT",
+        authorization: "Bearer profile-state-secret",
+        body: replacement,
+      },
+      {
+        method: "DELETE",
+        authorization: "Bearer profile-state-secret",
+        body: undefined,
+      },
+    ],
   );
 });
 
@@ -1043,7 +1109,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 32);
+    assert.equal(discovery.capabilities.length, 35);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

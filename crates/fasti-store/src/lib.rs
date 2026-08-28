@@ -10,6 +10,7 @@ mod evidence;
 mod identity;
 mod kernel;
 mod metadata;
+mod nuvio_collections;
 mod observation;
 mod online_archive;
 mod portability;

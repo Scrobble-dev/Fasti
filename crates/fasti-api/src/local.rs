@@ -19,6 +19,8 @@ use std::sync::Arc;
 
 const MAX_BOOTSTRAP_JSON_BODY_BYTES: usize = 4 * 1024;
 const MAX_OBSERVATION_JSON_BODY_BYTES: usize = 64 * 1024;
+const MAX_NUVIO_COLLECTIONS_JSON_BODY_BYTES: usize =
+    fasti_application::MAX_NUVIO_COLLECTIONS_JSON_BYTES;
 const MAX_RECORDS_JSON_BODY_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]
@@ -316,12 +318,15 @@ pub(crate) fn router(
         crate::records::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
     let profile_state =
         crate::profile_state::router().layer(DefaultBodyLimit::max(MAX_RECORDS_JSON_BODY_BYTES));
+    let nuvio_collections = crate::nuvio_collections::router()
+        .layer(DefaultBodyLimit::max(MAX_NUVIO_COLLECTIONS_JSON_BODY_BYTES));
 
     let routes = Router::new()
         .merge(crate::browser_auth::router())
         .merge(observation)
         .merge(records)
-        .merge(profile_state);
+        .merge(profile_state)
+        .merge(nuvio_collections);
     if include_bootstrap {
         bootstrap.merge(routes).with_state(state)
     } else {

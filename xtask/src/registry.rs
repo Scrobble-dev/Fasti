@@ -613,9 +613,11 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         | CapabilityKey::AttachIdentifier
         | CapabilityKey::ListRecords
         | CapabilityKey::RegisterNamespace => "b1_records",
-        CapabilityKey::ListTrackingDispositions | CapabilityKey::SetTrackingDisposition => {
-            "b2_profile_state"
-        }
+        CapabilityKey::ClearNuvioCollections
+        | CapabilityKey::GetNuvioCollections
+        | CapabilityKey::ReplaceNuvioCollections
+        | CapabilityKey::ListTrackingDispositions
+        | CapabilityKey::SetTrackingDisposition => "b2_profile_state",
         CapabilityKey::CreateBrowserSession
         | CapabilityKey::ReadBrowserSession
         | CapabilityKey::EndBrowserSession

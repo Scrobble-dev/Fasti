@@ -13,6 +13,7 @@ use utoipa::{
 
 mod browser_auth;
 mod local;
+mod nuvio_collections;
 mod observation;
 mod problem;
 mod profile_state;
@@ -51,6 +52,9 @@ pub async fn health_check() -> Json<HealthResponse> {
         browser_auth::list_users,
         browser_auth::update_user,
         browser_auth::delete_user,
+        nuvio_collections::clear_nuvio_collections,
+        nuvio_collections::get_nuvio_collections,
+        nuvio_collections::replace_nuvio_collections,
         observation::submit_observation,
         profile_state::list_tracking_dispositions,
         profile_state::set_tracking_disposition,
@@ -77,6 +81,12 @@ pub async fn health_check() -> Json<HealthResponse> {
         fasti_contracts::ListBrowserUsersResponse,
         fasti_contracts::ListTrackingDispositionsResponse,
         fasti_contracts::NodeInitializationResponse,
+        fasti_contracts::NuvioCatalogSourceDto,
+        fasti_contracts::NuvioCollectionDto,
+        fasti_contracts::NuvioCollectionFolderDto,
+        fasti_contracts::NuvioCollectionSourceDto,
+        fasti_contracts::NuvioCollectionsDocumentDto,
+        fasti_contracts::NuvioCollectionsStateDto,
         fasti_contracts::ObservationIdentifierInput,
         fasti_contracts::ObservationIngressKind,
         fasti_contracts::RecordActivityDto,
@@ -248,10 +258,11 @@ mod tests {
             "/api/v1/namespaces",
             "/api/v1/profile/record-tracking-dispositions",
             "/api/v1/profile/record-tracking-dispositions/{record_id}",
+            "/api/v1/profile/nuvio-collections",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 12);
+        assert_eq!(document.paths.paths.len(), 13);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -283,6 +294,12 @@ mod tests {
         for schema in [
             "HealthResponse",
             "NodeInitializationResponse",
+            "NuvioCatalogSourceDto",
+            "NuvioCollectionDto",
+            "NuvioCollectionFolderDto",
+            "NuvioCollectionSourceDto",
+            "NuvioCollectionsDocumentDto",
+            "NuvioCollectionsStateDto",
             "ClientEnrollmentResponse",
             "CreateBrowserSessionRequest",
             "BrowserSessionResponse",
@@ -335,6 +352,81 @@ mod tests {
             .expect("router response");
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn nuvio_collections_replace_get_and_clear_use_the_authenticated_profile() {
+        let (root, kernel) = test_kernel();
+        let app = api_router(kernel, test_bind_addr(), root.path());
+        let credential = enroll_admin(&app, root.path()).await.credential;
+        let document = r#"[{"id":"collection","title":"Collection","folders":[{"id":"folder","title":"Folder","sources":[{"provider":"tmdb","tmdbSourceType":"discover","mediaType":"movie","filters":{"voteCountGte":10,"vote_count.gte":10},"id":"source"}]}]}]"#;
+
+        let replaced = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/profile/nuvio-collections")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .body(Body::from(document))
+                    .expect("replace request"),
+            )
+            .await
+            .expect("replace response");
+        assert_eq!(replaced.status(), StatusCode::OK);
+        let replaced: fasti_contracts::NuvioCollectionsStateDto = serde_json::from_slice(
+            &to_bytes(replaced.into_body(), 64 * 1024)
+                .await
+                .expect("bounded replace body"),
+        )
+        .expect("replace state");
+        let replaced = serde_json::to_value(replaced.document.expect("stored document"))
+            .expect("document JSON");
+        assert_eq!(
+            replaced[0]["folders"][0]["sources"][0]["mediaType"],
+            "MOVIE"
+        );
+        assert_eq!(
+            replaced[0]["folders"][0]["sources"][0]["filters"]["vote_count.gte"],
+            10
+        );
+
+        let read = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/profile/nuvio-collections")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .body(Body::empty())
+                    .expect("get request"),
+            )
+            .await
+            .expect("get response");
+        assert_eq!(read.status(), StatusCode::OK);
+        let read: fasti_contracts::NuvioCollectionsStateDto = serde_json::from_slice(
+            &to_bytes(read.into_body(), 64 * 1024)
+                .await
+                .expect("bounded get body"),
+        )
+        .expect("get state");
+        assert!(read.document.is_some());
+
+        let cleared = app
+            .oneshot(
+                Request::delete("/api/v1/profile/nuvio-collections")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .body(Body::empty())
+                    .expect("clear request"),
+            )
+            .await
+            .expect("clear response");
+        assert_eq!(cleared.status(), StatusCode::OK);
+        let cleared: fasti_contracts::NuvioCollectionsStateDto = serde_json::from_slice(
+            &to_bytes(cleared.into_body(), 4096)
+                .await
+                .expect("bounded clear body"),
+        )
+        .expect("clear state");
+        assert!(cleared.document.is_none());
     }
 
     #[cfg(target_os = "linux")]
@@ -485,6 +577,22 @@ mod tests {
             .await
             .expect("create response");
         assert_eq!(created.status(), StatusCode::OK);
+
+        let collections = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/profile/nuvio-collections")
+                    .header(header::COOKIE, &cookies)
+                    .header("x-fasti-csrf", &csrf)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"[{"id":"remote","title":"Remote","folders":[]}]"#,
+                    ))
+                    .expect("Nuvio Collections request"),
+            )
+            .await
+            .expect("Nuvio Collections response");
+        assert_eq!(collections.status(), StatusCode::OK);
 
         let updated = app
             .clone()

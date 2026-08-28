@@ -1101,6 +1101,7 @@ dependencies = [
  "chrono",
  "fasti-domain",
  "serde",
+ "serde_json",
  "sha2",
 ]
 

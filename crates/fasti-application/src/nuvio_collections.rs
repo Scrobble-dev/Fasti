@@ -3,6 +3,8 @@
 //! Nuvio Collections describe external catalog browse configuration. They are
 //! not Fasti media lists and their opaque provider IDs are never Fasti IDs.
 
+use crate::{ApplicationResult, RequestAccessContext};
+use fasti_domain::RequestCorrelationId;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::fmt;
@@ -17,6 +19,106 @@ const MAX_NUVIO_JSON_NODES: usize = 200_000;
 const MAX_NUVIO_JSON_DEPTH: usize = 16;
 const MAX_NUVIO_STRING_BYTES: usize = 8 * 1024;
 const MAX_NUVIO_KEY_BYTES: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetNuvioCollectionsQuery {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+}
+
+impl GetNuvioCollectionsQuery {
+    pub const fn new(correlation_id: RequestCorrelationId, access: RequestAccessContext) -> Self {
+        Self {
+            correlation_id,
+            access,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplaceNuvioCollectionsCommand {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+    document: NuvioCollectionsDocument,
+}
+
+impl ReplaceNuvioCollectionsCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        access: RequestAccessContext,
+        document: NuvioCollectionsDocument,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access,
+            document,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+
+    pub const fn document(&self) -> &NuvioCollectionsDocument {
+        &self.document
+    }
+
+    pub fn into_document(self) -> NuvioCollectionsDocument {
+        self.document
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClearNuvioCollectionsCommand {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+}
+
+impl ClearNuvioCollectionsCommand {
+    pub const fn new(correlation_id: RequestCorrelationId, access: RequestAccessContext) -> Self {
+        Self {
+            correlation_id,
+            access,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+}
+
+pub trait NuvioCollectionsPort: Send + Sync {
+    fn get_nuvio_collections(
+        &self,
+        query: GetNuvioCollectionsQuery,
+    ) -> ApplicationResult<Option<NuvioCollectionsDocument>>;
+
+    fn replace_nuvio_collections(
+        &self,
+        command: ReplaceNuvioCollectionsCommand,
+    ) -> ApplicationResult<NuvioCollectionsDocument>;
+
+    fn clear_nuvio_collections(
+        &self,
+        command: ClearNuvioCollectionsCommand,
+    ) -> ApplicationResult<()>;
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NuvioCollectionsSummary {

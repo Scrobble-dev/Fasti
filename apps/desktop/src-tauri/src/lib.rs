@@ -6,6 +6,7 @@ mod api_clients;
 mod artwork;
 mod endpoint;
 mod network_config;
+mod nuvio_collections;
 mod outbound_http;
 mod providers;
 mod records;
@@ -338,6 +339,44 @@ fn set_tracking_disposition(
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command(async)]
+fn get_nuvio_collections(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<fasti_contracts::NuvioCollectionsStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    nuvio_collections::get(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn replace_nuvio_collections(
+    state: tauri::State<'_, DesktopState>,
+    document: fasti_contracts::NuvioCollectionsDocumentDto,
+) -> Result<fasti_contracts::NuvioCollectionsStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    nuvio_collections::replace(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        document,
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn clear_nuvio_collections(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<fasti_contracts::NuvioCollectionsStateDto, DesktopProblem> {
+    let kernel = state.kernel()?;
+    nuvio_collections::clear(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
 fn list_reviews(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Vec<reviews::ReviewItem>, DesktopProblem> {
@@ -459,6 +498,9 @@ pub fn run() {
             register_namespace,
             list_tracking_dispositions,
             set_tracking_disposition,
+            get_nuvio_collections,
+            replace_nuvio_collections,
+            clear_nuvio_collections,
             list_reviews,
             resolve_review
         ])

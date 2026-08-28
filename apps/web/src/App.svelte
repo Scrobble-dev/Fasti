@@ -217,6 +217,10 @@
           invoke("set_tracking_disposition", {
             input: { record_id: recordId, disposition },
           }),
+        getNuvioCollections: () => invoke("get_nuvio_collections"),
+        replaceNuvioCollections: (document) =>
+          invoke("replace_nuvio_collections", { document }),
+        clearNuvioCollections: () => invoke("clear_nuvio_collections"),
       };
       applySetupStatus(await invoke<SetupStatus>("setup_status"));
     } catch (error) {

@@ -206,7 +206,7 @@ surface_profiles:
     sse_asyncapi:
       {
         state: not_applicable,
-        reason: Profile tracking disposition is finite request state with no event channel.,
+        reason: Profile tracking and catalog configuration are finite request state with no event channel.,
       }
     cli:
       {
@@ -222,7 +222,7 @@ surface_profiles:
     json_ld:
       {
         state: not_applicable,
-        reason: Private profile tracking state is not public linked-data identity.,
+        reason: Private profile tracking and catalog configuration are not public linked-data identity.,
       }
     okf: { state: required, binding: "okf:capability-catalog" }
     sdk: { state: required, binding: "sdk:{capability_id}" }
@@ -960,6 +960,85 @@ capabilities:
         validation_failed,
       ]
     examples: [profile.record.tracking_disposition.set.validation_failed]
+    uat: []
+
+  - application_key: get_nuvio_collections
+    id: profile.nuvio_collections.get
+    bounded_context: profile.catalog_configuration
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_profile_state
+    scopes: [profile_state_read]
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        storage_unavailable,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: replace_nuvio_collections
+    id: profile.nuvio_collections.replace
+    bounded_context: profile.catalog_configuration
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_profile_state
+    scopes: [profile_state_write]
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        malformed_json,
+        payload_too_large,
+        storage_unavailable,
+        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: clear_nuvio_collections
+    id: profile.nuvio_collections.clear
+    bounded_context: profile.catalog_configuration
+    contract_body: b2
+    runtime_body: b2
+    authorization: scoped
+    lifecycle:
+      {
+        introduced_in: b2,
+        contract_state: finalized,
+        runtime_availability: implemented,
+      }
+    surface_profile: b2_profile_state
+    scopes: [profile_state_write]
+    problems:
+      [
+        authentication_failed,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        storage_unavailable,
+      ]
+    examples: []
     uat: []
 
   - application_key: inspect_review

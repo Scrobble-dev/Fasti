@@ -15,6 +15,8 @@ import type {
   CreateRecordResult,
   EndpointConnectionStatus,
   NetworkConfiguration,
+  NuvioCollectionsDocument,
+  NuvioCollectionsState,
   ProviderCredentialStatus,
   ProviderSearchCandidate,
   RecordSummary,
@@ -350,6 +352,20 @@ export function createWebHost(defaultApiUrl: string): WorkbenchHost {
       return client.setTrackingDisposition(recordId, {
         disposition,
       }) as Promise<TrackingDispositionState>;
+    },
+
+    async getNuvioCollections(): Promise<NuvioCollectionsState> {
+      return client.getNuvioCollections();
+    },
+
+    async replaceNuvioCollections(
+      document: NuvioCollectionsDocument,
+    ): Promise<NuvioCollectionsState> {
+      return client.replaceNuvioCollections(document);
+    },
+
+    async clearNuvioCollections(): Promise<NuvioCollectionsState> {
+      return client.clearNuvioCollections();
     },
 
     async createBrowserSession(
