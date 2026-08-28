@@ -81,10 +81,9 @@
     | "system" = $state("network");
 
   $effect(() => {
-    const canLoadProfileData = canAccessProfileData;
     if (activeTab) {
       active = activeTab;
-      if (activeTab === "nuvio_collections" && canLoadProfileData) {
+      if (activeTab === "nuvio_collections" && canAccessProfileData) {
         void untrack(loadNuvioCollections);
       }
     }
