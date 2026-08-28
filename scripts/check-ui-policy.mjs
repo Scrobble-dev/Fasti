@@ -65,6 +65,7 @@ if (forbiddenIcons) {
   );
 }
 
+// eslint-disable-next-line xss/no-mixed-html -- static repository search; this script does not generate HTML
 const rawSvg = gitGrep([
   "-nF",
   "<svg",
@@ -75,6 +76,7 @@ const rawSvg = gitGrep([
 if (rawSvg) {
   failures.push(`Raw SVG needs a documented brand-only exception:\n${rawSvg}`);
 }
+// eslint-disable-next-line xss/no-mixed-html -- static repository search; this script does not generate HTML
 const brandSvg = gitGrep([
   "-n",
   "-o",

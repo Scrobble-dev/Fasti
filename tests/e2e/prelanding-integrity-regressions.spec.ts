@@ -126,9 +126,9 @@ async function installTrustedHost(page: Page, scenario: Scenario) {
     let resolveEndpoint: (() => void) | undefined;
     browserWindow.__RESOLVE_ENDPOINT__ = () => resolveEndpoint?.();
     browserWindow.__RESOLVE_SEARCH__ = (index, result) =>
-      searchResolvers[index]?.([result]);
+      searchResolvers.at(index)?.([result]);
     browserWindow.__RESOLVE_STATUS__ = (index, google, tmdb) =>
-      statusResolvers[index]?.resolve(statuses(google, tmdb));
+      statusResolvers.at(index)?.resolve(statuses(google, tmdb));
 
     let resolveReview: (() => void) | undefined;
     browserWindow.__RESOLVE_REVIEW__ = () => resolveReview?.();
