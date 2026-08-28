@@ -316,6 +316,14 @@ export function createWebHost(
     },
     async listIntegrations(): Promise<IntegrationRuntimeStatus[]> {
       const response = await client.listIntegrations();
+      if (
+        !Array.isArray(response.integrations) ||
+        !response.integrations.every(isIntegrationStatus)
+      ) {
+        throw unavailable(
+          "Fasti integration status did not match the supported contract.",
+        );
+      }
       return response.integrations as unknown as IntegrationRuntimeStatus[];
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {

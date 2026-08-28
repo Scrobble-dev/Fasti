@@ -201,8 +201,6 @@ components:
         - observed_at
         - item_type
         - completed
-        - provider_ids
-        - series_provider_ids
       properties:
         source_event_id:
           type: string

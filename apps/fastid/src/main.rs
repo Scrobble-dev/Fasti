@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8420";
 const DEFAULT_PORT_FALLBACK: &str = "fail";
@@ -338,11 +338,25 @@ async fn main() -> Result<()> {
         None
     };
 
-    let primary_result = axum::serve(listener, app).await;
-    if let Some(task) = integration_task {
-        task.abort();
+    match integration_task {
+        Some(task) => {
+            let abort_handle = task.abort_handle();
+            tokio::select! {
+                result = axum::serve(listener, app) => {
+                    abort_handle.abort();
+                    result?;
+                }
+                joined = task => {
+                    match joined {
+                        Ok(Ok(())) => error!("Fasti isolated integration listener exited unexpectedly"),
+                        Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
+                        Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
+                    }
+                }
+            }
+        }
+        None => axum::serve(listener, app).await?,
     }
-    primary_result?;
     Ok(())
 }
 

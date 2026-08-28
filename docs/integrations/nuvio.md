@@ -66,14 +66,18 @@ Authorization: Bearer <one-time-issued-client-credential>
 Content-Type: application/json
 
 {
-  "event_id": "nuvio-session-42-completed-episode-7",
+  "source_event_id": "nuvio-session-42-completed-episode-7",
   "observed_at": "2026-08-27T12:30:00Z",
   "occurred_at": "2026-08-27T12:29:58Z",
-  "media_type": "Episode",
+  "item_type": "episode",
   "title": "Example episode",
-  "identifiers": {
+  "completed": true,
+  "provider_ids": {
     "imdb": "tt1234567",
     "kitsu": "7442"
+  },
+  "series_provider_ids": {
+    "imdb": "tt0000000"
   }
 }
 ```
