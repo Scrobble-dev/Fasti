@@ -163,6 +163,7 @@ Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decisio
   3. Fasti Token-Skinned Tabler Element (`brand/tokens/tokens.json`)
   4. Custom Svelte Component (STRICT EXCEPTION: only if Tabler has zero equivalent; requires explicit documented architectural rationale).
 - **Permanent gate**: `pnpm lint:ui` must pass. It rejects non-Tabler icon systems, unapproved raw SVG, removal of the Tabler Core stylesheet, and removal of these managed policy markers. Do not weaken its allowlist to land UI work.
+- **Workbench shell contract**: Use one `.page` root with an adjacent `.navbar.navbar-vertical.navbar-expand-lg.offcanvas-lg` and `.page-wrapper`. Below `lg`, navigation is closed by default and the page wrapper owns the full viewport. Settings uses `.container-fluid`, list-group links on wide screens, and a labelled `.form-select` on constrained screens. Theme settings uses the Tabler `.offcanvas` and writes every exposed choice to the documented Tabler and Fasti data attributes. Finite Fasti component radii must consume `--tblr-border-radius-scale`; focus indicators must use `--fasti-focus`, never a selectable accent. `pnpm lint:ui` enforces these rules and rejects the prior fixed mobile rail, compensating page margin, centered Settings ceiling, and bespoke drawer fallback.
 
 <!-- FASTI_TABLER_POLICY_END -->
 

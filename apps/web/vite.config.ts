@@ -36,6 +36,21 @@ export default defineConfig({
         // Playwright overrides this process-local value for its bounded stub.
         target: process.env.FASTI_QA_PROXY_TARGET ?? "http://127.0.0.1:8420",
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("error", (err, _req, res) => {
+            if (
+              res &&
+              "writeHead" in res &&
+              typeof res.writeHead === "function" &&
+              !res.headersSent
+            ) {
+              res.writeHead(502, { "content-type": "application/json" });
+              res.end(
+                JSON.stringify({ error: "proxy_error", message: err.message }),
+              );
+            }
+          });
+        },
       },
     },
   },

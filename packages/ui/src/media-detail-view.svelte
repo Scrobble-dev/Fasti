@@ -1368,7 +1368,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     padding: 28px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
   }
@@ -1376,7 +1376,7 @@
   .poster-frame {
     width: 100%;
     aspect-ratio: 2 / 3;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     background: var(--fasti-surface-archive);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
@@ -1417,7 +1417,7 @@
   }
   .collection-pill {
     padding: 2px 8px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(in srgb, var(--fasti-brand-gold) 20%, transparent);
     color: var(--fasti-brand-gold);
     font-weight: 700;
@@ -1441,7 +1441,7 @@
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: #eab308;
     color: #1c1917;
     font-family: var(--fasti-font-mono);
@@ -1460,7 +1460,7 @@
     align-items: center;
     background: var(--fasti-surface-archive);
     border: 1px solid var(--fasti-brand-gold);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     padding: 4px 8px;
   }
   .user-star {
@@ -1479,7 +1479,7 @@
 
   .status-select {
     padding: 7px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     font-size: 0.88rem;
     cursor: pointer;
@@ -1497,7 +1497,7 @@
   .icon-action-btn {
     width: var(--fasti-touch-target-min);
     height: var(--fasti-touch-target-min);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     background: var(--fasti-surface-archive);
@@ -1533,7 +1533,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -1579,7 +1579,7 @@
   }
   .genre-chip {
     padding: 3px 8px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     font-size: 0.8rem;
     font-weight: 500;
@@ -1601,7 +1601,7 @@
     gap: 6px;
     padding: 6px 10px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-family: var(--fasti-font-mono);
     font-size: 0.78rem;
     color: var(--fasti-text-primary);
@@ -1621,7 +1621,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
   }
   .content-tabs {
@@ -1669,7 +1669,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
     text-align: left;
     transition: all 120ms ease;
@@ -1681,7 +1681,7 @@
   .action-btn-icon {
     width: 44px;
     height: 44px;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     display: grid;
     place-items: center;
@@ -1710,7 +1710,7 @@
     justify-content: space-between;
     padding: 12px 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   .history-left {
     display: flex;
@@ -1759,7 +1759,7 @@
     padding: 2px 6px;
     background: var(--fasti-brand-gold);
     color: black;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     font-weight: 700;
   }
   .hist-star {
@@ -1772,7 +1772,7 @@
     text-align: center;
     padding: 40px 20px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   :global(.empty-icon) {
     color: var(--fasti-text-muted);
@@ -1793,7 +1793,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
   }
   .season-card-btn.active {
@@ -1808,7 +1808,7 @@
     width: 36px;
     height: 52px;
     object-fit: cover;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
   }
   .season-name {
     font-weight: 700;
@@ -1838,7 +1838,7 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
@@ -1855,7 +1855,7 @@
     gap: 14px;
     padding: 12px 16px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
   }
   .episode-item-row.watched {
     opacity: 0.75;
@@ -1863,7 +1863,7 @@
   .ep-check-btn {
     width: var(--fasti-touch-target-min);
     height: var(--fasti-touch-target-min);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 2px solid var(--fasti-text-muted);
     background: transparent;
     display: grid;
@@ -1911,7 +1911,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.72rem;
     font-weight: 600;
     color: var(--fasti-text-muted);
@@ -1924,7 +1924,7 @@
   }
 
   :is(.btn-secondary-sm, .mark-prev-btn):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
@@ -1941,7 +1941,7 @@
     text-align: center;
     padding: 12px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
   .cast-avatar {
     width: 72px;
@@ -1978,7 +1978,7 @@
     );
     border: 1px solid
       color-mix(in srgb, var(--fasti-state-verified) 32%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     margin-bottom: 20px;
   }
   .provider-banner > div {
@@ -2010,7 +2010,7 @@
   }
 
   .assertions-scroll:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
   .assertions-table th,
@@ -2027,7 +2027,7 @@
     font-size: 0.72rem;
     text-transform: uppercase;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-state-verified) 15%,
@@ -2062,7 +2062,7 @@
     padding: 8px 12px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
     font: inherit;
@@ -2091,7 +2091,7 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
@@ -2102,7 +2102,7 @@
   .notes-textarea {
     width: 100%;
     padding: 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
     font-family: var(--fasti-font-body);
@@ -2120,7 +2120,7 @@
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
     border: none;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-weight: 600;
     cursor: pointer;
   }
@@ -2129,13 +2129,13 @@
     background: var(--fasti-surface-archive);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 30%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     cursor: pointer;
   }
   .notes-display-box {
     padding: 18px;
     background: var(--fasti-surface-archive);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     font-size: 0.95rem;
     line-height: 1.6;
   }

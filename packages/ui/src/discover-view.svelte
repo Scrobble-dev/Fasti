@@ -401,7 +401,7 @@
     padding: 24px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -437,7 +437,7 @@
     min-height: 44px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
   }
@@ -461,7 +461,7 @@
   }
 
   :is(button, input, select):focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 

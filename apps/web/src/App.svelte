@@ -15,6 +15,7 @@
   } from "@fasti/ui/status";
   import FastiWorkbench from "@fasti/ui/workbench";
   import "@tabler/core/dist/css/tabler.min.css";
+  import "@tabler/core/dist/css/tabler-themes.min.css";
   import { onMount, tick } from "svelte";
   import markDark from "../../../brand/logos/fasti-mark-dark.svg?url";
   import markLight from "../../../brand/logos/fasti-mark-light.svg?url";
@@ -283,6 +284,7 @@
   function openStatus(): void {
     activeSurface = "status";
     if (typeof window !== "undefined") {
+      theme = resolveTheme();
       window.history.pushState({}, "", "/status");
     }
     inspectHealthOnRouteEntry();
@@ -302,6 +304,7 @@
     if (nextSurface === activeSurface) return;
     activeSurface = nextSurface;
     if (nextSurface === "status") {
+      theme = resolveTheme();
       inspectHealthOnRouteEntry();
     } else {
       cancelBrowserHealthInspection();

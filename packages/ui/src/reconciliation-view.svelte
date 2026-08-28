@@ -243,7 +243,7 @@
       var(--fasti-state-verified) 12%,
       transparent
     );
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.85rem;
     color: var(--fasti-text-primary);
   }
@@ -258,7 +258,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
   }
 
   :global(.empty-icon) {
@@ -287,7 +287,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
   }
@@ -308,7 +308,7 @@
     font-weight: 700;
     text-transform: uppercase;
     padding: 3px 8px;
-    border-radius: 3px;
+    border-radius: calc(3px * var(--tblr-border-radius-scale, 1));
     background: color-mix(
       in srgb,
       var(--fasti-state-attention) 20%,
@@ -371,7 +371,7 @@
     gap: 12px;
     padding: 10px 12px;
     background: var(--fasti-surface-archive);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     overflow-wrap: anywhere;
   }
 
@@ -399,7 +399,7 @@
   .new-record-form select {
     min-height: 44px;
     padding: 6px 10px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
     background: var(--fasti-surface-paper);
@@ -412,7 +412,7 @@
     gap: 6px;
     min-height: 44px;
     padding: 9px 18px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     font-size: 0.88rem;
     font-weight: 600;
     cursor: pointer;

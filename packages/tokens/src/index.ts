@@ -114,4 +114,12 @@ export const cssVariables = `
   --fasti-brand-contrast: var(--fasti-surface-night);
   --fasti-verified-contrast: var(--fasti-surface-night);
 }
+
+[data-bs-theme="dark"][data-fasti-theme="night"] {
+  --fasti-background: color-mix(in srgb, var(--fasti-surface-night) 88%, black);
+  --fasti-panel: color-mix(in srgb, var(--fasti-surface-night) 94%, ${colors.surface.paper});
+  --fasti-surface-archive: color-mix(in srgb, var(--fasti-surface-night) 88%, black);
+  --fasti-surface-paper: color-mix(in srgb, var(--fasti-surface-night) 94%, ${colors.surface.paper});
+  --fasti-border: color-mix(in srgb, ${colors.surface.paper} 28%, transparent);
+}
 `;

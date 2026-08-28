@@ -371,7 +371,7 @@
     color: var(--fasti-text-muted);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 12px;
+    border-radius: calc(12px * var(--tblr-border-radius-scale, 1));
   }
 
   .view-all-btn {
@@ -386,7 +386,7 @@
     cursor: pointer;
     min-height: 44px;
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     transition: all 120ms ease;
   }
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { flushSync, onMount, tick } from "svelte";
   import {
     IconChevronRight,
     IconActivityHeartbeat,
@@ -32,6 +32,7 @@
   import { hostProblemText } from "./host-problem.js";
   import { projectRecordSummary } from "./record-projection.js";
   import type {
+    ActiveNavSection,
     BrowserSession,
     MediaRecord,
     ProviderCredentialStatus,
@@ -78,9 +79,22 @@
     return fallback;
   }
 
+  function defaultThemeSettings(): ThemeSettings {
+    const activeMode =
+      typeof document === "undefined"
+        ? undefined
+        : document.documentElement.dataset.fastiTheme;
+    return {
+      ...DEFAULT_THEME_SETTINGS,
+      mode:
+        activeMode === "dark" || activeMode === "night" ? activeMode : "light",
+    };
+  }
+
   function accessibleAccent(value: string): {
     color: string;
     contrast: "#000000" | "#ffffff";
+    rgb: string;
   } {
     const match = /^#([0-9a-f]{6})$/i.exec(value.trim());
     const color = match ? `#${match[1]}` : DEFAULT_THEME_SETTINGS.accentColor;
@@ -95,7 +109,56 @@
     return {
       color,
       contrast: luminance > 0.179 ? "#000000" : "#ffffff",
+      rgb: [1, 3, 5]
+        .map((index) => Number.parseInt(color.slice(index, index + 2), 16))
+        .join(", "),
     };
+  }
+
+  type SettingsTab =
+    | "network"
+    | "providers"
+    | "preferences"
+    | "custom_fields"
+    | "nuvio_collections"
+    | "system";
+
+  let settingsTab = $state<SettingsTab>("network");
+
+  function settingsTabFromPath(path: string): SettingsTab {
+    if (path === "/settings/metadata" || path === "/settings/providers")
+      return "providers";
+    if (path === "/settings/preferences") return "preferences";
+    if (
+      path === "/settings/custom-fields" ||
+      path === "/settings/custom_fields"
+    )
+      return "custom_fields";
+    if (
+      path === "/settings/collections" ||
+      path === "/settings/nuvio_collections"
+    )
+      return "nuvio_collections";
+    if (path === "/settings/status" || path === "/settings/system")
+      return "system";
+    return "network";
+  }
+
+  function pathForSettingsTab(tab: SettingsTab): string {
+    switch (tab) {
+      case "providers":
+        return "/settings/metadata";
+      case "preferences":
+        return "/settings/preferences";
+      case "custom_fields":
+        return "/settings/custom-fields";
+      case "nuvio_collections":
+        return "/settings/collections";
+      case "system":
+        return "/settings/status";
+      default:
+        return "/settings";
+    }
   }
 
   function pathForSection(section: Section): string {
@@ -103,7 +166,7 @@
       case "connections":
         return "/connections";
       case "settings":
-        return "/settings";
+        return pathForSettingsTab(settingsTab);
       case "discover":
         return "/discover";
       case "reconciliation":
@@ -123,7 +186,10 @@
     if (typeof window === "undefined") return "home";
     const path = window.location.pathname;
     if (path === "/connections") return "connections";
-    if (path === "/settings") return "settings";
+    if (path.startsWith("/settings")) {
+      settingsTab = settingsTabFromPath(path);
+      return "settings";
+    }
     if (path === "/discover") return "discover";
     if (path === "/reconciliation" || path === "/reviews")
       return "reconciliation";
@@ -156,8 +222,14 @@
       defaultItems: T[],
     ): T[] => {
       const supportedIds = new Set(defaultItems.map((item) => item.id));
+      const seenIds = new Set<string>();
       const supportedStored = Array.isArray(storedItems)
-        ? storedItems.filter((item) => supportedIds.has(item?.id))
+        ? storedItems.filter((item) => {
+            if (!supportedIds.has(item?.id) || seenIds.has(item.id))
+              return false;
+            seenIds.add(item.id);
+            return true;
+          })
         : [];
       return [
         ...supportedStored,
@@ -172,6 +244,14 @@
     return {
       ...defaults,
       ...(stored && typeof stored === "object" ? stored : {}),
+      sidebarCollapsed:
+        typeof stored?.sidebarCollapsed === "boolean"
+          ? stored.sidebarCollapsed
+          : defaults.sidebarCollapsed,
+      sidebarHidden:
+        typeof stored?.sidebarHidden === "boolean"
+          ? stored.sidebarHidden
+          : defaults.sidebarHidden,
       navItems: mergeById(stored?.navItems, defaults.navItems),
       contextMenuItems: mergeById(
         stored?.contextMenuItems,
@@ -189,10 +269,15 @@
     ),
   );
   let themeSettings = $state<ThemeSettings>(
-    loadPersisted("fasti-theme-settings", DEFAULT_THEME_SETTINGS),
+    normalizeThemeSettings(
+      loadPersisted("fasti-theme-settings", defaultThemeSettings()),
+    ),
   );
   let themeDrawerOpen = $state(false);
   let authModalOpen = $state(false);
+  let mobileNavigationOpen = $state(false);
+  let navigationTrigger = $state<HTMLButtonElement | undefined>();
+  let showNavigationTrigger = $state<HTMLButtonElement | undefined>();
   let browserSession = $state<BrowserSession | null>(null);
   let browserSessionChecked = $state(false);
 
@@ -211,23 +296,51 @@
         "fasti-theme-settings",
         JSON.stringify(themeSettings),
       );
+      localStorage.setItem(
+        "fasti-theme",
+        themeSettings.mode === "light" ? "light" : "dark",
+      );
     } catch {}
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    // Both "dark" and "night" use the same dark token set; see
-    // packages/tokens/src/index.ts's `[data-bs-theme="dark"]` block.
     root.dataset.bsTheme = themeSettings.mode === "light" ? "light" : "dark";
+    root.dataset.fastiTheme = themeSettings.mode;
+    root.dataset.bsThemeBase = themeSettings.themeBase ?? "slate";
+    root.dataset.bsThemeFont = themeSettings.fontFamily ?? "sans-serif";
+    root.dataset.bsThemeRadius = String(themeSettings.cornerRadius ?? 1);
     root.style.colorScheme = themeSettings.mode === "light" ? "light" : "dark";
     if (themeSettings.accentColor) {
       const accent = accessibleAccent(themeSettings.accentColor);
+      const tablerPrimary: Record<string, string> = {
+        "#066fd1": "blue",
+        "#d63939": "red",
+        "#2fb344": "green",
+        "#f76707": "orange",
+        "#ae3ec9": "purple",
+        "#0ca678": "teal",
+        "#17a2b8": "cyan",
+        "#8b2e2a": "red",
+        "#d4af37": "yellow",
+      };
+      root.dataset.bsThemePrimary =
+        tablerPrimary[accent.color.toLocaleLowerCase()] ?? "blue";
       root.style.setProperty("--fasti-action-primary", accent.color);
       root.style.setProperty("--fasti-action-contrast", accent.contrast);
       root.style.setProperty("--tblr-primary", accent.color);
+      root.style.setProperty("--tblr-primary-rgb", accent.rgb);
       root.style.setProperty("--tblr-primary-fg", accent.contrast);
+      root.style.setProperty(
+        "--tblr-primary-darken",
+        `color-mix(in srgb, ${accent.color} 88%, #000000)`,
+      );
     }
     if (themeSettings.fontFamily === "serif") {
       root.style.setProperty(
         "--fasti-font-display",
+        "'Newsreader', Georgia, serif",
+      );
+      root.style.setProperty(
+        "--fasti-font-body",
         "'Newsreader', Georgia, serif",
       );
     } else if (themeSettings.fontFamily === "monospace") {
@@ -235,16 +348,72 @@
         "--fasti-font-display",
         "'IBM Plex Mono', monospace",
       );
+      root.style.setProperty("--fasti-font-body", "'IBM Plex Mono', monospace");
     } else {
       root.style.removeProperty("--fasti-font-display");
+      root.style.removeProperty("--fasti-font-body");
     }
   });
 
   function updateTheme(updates: Partial<ThemeSettings>): void {
-    themeSettings = { ...themeSettings, ...updates };
+    themeSettings = normalizeThemeSettings({ ...themeSettings, ...updates });
+  }
+
+  function normalizeThemeSettings(
+    value: Partial<ThemeSettings> | null,
+  ): ThemeSettings {
+    const candidate = value && typeof value === "object" ? value : {};
+    const modes = new Set<ThemeSettings["mode"]>(["light", "dark", "night"]);
+    const fonts = new Set<NonNullable<ThemeSettings["fontFamily"]>>([
+      "sans-serif",
+      "serif",
+      "monospace",
+    ]);
+    const bases = new Set<NonNullable<ThemeSettings["themeBase"]>>([
+      "slate",
+      "gray",
+      "zinc",
+      "neutral",
+      "stone",
+    ]);
+    const radii = new Set([0, 0.5, 1, 1.5, 2]);
+    const accent = accessibleAccent(
+      typeof candidate.accentColor === "string"
+        ? candidate.accentColor
+        : DEFAULT_THEME_SETTINGS.accentColor,
+    ).color;
+    return {
+      ...DEFAULT_THEME_SETTINGS,
+      mode: modes.has(candidate.mode as ThemeSettings["mode"])
+        ? (candidate.mode as ThemeSettings["mode"])
+        : DEFAULT_THEME_SETTINGS.mode,
+      accentColor: accent,
+      fontFamily: fonts.has(
+        candidate.fontFamily as NonNullable<ThemeSettings["fontFamily"]>,
+      )
+        ? candidate.fontFamily
+        : DEFAULT_THEME_SETTINGS.fontFamily,
+      themeBase: bases.has(
+        candidate.themeBase as NonNullable<ThemeSettings["themeBase"]>,
+      )
+        ? candidate.themeBase
+        : DEFAULT_THEME_SETTINGS.themeBase,
+      cornerRadius: radii.has(candidate.cornerRadius ?? Number.NaN)
+        ? candidate.cornerRadius
+        : DEFAULT_THEME_SETTINGS.cornerRadius,
+      density: ["compact", "normal", "spacious"].includes(
+        candidate.density ?? "",
+      )
+        ? (candidate.density as ThemeSettings["density"])
+        : DEFAULT_THEME_SETTINGS.density,
+      fontSize: ["sm", "md", "lg"].includes(candidate.fontSize ?? "")
+        ? candidate.fontSize
+        : DEFAULT_THEME_SETTINGS.fontSize,
+    };
   }
 
   function select(section: Section): void {
+    mobileNavigationOpen = false;
     activeSection = section;
     if (typeof window === "undefined") return;
     const path = pathForSection(section);
@@ -258,6 +427,55 @@
 
   function handleSelectSection(section: string): void {
     select(section as Section);
+  }
+
+  function hrefForSection(section: ActiveNavSection): string {
+    return pathForSection(section as Section);
+  }
+
+  async function hideNavigation(): Promise<void> {
+    workbenchPreferences = {
+      ...workbenchPreferences,
+      sidebarHidden: true,
+    };
+    await tick();
+    showNavigationTrigger?.focus();
+  }
+
+  function focusNavigationEntry(): void {
+    const navigation = document.querySelector<HTMLElement>(
+      "#fasti-main-navigation",
+    );
+    (
+      navigation?.querySelector<HTMLElement>('[aria-current="page"]') ??
+      navigation?.querySelector<HTMLElement>(".nav-link[href]") ??
+      navigation?.querySelector<HTMLElement>("button:not([disabled])")
+    )?.focus();
+  }
+
+  async function showNavigation(): Promise<void> {
+    if (isNarrowViewport) {
+      flushSync(() => (mobileNavigationOpen = true));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!mobileNavigationOpen) return;
+          focusNavigationEntry();
+        });
+      });
+      return;
+    }
+    workbenchPreferences = {
+      ...workbenchPreferences,
+      sidebarHidden: false,
+    };
+    await tick();
+    focusNavigationEntry();
+  }
+
+  async function closeMobileNavigation(): Promise<void> {
+    mobileNavigationOpen = false;
+    await tick();
+    navigationTrigger?.focus();
   }
 
   function openRecord(
@@ -541,17 +759,20 @@
     }
   });
 
-  // nav-sidebar.svelte turns itself into a fixed-position rail below this
-  // breakpoint (see its own `@media (max-width: 61.99rem)` block). At a
-  // phone width, an always-expanded 240px rail leaves too little room for
-  // real content and forces horizontal scroll, which then slides content
-  // out from under the fixed rail. Force the icon-only (64px) width there
-  // regardless of the persisted preference, matching a standard mobile
-  // nav-rail pattern.
+  // Tabler's `lg` boundary converts the vertical navbar into an offcanvas.
+  // The persisted collapsed/hidden preferences remain desktop choices; a
+  // narrow viewport always starts with a full-width canvas and closed nav.
   let isNarrowViewport = $state(
     typeof window !== "undefined" &&
       window.matchMedia("(max-width: 61.99rem)").matches,
   );
+
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    const locked = isNarrowViewport && mobileNavigationOpen;
+    document.body.classList.toggle("fasti-navigation-open", locked);
+    return () => document.body.classList.remove("fasti-navigation-open");
+  });
 
   async function refreshBrowserSession(): Promise<void> {
     if (!host.currentBrowserSession) {
@@ -574,13 +795,24 @@
     const sync = () => (activeSection = sectionFromPath());
     window.addEventListener("popstate", sync);
     const media = window.matchMedia("(max-width: 61.99rem)");
-    const syncViewport = () => (isNarrowViewport = media.matches);
+    const syncViewport = () => {
+      isNarrowViewport = media.matches;
+      if (!media.matches) mobileNavigationOpen = false;
+    };
+    const closeNavigationOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !isNarrowViewport || !mobileNavigationOpen)
+        return;
+      event.preventDefault();
+      void closeMobileNavigation();
+    };
     syncViewport();
     media.addEventListener("change", syncViewport);
+    document.addEventListener("keydown", closeNavigationOnEscape);
     void refreshBrowserSession();
     return () => {
       window.removeEventListener("popstate", sync);
       media.removeEventListener("change", syncViewport);
+      document.removeEventListener("keydown", closeNavigationOnEscape);
     };
   });
 
@@ -628,69 +860,60 @@
   {/if}
 {/snippet}
 
-<div class="workbench-shell">
+<div class="page workbench-shell">
   <NavSidebar
     {activeSection}
     navItems={workbenchPreferences.navItems}
     {openReviewCount}
-    collapsed={workbenchPreferences.sidebarCollapsed || isNarrowViewport}
+    collapsed={workbenchPreferences.sidebarCollapsed}
     hidden={workbenchPreferences.sidebarHidden}
+    narrowViewport={isNarrowViewport}
+    mobileOpen={mobileNavigationOpen}
+    {hrefForSection}
     onToggleCollapse={() =>
       (workbenchPreferences = {
         ...workbenchPreferences,
         sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
       })}
-    onToggleHide={() =>
-      (workbenchPreferences = {
-        ...workbenchPreferences,
-        sidebarHidden: true,
-      })}
+    onToggleHide={() => void hideNavigation()}
+    onCloseMobile={() => void closeMobileNavigation()}
     onSelectSection={handleSelectSection}
   />
 
   <div
-    class="workbench-main-shell"
+    class="page-wrapper workbench-main-shell"
+    class:sidebar-collapsed={workbenchPreferences.sidebarCollapsed}
     class:sidebar-hidden={workbenchPreferences.sidebarHidden}
+    inert={isNarrowViewport && mobileNavigationOpen}
   >
-    <header class="top-bar" aria-label="Workbench toolbar">
+    <header
+      class="navbar navbar-expand-md top-bar"
+      aria-label="Workbench toolbar"
+    >
       <div class="top-bar-left">
-        {#if workbenchPreferences.sidebarHidden}
+        {#if isNarrowViewport}
           <button
+            bind:this={navigationTrigger}
             type="button"
-            class="icon-btn"
-            onclick={() =>
-              (workbenchPreferences = {
-                ...workbenchPreferences,
-                sidebarHidden: false,
-              })}
-            title="Show sidebar"
-            aria-label="Show sidebar"
-          >
-            <IconLayoutSidebarLeftExpand size={18} />
-          </button>
-        {:else}
-          <button
-            type="button"
-            class="icon-btn"
-            onclick={() =>
-              (workbenchPreferences = isNarrowViewport
-                ? { ...workbenchPreferences, sidebarHidden: true }
-                : {
-                    ...workbenchPreferences,
-                    sidebarCollapsed: !workbenchPreferences.sidebarCollapsed,
-                  })}
-            title={isNarrowViewport
-              ? "Hide sidebar"
-              : workbenchPreferences.sidebarCollapsed
-                ? "Expand sidebar"
-                : "Collapse sidebar"}
-            aria-label={isNarrowViewport
-              ? "Hide sidebar"
-              : workbenchPreferences.sidebarCollapsed
-                ? "Expand sidebar"
-                : "Collapse sidebar"}
+            class="btn btn-icon btn-ghost-secondary icon-btn"
+            aria-controls="fasti-main-navigation"
+            aria-expanded={mobileNavigationOpen}
+            onclick={() => void showNavigation()}
+            title="Open navigation"
+            aria-label="Open navigation"
           >
             <IconLayoutSidebar size={18} />
+          </button>
+        {:else if workbenchPreferences.sidebarHidden}
+          <button
+            bind:this={showNavigationTrigger}
+            type="button"
+            class="btn btn-icon btn-ghost-secondary icon-btn"
+            onclick={() => void showNavigation()}
+            title="Show navigation"
+            aria-label="Show navigation"
+          >
+            <IconLayoutSidebarLeftExpand size={18} />
           </button>
         {/if}
         <span class="section-title">{formatSectionTitle(activeSection)}</span>
@@ -744,7 +967,7 @@
       </div>
     </header>
 
-    <main id="main-content" class="main-content" tabindex="-1">
+    <main id="main-content" class="page-body main-content" tabindex="-1">
       {#if showsRecordFeedback && recordActionNotice}
         <p class="record-action-feedback" role="status">
           {recordActionNotice}
@@ -761,6 +984,16 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          activeTab={settingsTab}
+          onTabChange={(tab: SettingsTab) => {
+            settingsTab = tab;
+            if (typeof window !== "undefined") {
+              const newPath = pathForSettingsTab(tab);
+              if (window.location.pathname !== newPath) {
+                window.history.pushState(null, "", newPath);
+              }
+            }
+          }}
           onClientEndpointChanged={resetClientEndpoint}
           onProviderCredentialsChanged={invalidateDiscoverProviders}
           onUpdateWorkbenchPreferences={(patch) =>
@@ -1004,32 +1237,30 @@
 
 <style>
   .workbench-shell {
+    --fasti-collapsed-navigation-width: 4rem;
     min-height: 100dvh;
-    display: flex;
     background: var(--fasti-surface-archive);
     color: var(--fasti-text-primary);
   }
 
   .workbench-main-shell {
-    flex: 1;
     min-width: 0;
-    display: flex;
-    flex-direction: column;
   }
 
-  /* Below Tabler's `lg` boundary, nav-sidebar.svelte switches itself to
-   * `position: fixed`, removing it from flex flow so it stops claiming
-   * layout space. Reserve that space here (matching its collapsed width,
-   * which `isNarrowViewport` forces at this breakpoint) so the fixed rail
-   * doesn't overlap and intercept clicks on the main content. */
-  @media (max-width: 61.99rem) {
-    .workbench-main-shell {
-      margin-left: 64px;
+  @media (min-width: 62rem) {
+    :global(.fasti-sidebar-vertical.navbar-vertical-collapsed)
+      + .workbench-main-shell.sidebar-collapsed {
+      margin-left: var(--fasti-collapsed-navigation-width);
     }
 
-    .workbench-main-shell.sidebar-hidden {
+    :global(.fasti-sidebar-vertical.desktop-hidden)
+      + .workbench-main-shell.sidebar-hidden {
       margin-left: 0;
     }
+  }
+
+  :global(body.fasti-navigation-open) {
+    overflow: hidden;
   }
 
   .top-bar {
@@ -1058,11 +1289,6 @@
     display: flex;
     align-items: center;
     flex: 0 0 auto;
-  }
-
-  .top-bar-actions {
-    display: flex;
-    align-items: center;
     gap: 4px;
   }
 
@@ -1082,7 +1308,7 @@
     min-width: 44px;
     min-height: 44px;
     border: 0;
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: transparent;
     color: var(--fasti-text-muted);
     cursor: pointer;
@@ -1097,13 +1323,13 @@
   .icon-btn:focus-visible,
   .main-content:focus-visible,
   .link-btn:focus-visible {
-    outline: 3px solid var(--fasti-action-primary);
+    outline: 3px solid var(--fasti-focus);
     outline-offset: 2px;
   }
 
   .main-content {
     min-width: 0;
-    flex: 1;
+    margin-bottom: 0;
   }
 
   .record-action-feedback {
@@ -1166,7 +1392,7 @@
   .link-btn {
     min-height: var(--fasti-touch-target-min);
     border: 1px solid var(--fasti-action-primary);
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
     font-weight: 700;
@@ -1231,7 +1457,7 @@
     padding: 20px;
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -1272,7 +1498,7 @@
     padding: 20px;
     border: 1px dashed
       var(--fasti-border, color-mix(in srgb, currentColor 25%, transparent));
-    border-radius: 8px;
+    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
   }
 
   .next-step h2 {

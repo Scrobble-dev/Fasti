@@ -207,7 +207,7 @@
     justify-content: center;
     gap: 8px;
     border: 1px solid transparent;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     padding: 9px 14px;
     font-weight: 700;
     line-height: 1.2;

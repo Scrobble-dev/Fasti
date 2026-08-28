@@ -26,7 +26,7 @@ token controls, overlays, stock imagery, and client-owned media state. Those
 surfaces cannot return until their bounded contexts and generated contracts are
 active.
 
-## Automated evidence
+## Historical automated evidence
 
 Run from a clean checkout:
 
@@ -38,13 +38,16 @@ pnpm test
 pnpm test:ui
 ```
 
-The 17 Playwright tests use the installed Chrome channel locally and a pinned
-Playwright Chromium build in CI. Isolated generated-contract fixtures cover
+At this status-only checkpoint, 17 Playwright tests used the installed Chrome
+channel locally and a pinned Playwright Chromium build in CI. Isolated
+generated-contract fixtures covered
 healthy, invalid, and network-unavailable responses. A bounded loopback stub
 also proves the Vite proxy path. The native and OCI smoke gates own live-daemon
-health proof. OCI smoke also proves that the staged node-initialization route
-remains absent from production with a `404` response. The UI suite retains light
-and dark screenshots at 320, 768, and 1440 CSS pixels. It also checks:
+health proof. OCI smoke also proved that the staged node-initialization route
+remained absent from production with a `404` response. That historical suite
+retained light and dark screenshots at 320, 768, and 1440 CSS pixels. The
+current Workbench matrix is recorded in the linked B4 Workbench audit. This
+checkpoint also checked:
 
 - zero Axe violations in each tested state;
 - one H1 and a descriptive document title;

@@ -119,7 +119,7 @@
     padding: 32px;
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-surface-paper);
   }
 
@@ -144,7 +144,7 @@
     background: var(--fasti-surface-paper);
     border: 1px solid
       color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
-    border-radius: 6px;
+    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
     overflow: hidden;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
   }
@@ -197,7 +197,7 @@
     align-items: center;
     gap: 4px;
     padding: 6px 12px;
-    border-radius: 4px;
+    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
     background: var(--fasti-action-primary);
     color: var(--fasti-action-contrast);
     font-size: 0.82rem;
