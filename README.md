@@ -88,7 +88,7 @@ The active workspace has an inward-facing ownership spine and executable B1 cont
 
 ```text
 apps/fastid          production health plus explicit locally exposed durable composition root
-apps/web             pre-production health and interface-quality harness; not packaged or deployed
+apps/web             local Workbench at / plus the explicit /status diagnostic; not packaged or deployed
 apps/desktop         trusted-host desktop review candidate; not packaged or released
 crates/fasti-domain  typed IDs, time values, and domain invariants
 crates/fasti-application
@@ -115,7 +115,7 @@ Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an e
 
 B1 has a machine-readable capability registry as the authoritative public ledger. Deterministic generation projects that meaning into:
 
-- a production OpenAPI 3.1 document covering health and durable setup routes;
+- a production OpenAPI 3.1 document covering health, durable setup, observations, Records, identifiers, and namespaces;
 - a separate OpenAPI 3.1 document for real, feature-gated conformance handlers and shared public DTOs;
 - AsyncAPI 3.x transport binding for the `receipt.stream` SSE channel;
 - JSON Schema 2020-12 for public payloads;
@@ -187,7 +187,7 @@ pnpm install --frozen-lockfile
 pnpm dev:web
 ```
 
-Open `http://127.0.0.1:5173/` for the Workbench or `/status` for the service diagnostic. The Vite-only proxy forwards `/api` to the default loopback daemon at `127.0.0.1:8420`. This fixed proxy is test tooling, not the owner of custom-domain, certificate, container, Tauri, or runtime listener configuration. See the [Workbench Impeccable audit](docs/qa/b4-workbench-impeccable-audit.md) and [status QA evidence](docs/qa/b4-truthful-shell-evidence.md) for the current test scope and release limits.
+Open `http://127.0.0.1:5173/` for the Workbench or `/status` for the service diagnostic. Vite forwards same-origin `/api` requests to the active local daemon during development. The browser can save a different non-secret service URL, but it never stores a bearer. A cross-origin browser URL requires an HTTPS reverse proxy that explicitly permits the Workbench origin through CORS. Direct `fastid` does not provide CORS. These client settings do not bind a listener or configure DNS, TLS, a reverse proxy, or a public deployment. See the [Workbench Impeccable audit](docs/qa/b4-workbench-impeccable-audit.md) and the [superseded status-only evidence](docs/qa/b4-truthful-shell-evidence.md) for their separate scopes.
 
 To inspect the governed public capability identifiers without starting a service:
 

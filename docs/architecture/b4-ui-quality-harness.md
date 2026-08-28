@@ -1,125 +1,68 @@
-# Milestone B4 UI/UX Testing & Quality Harness Architecture
+# B4 UI quality harness
 
-This document defines the architectural specification for Fasti's UI/UX quality pipeline, activating when Milestone B4 (the Svelte/Tauri UI Workbench) begins.
+This document records the current B4 quality boundary. It does not describe a
+public release or promise later infrastructure.
 
----
+## Current surface
 
-## 1. Quality Pipeline Architecture
+- `/` renders the local media Workbench.
+- `/status` renders the separate service diagnostic.
+- The browser reads generated health and Record contracts.
+- The Record list is a summary of at most 500 Records. The operation has no
+  cursor.
+- The browser owns no domain persistence or mutation queue.
+- The browser stores only non-secret display preferences and the selected
+  client service URL. Credentials remain in tab memory.
+- Trusted-host settings and unsupported domain mutations remain disabled in the
+  browser.
 
-```
-Svelte / Tauri UI Presentation Boundary
-  │
-  ├─► Layer 1: Storybook Component & Interaction Harness
-  │     ├── Interaction Tests (User clicks, keyboard navigation, form inputs)
-  │     ├── Axe Accessibility Automated Checks (`@axe-core/playwright`)
-  │     └── Explicit State Permutations (Loading, error, empty, offline, stale)
-  │
-  ├─► Layer 2: Playwright Cross-Platform User Journeys
-  │     ├── Offline & Local-First Kernel Resilience (Direct local `fastid` execution)
-  │     ├── Interruption & Crash Recovery Journey (Crash mid-edit -> Resume exact place)
-  │     └── In-Context Accessibility Checks (Axe runs on every journey state)
-  │
-  ├─► Layer 3: Visual & Artifact Regression (Argos CI — Non-Blocking Advisory)
-  │     ├── Multi-theme visual snapshots (Dark, high contrast, reduced motion)
-  │     ├── Viewport reflow snapshots (Mobile 320px, tablet, desktop 1440px)
-  │     └── Schema / Contract / Markdown artifact snapshot diffs
-  │
-  └─► Layer 4: Performance & Stability Sentinels (Lighthouse CI)
-        ├── Layout Stability (CLS = 0)
-        ├── Fast Interaction Response (INP < 100ms)
-        └── Cognitive Load & A11y Sentinel Scores
+## Gate layers
+
+```text
+Svelte presentation and host adapters
+  -> formatting, Svelte diagnostics, build, and UI policy checks
+  -> deterministic Playwright journeys with Axe
+  -> rendered design, contrast, reflow, target-size, and keyboard review
+  -> packaged assistive-technology and release evidence when B4 closes
 ```
 
----
+Playwright uses at most two workers. This keeps cold runs deterministic on
+constrained hosts. Tests use isolated local ports and do not reuse another
+worktree's server.
 
-## 2. Storybook State Permutation Matrix
+## Current state matrix
 
-Every user-facing component must define stories for explicit product states rather than optimistic demo paths. Uncertainty and interruption are first-class product states in Fasti.
+The automated matrix covers only states that the current host can produce:
 
-Per `ROADMAP.md` (B4), Fasti explicitly excludes playback controls, a `Chronicle` navigation item, instructional dashboard copy, and persistent connectivity badges.
+| Dimension     | Covered states                                                                                                               |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Routes        | Workbench root and service diagnostic                                                                                        |
+| Session       | Signed out, valid memory-only bearer, rejected bearer                                                                        |
+| Records       | Empty, bounded summary list, unavailable service                                                                             |
+| Settings      | Browser client URL, saved display state, trusted-host controls disabled                                                      |
+| Viewports     | 320, 768, and 1440 CSS pixels                                                                                                |
+| Themes        | Light and Dark                                                                                                               |
+| Accessibility | Keyboard, focus, Axe, contrast, reflow, text spacing, reduced motion, forced colors, and shared 44 CSS pixel product targets |
 
-| State Dimension | Required Story Permutations | Acceptance Criteria |
-|---|---|---|
-| **Data Presence** | Empty state, 1 record, 1,000 records (virtualized list) | Clean call to action, stable scroll position, no UI freeze |
-| **Resolution Status**| Fully resolved, ambiguous match, un-enriched scrobble | Amber warning badge, explicit manual reconciliation trigger |
-| **Local Kernel Status**| Online, daemon unreachable, database locked, sync pending | Contextual failure guidance, zero silent loss, retry trigger |
-| **Interaction States**| Default, hover, keyboard focused, active, disabled | Visible 3px high-contrast focus ring, 44px min touch target |
-| **Display Constraints**| Long strings (256+ chars), narrow viewport (320px), 200% zoom | Text wraps cleanly or truncates with tooltip, zero horizontal overflow |
-| **Accessibility Modes**| Default theme, High Contrast, `prefers-reduced-motion: reduce` | Animations disabled, color contrast >= 7:1 (B8b enforces minimum 7:1 ratio) |
+Do not add optimistic stories for a capability that has no real host command.
+Add its states when its bounded context, contract or IPC adapter, typed recovery,
+and end-to-end evidence land together.
 
----
+## Non-negotiable boundaries
 
-## 3. Playwright Journey Contracts
+- Headless daemon and contract gates remain independent of browser packaging.
+- `fastid` and SQLite own domain persistence.
+- The UI does not invent retry or mutation queues.
+- UI code contains no analytics, session replay, external font, or CDN
+  dependency.
+- Unsupported controls stay visible and disabled when that preserves approved
+  information architecture.
+- Motion is functional, transform-based, and removed for reduced-motion users.
+- Local tests do not depend on a cloud screenshot or performance service.
 
-Playwright tests verify resilient human journeys rather than shallow DOM assertions.
+## Evidence limits
 
-### Core Journey 1: First-Launch to Unresolved Scrobble
-1. Launch app with fresh workspace.
-2. Verify empty state guidance for approved media types (Movies, Shows, Music, Books, Games, Podcasts).
-3. Ingest raw scrobble observation through local `fastid` API without external metadata lookup.
-4. Verify observation is recorded immediately with `rec_*` key and marked `unresolved`.
-5. Verify no blocking spinners, fake missing fields, or playback player widgets.
-
-### Core Journey 2: Offline Resilience & Interruption Recovery (No Client Queues)
-1. Ingest 5 observations via local daemon.
-2. Sever upstream network connection (local `fastid` remains the local-first authority).
-3. Edit record tags, list memberships, and manual reconciliation notes directly against local kernel.
-4. Simulate process termination / reload.
-5. Verify all local edits and unresolved states are restored from SQLite cleanly.
-6. Reconnect external network; verify background reconciliation resumes without overwriting user notes.
-
----
-
-## 4. In-Context Accessibility (Axe-Core)
-
-Automated accessibility audits are integrated directly into Playwright journey steps via `@axe-core/playwright`:
-
-```typescript
-import { test, expect } from '@playwright/test';
-import AxeBuilder from '@axe-core/playwright';
-
-test('Media view has zero WCAG 2.1 AA violations in empty and daemon-offline states', async ({ page }) => {
-  await page.goto('/activity');
-
-  // Test empty state
-  const accessibilityScanResults = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-    .analyze();
-  expect(accessibilityScanResults.violations).toEqual([]);
-
-  // Verify minimum 7:1 contrast ratio (AAA-level)
-  const contrastResults = await new AxeBuilder({ page })
-    .withTags(['wcag21aaa'])
-    .disableRules(['color-contrast']) // Re-enable with explicit 7:1 threshold
-    .options({ rules: { 'color-contrast-enhanced': { enabled: true } } })
-    .analyze();
-  expect(contrastResults.violations.filter(v => v.id === 'color-contrast-enhanced')).toEqual([]);
-
-  // Trigger daemon unreachable state
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('fasti:daemon-offline')));
-  const offlineScanResults = await new AxeBuilder({ page }).analyze();
-  expect(offlineScanResults.violations).toEqual([]);
-});
-```
-
----
-
-## 5. Visual Regression & Snapshot Strategy (Argos CI + Local Pixelmatch)
-
-* **SaaS Tier (Argos CI)**: 5,000 screenshots per month on OSS tier.
-* **Non-Blocking Guardrail**: Argos CI runs as an **advisory check on PRs**. Quota exhaustion or SaaS latency must never block local development or CI merges.
-* **Deterministic Fallback**: Local Playwright screenshot assertions and artifact diffs run offline in deterministic CI.
-* **Scope**:
-  * Core approved views (Media Navigation, Poster/Row Grid, Detail View, Ingest Log, Settings, Export/Import).
-  * 3 standard breakpoints (360px, 768px, 1280px).
-  * Light & Dark themes.
-  * Snapshot diffing of generated Markdown / JSON documentation.
-
----
-
-## 6. Non-Negotiable Boundaries
-
-* **No UI test blocks headless daemon builds**: B1–B3 engine tests and CLI verification remain decoupled from web/Tauri UI harnesses.
-* **No client-side retry/mutation queues**: `fastid` and local SQLite own persistence and synchronization. The UI presentation boundary does not invent offline queues (`ROADMAP.md:95`).
-* **No flaky cloud browser dependencies**: Playwright runs against standard local headless Chromium/Firefox/WebKit instances on GitHub Actions runners.
-* **Zero telemetry in UI code**: The web frontend contains no analytics trackers, session replay scripts, or external font/CDN calls.
+Automated Axe and browser checks do not prove WCAG or EN 301 549 conformity.
+B4 closure still requires packaged keyboard and screen-reader evidence plus
+testing with representative disabled and neurodivergent users. B8b requires a
+separate release-bound design and accessibility receipt.

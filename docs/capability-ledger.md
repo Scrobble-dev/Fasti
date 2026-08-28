@@ -32,9 +32,10 @@ The fixture separates contract proof from availability claims. Its finite routes
 Required surfaces are generated or validated from the registry across domain/application ownership, OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, semantic examples, CLI, typed TypeScript HTTP/SSE SDK, knowledge, and package smoke. Reasoned `N/A` is explicit—for example, operational health has no event stream and access administration is not linked-data domain state.
 
 The browser Workbench consumes generated SDK parsers and adds no API shape,
-domain state, retry queue, persistence, or public binding. Its local Vite proxy
-is not an endpoint-configuration authority. The Workbench is review code, not a
-published web product or B4 completion claim.
+domain state, retry queue, or public binding. It stores only non-secret display
+preferences and the selected client service URL. Credentials remain in tab
+memory. Domain persistence remains in `fastid` and SQLite. The Workbench is
+review code, not a published web product or B4 completion claim.
 
 ## Workbench presentation truth
 
@@ -42,7 +43,7 @@ published web product or B4 completion claim.
 | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Product root and media navigation                                                                   | `/` renders the preserved Tabler-based Workbench. Empty and error states come from the host; no mock catalogue is loaded.     | B4 presentation evidence and B8 packaging remain open.                                                                                                   |
 | Local service status                                                                                | `/status` consumes the generated `system.health` parser.                                                                      | `system.health`; no new capability required.                                                                                                             |
-| Browser record list                                                                                 | `GET /api/v1/records` uses a real `identity_read` bearer held only in tab memory. Reload clears it.                           | Existing `identity.record.list` registry/OpenAPI/SDK surface.                                                                                            |
+| Browser record list                                                                                 | `GET /api/v1/records` uses a real `identity_read` bearer held only in tab memory. Reload clears it. The summary is limited to 500 Records and has no cursor. | Existing `identity.record.list` registry/OpenAPI/SDK surface.                                                                                            |
 | Tauri record list                                                                                   | Trusted host invokes the authenticated local records query without an HTTP round trip.                                        | Existing access and identity application ports.                                                                                                          |
 | Activity, watch-state, watchlist, collection, rating, review, note, tag, artwork, and episode edits | Approved controls remain visible but disabled when the host has no matching command. The UI does not mutate local mock state. | B4 must land each domain/application capability, registry disposition, applicable OpenAPI/SDK or IPC adapter, typed recovery, and E2E evidence together. |
 | API credential connection                                                                           | Active in the browser for record reads; active API-client administration stays in the trusted packaged host.                  | [Authentication boundaries](architecture/authentication.md).                                                                                             |

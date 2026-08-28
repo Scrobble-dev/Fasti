@@ -29,9 +29,8 @@ prints the port it actually got. Automatic fallback is unavailable when
 pin the URL other tooling should use. Run `./scripts/dev.sh --status` at
 any time to see the live URL.
 
-Some worktrees also carry `apps/web`, a pre-production health and
-interface-quality harness (see the "Browser QA harness" row in the status
-table above). If this worktree has `apps/web`, the command also builds
+Some worktrees also carry `apps/web`, the local B4 Workbench and its separate
+service diagnostic. If this worktree has `apps/web`, the command also builds
 `@fasti/tokens` and `@fasti/sdk` (its workspace dependencies), then starts
 Vite. The harness listens at `http://127.0.0.1:5173` and proxies `/api`
 requests to whichever URL `fastid` actually started on.
@@ -39,6 +38,13 @@ requests to whichever URL `fastid` actually started on.
 Not every worktree has `apps/web`. Check with `git worktree list`. Then look
 for `apps/web` inside each worktree path. If your current worktree does not
 have `apps/web`, `./scripts/dev.sh` says so and starts only `fastid`.
+
+Open `/` for the Workbench and `/status` for service diagnostics. The browser
+can save one non-secret client service URL. A cross-origin URL requires an
+HTTPS reverse proxy that explicitly allows the Workbench origin through CORS.
+Direct `fastid` does not provide CORS. Node listener, public URL, provider, and
+credential settings remain disabled in the browser because they require the
+trusted host.
 
 Other commands:
 
