@@ -33,6 +33,7 @@
   interface Props {
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
+    canAccessProfileData?: boolean;
     activeTab?:
       | "network"
       | "providers"
@@ -62,6 +63,7 @@
   let {
     host,
     workbenchPreferences,
+    canAccessProfileData = true,
     activeTab = "network",
     onTabChange,
     onUpdateWorkbenchPreferences,
@@ -79,9 +81,10 @@
     | "system" = $state("network");
 
   $effect(() => {
+    const canLoadProfileData = canAccessProfileData;
     if (activeTab) {
       active = activeTab;
-      if (activeTab === "nuvio_collections") {
+      if (activeTab === "nuvio_collections" && canLoadProfileData) {
         void untrack(loadNuvioCollections);
       }
     }
@@ -212,7 +215,8 @@
   }
 
   async function loadNuvioCollections(): Promise<void> {
-    if (!host.getNuvioCollections || nuvioLoading) return;
+    if (!canAccessProfileData || !host.getNuvioCollections || nuvioLoading)
+      return;
     nuvioLoading = true;
     nuvioProblem = undefined;
     try {
@@ -229,7 +233,13 @@
   }
 
   async function importNuvioCollections(): Promise<void> {
-    if (!host.replaceNuvioCollections || !nuvioFile || nuvioLoading) return;
+    if (
+      !canAccessProfileData ||
+      !host.replaceNuvioCollections ||
+      !nuvioFile ||
+      nuvioLoading
+    )
+      return;
     nuvioProblem = undefined;
     nuvioNotice = undefined;
     if (nuvioFile.size > MAX_NUVIO_COLLECTIONS_BYTES) {
@@ -276,6 +286,7 @@
 
   async function clearNuvioCollections(): Promise<void> {
     if (
+      !canAccessProfileData ||
       !host.clearNuvioCollections ||
       nuvioLoading ||
       !confirm(
@@ -405,6 +416,7 @@
     packName: string,
   ): Promise<void> {
     if (
+      !canAccessProfileData ||
       !host.replaceNuvioCollections ||
       nuvioLoading ||
       (nuvioDocument !== null &&
@@ -1337,14 +1349,20 @@
               type="button"
               class="secondary"
               onclick={() => void loadNuvioCollections()}
-              disabled={!host.getNuvioCollections || nuvioLoading}
+              disabled={!canAccessProfileData ||
+                !host.getNuvioCollections ||
+                nuvioLoading}
             >
               <IconRefresh size={18} aria-hidden="true" />
               {nuvioLoading ? "Working…" : "Refresh"}
             </button>
           </div>
 
-          {#if host.getNuvioCollections && host.replaceNuvioCollections && host.clearNuvioCollections}
+          {#if !canAccessProfileData}
+            <p class="managed-note">
+              Sign in to manage this profile's Nuvio Collections document.
+            </p>
+          {:else if host.getNuvioCollections && host.replaceNuvioCollections && host.clearNuvioCollections}
             {@const counts = nuvioCounts(nuvioDocument)}
             <dl class="nuvio-summary" aria-label="Saved document summary">
               <div>
@@ -1918,6 +1936,9 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    color: var(--fasti-text-primary);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
   }
 
   .credential-form {

@@ -61,6 +61,21 @@ test("Workbench navigation and theme controls keep 44 pixel targets", async ({
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
 
+test("metadata documentation links keep contrast in the default dark theme", async ({
+  page,
+}) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/settings/metadata");
+
+  const documentationLinks = page.locator(".provider-card .docs-link");
+  expect(await documentationLinks.count()).toBeGreaterThan(0);
+  await expect(documentationLinks.first()).toBeVisible();
+  expect(
+    (await new AxeBuilder({ page }).withRules(["color-contrast"]).analyze())
+      .violations,
+  ).toEqual([]);
+});
+
 test("theme settings apply distinct Tabler and Fasti effects and persist", async ({
   page,
 }) => {

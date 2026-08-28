@@ -499,6 +499,26 @@ test("direct canonical and compatibility Settings routes preserve one active sec
   }
 });
 
+test("signed-out Collections does not request profile data", async ({
+  page,
+}) => {
+  let profileRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/v1/profile/nuvio-collections")
+      profileRequests += 1;
+  });
+
+  await page.goto("/settings/collections");
+  await expect(
+    page.getByText(
+      "Sign in to manage this profile's Nuvio Collections document.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await page.waitForLoadState("networkidle");
+  expect(profileRequests).toBe(0);
+});
+
 for (const viewport of [...mobileViewports, ...desktopViewports]) {
   test(`${viewport.width}px shell and Settings do not overflow horizontally`, async ({
     page,

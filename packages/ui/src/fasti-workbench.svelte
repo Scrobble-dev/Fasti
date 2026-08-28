@@ -984,6 +984,8 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          canAccessProfileData={!host.currentBrowserSession ||
+            (browserSessionChecked && browserSession !== null)}
           activeTab={settingsTab}
           onTabChange={(tab: SettingsTab) => {
             settingsTab = tab;
