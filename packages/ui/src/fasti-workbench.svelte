@@ -331,7 +331,7 @@
       root.style.setProperty("--tblr-primary-fg", accent.contrast);
       root.style.setProperty(
         "--tblr-primary-darken",
-        `color-mix(in srgb, ${accent.color} 88%, ${accent.contrast === "#ffffff" ? "#000000" : "#ffffff"})`,
+        `color-mix(in srgb, ${accent.color} 88%, #000000)`,
       );
     }
     if (themeSettings.fontFamily === "serif") {

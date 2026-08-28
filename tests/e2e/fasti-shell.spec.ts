@@ -1101,6 +1101,12 @@ test("profile Nuvio Collections import, export, and clear stay local", async ({
           .__NUVIO_REPLACE_COUNT__,
     ),
   ).toBe(1);
+  const dismissedDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JSON" }).click();
+  const dismissedDownload = await dismissedDownloadPromise;
+  expect(
+    JSON.parse(await readFile((await dismissedDownload.path())!, "utf8")),
+  ).toEqual(input);
 
   page.once("dialog", (dialog) => dialog.accept());
   await preset.getByRole("button", { name: "Install pack" }).click();
