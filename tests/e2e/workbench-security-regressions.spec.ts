@@ -595,6 +595,8 @@ test("Discover selects configured providers and refreshes explicit setup state",
     };
     const browserWindow = window as typeof window & {
       __SEARCH_INPUT__?: unknown;
+      __TRACK_INPUT__?: unknown;
+      __TRACK_CALLS__?: number;
       __PROVIDER_STATUS_CALLS__?: number;
       __SET_TMDB_CONFIGURED__?: (configured: boolean) => void;
       __TAURI_INTERNALS__: {
@@ -602,6 +604,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
       };
     };
     browserWindow.__PROVIDER_STATUS_CALLS__ = 0;
+    browserWindow.__TRACK_CALLS__ = 0;
     browserWindow.__SET_TMDB_CONFIGURED__ = (configured) => {
       tmdbConfigured = configured;
     };
@@ -617,10 +620,34 @@ test("Discover selects configured providers and refreshes explicit setup state",
               (browserWindow.__PROVIDER_STATUS_CALLS__ ?? 0) + 1;
             return providerStatus();
           case "save_provider_credential":
+            if (
+              (arguments_ as { input?: { credential?: string } })?.input
+                ?.credential === "rejected-credential"
+            ) {
+              throw {
+                detail: "The provider rejected this credential.",
+                next_action: "Check the credential and try again.",
+              };
+            }
             googleConfigured = true;
             return providerStatus();
           case "search_provider":
             browserWindow.__SEARCH_INPUT__ = arguments_;
+            if (
+              (arguments_ as { input?: { provider?: string } })?.input
+                ?.provider === "google-books"
+            ) {
+              return [
+                {
+                  provider: "google-books",
+                  provider_id: "dune-volume",
+                  title: "Dune",
+                  kind: "book",
+                  authors: ["Frank Herbert"],
+                  image_url: null,
+                },
+              ];
+            }
             return [
               {
                 provider: "tmdb",
@@ -630,7 +657,32 @@ test("Discover selects configured providers and refreshes explicit setup state",
                 authors: [],
                 image_url: null,
               },
+              {
+                provider: "tmdb",
+                provider_id: "1396",
+                title: "Breaking Bad: The Movie",
+                kind: "movie",
+                authors: [],
+                image_url: null,
+              },
             ];
+          case "track_provider_candidate":
+            browserWindow.__TRACK_INPUT__ = arguments_;
+            browserWindow.__TRACK_CALLS__ =
+              (browserWindow.__TRACK_CALLS__ ?? 0) + 1;
+            if (
+              (arguments_ as { input?: { kind?: string } })?.input?.kind ===
+              "movie"
+            ) {
+              throw {
+                detail: "TMDB could not return the selected movie.",
+                next_action: "Try the search again.",
+              };
+            }
+            return {
+              record_id: "rec_01991f588e0070008000000000000010",
+              grain: "show",
+            };
           case "list_records":
           case "list_reviews":
             return [];
@@ -698,7 +750,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await search.fill("Breaking Bad");
   await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Breaking Bad" }),
+    page.getByRole("heading", { name: "Breaking Bad", exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(
@@ -709,20 +761,84 @@ test("Discover selects configured providers and refreshes explicit setup state",
   ).toEqual({
     input: { provider: "tmdb", query: "Breaking Bad" },
   });
-  await expect(page.getByRole("button", { name: "Track Now" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Create Record" })).toHaveCount(
+    2,
+  );
+  const showResult = page.getByRole("listitem").filter({
+    has: page.getByRole("heading", { name: "Breaking Bad", exact: true }),
+  });
+  await showResult.getByRole("button", { name: "Create Record" }).click();
+  await expect(
+    showResult.getByRole("button", { name: "Record created" }),
+  ).toBeDisabled();
+  await expect(showResult.getByRole("status")).toHaveText(
+    "Record ID: rec_01991f588e0070008000000000000010",
+  );
+  await expect(
+    page
+      .getByRole("listitem")
+      .filter({
+        has: page.getByRole("heading", { name: "Breaking Bad: The Movie" }),
+      })
+      .getByRole("button", { name: "Create Record" }),
+  ).toBeEnabled();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __TRACK_INPUT__?: unknown })
+          .__TRACK_INPUT__,
+    ),
+  ).toEqual({
+    input: { provider: "tmdb", provider_id: "1396", kind: "show" },
+  });
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __TRACK_CALLS__?: number })
+          .__TRACK_CALLS__,
+    ),
+  ).toBe(1);
+  const movieResult = page.getByRole("listitem").filter({
+    has: page.getByRole("heading", { name: "Breaking Bad: The Movie" }),
+  });
+  await movieResult.getByRole("button", { name: "Create Record" }).click();
+  await expect(movieResult.getByRole("alert")).toHaveText(
+    "TMDB could not return the selected movie. Try the search again.",
+  );
+  await expect(
+    movieResult.getByRole("button", { name: "Create Record" }),
+  ).toBeEnabled();
+  await expect(
+    movieResult.getByRole("button", { name: "Record created" }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __TRACK_CALLS__?: number })
+          .__TRACK_CALLS__,
+    ),
+  ).toBe(2);
 
   await provider.selectOption("google-books");
   await expect(
-    page.getByRole("heading", { name: "Google Books needs a credential" }),
+    page.getByRole("heading", { name: /needs a credential$/ }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Breaking Bad" })).toHaveCount(
     0,
   );
-  await openWorkbenchSection(page, "Settings");
-  await page
-    .getByLabel("Settings section", { exact: true })
-    .selectOption("providers");
-  await page.getByLabel("New credential").fill("provider-secret");
+  await page.getByRole("button", { name: "Open provider settings" }).click();
+  await expect(
+    page.getByLabel("Settings section", { exact: true }),
+  ).toHaveValue("providers");
+  const googleCredential = page.getByLabel("Google Books API key");
+  await googleCredential.fill("rejected-credential");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "The provider rejected this credential. Check the credential and try again.",
+  );
+  await expect(googleCredential).toHaveValue("rejected-credential");
+
+  await googleCredential.fill("provider-secret");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(
     page.getByRole("status").filter({ hasText: "Credential saved" }),
@@ -739,6 +855,20 @@ test("Discover selects configured providers and refreshes explicit setup state",
       ),
   ).not.toContain("provider-secret");
 
+  await page.getByRole("button", { name: "Test search" }).click();
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Search succeeded. 1 candidate returned." }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __SEARCH_INPUT__?: unknown })
+          .__SEARCH_INPUT__,
+    ),
+  ).toEqual({ input: { provider: "google-books", query: "Dune" } });
+
   await openWorkbenchSection(page, "Discover");
   await expect(page.getByLabel("Metadata provider")).toHaveValue(
     "google-books",
@@ -747,7 +877,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
     page.getByRole("searchbox", { name: "Search Google Books" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Google Books needs a credential" }),
+    page.getByRole("heading", { name: /needs a credential$/ }),
   ).toHaveCount(0);
 
   await provider.selectOption("tmdb");
@@ -764,4 +894,19 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await expect(
     page.getByRole("heading", { name: "TMDB needs a credential" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Open provider settings" }).click();
+  await expect(page.getByLabel("TMDB API Read Access Token")).toBeVisible();
+});
+
+test("browser Discover fails closed when provider credentials are unavailable", async ({
+  page,
+}) => {
+  await page.goto("/discover");
+  await expect(
+    page.getByRole("heading", { name: /needs a credential$/ }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create Record" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("searchbox")).toHaveCount(0);
 });

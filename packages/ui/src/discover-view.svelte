@@ -1,5 +1,6 @@
 <script lang="ts">
   import type {
+    CreateRecordResult,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
   } from "./types.js";
@@ -16,11 +17,16 @@
     ) => Promise<ProviderSearchCandidate[]>;
     onOpenSettings: () => void;
     onRetry: () => void;
-    onTrackRecord?: (candidate: ProviderSearchCandidate) => Promise<void>;
+    onCandidateAction?: (
+      candidate: ProviderSearchCandidate,
+    ) => Promise<CreateRecordResult | void>;
     embedded?: boolean;
     actionLabel?: string;
+    pendingLabel?: string;
     completedLabel?: string;
     actionProblemFallback?: string;
+    actionUnavailableLabel?: string;
+    actionUnavailableText?: string;
     selectedProviderId?: string;
     selectionExplicit?: boolean;
   }
@@ -32,11 +38,14 @@
     onSearch,
     onOpenSettings,
     onRetry,
-    onTrackRecord,
+    onCandidateAction,
     embedded = false,
-    actionLabel = "Track Now",
-    completedLabel = "Added to library",
-    actionProblemFallback = "Fasti could not add this title to your library.",
+    actionLabel = "Create Record",
+    pendingLabel = "Creating…",
+    completedLabel = "Record created",
+    actionProblemFallback = "Fasti could not create this Record.",
+    actionUnavailableLabel = "Record creation unavailable",
+    actionUnavailableText = "Search does not create a Record. Record creation is unavailable until the host can save the Record, identifier, and metadata together.",
     selectedProviderId = $bindable(""),
     selectionExplicit = $bindable(false),
   }: Props = $props();
@@ -46,25 +55,37 @@
   let problem = $state("");
   let searched = $state(false);
   let completedQuery = $state("");
-  let trackingId = $state("");
-  let trackedIds = $state<Set<string>>(new Set());
-  let trackProblem = $state("");
+  let actionKey = $state("");
+  let completedKeys = $state<Set<string>>(new Set());
+  let createdRecordIds = $state<Record<string, string>>({});
+  let actionProblem = $state("");
+  let actionProblemKey = $state("");
   let searchRevision = 0;
   let searchProviderId = "";
 
-  async function trackRecord(
+  function candidateKey(candidate: ProviderSearchCandidate): string {
+    return `${candidate.provider}:${candidate.kind}:${candidate.provider_id}`;
+  }
+
+  async function runCandidateAction(
     candidate: ProviderSearchCandidate,
   ): Promise<void> {
-    if (!onTrackRecord || trackingId) return;
-    trackingId = candidate.provider_id;
-    trackProblem = "";
+    if (!onCandidateAction || actionKey) return;
+    const key = candidateKey(candidate);
+    actionKey = key;
+    actionProblem = "";
+    actionProblemKey = "";
     try {
-      await onTrackRecord(candidate);
-      trackedIds = new Set([...trackedIds, candidate.provider_id]);
+      const result = await onCandidateAction(candidate);
+      completedKeys = new Set([...completedKeys, key]);
+      if (result) {
+        createdRecordIds = { ...createdRecordIds, [key]: result.record_id };
+      }
     } catch (error) {
-      trackProblem = hostProblemText(error, actionProblemFallback);
+      actionProblem = hostProblemText(error, actionProblemFallback);
+      actionProblemKey = key;
     } finally {
-      trackingId = "";
+      actionKey = "";
     }
   }
   const supportedProviders = $derived(
@@ -102,6 +123,8 @@
     searching = false;
     results = [];
     problem = "";
+    actionProblem = "";
+    actionProblemKey = "";
     searched = false;
     completedQuery = "";
   });
@@ -127,6 +150,8 @@
     const revision = ++searchRevision;
     searching = true;
     problem = "";
+    actionProblem = "";
+    actionProblemKey = "";
     searched = false;
     try {
       const nextResults = await onSearch(provider.provider, value);
@@ -261,15 +286,14 @@
             {results.length === 1 ? "result" : "results"} for
             {completedQuery}.
           </p>
-          {#if !onTrackRecord}
-            <p id="tracking-unavailable" class="result-action-note">
-              Search does not change your library. Adding a result is
-              unavailable until the host can save the record and identifier
-              together.
+          {#if !onCandidateAction}
+            <p id="candidate-action-unavailable" class="result-action-note">
+              {actionUnavailableText}
             </p>
           {/if}
           <ol>
-            {#each results as result (result.provider_id)}
+            {#each results as result (candidateKey(result))}
+              {@const resultKey = candidateKey(result)}
               <li>
                 <svelte:element
                   this={embedded ? "h5" : "h3"}
@@ -306,36 +330,41 @@
                     <dd><code>{result.provider_id}</code></dd>
                   </div>
                 </dl>
-                {#if onTrackRecord}
+                {#if onCandidateAction}
                   <button
                     type="button"
                     class="track-btn"
-                    disabled={Boolean(trackingId) ||
-                      trackedIds.has(result.provider_id)}
-                    onclick={() => trackRecord(result)}
+                    disabled={Boolean(actionKey) ||
+                      completedKeys.has(resultKey)}
+                    onclick={() => runCandidateAction(result)}
                   >
-                    {#if trackedIds.has(result.provider_id)}
+                    {#if completedKeys.has(resultKey)}
                       {completedLabel}
-                    {:else if trackingId === result.provider_id}
-                      Adding…
+                    {:else if actionKey === resultKey}
+                      {pendingLabel}
                     {:else}
                       {actionLabel}
                     {/if}
                   </button>
+                  {#if createdRecordIds[resultKey]}
+                    <p class="result-action-status" role="status">
+                      Record ID: <code>{createdRecordIds[resultKey]}</code>
+                    </p>
+                  {/if}
+                  {#if actionProblemKey === resultKey}
+                    <p class="problem" role="alert">{actionProblem}</p>
+                  {/if}
                 {:else}
                   <button
                     type="button"
                     class="track-btn"
-                    aria-describedby="tracking-unavailable"
-                    disabled>Tracking unavailable</button
+                    aria-describedby="candidate-action-unavailable"
+                    disabled>{actionUnavailableLabel}</button
                   >
                 {/if}
               </li>
             {/each}
           </ol>
-          {#if trackProblem}
-            <p class="problem" role="alert">{trackProblem}</p>
-          {/if}
         {:else}
           <p>Enter a title or provider identifier.</p>
         {/if}
@@ -510,6 +539,10 @@
 
   .track-btn {
     margin-top: 12px;
+  }
+
+  .result-action-status {
+    margin-top: 8px;
   }
 
   @media (max-width: 47.99rem) {

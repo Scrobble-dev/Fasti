@@ -154,6 +154,16 @@ The daemon and container launcher therefore remain the only owners of
 `FASTI_LISTEN`, `FASTI_PORT`, `FASTI_PORT_FALLBACK`, and bound-address
 publication. Settings does not present an unconsumed listener control.
 
+The prepared source launcher preserves that boundary:
+
+```bash
+FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
+```
+
+It builds the static Workbench and runs the Tauri host in the foreground. It
+does not start the daemon or Vite. The data root is mandatory and is resolved
+before it reaches the Desktop process.
+
 Desktop builds still require an explicit, non-empty `FASTI_DATA_ROOT`. Android
 uses an explicit `FASTI_DATA_ROOT` when the launch environment supplies one;
 otherwise it uses the app's sandbox data directory. The explicit override wins.
@@ -188,6 +198,18 @@ precedence and are read-only in Settings. The host loads a credential only
 after outbound access is authorized. It sends Google Books keys in the
 sensitive `X-Goog-Api-Key` header and TMDB tokens in the sensitive
 `Authorization: Bearer` header.
+
+Settings accepts a Google Books API key or a TMDB API Read Access Token. It does
+not describe a TMDB API key because the adapter does not accept one. A rejected
+credential remains masked in the active field so it can be corrected; it is not
+copied to the URL, page text, browser storage, logs, or screenshots. The field
+clears after successful storage. Credential operations are single-flight.
+
+**Test search** performs an ordinary, non-mutating provider search with a fixed
+query. It can consume provider quota. There is no separate credential-test IPC.
+Discover uses only the trusted host's atomic `track_provider_candidate`
+operation to create a Record. The UI treats `provider:kind:provider_id` as the
+temporary candidate identity, then displays the exact returned Fasti Record ID.
 
 Search returns at most ten neutral candidates. Selecting a candidate does not
 trust the earlier search body: the host performs a bounded `metadata.read` for

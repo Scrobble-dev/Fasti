@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import {
     IconAlertCircle,
     IconBug,
@@ -129,7 +129,14 @@
     }
   }
 
-  async function testProviderConnection(providerId: string) {
+  function providerCredentialLabel(provider: string): string {
+    if (provider === "tmdb") return "TMDB API Read Access Token";
+    if (provider === "google-books") return "Google Books API key";
+    return "Provider credential";
+  }
+
+  async function testProviderSearch(providerId: string) {
+    if (credentialOperationBusy) return;
     testingProvider = providerId;
     testResults = { ...testResults, [providerId]: undefined };
     try {
@@ -144,17 +151,19 @@
         ...testResults,
         [providerId]: {
           ok: true,
-          message: `Connection successful. Returned ${results.length} search candidate results.`,
+          message: `Search succeeded. ${results.length} ${results.length === 1 ? "candidate" : "candidates"} returned.`,
         },
       };
-    } catch (err: unknown) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : "Connection test failed. Please verify credentials.";
+    } catch (error: unknown) {
       testResults = {
         ...testResults,
-        [providerId]: { ok: false, message: msg },
+        [providerId]: {
+          ok: false,
+          message: hostProblemText(
+            error,
+            "Search failed. Verify the credential and network policy.",
+          ),
+        },
       };
     } finally {
       testingProvider = undefined;
@@ -169,6 +178,9 @@
   let providerNotice = $state<string>();
   let editing = $state<Record<string, string>>({});
   let busyProvider = $state<string>();
+  const credentialOperationBusy = $derived(
+    providerLoading || Boolean(busyProvider) || Boolean(testingProvider),
+  );
   let nuvioDocument = $state<NuvioCollectionsDocument | null>(null);
   let nuvioFile = $state<File>();
   let nuvioFileInput = $state<HTMLInputElement>();
@@ -519,9 +531,10 @@
   }
 
   async function loadProviders(): Promise<void> {
-    if (providerLoading) return;
+    if (credentialOperationBusy) return;
     providerLoading = true;
     providerProblem = undefined;
+    testResults = {};
     try {
       providers = await host.providerCredentialStatus();
     } catch (error) {
@@ -536,12 +549,14 @@
 
   async function saveProvider(provider: string): Promise<void> {
     const credential = editing[provider]?.trim();
-    if (!credential || busyProvider) return;
+    if (!credential || credentialOperationBusy) return;
     busyProvider = provider;
     providerProblem = undefined;
     providerNotice = undefined;
     try {
       providers = await host.saveProviderCredential(provider, credential);
+      editing = { ...editing, [provider]: "" };
+      testResults = { ...testResults, [provider]: undefined };
       providerNotice = "Credential saved in the platform credential store.";
       onProviderCredentialsChanged?.();
     } catch (error) {
@@ -550,13 +565,12 @@
         "Fasti rejected the provider credential.",
       );
     } finally {
-      editing = { ...editing, [provider]: "" };
       busyProvider = undefined;
     }
   }
 
   async function deleteProvider(provider: string): Promise<void> {
-    if (busyProvider) return;
+    if (credentialOperationBusy) return;
     const label =
       providers.find((candidate) => candidate.provider === provider)?.label ??
       provider;
@@ -570,10 +584,13 @@
     busyProvider = provider;
     providerProblem = undefined;
     providerNotice = undefined;
+    let removed = false;
     try {
       providers = await host.deleteProviderCredential(provider);
+      testResults = { ...testResults, [provider]: undefined };
       providerNotice = "Credential removed from the platform credential store.";
       onProviderCredentialsChanged?.();
+      removed = true;
     } catch (error) {
       providerProblem = hostProblemText(
         error,
@@ -581,6 +598,10 @@
       );
     } finally {
       busyProvider = undefined;
+    }
+    if (removed) {
+      await tick();
+      document.getElementById(`provider-${provider}`)?.focus();
     }
   }
 
@@ -827,7 +848,7 @@
               type="button"
               class="secondary"
               onclick={() => void loadProviders()}
-              disabled={providerLoading}
+              disabled={credentialOperationBusy}
             >
               <IconRefresh size={18} aria-hidden="true" />
               {providerLoading ? "Loading…" : "Refresh"}
@@ -881,9 +902,9 @@
                       void saveProvider(provider.provider);
                     }}
                   >
-                    <label for={`provider-${provider.provider}`}
-                      >New credential</label
-                    >
+                    <label for={`provider-${provider.provider}`}>
+                      {providerCredentialLabel(provider.provider)}
+                    </label>
                     <div class="credential-input-row">
                       <div class="secret-field-wrap">
                         <input
@@ -892,16 +913,14 @@
                             ? "text"
                             : "password"}
                           autocomplete="off"
-                          placeholder={provider.provider === "tmdb"
-                            ? "Enter TMDB API Read Access Token or API Key"
-                            : "Enter API key or access token"}
+                          placeholder={`Enter ${providerCredentialLabel(provider.provider)}`}
                           value={editing[provider.provider] ?? ""}
                           oninput={(event) =>
                             (editing = {
                               ...editing,
                               [provider.provider]: event.currentTarget.value,
                             })}
-                          disabled={busyProvider === provider.provider}
+                          disabled={credentialOperationBusy}
                         />
                         <button
                           type="button"
@@ -931,7 +950,7 @@
                         type="submit"
                         class="primary"
                         disabled={!editing[provider.provider]?.trim() ||
-                          Boolean(busyProvider)}
+                          credentialOperationBusy}
                       >
                         <IconKey size={18} aria-hidden="true" /> Save
                       </button>
@@ -940,9 +959,8 @@
                           type="button"
                           class="secondary test-conn-btn"
                           onclick={() =>
-                            void testProviderConnection(provider.provider)}
-                          disabled={Boolean(busyProvider) ||
-                            testingProvider === provider.provider}
+                            void testProviderSearch(provider.provider)}
+                          disabled={credentialOperationBusy}
                         >
                           {#if testingProvider === provider.provider}
                             <IconRefresh
@@ -951,14 +969,14 @@
                               aria-hidden="true"
                             /> Testing…
                           {:else}
-                            Test Connection
+                            Test search
                           {/if}
                         </button>
                         <button
                           type="button"
                           class="danger"
                           onclick={() => void deleteProvider(provider.provider)}
-                          disabled={Boolean(busyProvider)}
+                          disabled={credentialOperationBusy}
                         >
                           Remove
                         </button>
@@ -971,7 +989,9 @@
                       class="test-result-alert"
                       class:success={testResults[provider.provider]?.ok}
                       class:failure={!testResults[provider.provider]?.ok}
-                      role="status"
+                      role={testResults[provider.provider]?.ok
+                        ? "status"
+                        : "alert"}
                     >
                       {#if testResults[provider.provider]?.ok}
                         <IconCheck size={16} aria-hidden="true" />
@@ -1861,7 +1881,7 @@
       var(--fasti-state-success, #2fb344) 15%,
       transparent
     );
-    color: var(--fasti-state-success, #2fb344);
+    color: var(--fasti-text-primary);
     border: 1px solid
       color-mix(in srgb, var(--fasti-state-success, #2fb344) 40%, transparent);
   }

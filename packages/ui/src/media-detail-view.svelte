@@ -1157,10 +1157,13 @@
                 onSearch={searchCompatibleMetadata}
                 onOpenSettings={onOpenProviderSettings ?? (() => {})}
                 onRetry={onRetryProviders ?? (() => {})}
-                onTrackRecord={onApplyMetadata ? chooseMetadata : undefined}
+                onCandidateAction={onApplyMetadata ? chooseMetadata : undefined}
                 actionLabel="Use metadata"
+                pendingLabel="Applying…"
                 completedLabel="Metadata applied"
                 actionProblemFallback="Fasti could not apply metadata to this record."
+                actionUnavailableLabel="Metadata changes unavailable"
+                actionUnavailableText="Search does not change this Record. Metadata changes require the trusted host to apply the selected provider claims."
               />
             {/key}
 

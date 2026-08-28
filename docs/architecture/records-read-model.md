@@ -47,6 +47,15 @@ The canonical field keys are owned once in `fasti-domain::metadata`; provider ad
 
 `apps/desktop/src-tauri/src/records.rs` exposes `list_records`, `create_provider_record`, and `apply_provider_metadata`, following the same authenticated local-kernel pattern as the other Desktop commands. `track_provider_candidate` and `apply_provider_metadata` first perform the authorized provider read in `providers.rs`, cache validated artwork when present, then call these local operations. They make no daemon HTTP round-trip.
 
+Discover creates a Record only through `track_provider_candidate`. The existing
+`CreateRecordView.record_id` result returns to the candidate row and remains
+visible after success. The UI does not fall back to separate `create_record`,
+`register_namespace`, and `attach_identifier` calls because that sequence is not
+the provider operation's atomic boundary and can report a partial result.
+`provider:kind:provider_id` identifies transient search candidates, including
+TMDB movie and show IDs that share the same number. It is not canonical Record
+identity.
+
 `crates/fasti-api/src/records.rs` exposes the same query as `GET /api/v1/records`, bearer-authenticated the same way as every other production-runtime route. This is the surface the browser-hosted web app uses -- the Tauri command above is desktop-only and never reachable from a browser tab.
 
 The wire `RecordSummary` view carries `grain: Grain` unchanged -- `Grain` is identity granularity (Work/Series/Release/Season/Episode/Film/...), distinct from the frontend's display-oriented `MediaKind` (movie/show/anime/book/...). `record-projection.ts` owns that presentation mapping and keeps provider identifiers separate from Fasti Record IDs.

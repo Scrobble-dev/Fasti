@@ -36,8 +36,16 @@ async function mockHealth(page: Page) {
   );
 }
 
-async function mockTrustedHost(page: Page, providerConfigured = false) {
-  await page.addInitScript((configured) => {
+async function mockTrustedHost(
+  page: Page,
+  providerConfigured = false,
+  holdProviderSearch = false,
+) {
+  const mockOptions =
+    (providerConfigured ? 1 : 0) | (holdProviderSearch ? 2 : 0);
+  await page.addInitScript((options) => {
+    const configured = Boolean(options & 1);
+    const holdSearch = Boolean(options & 2);
     const networkConfiguration = {
       connection: {
         service_url: {
@@ -58,12 +66,13 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
         deny_networks: [],
       },
     };
-    const providerStatus = [
+    let providerIsConfigured = configured;
+    const providerStatus = () => [
       {
         provider: "google-books",
         label: "Google Books",
-        configured,
-        source: "none",
+        configured: providerIsConfigured,
+        source: providerIsConfigured ? "credential_store" : "none",
         writable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
@@ -71,6 +80,10 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
     let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
+      __PROVIDER_SAVE_CALLS__?: number;
+      __PROVIDER_STATUS_CALLS__?: number;
+      __PROVIDER_SEARCH_CALLS__?: number;
+      __RESOLVE_PROVIDER_SEARCH__?: () => void;
       __NUVIO_REPLACE_COUNT__?: number;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_: unknown) => Promise<unknown>;
@@ -84,7 +97,9 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
           case "load_network_configuration":
             return networkConfiguration;
           case "provider_credential_status":
-            return providerStatus;
+            browserWindow.__PROVIDER_STATUS_CALLS__ =
+              (browserWindow.__PROVIDER_STATUS_CALLS__ ?? 0) + 1;
+            return providerStatus();
           case "get_nuvio_collections":
             return { document: nuvioDocument };
           case "replace_nuvio_collections": {
@@ -105,27 +120,41 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
               version: "0.1.0-test",
             };
           case "save_provider_credential": {
+            browserWindow.__PROVIDER_SAVE_CALLS__ =
+              (browserWindow.__PROVIDER_SAVE_CALLS__ ?? 0) + 1;
             const candidate = arguments_ as {
               input?: { provider?: string; credential?: string };
             };
             browserWindow.__PROVIDER_SECRET_MATCH__ =
               candidate.input?.provider === "google-books" &&
-              candidate.input?.credential === "test-secret-not-retained";
-            throw {
-              code: "secure_storage_unavailable",
-              title: "Secure storage is unavailable",
-              detail: "The credential store rejected the test value.",
-              next_action: "Unlock the credential store, then retry.",
-            };
+              candidate.input?.credential === "test-secret-for-correction";
+            if (browserWindow.__PROVIDER_SECRET_MATCH__) {
+              throw {
+                code: "secure_storage_unavailable",
+                title: "Secure storage is unavailable",
+                detail: "The credential store rejected the test value.",
+                next_action: "Unlock the credential store, then retry.",
+              };
+            }
+            providerIsConfigured = true;
+            return providerStatus();
           }
           case "search_provider":
+            browserWindow.__PROVIDER_SEARCH_CALLS__ =
+              (browserWindow.__PROVIDER_SEARCH_CALLS__ ?? 0) + 1;
+            if (holdSearch) {
+              await new Promise<void>((resolve) => {
+                browserWindow.__RESOLVE_PROVIDER_SEARCH__ = resolve;
+              });
+              return [];
+            }
             throw new Error("Trusted provider execution is unavailable.");
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
         }
       },
     };
-  }, providerConfigured);
+  }, mockOptions);
 }
 
 test("the development browser user can sign in and edit but cannot delete the last administrator", async ({
@@ -962,7 +991,7 @@ test("the harness does not contact third-party origins", async ({ page }) => {
   expect([...externalOrigins]).toEqual([]);
 });
 
-test("trusted-host provider settings clear a rejected secret", async ({
+test("trusted-host provider settings retain a rejected secret for correction", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 900 });
@@ -975,14 +1004,15 @@ test("trusted-host provider settings clear a rejected secret", async ({
     .selectOption("providers");
   await expect(page.getByText("No credential is configured.")).toBeVisible();
 
-  const credential = page.getByLabel("New credential");
-  await credential.fill("test-secret-not-retained");
+  const credential = page.getByLabel("Google Books API key");
+  await expect(credential).toHaveAttribute("type", "password");
+  await credential.fill("test-secret-for-correction");
   await page.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByRole("alert")).toContainText(
     "The credential store rejected the test value.",
   );
-  await expect(credential).toHaveValue("");
+  await expect(credential).toHaveValue("test-secret-for-correction");
   expect(
     await page.evaluate(
       () =>
@@ -991,8 +1021,19 @@ test("trusted-host provider settings clear a rejected secret", async ({
     ),
   ).toBe(true);
   expect((await page.locator("body").textContent()) ?? "").not.toContain(
-    "test-secret-not-retained",
+    "test-secret-for-correction",
   );
+  expect(page.url()).not.toContain("test-secret-for-correction");
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
+    "test-secret-for-correction",
+  );
+
+  await credential.fill("test-secret-stored");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Credential saved" }),
+  ).toBeVisible();
+  await expect(credential).toHaveValue("");
 
   const undersizedControls = await page
     .locator("button:visible, input:visible")
@@ -1017,17 +1058,80 @@ test("trusted-host provider settings clear a rejected secret", async ({
   });
 });
 
-test("provider connection tests fail closed when trusted execution is unavailable", async ({
+test("provider search tests fail closed when trusted execution is unavailable", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await mockTrustedHost(page, true);
   await page.goto("/settings/metadata");
 
-  await page.getByRole("button", { name: "Test Connection" }).click();
+  await page.getByRole("button", { name: "Test search" }).click();
   const result = page.locator(".test-result-alert");
   await expect(result).toHaveText("Trusted provider execution is unavailable.");
-  await expect(result).not.toContainText("Connection successful");
+  await expect(result).not.toContainText("Search succeeded");
+});
+
+test("provider credential operations remain single-flight", async ({
+  page,
+}) => {
+  await mockTrustedHost(page, true, true);
+  await page.goto("/settings/metadata");
+
+  const credential = page.getByLabel("Google Books API key");
+  await credential.fill("queued-save");
+  await page.getByRole("button", { name: "Test search" }).click();
+  await expect(page.getByRole("button", { name: "Testing…" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Remove" })).toBeDisabled();
+  await expect(credential).toBeDisabled();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SEARCH_CALLS__?: number })
+          .__PROVIDER_SEARCH_CALLS__,
+    ),
+  ).toBe(1);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_STATUS_CALLS__?: number })
+          .__PROVIDER_STATUS_CALLS__,
+    ),
+  ).toBe(1);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SAVE_CALLS__?: number })
+          .__PROVIDER_SAVE_CALLS__ ?? 0,
+    ),
+  ).toBe(0);
+
+  await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __RESOLVE_PROVIDER_SEARCH__?: () => void;
+      }
+    ).__RESOLVE_PROVIDER_SEARCH__?.(),
+  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Credential saved" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SAVE_CALLS__?: number })
+          .__PROVIDER_SAVE_CALLS__,
+    ),
+  ).toBe(1);
 });
 
 test("profile Nuvio Collections import, export, and clear stay local", async ({
