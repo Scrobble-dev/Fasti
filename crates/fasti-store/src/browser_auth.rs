@@ -13,7 +13,7 @@ use fasti_application::{
     BrowserUserView, BrowserUsername, CapabilityKey, CreateBrowserSessionCommand,
     CreatedBrowserSession, DeleteBrowserUserCommand, EndBrowserSessionCommand,
     EnrollFirstClientCommand, FastiProblem, InitializeNodeCommand, ListBrowserUsersQuery,
-    ProblemCode, RequestAccessContext, UpdateBrowserUserCommand,
+    ProblemCode, RequestAccessContext, ScopeKey, UpdateBrowserUserCommand, Violation,
 };
 use fasti_domain::{BrowserUserId, ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -93,6 +93,70 @@ fn user_view(
         parse_timestamp(&created_at, capability, correlation_id)?,
         parse_timestamp(&updated_at, capability, correlation_id)?,
     ))
+}
+
+pub(crate) fn viable_administrator_count(
+    connection: &Connection,
+    workspace_id: &str,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<i64> {
+    map_sql(
+        connection.query_row(
+            r#"
+            WITH viable_administrators AS (
+                SELECT DISTINCT u.user_id
+                FROM browser_users u
+                JOIN clients c
+                  ON c.client_id = u.client_id
+                 AND c.workspace_id = ?1
+                 AND c.status = 'active'
+                JOIN credentials cr
+                  ON cr.client_id = c.client_id
+                 AND cr.workspace_id = c.workspace_id
+                 AND cr.epoch = c.current_credential_epoch
+                 AND cr.status = 'active'
+                JOIN profile_grants pg
+                  ON pg.client_id = c.client_id
+                 AND pg.workspace_id = c.workspace_id
+                 AND pg.profile_id = u.profile_id
+                 AND pg.status = 'active'
+                JOIN grant_scopes gs
+                  ON gs.grant_id = pg.grant_id
+                 AND gs.scope_key = ?2
+                WHERE u.is_admin = 1
+                  AND u.active = 1
+            )
+            SELECT COUNT(*) FROM viable_administrators
+            "#,
+            params![workspace_id, ScopeKey::BrowserUserManage.as_str()],
+            |row| row.get(0),
+        ),
+        capability,
+        correlation_id,
+    )
+}
+
+fn ensure_viable_administrator_remains(
+    connection: &Connection,
+    workspace_id: &str,
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> ApplicationResult<()> {
+    if viable_administrator_count(connection, workspace_id, capability, correlation_id)? == 0 {
+        let violation = Violation::try_new(
+            "last_active_administrator_required",
+            "/",
+            "this change would remove the workspace's last active administrator with browser-user management access",
+            "at least one active administrator with browser-user management access must remain",
+        )
+        .expect("the administrator continuity violation is valid");
+        return Err(Box::new(
+            FastiProblem::validation_failed(capability, correlation_id, vec![violation])
+                .expect("one validation violation is within bounds"),
+        ));
+    }
+    Ok(())
 }
 
 fn load_node_access(
@@ -743,6 +807,14 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             ));
         }
+        if active == Some(false) {
+            ensure_viable_administrator_remains(
+                &transaction,
+                &workspace_id,
+                capability,
+                correlation_id,
+            )?;
+        }
         if username.is_some() || password.is_some() || active == Some(false) {
             map_sql(
                 transaction.execute(
@@ -840,6 +912,12 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             ));
         }
+        ensure_viable_administrator_remains(
+            &transaction,
+            &workspace_id,
+            capability,
+            correlation_id,
+        )?;
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(deleted_self)
     }
@@ -848,6 +926,10 @@ impl BrowserAccountPort for SqliteKernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fasti_application::{
+        ClientCredentialAdministrationPort, CreateScopedClientCredentialCommand,
+        CreateScopedClientCredentialOutcome, RevokeClientCredentialCommand, ScopeKey,
+    };
 
     fn login(
         kernel: &SqliteKernel,
@@ -863,6 +945,49 @@ mod tests {
             )
             .expect("command"),
         )
+    }
+
+    fn add_second_administrator(
+        kernel: &SqliteKernel,
+        first: &CreatedBrowserSession,
+    ) -> (RequestAccessContext, CreateScopedClientCredentialOutcome) {
+        let access = {
+            let connection = Connection::open(kernel.database_path()).expect("database");
+            load_node_access(
+                &connection,
+                CapabilityKey::RotateCredential,
+                fasti_domain::RequestCorrelationId::new_v7(),
+            )
+            .expect("load administrator access")
+        };
+        let second_access = kernel
+            .create_scoped_client_credential(CreateScopedClientCredentialCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                access,
+                vec![ScopeKey::BrowserUserManage],
+            ))
+            .expect("create second administrator access");
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        connection
+            .execute(
+                r#"
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, created_at, updated_at
+                )
+                SELECT ?1, 'secondadmin', password_hash, ?2, ?3,
+                       1, 0, 1, created_at, updated_at
+                FROM browser_users WHERE user_id = ?4
+                "#,
+                params![
+                    BrowserUserId::new_v7().to_string(),
+                    second_access.client_id().to_string(),
+                    second_access.profile_id().to_string(),
+                    first.user().user_id().to_string()
+                ],
+            )
+            .expect("seed second administrator");
+        (access, second_access)
     }
 
     #[test]
@@ -1010,7 +1135,7 @@ mod tests {
     }
 
     #[test]
-    fn development_user_is_seeded_once_and_can_be_deleted() {
+    fn development_user_is_seeded_once_and_the_last_active_admin_is_retained() {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = SqliteKernel::open(root.path()).expect("kernel");
         kernel
@@ -1138,7 +1263,7 @@ mod tests {
                 BrowserPassword::try_new("editedadmin").expect("password"),
             ))
             .expect("delete another user"));
-        assert!(kernel
+        let delete_error = kernel
             .delete_browser_user(DeleteBrowserUserCommand::new(
                 fasti_domain::RequestCorrelationId::new_v7(),
                 fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
@@ -1146,13 +1271,51 @@ mod tests {
                 user_id,
                 BrowserPassword::try_new("editedadmin").expect("password"),
             ))
-            .expect("delete user"));
+            .expect_err("last active administrator delete must fail");
+        assert_eq!(delete_error.code(), ProblemCode::ValidationFailed);
+        assert_eq!(
+            delete_error.violations()[0].code(),
+            "last_active_administrator_required"
+        );
+        assert_eq!(delete_error.violations()[0].pointer(), "/");
+        let deactivate_error = kernel
+            .update_browser_user(
+                UpdateBrowserUserCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                    fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
+                    user_id,
+                    BrowserPassword::try_new("editedadmin").expect("password"),
+                    None,
+                    None,
+                    Some(false),
+                )
+                .expect("deactivation command"),
+            )
+            .expect_err("last active administrator deactivation must fail");
+        assert_eq!(deactivate_error.code(), ProblemCode::ValidationFailed);
+        assert_eq!(
+            deactivate_error.violations()[0].code(),
+            "last_active_administrator_required"
+        );
+        assert_eq!(deactivate_error.violations()[0].pointer(), "/");
         kernel
             .ensure_development_browser_user(
                 BrowserUsername::try_new("testadmin").expect("username"),
                 BrowserPassword::try_new("testadmin").expect("password"),
             )
             .expect("marker prevents recreation");
+        assert!(kernel
+            .create_browser_session(
+                CreateBrowserSessionCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    BrowserUsername::try_new("editedadmin").expect("username"),
+                    BrowserPassword::try_new("editedadmin").expect("password"),
+                    60,
+                )
+                .expect("command")
+            )
+            .is_ok());
         assert!(kernel
             .create_browser_session(
                 CreateBrowserSessionCommand::try_new(
@@ -1164,5 +1327,228 @@ mod tests {
                 .expect("command")
             )
             .is_err());
+    }
+
+    #[test]
+    fn concurrent_admin_deletions_retain_one_active_administrator() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        let password = BrowserUserId::new_v7().to_string();
+        kernel
+            .ensure_development_browser_user(
+                BrowserUsername::try_new("firstadmin").expect("username"),
+                BrowserPassword::try_new(&password).expect("password"),
+            )
+            .expect("seed first administrator");
+        let first = login(&kernel, "firstadmin", &password).expect("first login");
+        let first_user_id = first.user().user_id();
+        let second_user_id = BrowserUserId::new_v7();
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        connection
+            .execute(
+                r#"
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, created_at, updated_at
+                )
+                SELECT ?1, 'secondadmin', password_hash, client_id, profile_id,
+                       1, 0, 1, created_at, updated_at
+                FROM browser_users WHERE user_id = ?2
+                "#,
+                params![second_user_id.to_string(), first_user_id.to_string()],
+            )
+            .expect("seed second administrator");
+        drop(connection);
+        let second = login(&kernel, "secondadmin", &password).expect("second login");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+
+        let spawn_delete = |kernel: SqliteKernel,
+                            login: CreatedBrowserSession,
+                            user_id: BrowserUserId| {
+            let barrier = barrier.clone();
+            let password = password.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                match kernel.delete_browser_user(DeleteBrowserUserCommand::new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    fasti_application::SecretMaterial::try_from_hex(&login.session().expose_hex())
+                        .expect("session"),
+                    fasti_application::SecretMaterial::try_from_hex(&login.csrf().expose_hex())
+                        .expect("csrf"),
+                    user_id,
+                    BrowserPassword::try_new(&password).expect("password"),
+                )) {
+                    Ok(true) => "deleted",
+                    Err(problem)
+                        if problem.code() == ProblemCode::ValidationFailed
+                            && problem.violations().iter().any(|violation| {
+                                violation.code() == "last_active_administrator_required"
+                            }) =>
+                    {
+                        "retained"
+                    }
+                    outcome => panic!("unexpected concurrent deletion outcome: {outcome:?}"),
+                }
+            })
+        };
+
+        let first_delete = spawn_delete(kernel.clone(), first, first_user_id);
+        let second_delete = spawn_delete(kernel.clone(), second, second_user_id);
+        barrier.wait();
+        let outcomes = [
+            first_delete.join().expect("first deletion thread"),
+            second_delete.join().expect("second deletion thread"),
+        ];
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == "deleted")
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == "retained")
+                .count(),
+            1
+        );
+
+        let connection = Connection::open(kernel.database_path()).expect("database");
+        let active_administrators: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM browser_users WHERE is_admin = 1 AND active = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count active administrators");
+        assert_eq!(active_administrators, 1);
+    }
+
+    #[test]
+    fn revoked_administrator_access_cannot_satisfy_the_continuity_guard() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        let password = BrowserUserId::new_v7().to_string();
+        kernel
+            .ensure_development_browser_user(
+                BrowserUsername::try_new("firstadmin").expect("username"),
+                BrowserPassword::try_new(&password).expect("password"),
+            )
+            .expect("seed first administrator");
+        let first = login(&kernel, "firstadmin", &password).expect("first login");
+        let (access, second_access) = add_second_administrator(&kernel, &first);
+        kernel
+            .revoke_client_credential(RevokeClientCredentialCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                access,
+                second_access.credential_id(),
+            ))
+            .expect("revoke second administrator access");
+
+        let session = first.session().expose_hex();
+        let csrf = first.csrf().expose_hex();
+        let first_user_id = first.user().user_id();
+        let delete_error = kernel
+            .delete_browser_user(DeleteBrowserUserCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
+                first_user_id,
+                BrowserPassword::try_new(&password).expect("password"),
+            ))
+            .expect_err("revoked administrator cannot permit the last usable admin deletion");
+        assert!(delete_error
+            .violations()
+            .iter()
+            .any(|violation| { violation.code() == "last_active_administrator_required" }));
+        let deactivate_error = kernel
+            .update_browser_user(
+                UpdateBrowserUserCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    fasti_application::SecretMaterial::try_from_hex(&session).expect("session"),
+                    fasti_application::SecretMaterial::try_from_hex(&csrf).expect("csrf"),
+                    first_user_id,
+                    BrowserPassword::try_new(&password).expect("password"),
+                    None,
+                    None,
+                    Some(false),
+                )
+                .expect("deactivation command"),
+            )
+            .expect_err("revoked administrator cannot permit the last usable admin deactivation");
+        assert!(deactivate_error
+            .violations()
+            .iter()
+            .any(|violation| { violation.code() == "last_active_administrator_required" }));
+    }
+
+    #[test]
+    fn removing_one_administrator_cannot_enable_revoking_the_last_other_administrator() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        let password = BrowserUserId::new_v7().to_string();
+        kernel
+            .ensure_development_browser_user(
+                BrowserUsername::try_new("firstadmin").expect("username"),
+                BrowserPassword::try_new(&password).expect("password"),
+            )
+            .expect("seed first administrator");
+        let first = login(&kernel, "firstadmin", &password).expect("first login");
+        let (access, second_access) = add_second_administrator(&kernel, &first);
+
+        assert!(kernel
+            .delete_browser_user(DeleteBrowserUserCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                fasti_application::SecretMaterial::try_from_hex(&first.session().expose_hex())
+                    .expect("session"),
+                fasti_application::SecretMaterial::try_from_hex(&first.csrf().expose_hex())
+                    .expect("csrf"),
+                first.user().user_id(),
+                BrowserPassword::try_new(&password).expect("password"),
+            ))
+            .expect("remove first administrator"));
+        let revoke_error = kernel
+            .revoke_client_credential(RevokeClientCredentialCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                access,
+                second_access.credential_id(),
+            ))
+            .expect_err("the remaining administrator access must not be revoked");
+        assert_eq!(revoke_error.code(), ProblemCode::Forbidden);
+        assert!(login(&kernel, "secondadmin", &password).is_ok());
+    }
+
+    #[test]
+    fn ordinary_credential_can_be_revoked_without_browser_administrators() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        let initialized = kernel
+            .initialize_node(InitializeNodeCommand::new(correlation_id))
+            .expect("initialize node");
+        let proof = fasti_application::SecretMaterial::try_from_hex(
+            &initialized.initialization_proof().expose_hex(),
+        )
+        .expect("initialization proof");
+        let access = *kernel
+            .enroll_first_client(EnrollFirstClientCommand::new(correlation_id, proof))
+            .expect("enroll first client")
+            .access();
+        let ordinary_access = kernel
+            .create_scoped_client_credential(CreateScopedClientCredentialCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                access,
+                vec![ScopeKey::ObservationAccept],
+            ))
+            .expect("create ordinary scoped access");
+
+        kernel
+            .revoke_client_credential(RevokeClientCredentialCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                access,
+                ordinary_access.credential_id(),
+            ))
+            .expect("revoke ordinary scoped access without browser administrators");
     }
 }

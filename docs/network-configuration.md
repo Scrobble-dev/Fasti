@@ -12,11 +12,11 @@ reverse-proxy address from changing the daemon bind address.
 | `FASTI_API_URL`                  | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment.                              |
 | `FASTI_PUBLIC_URL`               | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
 | `FASTI_REMOTE_TRUSTED_PROXY`     | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
-| `FASTI_DEVELOPMENT_TEST_ACCOUNT` | `fastid`                 | Exact `true` seeds the one-time `testadmin` development account. Debug default: `true`; release default: `false`.                 |
+| `FASTI_DEVELOPMENT_TEST_ACCOUNT` | `fastid`                 | Exact `true` seeds the one-time `testadmin` account on a loopback durable listener. Default: `false`. Remote listeners reject it. |
 | `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
 | `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
 | `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
-| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP is accepted.                                        |
+| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP inside a detected container boundary is accepted.    |
 | `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
@@ -42,8 +42,12 @@ The container always listens on port `8420` internally. The launcher maps the
 configured host port to it on `127.0.0.1` and sets
 `FASTI_EXTERNAL_BIND_IP=127.0.0.1`. That explicit assertion lets `fastid`
 mount the durable API through the wildcard container socket. A wildcard
-listener without the assertion stays health-only. A non-loopback assertion is
-rejected. Do not set this variable when the outer published address is public.
+listener without the assertion is remote and stays health-only by default. It
+mounts the authenticated remote router only with `FASTI_DATA_ROOT`,
+`FASTI_REMOTE_TRUSTED_PROXY=true`, and an absolute HTTPS `FASTI_PUBLIC_URL`. A
+native process cannot replay the assertion because `fastid` also requires the
+container isolation boundary. A non-loopback assertion is rejected. Do not set
+this variable when the outer published address is public.
 The launcher runs the container process as the invoking non-root user so its
 worktree-owned data directory remains writable. Podman uses `keep-id` for the
 rootless user namespace. The image default remains the non-root `fasti` user.
@@ -82,7 +86,6 @@ FASTI_LISTEN=0.0.0.0:8420 \
 FASTI_DATA_ROOT=/path/to/private/fasti-data \
 FASTI_REMOTE_TRUSTED_PROXY=true \
 FASTI_PUBLIC_URL=https://fasti.internal \
-FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
 cargo run --locked -p fastid
 ```
 
@@ -93,13 +96,22 @@ for durable data routes. Remote session cookies are `Secure`, `HttpOnly`, and
 `SameSite=Strict`; the readable strict CSRF cookie is required as an exact
 `X-Fasti-CSRF` proof for browser mutations.
 
-`FASTI_DEVELOPMENT_TEST_ACCOUNT=true` creates `testadmin` with password
-`testadmin` once per fresh data root and marks it explicitly as a test account.
-The account can be renamed, have its password changed, be deactivated, or be
-deleted. Its durable seed marker prevents recreation after rename or deletion.
-Debug builds enable this seed by default. Release builds disable it unless the
-operator explicitly opts in. Change or delete the account before sharing any
-development instance; this is not a supported production provisioning path.
+Development accounts are disabled by default in every build. For an isolated
+loopback-only data root, an operator can opt in explicitly:
+
+```bash
+FASTI_LISTEN=127.0.0.1:8420 \
+FASTI_DATA_ROOT=/path/to/private/fasti-data \
+FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
+cargo run --locked -p fastid
+```
+
+This creates `testadmin` with password `testadmin` once and marks it as a test
+account. A remote listener rejects the setting. Rename and deletion do not
+clear the durable seed marker, so startup never recreates the account. Fasti
+also rejects browser-account or credential changes that would leave no active
+administrator that can manage browser users. This is not a supported production
+provisioning or recovery path.
 
 `.internal` needs working name resolution and a certificate whose subject
 includes that host. Fasti uses the platform trust store. It does not issue a

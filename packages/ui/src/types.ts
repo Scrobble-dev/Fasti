@@ -296,7 +296,6 @@ export interface NuvioCollectionsState {
 
 export interface WorkbenchHost {
   readonly networkConfigurationScope: "client" | "node";
-  readonly developmentTestAccountHint?: string;
   loadNetworkConfiguration(): Promise<NetworkConfiguration>;
   saveNetworkConfiguration(
     input: SaveNetworkConfigurationRequest,
