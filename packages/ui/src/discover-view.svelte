@@ -17,6 +17,8 @@
     onOpenSettings: () => void;
     onRetry: () => void;
     onTrackRecord?: (candidate: ProviderSearchCandidate) => Promise<void>;
+    selectedProviderId?: string;
+    selectionExplicit?: boolean;
   }
 
   let {
@@ -27,6 +29,8 @@
     onOpenSettings,
     onRetry,
     onTrackRecord,
+    selectedProviderId = $bindable(""),
+    selectionExplicit = $bindable(false),
   }: Props = $props();
   let query = $state("");
   let results: ProviderSearchCandidate[] = $state([]);
@@ -37,9 +41,6 @@
   let trackingId = $state("");
   let trackedIds = $state<Set<string>>(new Set());
   let trackProblem = $state("");
-  let selectedProviderId = $state("");
-  let selectionExplicit = $state(false);
-
   const supportedProviders = $derived(
     (providerCredentials ?? []).filter((provider) =>
       ["google-books", "tmdb"].includes(provider.provider),
@@ -61,6 +62,7 @@
     ) {
       return;
     }
+    selectionExplicit = false;
     selectedProviderId =
       supportedProviders.find((provider) => provider.configured)?.provider ??
       supportedProviders[0].provider;

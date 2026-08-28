@@ -324,6 +324,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await page.setViewportSize({ width: 375, height: 812 });
   await page.addInitScript(() => {
     let googleConfigured = false;
+    let tmdbConfigured = true;
     const providerStatus = () => [
       {
         provider: "google-books",
@@ -336,9 +337,9 @@ test("Discover selects configured providers and refreshes explicit setup state",
       {
         provider: "tmdb",
         label: "TMDB",
-        configured: true,
-        source: "environment",
-        writable: false,
+        configured: tmdbConfigured,
+        source: tmdbConfigured ? "environment" : "none",
+        writable: !tmdbConfigured,
         docs_url: "https://developer.themoviedb.org/docs",
       },
     ];
@@ -364,10 +365,16 @@ test("Discover selects configured providers and refreshes explicit setup state",
     };
     const browserWindow = window as typeof window & {
       __SEARCH_INPUT__?: unknown;
+      __PROVIDER_STATUS_CALLS__?: number;
+      __SET_TMDB_CONFIGURED__?: (configured: boolean) => void;
       __TRACK_INPUTS__?: Array<{ command: string; arguments_: unknown }>;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_?: unknown) => Promise<unknown>;
       };
+    };
+    browserWindow.__PROVIDER_STATUS_CALLS__ = 0;
+    browserWindow.__SET_TMDB_CONFIGURED__ = (configured) => {
+      tmdbConfigured = configured;
     };
     browserWindow.__TRACK_INPUTS__ = [];
     browserWindow.__TAURI_INTERNALS__ = {
@@ -378,6 +385,8 @@ test("Discover selects configured providers and refreshes explicit setup state",
           case "load_network_configuration":
             return networkConfiguration;
           case "provider_credential_status":
+            browserWindow.__PROVIDER_STATUS_CALLS__ =
+              (browserWindow.__PROVIDER_STATUS_CALLS__ ?? 0) + 1;
             return providerStatus();
           case "save_provider_credential":
             googleConfigured = true;
@@ -414,6 +423,18 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await page.goto("/discover");
   const provider = page.getByLabel("Metadata provider");
   await expect(provider).toHaveValue("tmdb");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __PROVIDER_STATUS_CALLS__?: number;
+            }
+          ).__PROVIDER_STATUS_CALLS__,
+      ),
+    )
+    .toBe(1);
   const providerBox = await provider.boundingBox();
   expect(providerBox?.height).toBeGreaterThanOrEqual(44);
   expect(
@@ -424,6 +445,22 @@ test("Discover selects configured providers and refreshes explicit setup state",
     ),
   ).toBeLessThanOrEqual(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as typeof window & {
+              __PROVIDER_STATUS_CALLS__?: number;
+            }
+          ).__PROVIDER_STATUS_CALLS__,
+      ),
+    )
+    .toBe(2);
+  await expect(provider).toHaveValue("tmdb");
 
   const search = page.getByRole("searchbox", { name: "Search TMDB" });
   await search.fill("é".repeat(129));
@@ -534,4 +571,19 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await expect(
     page.getByRole("heading", { name: "Google Books needs a credential" }),
   ).toHaveCount(0);
+
+  await provider.selectOption("tmdb");
+  await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __SET_TMDB_CONFIGURED__?: (configured: boolean) => void;
+      }
+    ).__SET_TMDB_CONFIGURED__?.(false),
+  );
+  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await page.getByRole("button", { name: "Discover", exact: true }).click();
+  await expect(provider).toHaveValue("tmdb");
+  await expect(
+    page.getByRole("heading", { name: "TMDB needs a credential" }),
+  ).toBeVisible();
 });

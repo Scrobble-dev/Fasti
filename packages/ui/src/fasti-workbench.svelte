@@ -263,7 +263,8 @@
   );
   let discoverLoading = $state(false);
   let discoverHostProblem = $state<string | undefined>(undefined);
-  let discoverLoaded = false;
+  let discoverSelectedProviderId = $state("");
+  let discoverSelectionExplicit = $state(false);
 
   async function loadDiscover(): Promise<void> {
     discoverLoading = true;
@@ -282,7 +283,6 @@
   }
 
   function invalidateDiscoverProviders(): void {
-    discoverLoaded = false;
     discoverProviders = undefined;
   }
 
@@ -449,10 +449,7 @@
   );
 
   $effect(() => {
-    if (activeSection === "discover" && !discoverLoaded) {
-      discoverLoaded = true;
-      void loadDiscover();
-    }
+    if (activeSection === "discover") void loadDiscover();
     if (activeSection === "reconciliation" && !reviewsLoaded) {
       reviewsLoaded = true;
       void loadReviews();
@@ -661,6 +658,8 @@
           providerCredentials={discoverProviders}
           loading={discoverLoading}
           hostProblem={discoverHostProblem}
+          bind:selectedProviderId={discoverSelectedProviderId}
+          bind:selectionExplicit={discoverSelectionExplicit}
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
