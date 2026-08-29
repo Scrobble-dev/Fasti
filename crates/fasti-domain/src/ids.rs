@@ -197,6 +197,7 @@ define_fasti_ids!(
     (Credential, CredentialId, "crd_", Executable),
     (ProfileGrant, ProfileGrantId, "grt_", Executable),
     (BrowserUser, BrowserUserId, "usr_", Executable),
+    (BrowserSession, BrowserSessionId, "sess_", Executable),
     (Record, RecordId, "rec_", Executable),
     (ExternalIdentifier, ExternalIdentifierId, "xid_", Executable),
     (IdentityAssertion, IdentityAssertionId, "asr_", Reserved),
@@ -221,7 +222,7 @@ mod tests {
 
     #[test]
     fn registry_has_one_unique_prefix_per_kind() {
-        assert_eq!(ID_PREFIX_REGISTRY.len(), 20);
+        assert_eq!(ID_PREFIX_REGISTRY.len(), 21);
         let prefixes: HashSet<_> = ID_PREFIX_REGISTRY
             .iter()
             .map(|entry| entry.prefix)
@@ -252,8 +253,8 @@ mod tests {
         assert_eq!(
             executable,
             HashSet::from([
-                "wsp_", "prf_", "cli_", "crd_", "grt_", "usr_", "rec_", "xid_", "evd_", "obs_",
-                "occ_", "int_", "rev_", "op_", "rcp_", "req_",
+                "wsp_", "prf_", "cli_", "crd_", "grt_", "usr_", "sess_", "rec_", "xid_",
+                "evd_", "obs_", "occ_", "int_", "rev_", "op_", "rcp_", "req_",
             ])
         );
         assert_eq!(reserved, HashSet::from(["asr_", "cor_", "rst_", "fld_"]));
@@ -290,6 +291,20 @@ mod tests {
         assert!(encoded.starts_with("rec_"));
         assert_eq!(encoded.len(), 36);
         assert_eq!(encoded.parse::<RecordId>().expect("valid record id"), id);
+    }
+
+    #[test]
+    fn browser_session_id_round_trips_canonically() {
+        let id = BrowserSessionId::new_v7();
+        let encoded = id.to_string();
+        assert!(encoded.starts_with("sess_"));
+        assert_eq!(encoded.len(), 37);
+        assert_eq!(
+            encoded
+                .parse::<BrowserSessionId>()
+                .expect("valid browser session id"),
+            id
+        );
     }
 
     #[test]
