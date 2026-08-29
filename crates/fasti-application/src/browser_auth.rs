@@ -19,6 +19,87 @@ impl fmt::Display for SessionPolicyInputError {
 
 impl Error for SessionPolicyInputError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserRequestBoundaryError {
+    InvalidPolicy,
+    MissingOrigin,
+    MissingHost,
+    OriginMismatch,
+    HostMismatch,
+}
+
+impl fmt::Display for BrowserRequestBoundaryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidPolicy => "browser request boundary policy is invalid",
+            Self::MissingOrigin => "browser mutation is missing Origin",
+            Self::MissingHost => "browser mutation is missing Host",
+            Self::OriginMismatch => "browser mutation Origin is not allowed",
+            Self::HostMismatch => "browser mutation Host is not allowed",
+        })
+    }
+}
+
+impl Error for BrowserRequestBoundaryError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserRequestBoundaryPolicy {
+    allowed_origin: String,
+    allowed_host: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValidatedBrowserRequestBoundary(());
+
+impl BrowserRequestBoundaryPolicy {
+    pub fn try_new(
+        allowed_origin: impl Into<String>,
+        allowed_host: impl Into<String>,
+    ) -> Result<Self, BrowserRequestBoundaryError> {
+        let allowed_origin = allowed_origin.into();
+        let allowed_host = allowed_host.into();
+        let authority = allowed_origin
+            .strip_prefix("https://")
+            .or_else(|| allowed_origin.strip_prefix("http://"));
+        if authority.is_none_or(|value| {
+            value.is_empty()
+                || value
+                    .bytes()
+                    .any(|byte| matches!(byte, b'/' | b'?' | b'#' | b',' | b'@'))
+        }) || allowed_origin
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace())
+            || allowed_host.is_empty()
+            || allowed_host
+                .bytes()
+                .any(|byte| byte.is_ascii_whitespace() || byte == b',')
+            || !authority.is_some_and(|value| value.eq_ignore_ascii_case(&allowed_host))
+        {
+            return Err(BrowserRequestBoundaryError::InvalidPolicy);
+        }
+        Ok(Self {
+            allowed_origin,
+            allowed_host,
+        })
+    }
+
+    pub fn validate(
+        &self,
+        origin: Option<&str>,
+        host: Option<&str>,
+    ) -> Result<ValidatedBrowserRequestBoundary, BrowserRequestBoundaryError> {
+        let origin = origin.ok_or(BrowserRequestBoundaryError::MissingOrigin)?;
+        let host = host.ok_or(BrowserRequestBoundaryError::MissingHost)?;
+        if !origin.eq_ignore_ascii_case(&self.allowed_origin) {
+            return Err(BrowserRequestBoundaryError::OriginMismatch);
+        }
+        if !host.eq_ignore_ascii_case(&self.allowed_host) {
+            return Err(BrowserRequestBoundaryError::HostMismatch);
+        }
+        Ok(ValidatedBrowserRequestBoundary(()))
+    }
+}
+
 /// Governed browser-session timings.
 ///
 /// PR A deliberately has no `Default`: the approved plan does not provide
@@ -231,6 +312,7 @@ pub struct BrowserSessionMutationCommand {
     correlation_id: RequestCorrelationId,
     session_secret: SecretMaterial,
     csrf_secret: SecretMaterial,
+    _request_boundary: ValidatedBrowserRequestBoundary,
     now: DateTime<Utc>,
 }
 
@@ -239,12 +321,14 @@ impl BrowserSessionMutationCommand {
         correlation_id: RequestCorrelationId,
         session_secret: SecretMaterial,
         csrf_secret: SecretMaterial,
+        request_boundary: ValidatedBrowserRequestBoundary,
         now: DateTime<Utc>,
     ) -> Self {
         Self {
             correlation_id,
             session_secret,
             csrf_secret,
+            _request_boundary: request_boundary,
             now,
         }
     }
@@ -420,5 +504,31 @@ mod tests {
         )
         .is_err());
         assert_eq!(policy().browser_idle_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn browser_mutation_boundary_rejects_missing_and_mismatched_origin_or_host() {
+        let policy =
+            BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                .expect("valid boundary policy");
+        assert_eq!(
+            policy.validate(None, Some("fasti.example")),
+            Err(BrowserRequestBoundaryError::MissingOrigin)
+        );
+        assert_eq!(
+            policy.validate(Some("https://fasti.example"), None),
+            Err(BrowserRequestBoundaryError::MissingHost)
+        );
+        assert_eq!(
+            policy.validate(Some("https://attacker.example"), Some("fasti.example")),
+            Err(BrowserRequestBoundaryError::OriginMismatch)
+        );
+        assert_eq!(
+            policy.validate(Some("https://fasti.example"), Some("attacker.example")),
+            Err(BrowserRequestBoundaryError::HostMismatch)
+        );
+        assert!(policy
+            .validate(Some("https://fasti.example"), Some("fasti.example"))
+            .is_ok());
     }
 }

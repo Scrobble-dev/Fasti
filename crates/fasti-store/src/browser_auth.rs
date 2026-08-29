@@ -952,6 +952,28 @@ mod tests {
         SecretMaterial::try_from_hex(&secret.expose_hex()).expect("copy test secret")
     }
 
+    fn mutation_command(
+        correlation_id: fasti_domain::RequestCorrelationId,
+        session_secret: SecretMaterial,
+        csrf_secret: SecretMaterial,
+        now: DateTime<Utc>,
+    ) -> BrowserSessionMutationCommand {
+        let boundary = fasti_application::BrowserRequestBoundaryPolicy::try_new(
+            "https://fasti.example",
+            "fasti.example",
+        )
+        .expect("valid boundary policy")
+        .validate(Some("https://fasti.example"), Some("fasti.example"))
+        .expect("matching request boundary");
+        BrowserSessionMutationCommand::new(
+            correlation_id,
+            session_secret,
+            csrf_secret,
+            boundary,
+            now,
+        )
+    }
+
     fn policy() -> SessionPolicy {
         SessionPolicy::try_new(
             Duration::from_secs(30),
@@ -1145,7 +1167,7 @@ mod tests {
         let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
         let rotated = fixture
             .kernel
-            .rotate_browser_session(BrowserSessionMutationCommand::new(
+            .rotate_browser_session(mutation_command(
                 fasti_domain::RequestCorrelationId::new_v7(),
                 secret_copy(created.session_secret()),
                 secret_copy(created.csrf_secret()),
@@ -1187,7 +1209,7 @@ mod tests {
         assert!(fixture
             .kernel
             .revoke_browser_session(TargetBrowserSessionCommand::new(
-                BrowserSessionMutationCommand::new(
+                mutation_command(
                     fasti_domain::RequestCorrelationId::new_v7(),
                     secret_copy(first.session_secret()),
                     secret_copy(first.csrf_secret()),
@@ -1209,7 +1231,7 @@ mod tests {
         assert_eq!(
             fixture
                 .kernel
-                .revoke_other_browser_sessions(BrowserSessionMutationCommand::new(
+                .revoke_other_browser_sessions(mutation_command(
                     fasti_domain::RequestCorrelationId::new_v7(),
                     secret_copy(first.session_secret()),
                     secret_copy(first.csrf_secret()),
@@ -1231,7 +1253,7 @@ mod tests {
         assert_eq!(
             fixture
                 .kernel
-                .revoke_all_browser_sessions(BrowserSessionMutationCommand::new(
+                .revoke_all_browser_sessions(mutation_command(
                     fasti_domain::RequestCorrelationId::new_v7(),
                     secret_copy(first.session_secret()),
                     secret_copy(first.csrf_secret()),
@@ -1260,7 +1282,7 @@ mod tests {
             fixture
                 .kernel
                 .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
-                    BrowserSessionMutationCommand::new(
+                    mutation_command(
                         fasti_domain::RequestCorrelationId::new_v7(),
                         secret_copy(created.session_secret()),
                         secret_copy(created.csrf_secret()),
@@ -1273,7 +1295,7 @@ mod tests {
         let selected = fixture
             .kernel
             .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
-                BrowserSessionMutationCommand::new(
+                mutation_command(
                     fasti_domain::RequestCorrelationId::new_v7(),
                     secret_copy(created.session_secret()),
                     secret_copy(created.csrf_secret()),
@@ -1469,7 +1491,7 @@ mod tests {
             fixture
                 .kernel
                 .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
-                    BrowserSessionMutationCommand::new(
+                    mutation_command(
                         fasti_domain::RequestCorrelationId::new_v7(),
                         secret_copy(created.session_secret()),
                         secret_copy(created.csrf_secret()),
@@ -1498,7 +1520,7 @@ mod tests {
             threads.push(std::thread::spawn(move || {
                 kernel
                     .revoke_browser_session(TargetBrowserSessionCommand::new(
-                        BrowserSessionMutationCommand::new(
+                        mutation_command(
                             fasti_domain::RequestCorrelationId::new_v7(),
                             SecretMaterial::try_from_hex(&session_hex).expect("session"),
                             SecretMaterial::try_from_hex(&csrf_hex).expect("csrf"),
