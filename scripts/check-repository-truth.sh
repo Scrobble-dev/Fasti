@@ -30,6 +30,58 @@ for path in "${retired_paths[@]}"; do
   done < <(git ls-files --cached --others --exclude-standard -- "$path")
 done
 
+if [[ ! -f docs/architecture/adr-0005-framework-and-auth-adoption.md ]]; then
+  echo "The framework and authentication adoption decision is missing" >&2
+  exit 1
+fi
+
+docker_from_records() {
+  awk '
+    toupper($1) == "FROM" {
+      image = ""
+      alias = ""
+      for (field = 2; field <= NF; field++) {
+        if ($field ~ /^--/) {
+          continue
+        }
+        if (image == "") {
+          image = $field
+          continue
+        }
+        if (toupper($field) == "AS" && field < NF) {
+          alias = $(field + 1)
+          break
+        }
+      }
+      if (image == "") {
+        print "Dockerfile FROM instruction has no image" > "/dev/stderr"
+        exit 2
+      }
+      print image "|" alias
+    }
+  ' Dockerfile
+}
+
+declare -A docker_stage_aliases=()
+last_docker_image=""
+last_docker_alias=""
+while IFS='|' read -r base_image stage_alias; do
+  if [[ -z "${docker_stage_aliases[$base_image]+defined}" && "$base_image" != *@sha256:* ]]; then
+    echo "External Docker base image must use an immutable digest: $base_image" >&2
+    exit 1
+  fi
+  if [[ -n "$stage_alias" ]]; then
+    docker_stage_aliases["$stage_alias"]=1
+  fi
+  last_docker_image="$base_image"
+  last_docker_alias="$stage_alias"
+done < <(docker_from_records)
+
+if [[ "$last_docker_image|$last_docker_alias" != "runtime|default" ]]; then
+  echo "A plain Docker build must finish at the runtime-equivalent default stage" >&2
+  exit 1
+fi
+
 manifest_dependency_names() {
   local manifest="$1"
 
@@ -89,6 +141,80 @@ manifest_dependency_names() {
     }
   ' "$manifest" | sort -u
 }
+
+python3 - <<'PYTHON'
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any
+
+DEPENDENCY_TABLES = {"dependencies", "dev-dependencies", "build-dependencies"}
+
+
+def loco_declarations(document: dict[str, Any]) -> list[str]:
+    declarations: list[str] = []
+
+    def visit(value: Any, path: tuple[str, ...] = ()) -> None:
+        if not isinstance(value, dict):
+            return
+        for key, child in value.items():
+            child_path = (*path, str(key))
+            if key in DEPENDENCY_TABLES and isinstance(child, dict):
+                for local_name, specification in child.items():
+                    package_name = local_name
+                    if isinstance(specification, dict):
+                        package_name = specification.get("package", local_name)
+                    if package_name == "loco-rs":
+                        declarations.append(".".join((*child_path, str(local_name))))
+            visit(child, child_path)
+
+    visit(document)
+    return declarations
+
+
+def parse_manifest(text: str, name: str) -> dict[str, Any]:
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"invalid Cargo manifest in framework boundary check ({name}): {error}") from error
+
+
+cases = {
+    "direct": ('[dependencies]\nloco-rs = "1"\n', True),
+    "renamed": ('[dependencies]\nweb = { package = "loco-rs", version = "1" }\n', True),
+    "table": ('[dependencies.web]\npackage = "loco-rs"\nversion = "1"\n', True),
+    "target": ('[target.\'cfg(unix)\'.dev-dependencies]\nweb = { package = "loco-rs", version = "1" }\n', True),
+    "negative": ('[dependencies]\naxum = "1"\n', False),
+}
+for case_name, (source, expected) in cases.items():
+    found = bool(loco_declarations(parse_manifest(source, case_name)))
+    if found != expected:
+        raise SystemExit(f"framework boundary self-test failed: {case_name}")
+
+tracked_manifest_bytes = subprocess.run(
+    ["git", "ls-files", "-z", "--", "*Cargo.toml"],
+    check=True,
+    stdout=subprocess.PIPE,
+).stdout
+for encoded_path in tracked_manifest_bytes.split(b"\0"):
+    if not encoded_path:
+        continue
+    manifest = Path(os.fsdecode(encoded_path))
+    document = parse_manifest(manifest.read_text(encoding="utf-8"), str(manifest))
+    declarations = loco_declarations(document)
+    if declarations:
+        joined = ", ".join(declarations)
+        print(
+            "Loco is a reference for workflow patterns, not an active Fasti "
+            f"runtime dependency: {manifest} ({joined})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+PYTHON
 
 assert_no_boundary_dependencies() {
   local crate="$1"
