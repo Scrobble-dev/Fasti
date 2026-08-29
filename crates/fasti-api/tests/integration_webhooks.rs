@@ -7,7 +7,7 @@ use axum::{
 };
 use fasti_api::{api_router, integration_router};
 use fasti_contracts::{
-    ClientEnrollmentResponse, NodeInitializationResponse, SubmitObservationResponse,
+    ClientEnrollmentResponse, NodeInitializationResponse, ProblemDetails, SubmitObservationResponse,
 };
 use fasti_store::SqliteKernel;
 use std::path::Path;
@@ -253,6 +253,23 @@ async fn template_webhook_rejects_provider_ids_exceeding_the_combined_limit() {
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let problem: ProblemDetails = serde_json::from_slice(
+        &to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .expect("bounded body"),
+    )
+    .expect("problem response");
+    assert_eq!(problem.code, "invalid_observation");
+    assert_eq!(problem.violations.len(), 1);
+    assert_eq!(problem.violations[0].pointer, "/provider_ids");
+    assert_eq!(
+        problem.violations[0].reason,
+        "too many provider identifiers were supplied"
+    );
+    assert_eq!(
+        problem.violations[0].expected,
+        "at most 16 item and series identifiers combined"
+    );
 }
 
 #[tokio::test]
