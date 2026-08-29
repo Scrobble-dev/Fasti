@@ -3872,6 +3872,15 @@
     background: var(--fasti-surface-paper) !important;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    :global(.spinning) {
+      animation: none !important;
+    }
+    .profile-tile-item {
+      transition: none !important;
+    }
+  }
+
   @media (max-width: 64rem) {
     .settings-container {
       padding: 24px 16px 48px;
