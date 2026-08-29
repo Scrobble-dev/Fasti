@@ -162,8 +162,7 @@
     if (
       targetProfile.pinHash &&
       enteredPin !== targetProfile.pinHash &&
-      enteredPin !== "1234"
-    ) {
+      enteredPin !== targetProfile.pinHash
       errorMessage = "Invalid 4-digit PIN code. Please try again.";
       return;
     }
