@@ -219,7 +219,7 @@ async fn template_webhook(
         )));
     }
     let request: IntegrationObservationRequest = serde_json::from_slice(&body)
-        .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
+        .map_err(|_| representation_problem(ProblemCode::MalformedJson, correlation_id))?;
     let normalized = normalize_template_request(source, request, correlation_id)?;
     accept_observation_request(
         state,
@@ -325,6 +325,18 @@ fn ticks_to_seconds(value: Option<u64>) -> Option<u64> {
     value.map(|ticks| ticks / 10_000_000)
 }
 
+// Clamp to duration rather than passing a raw provider-reported position
+// through: provider session and item metadata can disagree slightly
+// (rounding, a still-buffering duration), and an unclamped position past
+// duration would make validate_request reject an otherwise-genuine completion.
+fn clamp_position(position: Option<u64>, duration: Option<u64>) -> Option<u64> {
+    match (position, duration) {
+        (Some(position), Some(duration)) => Some(position.min(duration)),
+        (Some(position), None) => Some(position),
+        (None, duration) => duration,
+    }
+}
+
 fn emby_request(
     value: &Value,
     raw: &[u8],
@@ -428,15 +440,7 @@ fn emby_request(
         });
 
     let duration_seconds = ticks_to_seconds(runtime_ticks).filter(|seconds| *seconds > 0);
-    // Clamp to duration rather than passing raw ticks through: Emby's session
-    // and item metadata can disagree slightly (rounding, a still-buffering
-    // duration), and an unclamped position past duration would make
-    // validate_request reject an otherwise-genuine completion.
-    let position_seconds = match (ticks_to_seconds(position_ticks), duration_seconds) {
-        (Some(position), Some(duration)) => Some(position.min(duration)),
-        (Some(position), None) => Some(position),
-        (None, duration) => duration,
-    };
+    let position_seconds = clamp_position(ticks_to_seconds(position_ticks), duration_seconds);
 
     Ok(SubmitObservationRequest {
         kind: ObservationIngressKind::ConsumptionOccurrence,
@@ -494,7 +498,7 @@ pub(crate) async fn emby_webhook(
         ));
     }
     let value: Value = serde_json::from_slice(&body)
-        .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
+        .map_err(|_| representation_problem(ProblemCode::MalformedJson, correlation_id))?;
     let normalized = emby_request(&value, &body, correlation_id)?;
     accept_observation_request(
         state,
@@ -646,15 +650,8 @@ fn plex_request(
     let duration_seconds = duration_ms
         .map(|value| value / 1000)
         .filter(|value| *value > 0);
-    // Clamp to duration rather than passing the raw viewOffset through: Plex's
-    // duration and viewOffset can disagree slightly, and an unclamped position
-    // past duration would make validate_request reject an otherwise-genuine
-    // completion.
-    let position_seconds = match (view_offset_ms.map(|value| value / 1000), duration_seconds) {
-        (Some(position), Some(duration)) => Some(position.min(duration)),
-        (Some(position), None) => Some(position),
-        (None, duration) => duration,
-    };
+    let position_seconds =
+        clamp_position(view_offset_ms.map(|value| value / 1000), duration_seconds);
 
     Ok(SubmitObservationRequest {
         kind: ObservationIngressKind::ConsumptionOccurrence,
@@ -746,7 +743,7 @@ pub(crate) async fn plex_webhook(
         ));
     }
     let value: Value = serde_json::from_slice(payload)
-        .map_err(|_| representation_problem(ProblemCode::ValidationFailed, correlation_id))?;
+        .map_err(|_| representation_problem(ProblemCode::MalformedJson, correlation_id))?;
     let normalized = plex_request(&value, payload, correlation_id)?;
     accept_observation_request(
         state,

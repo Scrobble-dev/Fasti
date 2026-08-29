@@ -320,6 +320,12 @@ async fn main() -> Result<()> {
             integration_transport_allowed(requested, tls_terminated),
             "non-loopback FASTI_INTEGRATION_LISTEN requires FASTI_INTEGRATION_TLS_TERMINATED=true and a trusted TLS reverse proxy"
         );
+        if !requested.ip().is_loopback() {
+            anyhow::ensure!(
+                remote_proxy_is_trusted()?,
+                "a non-loopback integration listener requires FASTI_REMOTE_TRUSTED_PROXY=true"
+            );
+        }
         let (integration_listener, used_integration_fallback) =
             bind_listener(requested, PortFallback::Fail).await?;
         debug_assert!(!used_integration_fallback);
