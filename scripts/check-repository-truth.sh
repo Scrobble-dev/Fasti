@@ -145,6 +145,8 @@ manifest_dependency_names() {
 python3 - <<'PYTHON'
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -193,9 +195,15 @@ for case_name, (source, expected) in cases.items():
     if found != expected:
         raise SystemExit(f"framework boundary self-test failed: {case_name}")
 
-for manifest in Path(".").rglob("Cargo.toml"):
-    if any(part in {".git", "target", "node_modules"} for part in manifest.parts):
+tracked_manifest_bytes = subprocess.run(
+    ["git", "ls-files", "-z", "--", "*Cargo.toml"],
+    check=True,
+    stdout=subprocess.PIPE,
+).stdout
+for encoded_path in tracked_manifest_bytes.split(b"\0"):
+    if not encoded_path:
         continue
+    manifest = Path(os.fsdecode(encoded_path))
     document = parse_manifest(manifest.read_text(encoding="utf-8"), str(manifest))
     declarations = loco_declarations(document)
     if declarations:
