@@ -1,0 +1,6 @@
+engines:
+  agentlinter:
+    exclude_paths:
+      # security@scrobble.dev is the intentional, required public reporting
+      # contact in our security policy -- not a PII leak.
+      - "SECURITY.md"

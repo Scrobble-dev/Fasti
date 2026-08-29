@@ -18,6 +18,9 @@ const USAGE: &str = "B1 loopback-only conformance fixture (nondurable; not a pro
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // nosemgrep: rust.lang.security.args.args -- args only pick the bind address, and
+    // requested_invocation() below still rejects anything but 127.0.0.1; argv cannot
+    // widen this loopback-only fixture's exposure.
     let requested = match requested_invocation(env::args().skip(1), env::var(ADDRESS_ENV).ok()) {
         Ok(Invocation::Help) => {
             println!("{USAGE}");

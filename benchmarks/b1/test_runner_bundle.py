@@ -17,7 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "package-b1-runner.py"
 SPEC = importlib.util.spec_from_file_location("fasti_package_b1_runner", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
+assert SPEC is not None and SPEC.loader is not None  # nosec B101 -- test-collection guard, not a runtime path
 bundle = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bundle)
 

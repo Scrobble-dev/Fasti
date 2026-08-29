@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,6 +41,13 @@ function checkTarget(file, rawTarget) {
   }
 
   const absolute = resolve(repoRoot, dirname(file), pathPart);
+  const relativeToRoot = relative(repoRoot, absolute);
+  if (relativeToRoot.startsWith("..") || isAbsolute(relativeToRoot)) {
+    failures.push(`${file}: link target escapes the repository ${pathPart}`);
+    return;
+  }
+  // absolute is confirmed to stay within repoRoot above.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   if (!existsSync(absolute)) {
     failures.push(`${file}: missing local link target ${pathPart}`);
   }
@@ -48,11 +55,15 @@ function checkTarget(file, rawTarget) {
 
 for (const file of markdownFiles) {
   const absoluteFile = resolve(repoRoot, file);
+  // file is a path returned by `git ls-files` above, which never emits ".."
+  // path components, so absoluteFile cannot escape repoRoot.
+  /* eslint-disable security/detect-non-literal-fs-filename */
   if (!existsSync(absoluteFile)) {
     continue;
   }
 
   const content = readFileSync(absoluteFile, "utf8");
+  /* eslint-enable security/detect-non-literal-fs-filename */
   for (const match of content.matchAll(inlineLink)) {
     checkTarget(file, match[1]);
   }

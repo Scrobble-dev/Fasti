@@ -1217,6 +1217,7 @@ mod tests {
     #[test]
     fn filesystem_destination_reports_indeterminate_parent_sync() {
         let root = tempfile::tempdir().expect("sync failure destination root");
+        // nosemgrep: rust.lang.security.current-exe.current-exe -- test-only re-exec worker (#[cfg(test)]), never compiled into a release binary
         let output = Command::new(std::env::current_exe().expect("current test binary"))
             .args([
                 "--exact",
@@ -1261,6 +1262,7 @@ mod tests {
         ] {
             let root = tempfile::tempdir().expect("crash destination root");
             let path = root.path().join("workspace.fasti");
+            // nosemgrep: rust.lang.security.current-exe.current-exe -- test-only re-exec worker (#[cfg(test)]), never compiled into a release binary
             let output = Command::new(std::env::current_exe().expect("current test binary"))
                 .args([
                     "--exact",

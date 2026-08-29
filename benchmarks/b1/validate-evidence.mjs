@@ -37,10 +37,18 @@ const physicalProfilesPath = join(here, "physical-profiles.json");
 const physicalProfilesSchemaPath = join(here, "physical-profiles.schema.json");
 
 function loadJson(path) {
+  // path is always one of this file's own fixed constants (schema/budgets/
+  // ledger/profile paths built from repositoryRoot) or the CLI's own
+  // positional evidence-file argument -- the documented purpose of this
+  // tool is to open a file the caller names, so there is no "expected root"
+  // to contain it to.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   return parseStrictJson(readFileSync(path, "utf8"), path);
 }
 
 function sha256(path) {
+  // See loadJson above: path is always a fixed local constant here.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
@@ -70,7 +78,12 @@ function readContainedRegularFileOnce(
     containedPath(lexicalRoot, lexicalTarget),
     `${label} path escapes its governed directory`,
   );
+  // lexicalRoot/lexicalTarget are the very paths containedPath() just
+  // verified stay inside the governed directory above; realpathSync here
+  // resolves symlinks so that check also holds for the real filesystem path.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const realRoot = realpathSync(lexicalRoot);
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const realParent = realpathSync(dirname(lexicalTarget));
   assert(
     realParent === realRoot || containedPath(realRoot, realParent),
@@ -78,10 +91,16 @@ function readContainedRegularFileOnce(
   );
   let descriptor;
   try {
+    // Target is contained and O_NOFOLLOW-opened per the checks above.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     descriptor = openSync(lexicalTarget, fsConstants.O_RDONLY | noFollow);
     const metadata = fstatSync(descriptor);
     assert(metadata.isFile(), `${label} is not a regular file`);
     afterOpen();
+    // descriptor is a file descriptor (number) from openSync above, not a
+    // path -- reading by fd avoids the TOCTOU race a second path-based read
+    // would reintroduce.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     const bytes = readFileSync(descriptor);
     assert(
       bytes.length === metadata.size,
@@ -178,12 +197,23 @@ function assert(condition, message) {
   }
 }
 
+// Defense-in-depth for every dynamic-key/dynamic-index read in this file:
+// each call site's key is a bounded array index or one of a small,
+// file-local fixed set of literal strings, never an attacker-chosen
+// property name, but this still refuses to follow inherited properties
+// (e.g. "__proto__", "constructor") instead of silently returning them.
+function ownProp(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key)
+    ? object[key]
+    : undefined;
+}
+
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
+    ? (ownProp(sorted, middle - 1) + ownProp(sorted, middle)) / 2
+    : ownProp(sorted, middle);
 }
 
 function summarize(values) {
@@ -208,7 +238,7 @@ function p95NearestRank(values) {
     0,
     Math.min(ordered.length - 1, Math.ceil(ordered.length * 0.95) - 1),
   );
-  return ordered[index];
+  return ownProp(ordered, index);
 }
 
 function assertSampleDerivedFromObservations(
@@ -255,7 +285,9 @@ function assertSampleDerivedFromObservations(
     ];
     assert(
       cgroupRequiredFields.every((field) =>
-        withCgroup ? observation[field] !== null : observation[field] === null,
+        withCgroup
+          ? ownProp(observation, field) !== null
+          : ownProp(observation, field) === null,
       ) &&
         (withCgroup ||
           (observation.cgroup_memory_limit_bytes === null &&
@@ -363,15 +395,16 @@ function assertSampleDerivedFromObservations(
       ? "cgroup_cpu_runtime_ns"
       : "process_tree_cpu_runtime_ns";
     const intervals = steady.slice(1).map((observation, index) => {
-      const previous = steady[index];
+      const previous = ownProp(steady, index);
       return (
-        ((observation[counter] - previous[counter]) /
+        ((ownProp(observation, counter) - ownProp(previous, counter)) /
           (observation.elapsed_ns - previous.elapsed_ns)) *
         100
       );
     });
     const measuredNs = steady.at(-1).elapsed_ns - steady[0].elapsed_ns;
-    const totalCpuNs = steady.at(-1)[counter] - steady[0][counter];
+    const totalCpuNs =
+      ownProp(steady.at(-1), counter) - ownProp(steady[0], counter);
     assert(
       measuredNs >= budgets.timing_seconds.idle_measurement * 1_000_000_000 &&
         sample.idle_cpu.interval_count === intervals.length &&
@@ -395,7 +428,7 @@ function assertSampleDerivedFromObservations(
 function assertSummary(actual, expected, label) {
   for (const key of ["minimum", "median", "maximum"]) {
     assert(
-      closeEnough(actual[key], expected[key]),
+      closeEnough(ownProp(actual, key), ownProp(expected, key)),
       `${label}.${key} is not derived from the samples`,
     );
   }
@@ -430,18 +463,43 @@ const physicalProfiles = loadJson(physicalProfilesPath);
 const piProfile = physicalProfiles.profiles.raspberry_pi_5_champion;
 const j4125Profile = physicalProfiles.profiles.j4125_calibrated;
 
+// Allow-list gate for physical-profiles.json pattern strings before they
+// ever reach `new RegExp(...)`: bounded length, and only the characters
+// these hardware-matching patterns legitimately need. Mirrors the strict
+// pre-validation scripts/generate-release-notes.mjs uses for its own
+// dynamic RegExp input.
+const SAFE_REGEX_PATTERN = /^[A-Za-z0-9_ .^$*+?()[\]{}|:,\\-]{1,200}$/;
+
+function compileTrustedPattern(pattern, flags, label) {
+  assert(
+    typeof pattern === "string" && SAFE_REGEX_PATTERN.test(pattern),
+    `${label} regex pattern uses unsupported syntax`,
+  );
+  return new RegExp(pattern, flags);
+}
+
 function deriveHardwareProfile(runner) {
   const tree = runner.physicality?.device_tree;
   if (
     tree &&
-    new RegExp(piProfile.device_tree.model_pattern).test(tree.model) &&
+    compileTrustedPattern(
+      piProfile.device_tree.model_pattern,
+      undefined,
+      "raspberry_pi_5_champion.device_tree.model_pattern",
+    ).test(tree.model) &&
     piProfile.device_tree.required_compatible.every((item) =>
       tree.compatible.includes(item),
     )
   ) {
     return "raspberry_pi_5_champion";
   }
-  if (new RegExp(j4125Profile.cpu_model_pattern, "i").test(runner.cpu_model)) {
+  if (
+    compileTrustedPattern(
+      j4125Profile.cpu_model_pattern,
+      "i",
+      "j4125_calibrated.cpu_model_pattern",
+    ).test(runner.cpu_model)
+  ) {
     return "j4125_calibrated";
   }
   return "unclassified";
@@ -1444,8 +1502,8 @@ function validateEvidence(
     ];
     for (const field of fields) {
       assertSummary(
-        scenario.summary[field],
-        summarize(scenario.samples.map((sample) => sample[field])),
+        ownProp(scenario.summary, field),
+        summarize(scenario.samples.map((sample) => ownProp(sample, field))),
         `${scenario.id}.summary.${field}`,
       );
     }
@@ -1459,14 +1517,16 @@ function validateEvidence(
     for (const [summaryField, sampleField] of cgroupFields) {
       if (nativeScenarioIds.has(scenario.id)) {
         assert(
-          scenario.summary[summaryField] === null,
+          ownProp(scenario.summary, summaryField) === null,
           `${scenario.id}.${summaryField} must be null`,
         );
       } else {
         assertSummary(
-          scenario.summary[summaryField],
+          ownProp(scenario.summary, summaryField),
           summarize(
-            scenario.samples.map((sample) => sample.cgroup[sampleField]),
+            scenario.samples.map((sample) =>
+              ownProp(sample.cgroup, sampleField),
+            ),
           ),
           `${scenario.id}.summary.${summaryField}`,
         );
@@ -1478,7 +1538,7 @@ function validateEvidence(
     evidence.scenarios.map((scenario) => [scenario.id, scenario]),
   );
   for (const id of ociScenarioIds) {
-    const dockerRuns = byId[id].commands.filter((command) =>
+    const dockerRuns = ownProp(byId, id).commands.filter((command) =>
       command.startsWith("docker run "),
     );
     assert(
@@ -1523,8 +1583,9 @@ function validateEvidence(
   );
   for (const id of expectedScenarioIds.slice(0, 4)) {
     assert(
-      byId[id].workload_exit.expectation === "running_until_harness_stop" &&
-        byId[id].workload_exit.observed_code === null,
+      ownProp(byId, id).workload_exit.expectation ===
+        "running_until_harness_stop" &&
+        ownProp(byId, id).workload_exit.observed_code === null,
       `${id} must stay alive until the harness stops it`,
     );
   }
@@ -1555,9 +1616,12 @@ function validateEvidence(
     "budget verdicts must appear once in canonical order",
   );
 
+  // budget is one of the 4 canonical keys just confirmed via
+  // isDeepStrictEqual(Object.keys(verdicts), [...]) above.
   for (const budget of Object.keys(verdicts)) {
     assert(
-      verdicts[budget].limit_bytes === budgets.memory_bytes[budget],
+      ownProp(verdicts, budget).limit_bytes ===
+        ownProp(budgets.memory_bytes, budget),
       `${budget} limit differs from canonical budget`,
     );
   }
@@ -1566,9 +1630,9 @@ function validateEvidence(
     ["idle_target", idleMeasured],
     ["absolute_ceiling", absoluteMeasured],
   ]) {
-    const verdict = verdicts[budget];
+    const verdict = ownProp(verdicts, budget);
     const expectedStatus =
-      measured <= budgets.memory_bytes[budget] ? "pass" : "fail";
+      measured <= ownProp(budgets.memory_bytes, budget) ? "pass" : "fail";
     assert(
       verdict.measured_bytes === measured,
       `${budget} measured_bytes is not derived from scenario maxima`,
@@ -1620,11 +1684,13 @@ function validateEvidence(
   if (evidence.status === "complete" && evidencePath !== null) {
     validateRetainedArtifacts(evidence, evidencePath, label);
   }
+  // budget is one of the 5 canonical artifactOrder entries, just confirmed
+  // via assertJsonEqual(..., artifactOrder) above.
   for (const verdict of evidence.artifact_budget_verdicts) {
     const budget = verdict.budget;
-    const measured = artifactMeasurements[budget];
+    const measured = ownProp(artifactMeasurements, budget);
     assert(
-      verdict.limit_bytes === budgets.artifact_bytes[budget] &&
+      verdict.limit_bytes === ownProp(budgets.artifact_bytes, budget) &&
         verdict.measured_bytes === measured,
       `${budget} artifact verdict is not correlated to its budget and measured bytes`,
     );
@@ -1637,7 +1703,9 @@ function validateEvidence(
     } else {
       assert(
         verdict.status ===
-          (measured <= budgets.artifact_bytes[budget] ? "pass" : "fail"),
+          (measured <= ownProp(budgets.artifact_bytes, budget)
+            ? "pass"
+            : "fail"),
         `${budget} artifact verdict is not derived from its limit`,
       );
     }
@@ -1686,7 +1754,7 @@ function validateEvidence(
 }
 
 function fixtureSummary(samples, field) {
-  return summarize(samples.map((sample) => sample[field]));
+  return summarize(samples.map((sample) => ownProp(sample, field)));
 }
 
 function makeSelfTestEvidence() {
@@ -1716,10 +1784,12 @@ function makeSelfTestEvidence() {
         sequence: index + 1,
         elapsed_ns,
         steady: elapsed_ns >= steadyStart,
-        process_tree_rss_bytes: processRss[index],
+        process_tree_rss_bytes: ownProp(processRss, index),
         process_tree_cpu_runtime_ns: run * 100_000 + index * 1_000_000,
         process_count: 1,
-        cgroup_memory_current_bytes: withCgroup ? cgroupCurrent[index] : null,
+        cgroup_memory_current_bytes: withCgroup
+          ? ownProp(cgroupCurrent, index)
+          : null,
         cgroup_memory_peak_bytes: withCgroup ? 11_000_000 + run : null,
         cgroup_cpu_runtime_ns: withCgroup
           ? run * 200_000 + index * 2_000_000
@@ -1736,7 +1806,8 @@ function makeSelfTestEvidence() {
       const intervals = steady.slice(1).map((observation, index) => {
         const previous = steady[index];
         return (
-          ((observation[idleCounter] - previous[idleCounter]) /
+          ((ownProp(observation, idleCounter) -
+            ownProp(previous, idleCounter)) /
             (observation.elapsed_ns - previous.elapsed_ns)) *
           100
         );
@@ -1799,7 +1870,8 @@ function makeSelfTestEvidence() {
                 (steady.at(-1).elapsed_ns - steady[0].elapsed_ns) /
                 1_000_000_000,
               average_percent_one_core: round6(
-                ((steady.at(-1)[idleCounter] - steady[0][idleCounter]) /
+                ((ownProp(steady.at(-1), idleCounter) -
+                  ownProp(steady[0], idleCounter)) /
                   (steady.at(-1).elapsed_ns - steady[0].elapsed_ns)) *
                   100,
               ),
@@ -2131,7 +2203,7 @@ function makeSelfTestEvidence() {
         ["contract_pack_compressed", 3],
       ].map(([budget, measured_bytes]) => ({
         budget,
-        limit_bytes: budgets.artifact_bytes[budget],
+        limit_bytes: ownProp(budgets.artifact_bytes, budget),
         measured_bytes,
         status: "pass",
         reason: `Fixture-derived ${budget} size.`,
@@ -2243,14 +2315,16 @@ function validatePackagingSpikeRemovalSentinels() {
       (candidate) => candidate.profile === device.profile,
     );
     const missingSpike = clone(ledger);
-    delete missingSpike.devices[deviceIndex].spike;
+    delete ownProp(missingSpike.devices, deviceIndex).spike;
     expectLedgerFailure(missingSpike, `${device.profile}.spike`);
     sentinels += 1;
 
     for (const path of requiredSpikePaths) {
       const missingField = clone(ledger);
-      let parent = missingField.devices[deviceIndex].spike;
-      for (const segment of path.slice(0, -1)) parent = parent[segment];
+      let parent = ownProp(missingField.devices, deviceIndex).spike;
+      for (const segment of path.slice(0, -1)) {
+        parent = ownProp(parent, segment);
+      }
       delete parent[path.at(-1)];
       expectLedgerFailure(
         missingField,
@@ -2265,10 +2339,10 @@ function validatePackagingSpikeRemovalSentinels() {
       sourceIndex += 1
     ) {
       const missingSource = clone(ledger);
-      missingSource.devices[deviceIndex].spike.authoritative_source_urls.splice(
-        sourceIndex,
-        1,
-      );
+      ownProp(
+        missingSource.devices,
+        deviceIndex,
+      ).spike.authoritative_source_urls.splice(sourceIndex, 1);
       expectLedgerFailure(
         missingSource,
         `${device.profile}.spike.authoritative_source_urls[${sourceIndex}]`,
@@ -2624,9 +2698,13 @@ function validateLedgerStateTransitions(validEvidence) {
 function validateContainedReceiptReaderSentinels() {
   const root = mkdtempSync(join(tmpdir(), "fasti-b1-receipt-reader-"));
   try {
+    // root is this function's own mkdtempSync-created directory, and every
+    // path below is a literal segment joined under it -- never external
+    // input.
     const receipt = join(root, "receipt.json");
     const openedReceipt = join(root, "opened-receipt.json");
     const original = Buffer.from('{"value":"descriptor-owned"}\n');
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     writeFileSync(receipt, original, { mode: 0o600 });
     const snapshot = readContainedRegularFileOnce(
       root,
@@ -2634,7 +2712,9 @@ function validateContainedReceiptReaderSentinels() {
       "self-test receipt",
       {
         afterOpen: () => {
+          // eslint-disable-next-line security/detect-non-literal-fs-filename
           renameSync(receipt, openedReceipt);
+          // eslint-disable-next-line security/detect-non-literal-fs-filename
           writeFileSync(receipt, '{"value":"swapped-path"}\n', {
             mode: 0o600,
           });
@@ -2648,6 +2728,7 @@ function validateContainedReceiptReaderSentinels() {
     );
 
     const linkedReceipt = join(root, "linked-receipt.json");
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     symlinkSync(openedReceipt, linkedReceipt);
     let symlinkRejected = false;
     try {
@@ -2934,7 +3015,7 @@ if (args.length === 1 && args[0] === "--self-test") {
   console.log(`PASS: ${path}`);
 } else {
   console.error(
-    "Usage: node benchmarks/b1/validate-evidence.mjs --static|--self-test|--emit-j4125-test-fixture|--build-qualification <pi.json> <j4125.json>|<evidence.json>",
+    "Usage: node benchmarks/b1/validate-evidence.mjs --static|--self-test|--emit-j4125-test-fixture|--build-qualification pi.json j4125.json|evidence.json",
   );
   process.exit(2);
 }

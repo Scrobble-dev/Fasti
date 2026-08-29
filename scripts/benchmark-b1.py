@@ -98,7 +98,7 @@ def run_checked(
     timeout: float = 30,
     input_text: str | None = None,
 ) -> str:
-    result = subprocess.run(
+    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- argv is a list (no shell); the inherited/derived environment configures the child process (as env=), it is never interpolated into a shell string.
         args,
         cwd=cwd,
         input=input_text,
@@ -779,7 +779,7 @@ def validate_profile_requirements(
 
 def detect_systemd_virtualization() -> str:
     require_command("systemd-detect-virt")
-    result = subprocess.run(
+    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["systemd-detect-virt"],
         cwd=ROOT,
         text=True,
@@ -1804,7 +1804,7 @@ exit 92
 
         started_at_ns = time.monotonic_ns()
         with log.open("wb") as log_handle:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                 command,
                 cwd=ROOT,
                 stdout=log_handle,
@@ -1868,7 +1868,7 @@ def docker_container_pid(name: str, timeout: float) -> int:
 
 
 def docker_running(name: str) -> bool:
-    result = subprocess.run(
+    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["docker", "inspect", "--format", "{{.State.Running}}", name],
         cwd=ROOT,
         text=True,
@@ -1879,7 +1879,7 @@ def docker_running(name: str) -> bool:
 
 
 def docker_logs(name: str) -> str:
-    result = subprocess.run(
+    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["docker", "logs", name],
         cwd=ROOT,
         text=True,
@@ -2011,7 +2011,7 @@ exec /bin/sleep 3600
                 commands.append(command_text(health_command))
                 payload = None
                 while time.monotonic() < deadline:
-                    probe = subprocess.run(
+                    probe = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                         health_command,
                         cwd=ROOT,
                         text=True,
@@ -2115,7 +2115,7 @@ exec /bin/sleep 3600
         }
         return metrics, commands, observed_exit
     finally:
-        subprocess.run(
+        subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
             ["docker", "rm", "--force", name],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
@@ -2657,14 +2657,15 @@ def artifact_sizes(
             source_command: list[str], destination: Path, *, source_cwd: Path = ROOT
         ) -> None:
             with destination.open("wb") as output:
-                source = subprocess.Popen(
+                source = subprocess.Popen(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                     source_command,
                     cwd=source_cwd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
-                assert source.stdout is not None
-                compressor = subprocess.Popen(
+                if source.stdout is None:
+                    raise CaptureError("gzip pipeline: source process has no stdout pipe")
+                compressor = subprocess.Popen(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                     ["gzip", "-n", "-9"],
                     cwd=source_cwd,
                     stdin=source.stdout,
@@ -2796,7 +2797,7 @@ def extract_native_fastid(
             raise CaptureError("Docker returned no container ID for native artifact extraction")
         run_checked(copy_command)
     finally:
-        subprocess.run(
+        subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
             ["docker", "rm", "--force", name],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
