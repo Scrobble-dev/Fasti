@@ -1,6 +1,10 @@
 # Multi-architecture Docker Official Image index digests resolved on 2026-08-22.
 # The tags remain readable; the digests make the build inputs immutable.
 FROM rust:1.97-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS rust-builder
+# The default target relies on unused-stage pruning. This executable feature
+# gate rejects Docker's deprecated legacy builder. Docker BuildKit and current
+# Podman/Buildah support RUN mounts and skip unrelated stages.
+RUN --mount=type=tmpfs,target=/tmp/fasti-modern-builder true
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 
@@ -64,6 +68,6 @@ FROM runtime AS local
 COPY --from=web-builder --chown=fasti:fasti /app/apps/web/dist /srv/fasti-web
 ENV FASTI_STATIC_DIR=/srv/fasti-web
 
-# Keep the daemon-and-CLI image as the default output. A plain `docker build .`
-# must not build or include the optional web stage.
+# Keep the daemon-and-CLI image as the default output. A supported modern
+# builder skips the unrelated web stages and never includes their files.
 FROM runtime AS default
