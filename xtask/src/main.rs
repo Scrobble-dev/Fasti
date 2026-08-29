@@ -232,18 +232,7 @@ fn run_milestone(
         ),
         BodyArg::B8b => {
             run_deep(root)?;
-            let b8a_manifest = root.join("target/fasti-evidence/b8a-manifest.json");
-            anyhow::ensure!(
-                b8a_manifest.is_file(),
-                "B8b requires a passing B8a manifest at {}; none exists yet",
-                b8a_manifest.display()
-            );
-            evidence::verify(root, &b8a_manifest).map_err(|error| {
-                error.context(format!(
-                    "B8b requires a passing B8a manifest at {}",
-                    b8a_manifest.display()
-                ))
-            })?;
+            evidence::verify_b8a_prerequisite(root)?;
             let manifest =
                 manifest.unwrap_or_else(|| root.join("target/fasti-evidence/b8b-manifest.json"));
             evidence::create_b8b_milestone_manifest(root, &manifest).map(|_| ())

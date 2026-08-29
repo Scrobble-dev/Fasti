@@ -5,7 +5,12 @@ use fasti_domain::{BrowserUserId, RequestCorrelationId};
 const MIN_PASSWORD_BYTES: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 128;
 const MIN_SESSION_MINUTES: u32 = 5;
-const MAX_SESSION_MINUTES: u32 = 86_400;
+/// The default, general-purpose maximum browser session lifetime (24h).
+/// `CreateBrowserSessionCommand::try_new` also accepts a caller-supplied
+/// ceiling above the floor for opt-in, non-default deployments (currently
+/// only the loopback-gated `FASTI_DEVELOPMENT_AUTO_LOGIN` dev convenience);
+/// production callers should pass this constant.
+pub const MAX_SESSION_MINUTES: u32 = 24 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrowserAuthInputError;
@@ -128,13 +133,19 @@ pub struct CreateBrowserSessionCommand {
 }
 
 impl CreateBrowserSessionCommand {
+    /// `max_lifetime_minutes` is the caller's ceiling for this request; pass
+    /// [`MAX_SESSION_MINUTES`] unless a deliberately relaxed, non-default
+    /// deployment ceiling applies (see its doc comment).
     pub fn try_new(
         correlation_id: RequestCorrelationId,
         username: BrowserUsername,
         password: BrowserPassword,
         lifetime_minutes: u32,
+        max_lifetime_minutes: u32,
     ) -> Result<Self, BrowserAuthInputError> {
-        if !(MIN_SESSION_MINUTES..=MAX_SESSION_MINUTES).contains(&lifetime_minutes) {
+        if max_lifetime_minutes < MIN_SESSION_MINUTES
+            || !(MIN_SESSION_MINUTES..=max_lifetime_minutes).contains(&lifetime_minutes)
+        {
             return Err(BrowserAuthInputError);
         }
         Ok(Self {
@@ -672,11 +683,14 @@ impl SwitchBrowserSessionProfileCommand {
 }
 
 pub trait BrowserAccountPort: Send + Sync {
+    /// Seeds the one-time development browser account if it does not exist
+    /// yet. Returns `true` when this call actually created it, `false` when
+    /// an account was already seeded (the given credential is then unused).
     fn ensure_development_browser_user(
         &self,
         username: BrowserUsername,
         password: BrowserPassword,
-    ) -> ApplicationResult<()>;
+    ) -> ApplicationResult<bool>;
     fn create_browser_session(
         &self,
         command: CreateBrowserSessionCommand,
@@ -728,7 +742,25 @@ mod tests {
             BrowserUsername::try_new("testadmin").expect("username"),
             BrowserPassword::try_new("testadmin").expect("password"),
             0,
+            MAX_SESSION_MINUTES,
         )
         .is_err());
+    }
+
+    #[test]
+    fn session_lifetime_is_bounded_by_the_caller_supplied_ceiling() {
+        let session = |lifetime, max| {
+            CreateBrowserSessionCommand::try_new(
+                RequestCorrelationId::new_v7(),
+                BrowserUsername::try_new("testadmin").expect("username"),
+                BrowserPassword::try_new("testadmin").expect("password"),
+                lifetime,
+                max,
+            )
+        };
+        assert!(session(MAX_SESSION_MINUTES, MAX_SESSION_MINUTES).is_ok());
+        assert!(session(MAX_SESSION_MINUTES + 1, MAX_SESSION_MINUTES).is_err());
+        assert!(session(MAX_SESSION_MINUTES + 1, MAX_SESSION_MINUTES * 100).is_ok());
+        assert!(session(MIN_SESSION_MINUTES - 1, MAX_SESSION_MINUTES * 100).is_err());
     }
 }

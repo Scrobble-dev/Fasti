@@ -263,8 +263,9 @@ const PRODUCTION_SCHEMAS = {
         "type": "string"
       },
       "session_timeout_minutes": {
+        "description": "5-1440 (24h) covers every normal deployment. The published maximum\nhere is wider than that -- 52,560,000 (100 years), matching apps/\nfastid/src/main.rs's DEVELOPMENT_UNBOUNDED_SESSION_MINUTES -- because\nthe generated SDK's client re-validates outgoing requests against\nthis exact published schema (packages/sdk/src/generated.ts's\nvalidateOpenApiValue): a narrower published maximum would make the\nSDK itself reject the value before a legitimate loopback dev-auto-\nlogin request ever reached the daemon. The runtime bound enforced by\nCreateBrowserSessionCommand::try_new is still the actual source of\ntruth for what a given instance accepts -- only a daemon with the\nloopback-gated FASTI_DEVELOPMENT_AUTO_LOGIN convenience active\naccepts anything above 1440, and rejects it (422) otherwise.",
         "format": "int32",
-        "maximum": 86400,
+        "maximum": 52560000,
         "minimum": 5,
         "type": "integer"
       },
@@ -590,10 +591,15 @@ const PRODUCTION_SCHEMAS = {
           "$ref": "#/components/schemas/RecordSummaryDto"
         },
         "type": "array"
+      },
+      "truncated": {
+        "description": "`true` when more active Records exist in this workspace beyond the\nbounded page returned here (see `ListTrackingDispositionsResponse`\nfor the same pattern on a sibling listing capability).",
+        "type": "boolean"
       }
     },
     "required": [
-      "records"
+      "records",
+      "truncated"
     ],
     "type": "object"
   },
@@ -1600,6 +1606,7 @@ export interface RecordSummaryDto {
 
 export interface ListRecordsResponse {
   readonly records: ReadonlyArray<RecordSummaryDto>;
+  readonly truncated: boolean;
 }
 
 export interface AttachIdentifierRequest {

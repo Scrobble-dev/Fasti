@@ -99,7 +99,7 @@ jobs:
       - run: pnpm test:ui
       - name: Retain browser evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-ui-quality-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
@@ -127,9 +127,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Build strict OCI image
-        run: docker build --tag fasti:b0 .
+        run: docker build --target runtime --tag fasti:b0 .
       - name: Verify non-root, health, false-success, and idle-memory gates
         run: bash scripts/smoke-oci.sh fasti:b0
+      - name: Build the local (UI-bundled) OCI image
+        run: docker build --target local --tag fasti:local .
+      - name: Verify the local image serves the UI and the API on one origin
+        run: bash scripts/smoke-oci-local.sh fasti:local
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Build native binaries
@@ -196,7 +200,7 @@ jobs:
             --artifact-budget-receipt "target/fasti-artifact-stage/${{ matrix.arch }}/receipt.json" \
             -- bash scripts/bench-daemon-idle.sh target/release/fastid
       - name: Retain the exact envelope receipt and measured daemon
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b1-envelope-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/envelope/${{ matrix.arch }}
@@ -212,7 +216,7 @@ jobs:
         run: |
           git archive --format=tar.gz --output=/tmp/fasti-source.tar.gz HEAD
           sha256sum /tmp/fasti-source.tar.gz > /tmp/fasti-source.tar.gz.sha256
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-source-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
@@ -249,7 +253,7 @@ jobs:
       - name: Generate JavaScript coverage
         run: pnpm run test:coverage
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@0565863a31f2c772f9f0395002a31e3f06189574 # v5.4.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/rust-lcov.info,coverage/js-lcov.info

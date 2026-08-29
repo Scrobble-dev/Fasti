@@ -171,3 +171,41 @@ opened by `fastid` or `apps/web` will not show up as a "published port" in
 Podman Desktop or BoxBuddy. This is expected. A host-networked container
 never publishes ports the way `podman run -p` does. Check that a port is
 alive with `curl` or `ss`, not by looking for it in a container manager UI.
+
+### The `local` build target: one container with the web UI
+
+The Dockerfile has a second, optional target named `local`. It adds the
+built web UI on top of the same release image. Build it with:
+
+```bash
+podman build --target local --tag fasti:local .
+```
+
+Plain `docker build .` (no `--target`) still builds the release image only.
+CI's own image builds pass `--target runtime` explicitly, so they are not
+affected by this second target. The two images share every stage up to
+`runtime` -- there is one Dockerfile, not two, so the build recipe for
+`fastid` itself never drifts between them.
+
+`fastid` serves the UI itself. There is no separate reverse proxy and no
+second process. It does this with one environment variable:
+
+- `FASTI_STATIC_DIR` names a directory of pre-built static files (the output
+  of `apps/web`'s `vite build`). The `local` image sets this by default. Any
+  request that does not match an `/api/*` route falls back to the files in
+  this directory, and a missing file falls back further to `index.html`, so
+  the web UI's own client-side router can take over. See
+  `with_static_fallback` in `crates/fasti-api/src/lib.rs`.
+
+This is unrelated to `FASTI_DATA_ROOT` and `FASTI_EXTERNAL_BIND_IP`, which
+control the durable API (see above). A bare `podman run fasti:local` with no
+other flags serves the UI on a safe, health-only backend -- the UI does not
+turn on durable routes by itself. To get the full product -- UI and durable
+API together, on one URL -- pass all three: a data volume, `FASTI_DATA_ROOT`,
+and `FASTI_EXTERNAL_BIND_IP`. The README's container quick start shows the
+exact commands.
+
+This does not change `apps/web`'s status as B4, review-only, and not a
+release claim (see the top of this page). The `local` target exists so
+anyone can try Fasti in one command. It is not what CI validates as the
+release artifact -- that remains the plain `runtime` target, unchanged.

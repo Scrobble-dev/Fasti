@@ -314,9 +314,8 @@ impl CanonicalWorkspaceManifestProjection {
         };
         let canonical_body = serde_json_canonicalizer::to_vec(&body)
             .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
-        let manifest_digest =
-            Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(&canonical_body)))
-                .expect("SHA-256 output is canonical lowercase hexadecimal");
+        let digest_bytes: [u8; 32] = Sha256::digest(&canonical_body).into();
+        let manifest_digest = Sha256Digest::from_bytes(&digest_bytes);
         let dto = ChecksummedWorkspaceManifestDto {
             manifest: body,
             manifest_digest: manifest_digest.as_str().to_owned(),
@@ -471,9 +470,8 @@ impl ChecksummedWorkspaceManifestDto {
             .map_err(|_| WorkspaceManifestConversionError::InvalidManifestDigest)?;
         let canonical_body = serde_json_canonicalizer::to_vec(body)
             .map_err(|_| WorkspaceManifestConversionError::CanonicalizationFailed)?;
-        let computed_manifest_digest =
-            Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(&canonical_body)))
-                .expect("SHA-256 output is canonical lowercase hexadecimal");
+        let digest_bytes: [u8; 32] = Sha256::digest(&canonical_body).into();
+        let computed_manifest_digest = Sha256Digest::from_bytes(&digest_bytes);
         if supplied_manifest_digest != computed_manifest_digest {
             return Err(WorkspaceManifestConversionError::ManifestDigestMismatch);
         }

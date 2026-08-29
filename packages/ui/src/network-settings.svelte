@@ -45,11 +45,13 @@
   let busy: "save" | "test" | undefined = $state();
   let notice = $state("");
   let problem = $state("");
+  let listDrafts: Record<string, string> = $state({});
   const clientOnly = $derived(scope === "client");
 
   $effect(() => {
     if (!configuration || configuration === loadedConfiguration) return;
     loadedConfiguration = configuration;
+    listDrafts = {};
     draft = {
       service_url: configuration.connection.service_url.value,
       public_url: configuration.connection.public_url.value,
@@ -181,14 +183,17 @@
           <textarea
             class="form-control"
             rows="3"
-            value={listText(
-              policy[item[0] as keyof OutboundAccessPolicy] as string[],
-            )}
-            oninput={(event) =>
+            value={listDrafts[item[0]] ??
+              listText(
+                policy[item[0] as keyof OutboundAccessPolicy] as string[],
+              )}
+            oninput={(event) => {
+              listDrafts[item[0]] = event.currentTarget.value;
               updateList(
                 item[0] as Parameters<typeof updateList>[0],
                 event.currentTarget.value,
-              )}
+              );
+            }}
             spellcheck="false"></textarea>
         </label>
       {/each}

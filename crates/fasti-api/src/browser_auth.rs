@@ -151,6 +151,7 @@ pub(crate) async fn create_session(
         username,
         password,
         request.session_timeout_minutes,
+        state.max_session_minutes,
     )
     .map_err(|_| validation_problem(capability, correlation_id))?;
     let kernel = state.kernel;

@@ -21,6 +21,8 @@ SPEC.loader.exec_module(benchmark)
 
 
 class CollectEnvironmentTests(unittest.TestCase):
+    """Test cases for environment collection and hardware fingerprinting."""
+
     def _fake_collector(self, temperature: dict) -> SimpleNamespace:
         return SimpleNamespace(
             parse_os_image=lambda: {"id": "ubuntu", "version_id": "24.04"},
@@ -92,6 +94,8 @@ class CollectEnvironmentTests(unittest.TestCase):
 
 
 class CgroupBoundaryTests(unittest.TestCase):
+    """Test cases for cgroup validation and transient scope enforcement."""
+
     def test_expected_transient_scope_is_accepted(self) -> None:
         unit = "fasti-b1-tauri-" + "1" * 32 + ".scope"
         path = benchmark.validate_control_group(
@@ -129,6 +133,8 @@ class CgroupBoundaryTests(unittest.TestCase):
 
 
 class DerivationTests(unittest.TestCase):
+    """Test cases for platform compatibility and display session validation."""
+
     def test_macos_is_refused_before_linux_capture_requirements(self) -> None:
         with mock.patch.object(benchmark.platform, "system", return_value="Darwin"):
             with self.assertRaisesRegex(benchmark.CaptureError, "WebKit XPC"):

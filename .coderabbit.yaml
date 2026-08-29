@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: "en-US"
 early_access: false
+enable_free_tier: true
 
 reviews:
   profile: "chill"
@@ -9,6 +10,13 @@ reviews:
   poem: false
   review_status: true
   collapse_walkthrough: true
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  suggested_labels: true
+  fail_commit_status: false
+  enable_prompt_for_ai_agents: true
   auto_review:
     enabled: true
     drafts: false
@@ -32,6 +40,30 @@ reviews:
     - "!target/**"
     - "!benchmarks/b1/fixtures/**"
     - "!brand/assets/**"
+    - "!apps/desktop/src-tauri/gen/**"
+    - "!tests/fixtures/**"
+
+  tools:
+    ast-grep:
+      essential_rules: true
+    clippy:
+      enabled: true
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    gitleaks:
+      enabled: true
+    biome:
+      enabled: true
+    eslint:
+      enabled: true
 
   path_instructions:
     - path: "crates/fasti-domain/**"
@@ -111,3 +143,27 @@ reviews:
         - Process lifecycle: Ensure long-running launchers clean up background child processes on exit/signals.
         - Determinism: Code generation and lint checks must be reproducible and offline-safe.
         - Secret safety: Never print tokens or sensitive data to stdout or log files.
+
+knowledge_base:
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "brand/DESIGN.md"
+      - "contracts/README.md"
+      - "docs/constitution.md"
+      - "docs/definition-of-done.md"
+      - "docs/handoffs/FASTI_MASTER_INTEGRATOR_HANDOFF.md"
+  learnings:
+    scope: "auto"
+  issues:
+    scope: "auto"
+  pull_requests:
+    scope: "auto"
+
+chat:
+  art: false
+  auto_reply: true
+

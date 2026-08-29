@@ -154,6 +154,12 @@ pub(crate) struct KernelInner {
     pub(crate) scratch_root: PathBuf,
     pub(crate) connection: Mutex<Connection>,
     pub(crate) upload_budget: Mutex<UploadBudget>,
+    // Serializes ensure_bootstrap_secret's read-validate-recover sequence.
+    // Without it, two concurrent callers can each see the same malformed
+    // file, and the one that loses the race can delete a secret the other
+    // just published, then republish a different one -- see
+    // ensure_bootstrap_secret's recovery loop.
+    pub(crate) bootstrap_secret: Mutex<()>,
     #[cfg(any(target_os = "linux", target_os = "android"))]
     _current_directory: File,
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -270,6 +276,7 @@ impl SqliteKernel {
                 scratch_root,
                 connection: Mutex::new(connection),
                 upload_budget: Mutex::new(UploadBudget::default()),
+                bootstrap_secret: Mutex::new(()),
                 #[cfg(any(target_os = "linux", target_os = "android"))]
                 _current_directory: current_directory,
                 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -365,6 +372,19 @@ impl SqliteKernel {
         correlation_id: RequestCorrelationId,
     ) -> ApplicationResult<MutexGuard<'_, UploadBudget>> {
         self.inner.upload_budget.lock().map_err(|_| {
+            Box::new(FastiProblem::storage_unavailable(
+                capability,
+                correlation_id,
+            ))
+        })
+    }
+
+    pub(crate) fn lock_bootstrap_secret(
+        &self,
+        capability: CapabilityKey,
+        correlation_id: RequestCorrelationId,
+    ) -> ApplicationResult<MutexGuard<'_, ()>> {
+        self.inner.bootstrap_secret.lock().map_err(|_| {
             Box::new(FastiProblem::storage_unavailable(
                 capability,
                 correlation_id,

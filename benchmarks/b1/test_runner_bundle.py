@@ -23,6 +23,7 @@ SPEC.loader.exec_module(bundle)
 
 
 def fixture() -> dict:
+    """Return a valid test fixture for bundle manifest validation."""
     return {
         "$schema": bundle.SCHEMA_URL,
         "schema_version": bundle.VERSION,
@@ -48,6 +49,8 @@ def fixture() -> dict:
 
 
 class ManifestTests(unittest.TestCase):
+    """Test cases for bundle manifest validation and schema enforcement."""
+
     def test_fixture_is_valid(self) -> None:
         self.assertEqual(bundle.validate_manifest(fixture())["schema_version"], bundle.VERSION)
 
@@ -68,6 +71,8 @@ class ManifestTests(unittest.TestCase):
 
 
 class HandoffIntegrationTests(unittest.TestCase):
+    """Integration tests for bundle creation, verification, and unpacking."""
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="fasti-b1-bundle-test-")
         self.root = Path(self.temporary.name)
@@ -88,6 +93,7 @@ class HandoffIntegrationTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def git(self, *args: str) -> str:
+        """Execute a git command in the test repository and return stdout."""
         result = subprocess.run(
             ["git", *args],
             cwd=self.repository,
@@ -98,11 +104,13 @@ class HandoffIntegrationTests(unittest.TestCase):
         return result.stdout.strip()
 
     def canonical_handoff(self) -> tuple[Path, Path]:
+        """Create a canonical test bundle and return paths to bundle and manifest."""
         artifact = self.root / "handoff.bundle"
         bundle.create_bundle(artifact, repository=self.repository)
         return artifact, artifact.with_suffix(".manifest.json")
 
     def write_manifest(self, path: Path, artifact: Path) -> None:
+        """Write a test manifest for the given artifact at the specified path."""
         source = bundle.source_identity(self.repository)
         value = fixture()
         value["source"] = source
@@ -131,6 +139,7 @@ class HandoffIntegrationTests(unittest.TestCase):
         original_verify = bundle.verify_bundle
 
         def mutate_caller_copy(snapshot_bundle: Path, snapshot_manifest: Path) -> dict:
+            """Mutate the caller's copy to verify unpack uses its own snapshot."""
             artifact.write_bytes(b"swapped after unpack snapshot")
             return original_verify(snapshot_bundle, snapshot_manifest)
 
@@ -232,6 +241,7 @@ class HandoffIntegrationTests(unittest.TestCase):
         def copy_then_mutate(
             source_handle: object, destination_handle: object, length: int
         ) -> None:
+            """Copy data then mutate source to verify change detection."""
             original_copy(source_handle, destination_handle, length=length)
             source.write_bytes(b"changed after copy and before the final file check")
 

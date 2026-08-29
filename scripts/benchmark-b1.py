@@ -2358,6 +2358,7 @@ def saved_oci_layer_bytes(
             members[member.name] = member
 
         def read_member(name: str, maximum: int = 1024 * 1024) -> bytes:
+            """Read and validate a tar member by name with size bounds."""
             member = members.get(name)
             if member is None or not member.isfile() or member.size > maximum:
                 raise CaptureError(f"Docker save omits a bounded regular {name}")
@@ -2370,6 +2371,7 @@ def saved_oci_layer_bytes(
             return payload
 
         def descriptor_path(descriptor: Any) -> str:
+            """Extract and validate the blob path from an OCI descriptor."""
             if not isinstance(descriptor, dict):
                 raise CaptureError("Docker save contains an invalid OCI descriptor")
             digest = descriptor.get("digest")
@@ -2385,6 +2387,7 @@ def saved_oci_layer_bytes(
             return f"blobs/sha256/{digest.removeprefix('sha256:')}"
 
         def read_descriptor(descriptor: Any, maximum: int) -> bytes:
+            """Read and validate a descriptor's blob content with size bounds."""
             path = descriptor_path(descriptor)
             member = members.get(path)
             if (
@@ -2469,6 +2472,7 @@ def saved_oci_layer_bytes(
             visited: set[str] = set()
 
             def visit_descriptor(descriptor: Any, depth: int = 0) -> None:
+                """Recursively visit and validate OCI descriptors in the image graph."""
                 path = descriptor_path(descriptor)
                 digest = descriptor["digest"]
                 media_type = descriptor.get("mediaType")
@@ -2725,6 +2729,7 @@ def artifact_sizes(
         def gzip_pipeline(
             source_command: list[str], destination: Path, *, source_cwd: Path = ROOT
         ) -> None:
+            """Execute a command and gzip its output to the destination file."""
             with destination.open("wb") as output:
                 source = subprocess.Popen(
                     source_command,
@@ -2884,6 +2889,7 @@ def extract_native_fastid(
 
 
 def budget_verdicts(scenarios: list[dict[str, Any]], budgets: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate budget compliance verdicts from scenario measurements."""
     by_id = {scenario["id"]: scenario for scenario in scenarios}
     idle_measured = max(
         by_id["native_fastid_idle"]["summary"]["steady_process_tree_rss_bytes"]["maximum"],
@@ -2899,6 +2905,7 @@ def budget_verdicts(scenarios: list[dict[str, Any]], budgets: dict[str, Any]) ->
     )
 
     def measured(budget: str, value: int, reason: str) -> dict[str, Any]:
+        """Create a budget verdict from measured value and limit."""
         limit = budgets[budget]
         return {
             "budget": budget,
@@ -2937,6 +2944,7 @@ def budget_verdicts(scenarios: list[dict[str, Any]], budgets: dict[str, Any]) ->
 
 
 def idle_cpu_verdicts(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Generate idle CPU budget verdicts from scenario measurements."""
     by_id = {scenario["id"]: scenario for scenario in scenarios}
     verdicts: list[dict[str, Any]] = []
     for scenario_id in ["native_fastid_idle", "oci_fastid_idle"]:

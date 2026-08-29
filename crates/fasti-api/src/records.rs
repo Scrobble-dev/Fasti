@@ -224,7 +224,7 @@ pub(crate) async fn list_records(
     let authentication = request_authentication(&headers, capability, correlation_id, false)?;
 
     let kernel = state.kernel;
-    let summaries = run_kernel(capability, correlation_id, move || {
+    let records = run_kernel(capability, correlation_id, move || {
         let access = authenticate_request(
             kernel.as_ref(),
             authentication,
@@ -235,8 +235,11 @@ pub(crate) async fn list_records(
         kernel.list_records(ListRecordsQuery::new(correlation_id, access))
     })
     .await?;
+    let truncated = records.truncated();
+    let summaries = records.into_records();
 
     Ok(Json(ListRecordsResponse {
+        truncated,
         records: summaries
             .into_iter()
             .map(|summary| RecordSummaryDto {

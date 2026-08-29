@@ -385,8 +385,16 @@ fn emby_request(
             "Movie, Episode, Audio, or Series",
         )
     })?;
+    // Known gap, not fixed here: this identity has no per-user component, so
+    // two different Emby accounts on the same server completing the same
+    // item within one workspace synthesize the same lexeme and collide into
+    // one occurrence. Emby's webhook plugin payload shape for the acting
+    // user's id isn't confirmed enough here to add without risking a wrong
+    // field guess (unlike `ingest.rs`'s desktop-side JellyfinWebhookPayload,
+    // which already fails closed on a missing UserId for this exact reason).
+    let item_id = emby_string(value, &["/Item/Id"]);
     let mut identifiers = Vec::new();
-    if let Some(item_id) = emby_string(value, &["/Item/Id"]) {
+    if let Some(item_id) = item_id {
         identifiers.push(ObservationIdentifierInput {
             namespace: format!("emby.{grain}"),
             grain: grain.to_owned(),
@@ -423,11 +431,28 @@ fn emby_request(
         ));
     }
 
-    let digest_identity =
-        derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
-    let observed_at = emby_string(value, &["/UtcTimestamp", "/Timestamp"])
+    let explicit_observed_at = emby_string(value, &["/UtcTimestamp", "/Timestamp"]);
+    let observed_at = explicit_observed_at
         .map(str::to_owned)
         .unwrap_or_else(|| Utc::now().to_rfc3339());
+    // Keyed on stable fields (item, event kind, completion time), not the
+    // raw evidence bytes: byte-level noise in a re-delivery of the same real
+    // event (whitespace, field reordering, an added optional field) must not
+    // change the identity, or a legitimate retry looks like a brand new
+    // occurrence and 409 idempotency_conflict ("changed evidence, same
+    // identity") becomes unreachable. Falls back to the raw digest when
+    // Item/Id or an explicit timestamp is absent: `observed_at` would
+    // otherwise fall back to Utc::now() above, which -- like the documented
+    // Plex observed_at gap -- differs on every retry of the exact same
+    // delivery and would turn a legitimate replay into a fabricated new
+    // occurrence.
+    let event_lexeme = match (item_id, explicit_observed_at) {
+        (Some(item_id), Some(explicit_observed_at)) => {
+            format!("emby:{item_id}:{normalized_event}:{explicit_observed_at}")
+        }
+        _ => String::from_utf8_lossy(raw).into_owned(),
+    };
+    let digest_identity = derive_deterministic_operation_id(&event_lexeme).to_string();
     let title = emby_string(value, &["/Item/Name"]).map(str::to_owned);
     let runtime_ticks = value.pointer("/Item/RunTimeTicks").and_then(Value::as_u64);
     let position_ticks = value
@@ -593,8 +618,9 @@ fn plex_request(
             "movie, episode, or track",
         )
     })?;
+    let rating_key = value.pointer("/Metadata/ratingKey").and_then(Value::as_str);
     let mut identifiers = Vec::new();
-    if let Some(rating_key) = value.pointer("/Metadata/ratingKey").and_then(Value::as_str) {
+    if let Some(rating_key) = rating_key {
         identifiers.push(ObservationIdentifierInput {
             namespace: format!("plex.{grain}"),
             grain: grain.to_owned(),
@@ -635,17 +661,41 @@ fn plex_request(
         }
     }
 
-    let source_event_id =
-        derive_deterministic_operation_id(&String::from_utf8_lossy(raw)).to_string();
     let duration_ms = value.pointer("/Metadata/duration").and_then(Value::as_u64);
     let view_offset_ms = value
         .pointer("/Metadata/viewOffset")
         .and_then(Value::as_u64);
-    let occurred_at = value
+    let last_viewed_at = value
         .pointer("/Metadata/lastViewedAt")
-        .and_then(Value::as_i64)
+        .and_then(Value::as_i64);
+    let occurred_at = last_viewed_at
         .and_then(|seconds| Utc.timestamp_opt(seconds, 0).single())
         .map(|value| value.to_rfc3339());
+    let server_uuid = value.pointer("/Server/uuid").and_then(Value::as_str);
+    // Known gap, not fixed here: this identity has no per-account component,
+    // so two different Plex accounts on the same server scrobbling the same
+    // item concurrently within one workspace synthesize the same lexeme and
+    // collide into one occurrence. `/Account/id` is present in Plex's
+    // webhook payload but wasn't confirmed stable/present across every event
+    // type this adapter accepts here, so it's flagged rather than added
+    // without that verification.
+    // Keyed on stable fields (item, server, view time), not the raw payload
+    // part bytes: byte-level noise in a re-delivery of the same real event
+    // must not change the identity, or a legitimate retry looks like a
+    // brand new occurrence and 409 idempotency_conflict becomes unreachable.
+    // Server/account identity distinguishes the same ratingKey scrobbled on
+    // two different Plex servers. Falls back to the raw digest when
+    // ratingKey is absent, since there's no other stable identity to key on.
+    let event_lexeme = match (server_uuid, rating_key, last_viewed_at) {
+        (Some(server_uuid), Some(rating_key), Some(last_viewed_at)) => {
+            format!("plex:{server_uuid}:{rating_key}:{last_viewed_at}")
+        }
+        // Substituting an empty/zero default for a missing field here (as
+        // opposed to falling back to the raw digest) would let two distinct
+        // scrobbles that both omit the same field collide into one lexeme.
+        _ => String::from_utf8_lossy(raw).into_owned(),
+    };
+    let source_event_id = derive_deterministic_operation_id(&event_lexeme).to_string();
 
     let duration_seconds = duration_ms
         .map(|value| value / 1000)
@@ -857,4 +907,228 @@ pub(crate) fn router() -> Router<LocalApiState> {
         )
         .route("/api/v1/integrations/emby/webhook", post(emby_webhook))
         .route("/api/v1/integrations/plex/webhook", post(plex_webhook))
+}
+
+#[cfg(test)]
+mod event_identity_tests {
+    use super::*;
+
+    /// Two deliveries of the same real Emby event that differ only in
+    /// incidental JSON field order must derive the same identity and every
+    /// other semantic field, except `observed_at` (Fasti's own ingestion
+    /// timestamp -- see `emby_request`'s fallback to `Utc::now()` when
+    /// `UtcTimestamp`/`Timestamp` is absent; both fixtures below supply an
+    /// explicit `UtcTimestamp`, so it's stable here too).
+    #[test]
+    fn emby_identity_and_fields_are_stable_across_field_reordering() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let a: Value = serde_json::from_str(
+            r#"{
+                "Event": "playback.stop",
+                "PlayedToCompletion": true,
+                "UtcTimestamp": "2026-08-27T12:00:00Z",
+                "Item": {
+                    "Id": "emby-item-9",
+                    "Type": "Movie",
+                    "Name": "Fixture movie",
+                    "RunTimeTicks": 72000000000,
+                    "ProviderIds": {"Imdb": "tt9999999", "Tmdb": "9999"}
+                },
+                "Session": {"PlayState": {"PositionTicks": 72000000000}}
+            }"#,
+        )
+        .expect("fixture a");
+        let b: Value = serde_json::from_str(
+            r#"{
+                "Session": {"PlayState": {"PositionTicks": 72000000000}},
+                "Item": {
+                    "ProviderIds": {"Tmdb": "9999", "Imdb": "tt9999999"},
+                    "RunTimeTicks": 72000000000,
+                    "Name": "Fixture movie",
+                    "Id": "emby-item-9",
+                    "Type": "Movie"
+                },
+                "UtcTimestamp": "2026-08-27T12:00:00Z",
+                "PlayedToCompletion": true,
+                "Event": "playback.stop"
+            }"#,
+        )
+        .expect("fixture b (reordered)");
+
+        let ra = emby_request(&a, b"raw-a", correlation_id)
+            .unwrap_or_else(|_| panic!("fixture a is valid"));
+        let rb = emby_request(&b, b"raw-b", correlation_id)
+            .unwrap_or_else(|_| panic!("fixture b is valid"));
+        assert_eq!(ra.source_event_id, rb.source_event_id);
+        assert_eq!(ra.observed_at, rb.observed_at);
+        assert_eq!(ra.title, rb.title);
+        assert_eq!(ra.position_seconds, rb.position_seconds);
+        assert_eq!(ra.duration_seconds, rb.duration_seconds);
+        assert_eq!(ra.target_grain, rb.target_grain);
+        assert_eq!(claim_tuples(&ra.identifiers), claim_tuples(&rb.identifiers));
+    }
+
+    /// When Emby omits both UtcTimestamp and Timestamp, `emby_request` has no
+    /// stable source timestamp and must not key identity on `Utc::now()`
+    /// (which would differ on every retry of the exact same delivery and
+    /// turn a legitimate replay into a fabricated new occurrence -- the same
+    /// class of bug documented for Plex below). It should fall back to the
+    /// raw body bytes instead, exactly like the Item/Id-missing case.
+    #[test]
+    fn emby_identity_falls_back_to_raw_bytes_when_no_explicit_timestamp_is_present() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let payload: Value = serde_json::from_str(
+            r#"{
+                "Event": "playback.stop",
+                "PlayedToCompletion": true,
+                "Item": {"Id": "emby-item-9", "Type": "Movie", "Name": "Fixture movie"}
+            }"#,
+        )
+        .expect("fixture without an explicit timestamp");
+        let raw = b"identical-raw-bytes";
+
+        let first = emby_request(&payload, raw, correlation_id)
+            .unwrap_or_else(|_| panic!("fixture is otherwise valid"));
+        let second = emby_request(&payload, raw, correlation_id)
+            .unwrap_or_else(|_| panic!("fixture is otherwise valid"));
+        assert_eq!(
+            first.source_event_id, second.source_event_id,
+            "identical raw bytes must derive the same identity regardless of \
+             wall-clock time between the two calls"
+        );
+    }
+
+    /// Same as above for Plex, whose identity now derives from ratingKey,
+    /// Server.uuid, and lastViewedAt rather than the raw multipart bytes.
+    /// `observed_at` is intentionally excluded from this comparison: Plex
+    /// webhooks carry no observation timestamp of their own, so
+    /// `plex_request` always stamps it with `Utc::now()`. That value feeds
+    /// `fasti-store`'s idempotency semantic_digest (see
+    /// `crates/fasti-store/src/observation.rs::semantic_digest`), which
+    /// means two genuinely separate Plex deliveries -- even byte-identical
+    /// ones -- can never satisfy that digest check today. That's a
+    /// pre-existing gap in the Plex adapter's timestamp handling, separate
+    /// from the identity-derivation fix this test covers; flagged, not
+    /// fixed here.
+    #[test]
+    fn plex_identity_and_fields_are_stable_across_field_reordering() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let a: Value = serde_json::from_str(
+            r#"{
+                "event": "media.scrobble",
+                "Server": {"uuid": "plex-server"},
+                "Metadata": {
+                    "type": "movie",
+                    "ratingKey": "200",
+                    "title": "Fixture Plex movie",
+                    "duration": 7200000,
+                    "viewOffset": 7200000,
+                    "lastViewedAt": 1787832000,
+                    "Guid": [{"id": "imdb://tt2222333"}]
+                }
+            }"#,
+        )
+        .expect("fixture a");
+        let b: Value = serde_json::from_str(
+            r#"{
+                "Server": {"uuid": "plex-server"},
+                "event": "media.scrobble",
+                "Metadata": {
+                    "lastViewedAt": 1787832000,
+                    "ratingKey": "200",
+                    "type": "movie",
+                    "title": "Fixture Plex movie",
+                    "viewOffset": 7200000,
+                    "duration": 7200000,
+                    "Guid": [{"id": "imdb://tt2222333"}]
+                }
+            }"#,
+        )
+        .expect("fixture b (reordered)");
+
+        let ra = plex_request(&a, b"raw-a", correlation_id)
+            .unwrap_or_else(|_| panic!("fixture a is valid"));
+        let rb = plex_request(&b, b"raw-b", correlation_id)
+            .unwrap_or_else(|_| panic!("fixture b is valid"));
+        assert_eq!(ra.source_event_id, rb.source_event_id);
+        assert_eq!(ra.occurred_at, rb.occurred_at);
+        assert_eq!(ra.title, rb.title);
+        assert_eq!(ra.position_seconds, rb.position_seconds);
+        assert_eq!(ra.duration_seconds, rb.duration_seconds);
+        assert_eq!(ra.target_grain, rb.target_grain);
+        assert_eq!(claim_tuples(&ra.identifiers), claim_tuples(&rb.identifiers));
+    }
+
+    /// A genuinely different Plex server publishing the same ratingKey must
+    /// not collide: the fix folds Server.uuid into the identity precisely so
+    /// two servers can't shadow each other's scrobbles.
+    #[test]
+    fn plex_identity_distinguishes_the_same_rating_key_on_different_servers() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let make = |server_uuid: &str| -> Value {
+            serde_json::json!({
+                "event": "media.scrobble",
+                "Server": {"uuid": server_uuid},
+                "Metadata": {
+                    "type": "movie",
+                    "ratingKey": "200",
+                    "duration": 7200000,
+                    "viewOffset": 7200000,
+                    "lastViewedAt": 1787832000_i64,
+                }
+            })
+        };
+        let a = make("server-a");
+        let b = make("server-b");
+        let ra = plex_request(&a, b"raw", correlation_id)
+            .unwrap_or_else(|_| panic!("fixture a is valid"));
+        let rb = plex_request(&b, b"raw", correlation_id)
+            .unwrap_or_else(|_| panic!("fixture b is valid"));
+        assert_ne!(ra.source_event_id, rb.source_event_id);
+    }
+
+    /// Regression test: when Server.uuid or Metadata.lastViewedAt is absent,
+    /// the identity must fall back to the raw digest, not substitute an
+    /// empty/zero default -- otherwise two distinct scrobbles that both omit
+    /// the same field would derive the same lexeme and collide.
+    #[test]
+    fn plex_identity_falls_back_to_raw_bytes_when_server_uuid_is_missing() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let payload = |raw: &'static [u8]| {
+            (
+                serde_json::json!({
+                    "event": "media.scrobble",
+                    "Metadata": {
+                        "type": "movie",
+                        "ratingKey": "200",
+                        "lastViewedAt": 1787832000_i64,
+                    }
+                }),
+                raw,
+            )
+        };
+        let (a, raw_a) = payload(b"raw-a");
+        let (b, raw_b) = payload(b"raw-b");
+        let ra =
+            plex_request(&a, raw_a, correlation_id).unwrap_or_else(|_| panic!("fixture a valid"));
+        let rb =
+            plex_request(&b, raw_b, correlation_id).unwrap_or_else(|_| panic!("fixture b valid"));
+        assert_ne!(
+            ra.source_event_id, rb.source_event_id,
+            "two distinct scrobbles missing Server.uuid must not collide into one identity"
+        );
+    }
+
+    fn claim_tuples(identifiers: &[ObservationIdentifierInput]) -> Vec<(String, String, String)> {
+        identifiers
+            .iter()
+            .map(|claim| {
+                (
+                    claim.namespace.clone(),
+                    claim.grain.clone(),
+                    claim.value.clone(),
+                )
+            })
+            .collect()
+    }
 }
