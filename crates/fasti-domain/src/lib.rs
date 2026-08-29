@@ -4,6 +4,7 @@
 //! dependencies. Delivery and persistence code depend on these values; domain
 //! policy does not depend on an adapter representation.
 
+pub mod access;
 pub mod chronicle;
 pub mod evidence;
 pub mod identity;
@@ -15,6 +16,7 @@ pub mod portability;
 pub mod review;
 pub mod time;
 
+pub use access::*;
 pub use chronicle::*;
 pub use evidence::*;
 pub use identity::*;

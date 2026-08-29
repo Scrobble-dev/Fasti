@@ -3,13 +3,15 @@ use crate::kernel::{
 };
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use fasti_application::{
-    ApplicationResult, AuthSubject, AuthSubjectLifecycle, AuthenticatedBrowserSession,
-    BrowserSessionMutationCommand, BrowserSessionPort, BrowserSessionQuery, BrowserSessionState,
-    BrowserSessionSummary, CapabilityKey, CreateAuthSubjectCommand, CreateBrowserSessionCommand,
-    CreatedBrowserSession, FastiBrowserSession, FastiProblem, ProblemCode,
-    SelectBrowserSessionProfileCommand, SessionPolicy, TargetBrowserSessionCommand,
+    ApplicationResult, AuthenticatedBrowserSession, BrowserSessionMutationCommand,
+    BrowserSessionPort, BrowserSessionQuery, BrowserSessionSummary, CapabilityKey,
+    CreateAuthSubjectCommand, CreateBrowserSessionCommand, CreatedBrowserSession, FastiProblem,
+    ProblemCode, SelectBrowserSessionProfileCommand, SessionPolicy, TargetBrowserSessionCommand,
 };
-use fasti_domain::{AuthSubjectId, BrowserSessionId, ProfileGrantId, WorkspaceId};
+use fasti_domain::{
+    AuthSubject, AuthSubjectId, AuthSubjectLifecycle, BrowserSessionId, BrowserSessionState,
+    FastiBrowserSession, ProfileGrantId, WorkspaceId,
+};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 use std::time::Duration;
 
@@ -73,7 +75,7 @@ fn parse_subject(
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<AuthSubject> {
     let (id, lifecycle, auth_epoch, authorization_epoch, created_at, updated_at) = row;
-    Ok(AuthSubject::new(
+    AuthSubject::try_new(
         id.parse::<AuthSubjectId>()
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
         AuthSubjectLifecycle::from_storage(&lifecycle)
@@ -84,7 +86,8 @@ fn parse_subject(
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
         parse_timestamp(&created_at, capability, correlation_id)?,
         parse_timestamp(&updated_at, capability, correlation_id)?,
-    ))
+    )
+    .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
 }
 
 fn parse_session(
@@ -92,7 +95,7 @@ fn parse_session(
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<FastiBrowserSession> {
-    Ok(FastiBrowserSession::new(
+    FastiBrowserSession::try_new(
         row.0
             .parse::<BrowserSessionId>()
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
@@ -119,7 +122,8 @@ fn parse_session(
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
         u64::try_from(row.13)
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
-    ))
+    )
+    .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))
 }
 
 fn session_problem(state: BrowserSessionState) -> ProblemCode {
@@ -128,9 +132,9 @@ fn session_problem(state: BrowserSessionState) -> ProblemCode {
             ProblemCode::BrowserSessionExpired
         }
         BrowserSessionState::Revoked => ProblemCode::BrowserSessionRevoked,
-        BrowserSessionState::SubjectInactive | BrowserSessionState::PolicyChanged => {
-            ProblemCode::SessionPolicyChanged
-        }
+        BrowserSessionState::SubjectInactive
+        | BrowserSessionState::SubjectMismatch
+        | BrowserSessionState::PolicyChanged => ProblemCode::SessionPolicyChanged,
         BrowserSessionState::Active => unreachable!("active sessions do not have an error"),
     }
 }
@@ -230,7 +234,7 @@ fn authenticate_session(
         .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
     let subject = query_subject(connection, subject_id, capability, correlation_id)?;
     let mut session = parse_session(&row, capability, correlation_id)?;
-    let state = session.state(subject, at);
+    let state = session.state(&subject, at);
     if !matches!(state, BrowserSessionState::Active) {
         if matches!(
             state,
@@ -343,7 +347,7 @@ fn insert_session(
         correlation_id,
     )?
     .min(absolute_expires_at);
-    let session = FastiBrowserSession::new(
+    let session = FastiBrowserSession::try_new(
         session_id,
         subject.id(),
         workspace_id,
@@ -356,7 +360,8 @@ fn insert_session(
         subject.auth_epoch(),
         subject.authorization_epoch(),
         rotation_generation,
-    );
+    )
+    .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
     map_sql(
         transaction.execute(
             r#"
@@ -510,7 +515,7 @@ fn rotate_session(
     }
     let session_secret = random_secret(capability, correlation_id)?;
     let csrf_secret = random_secret(capability, correlation_id)?;
-    let rotated = FastiBrowserSession::new(
+    let rotated = FastiBrowserSession::try_new(
         BrowserSessionId::new_v7(),
         current.subject().id(),
         current_session.workspace_id(),
@@ -526,7 +531,8 @@ fn rotate_session(
             .rotation_generation()
             .checked_add(1)
             .ok_or_else(|| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?,
-    );
+    )
+    .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
     map_sql(
         transaction.execute(
             r#"
@@ -930,7 +936,7 @@ impl BrowserSessionPort for SqliteKernel {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use fasti_application::{SecretMaterial, SessionPolicyChangeEffect};
+    use fasti_application::SecretMaterial;
     use fasti_domain::{ClientId, ProfileId};
 
     struct Fixture {
@@ -951,10 +957,7 @@ mod tests {
             Duration::from_secs(30),
             Duration::from_secs(120),
             Duration::from_secs(240),
-            Duration::from_secs(20),
             Duration::from_secs(10),
-            Duration::from_secs(15),
-            SessionPolicyChangeEffect::NewSessionsOnly,
         )
         .expect("deterministic policy")
     }
@@ -1013,14 +1016,15 @@ mod tests {
         kernel
             .create_auth_subject(CreateAuthSubjectCommand::new(
                 fasti_domain::RequestCorrelationId::new_v7(),
-                AuthSubject::new(
+                AuthSubject::try_new(
                     subject_id,
                     AuthSubjectLifecycle::Active,
                     1,
                     1,
                     created_at,
                     created_at,
-                ),
+                )
+                .expect("valid subject"),
             ))
             .expect("subject");
         {
@@ -1303,14 +1307,15 @@ mod tests {
             .kernel
             .create_auth_subject(CreateAuthSubjectCommand::new(
                 fasti_domain::RequestCorrelationId::new_v7(),
-                AuthSubject::new(
+                AuthSubject::try_new(
                     other_subject_id,
                     AuthSubjectLifecycle::Active,
                     1,
                     1,
                     fixture.created_at,
                     fixture.created_at,
-                ),
+                )
+                .expect("valid other subject"),
             ))
             .expect("other subject");
 
