@@ -3,7 +3,7 @@ use fasti_domain::{Grain, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 9;
+pub(crate) const SCHEMA_VERSION: i64 = 10;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -49,6 +49,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 8 {
         migrate_v9(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 9 {
+        migrate_v10(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -795,57 +800,6 @@ fn migrate_v8(connection: &Connection) -> Result<()> {
             seeded_at TEXT NOT NULL
         ) STRICT;
 
-        CREATE TABLE user_passkeys (
-            passkey_id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL REFERENCES browser_users(user_id) ON DELETE CASCADE,
-            name TEXT NOT NULL,
-            credential_id TEXT NOT NULL UNIQUE,
-            public_key_cose TEXT NOT NULL,
-            sign_count INTEGER NOT NULL DEFAULT 0,
-            aaguid TEXT,
-            created_at TEXT NOT NULL,
-            last_used_at TEXT
-        ) STRICT;
-        CREATE INDEX user_passkeys_user_idx ON user_passkeys(user_id);
-
-        CREATE TABLE user_totp (
-            user_id TEXT PRIMARY KEY REFERENCES browser_users(user_id) ON DELETE CASCADE,
-            secret TEXT NOT NULL,
-            confirmed INTEGER NOT NULL DEFAULT 0 CHECK (confirmed IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        ) STRICT;
-
-        CREATE TABLE user_backup_codes (
-            code_hash TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL REFERENCES browser_users(user_id) ON DELETE CASCADE,
-            used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
-            created_at TEXT NOT NULL,
-            used_at TEXT
-        ) STRICT;
-        CREATE INDEX user_backup_codes_user_idx ON user_backup_codes(user_id);
-
-        CREATE TABLE oidc_provider_configs (
-            workspace_id TEXT PRIMARY KEY REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
-            issuer_url TEXT NOT NULL,
-            client_id TEXT NOT NULL,
-            client_secret_digest TEXT,
-            pkce_enabled INTEGER NOT NULL DEFAULT 1 CHECK (pkce_enabled IN (0, 1)),
-            scopes TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        ) STRICT;
-
-        CREATE TABLE auth_ephemeral_challenges (
-            challenge_id TEXT PRIMARY KEY,
-            user_id TEXT REFERENCES browser_users(user_id) ON DELETE CASCADE,
-            challenge_bytes TEXT NOT NULL,
-            purpose TEXT NOT NULL,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        ) STRICT;
-
         "#,
     )?;
     for scope in V8_NODE_OWNER_SCOPE_BACKFILL {
@@ -916,6 +870,71 @@ fn migrate_v9(connection: &Connection) -> Result<()> {
         "#,
     );
     connection.execute_batch(&sql)
+}
+
+fn migrate_v10(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        -- Remove the PR-only simulated identity and factor state. These tables
+        -- never represented a supported user population or compatibility
+        -- boundary. IF EXISTS also repairs developer roots that ran the
+        -- previously edited v8 migration.
+        DROP TABLE IF EXISTS auth_ephemeral_challenges;
+        DROP TABLE IF EXISTS oidc_provider_configs;
+        DROP TABLE IF EXISTS user_backup_codes;
+        DROP TABLE IF EXISTS user_passkeys;
+        DROP TABLE IF EXISTS user_totp;
+        DROP TABLE IF EXISTS browser_sessions;
+        DROP TABLE IF EXISTS browser_auth_bootstrap;
+        DROP TABLE IF EXISTS browser_users;
+
+        CREATE TABLE auth_subjects (
+            auth_subject_id TEXT PRIMARY KEY,
+            lifecycle TEXT NOT NULL
+                CHECK (lifecycle IN ('active', 'disabled', 'deleted', 'recovery_pending')),
+            auth_epoch INTEGER NOT NULL CHECK (auth_epoch >= 0),
+            authorization_epoch INTEGER NOT NULL CHECK (authorization_epoch >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE fasti_browser_sessions (
+            browser_session_id TEXT PRIMARY KEY,
+            session_digest TEXT NOT NULL UNIQUE,
+            csrf_digest TEXT NOT NULL,
+            auth_subject_id TEXT NOT NULL
+                REFERENCES auth_subjects(auth_subject_id) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            selected_profile_grant_id TEXT NOT NULL
+                REFERENCES profile_grants(grant_id),
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            idle_expires_at TEXT NOT NULL,
+            absolute_expires_at TEXT NOT NULL,
+            idle_timeout_seconds INTEGER NOT NULL CHECK (idle_timeout_seconds > 0),
+            last_seen_write_interval_seconds INTEGER NOT NULL
+                CHECK (last_seen_write_interval_seconds > 0),
+            revoked_at TEXT,
+            auth_epoch INTEGER NOT NULL CHECK (auth_epoch >= 0),
+            authorization_epoch INTEGER NOT NULL CHECK (authorization_epoch >= 0),
+            rotation_generation INTEGER NOT NULL CHECK (rotation_generation >= 0),
+            CHECK (last_seen_at >= created_at),
+            CHECK (idle_expires_at <= absolute_expires_at)
+        ) STRICT;
+        CREATE INDEX fasti_browser_sessions_subject_idx
+            ON fasti_browser_sessions(auth_subject_id, revoked_at, absolute_expires_at);
+
+        CREATE TABLE fasti_browser_session_grants (
+            browser_session_id TEXT NOT NULL
+                REFERENCES fasti_browser_sessions(browser_session_id) ON DELETE CASCADE,
+            profile_grant_id TEXT NOT NULL REFERENCES profile_grants(grant_id),
+            PRIMARY KEY (browser_session_id, profile_grant_id)
+        ) STRICT, WITHOUT ROWID;
+        "#,
+    )?;
+    transaction.pragma_update(None, "user_version", 10)?;
+    transaction.commit()
 }
 
 fn migration_conflict(message: &str) -> rusqlite::Error {
@@ -2195,6 +2214,70 @@ mod tests {
     }
 
     #[test]
+    fn version_ten_replaces_browser_user_and_rejects_pr_only_factor_tables() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("v1");
+        migrate_v2(&connection).expect("v2");
+        migrate_v3(&connection).expect("v3");
+        migrate_v4(&connection).expect("v4");
+        migrate_v5(&connection).expect("v5");
+        migrate_v6(&connection).expect("v6");
+        migrate_v7(&connection).expect("v7");
+        migrate_v8(&connection).expect("v8");
+        migrate_v9(&connection).expect("v9");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE user_passkeys (passkey_id TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE user_totp (user_id TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE user_backup_codes (code_hash TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE oidc_provider_configs (workspace_id TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE auth_ephemeral_challenges (challenge_id TEXT PRIMARY KEY) STRICT;
+                "#,
+            )
+            .expect("simulate developer root created by the edited v8");
+
+        migrate(&connection).expect("forward migration");
+
+        for removed in [
+            "browser_users",
+            "browser_sessions",
+            "browser_auth_bootstrap",
+            "user_passkeys",
+            "user_totp",
+            "user_backup_codes",
+            "oidc_provider_configs",
+            "auth_ephemeral_challenges",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+                    [removed],
+                    |row| row.get(0),
+                )
+                .expect("table inventory");
+            assert_eq!(exists, 0, "{removed} survived the truth-reset migration");
+        }
+        for retained in [
+            "auth_subjects",
+            "fasti_browser_sessions",
+            "fasti_browser_session_grants",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+                    [retained],
+                    |row| row.get(0),
+                )
+                .expect("table inventory");
+            assert_eq!(exists, 1, "{retained} is missing");
+        }
+    }
+
+    #[test]
     fn version_four_upgrade_preserves_existing_schema_and_adds_later_tables() {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
         connection
@@ -2244,9 +2327,9 @@ mod tests {
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
         // column, migrate_v6's two metadata tables, and migrate_v7's profile
-        // tracking table, migrate_v8's browser authentication tables, and
-        // migrate_v9's Nuvio Collections table -- all additive, so every v4
-        // table and column remains.
+        // tracking table, migrate_v9's Nuvio Collections table, and v10's
+        // final dormant Access tables. V10 deliberately replaces the
+        // unsupported browser-user tables introduced by v8.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
@@ -2255,14 +2338,9 @@ mod tests {
                 "metadata_field_overrides".to_owned(),
                 "profile_record_tracking_dispositions".to_owned(),
                 "profile_nuvio_collections".to_owned(),
-                "browser_auth_bootstrap".to_owned(),
-                "browser_sessions".to_owned(),
-                "browser_users".to_owned(),
-                "auth_ephemeral_challenges".to_owned(),
-                "oidc_provider_configs".to_owned(),
-                "user_backup_codes".to_owned(),
-                "user_passkeys".to_owned(),
-                "user_totp".to_owned(),
+                "auth_subjects".to_owned(),
+                "fasti_browser_session_grants".to_owned(),
+                "fasti_browser_sessions".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

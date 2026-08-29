@@ -382,6 +382,30 @@ define_problem_catalog!(
         default_next_action: ("inspect_review_queue", "Inspect the current review queue"),
         param_policy: ProblemParamPolicy::Fixed("/review_item_id")
     },
+    BrowserSessionExpired => "browser_session_expired" {
+        title: "Browser session expired", status: 401,
+        detail: ProblemDetail::Static("the Fasti browser session reached its idle or absolute expiry"),
+        documentation_path: "v1/problems/browser-session-expired", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("sign_in_again", "Sign in again to continue"),
+        param_policy: ProblemParamPolicy::None
+    },
+    BrowserSessionRevoked => "browser_session_revoked" {
+        title: "Browser session revoked", status: 401,
+        detail: ProblemDetail::Static("the Fasti browser session is no longer active"),
+        documentation_path: "v1/problems/browser-session-revoked", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("sign_in_again", "Sign in again to continue"),
+        param_policy: ProblemParamPolicy::None
+    },
+    SessionPolicyChanged => "session_policy_changed" {
+        title: "Session policy changed", status: 401,
+        detail: ProblemDetail::Static("the Fasti browser session no longer satisfies the current subject or authorization policy"),
+        documentation_path: "v1/problems/session-policy-changed", safe_state: NoMutation,
+        retryability: RetryAfterCorrection,
+        default_next_action: ("sign_in_again", "Sign in again to continue"),
+        param_policy: ProblemParamPolicy::None
+    },
     StorageUnavailable => "storage_unavailable" {
         title: "Storage unavailable", status: 503,
         detail: ProblemDetail::Static("the local durability boundary is temporarily unavailable"),
@@ -446,6 +470,9 @@ impl ProblemCode {
             | Self::ReviewNotFound
             | Self::StorageUnavailable
             | Self::UnsupportedListener => CapabilityBody::B2,
+            Self::BrowserSessionExpired
+            | Self::BrowserSessionRevoked
+            | Self::SessionPolicyChanged => CapabilityBody::C1,
             Self::DataRootLocked
             | Self::ExportCanceled
             | Self::OperationCanceled
@@ -467,7 +494,9 @@ impl ProblemCode {
             | Self::StorageUnavailable => ContractState::Finalized,
             _ => match self.introduced_in() {
                 CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
-                CapabilityBody::B2 | CapabilityBody::B3 => ContractState::Reserved,
+                CapabilityBody::B2 | CapabilityBody::B3 | CapabilityBody::C1 => {
+                    ContractState::Reserved
+                }
             },
         }
     }
