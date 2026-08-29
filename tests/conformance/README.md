@@ -111,3 +111,23 @@ cargo test -p fasti-application --features conformance-fixture --test b6_client_
 ```
 
 The suite is verified by mutation, not only by passing. Breaking determinism in `derive_operation_id` fails three tests; injecting a vendor-specific branch into the command builder fails exactly one.
+
+## Access B TrailBase conformance
+
+On a prepared native Linux machine, run:
+
+```bash
+cargo xtask test milestone --body B
+```
+
+The existing milestone receipt owns this package evidence. The gate verifies
+the exact release lock and mutation sentinels, sole launcher, native and OCI
+lifecycle, combined 192 MiB boundary, public-account lifecycle, local OIDC with
+PKCE, TOTP, restart, full-depot recovery, and the test-only `v0.33.4` to
+`v0.33.5` adjacent upgrade and old-backup rollback fixture.
+
+The gate records source limitations as limitations. It does not turn them into
+success claims. Remote account and OAuth exposure remains unavailable because
+`v0.33.5` accepts protocol-relative redirects. The isolated administrator
+listener also lacks its second-factor login route. Run the same gate on native
+x86_64 and arm64 before claiming two-architecture execution.

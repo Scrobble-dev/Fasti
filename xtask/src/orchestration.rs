@@ -3,6 +3,92 @@ use anyhow::{ensure, Context};
 use std::path::Path;
 use std::process::Command;
 
+pub(crate) fn run_access_b(root: &Path) -> anyhow::Result<()> {
+    let source_before = git_status(root)?;
+    let gates = access_b_gates();
+    let records = run_additional_gates(root, &gates)?;
+    let source_after = git_status(root)?;
+    ensure!(
+        source_after == source_before,
+        "Access B gates changed the Git worktree; before={source_before:?}, after={source_after:?}"
+    );
+    write_gate_suite_receipt(
+        root,
+        Path::new("target/fasti-receipts/access-b.json"),
+        "fasti.access-b.gates",
+        "cargo xtask test milestone --body B",
+        &records,
+    )?;
+    Ok(())
+}
+
+pub(crate) fn access_b_gates() -> [CommandGate; 8] {
+    [
+        CommandGate::new(
+            "trailbase.release_lock",
+            "python3",
+            ["-B", "scripts/trailbase_runtime.py", "verify-release"],
+            "repair the exact TrailBase native and OCI release lock",
+        ),
+        CommandGate::new(
+            "trailbase.runtime_mutation_sentinels",
+            "python3",
+            ["-B", "scripts/trailbase_runtime.py", "self-test"],
+            "restore fail-closed TrailBase release, backup, and restore validation",
+        ),
+        CommandGate::new(
+            "trailbase.launcher_syntax",
+            "bash",
+            ["-n", "scripts/dev.sh"],
+            "repair the sole development launcher",
+        ),
+        CommandGate::new(
+            "trailbase.launcher_invariants",
+            "bash",
+            ["scripts/dev.sh", "--self-test"],
+            "repair the development launcher lifecycle and safety invariants",
+        ),
+        CommandGate::new(
+            "trailbase.oci_conformance",
+            "bash",
+            ["scripts/smoke-trailbase-oci.sh"],
+            "prepare the exact Podman image and repair the OCI lifecycle or isolation policy",
+        ),
+        CommandGate::new(
+            "trailbase.combined_binary",
+            "cargo",
+            ["build", "-p", "fastid", "--locked", "--offline"],
+            "prepare the exact Fasti daemon used by the combined resource probe",
+        ),
+        CommandGate::new(
+            "trailbase.combined_resource_envelope",
+            "bash",
+            [
+                "scripts/bench-envelope.sh",
+                "--target",
+                "ceiling",
+                "--",
+                "bash",
+                "scripts/smoke-trailbase-combined.sh",
+            ],
+            "repair combined Fasti and TrailBase startup without raising the 192 MiB ceiling",
+        ),
+        CommandGate::new(
+            "trailbase.account_conformance",
+            "python3",
+            [
+                "-B",
+                "scripts/smoke-trailbase.py",
+                "--root",
+                ".dev-trailbase",
+                "--receipt",
+                "target/fasti-receipts/trailbase-conformance.json",
+            ],
+            "prepare the exact native TrailBase depot and repair the account-lifecycle fixture",
+        ),
+    ]
+}
+
 pub(crate) fn run_portable_b1(root: &Path) -> anyhow::Result<()> {
     let source_before = git_status(root)?;
     let gates = portable_b1_gates();
@@ -195,6 +281,29 @@ fn git_status(root: &Path) -> anyhow::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_b_has_one_canonical_prepared_machine_gate() {
+        let gates = access_b_gates();
+        assert_eq!(
+            gates.iter().map(CommandGate::id).collect::<Vec<_>>(),
+            [
+                "trailbase.release_lock",
+                "trailbase.runtime_mutation_sentinels",
+                "trailbase.launcher_syntax",
+                "trailbase.launcher_invariants",
+                "trailbase.oci_conformance",
+                "trailbase.combined_binary",
+                "trailbase.combined_resource_envelope",
+                "trailbase.account_conformance",
+            ]
+        );
+        assert!(gates[6]
+            .display()
+            .contains("scripts/smoke-trailbase-combined.sh"));
+        assert!(gates[7].display().contains("scripts/smoke-trailbase.py"));
+        assert!(gates[7].display().contains(".dev-trailbase"));
+    }
 
     #[test]
     fn worktree_snapshot_detects_new_untracked_files() {

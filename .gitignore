@@ -71,3 +71,5 @@ __pycache__/
 .dev-logs/
 .dev-data/
 .dev-run/
+.dev-trailbase/
+.dev-trailbase-backups/

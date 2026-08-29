@@ -3,20 +3,20 @@
 Fasti keeps the listener, client URL, and public URL separate. This prevents a
 reverse-proxy address from changing the daemon bind address.
 
-| Variable                         | Owner                    | Purpose                                                                                                                           |
-| -------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
-| `FASTI_LISTEN`                   | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                                             |
-| `FASTI_PORT`                     | launcher                 | Native or container host port. Default: `8420`.                                                                                   |
-| `FASTI_PORT_FALLBACK`            | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.                               |
-| `FASTI_DATA_ROOT`                | `fastid`                 | Required private directory for every durable router. It is never inferred.                                                        |
-| `FASTI_API_URL`                  | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment.                              |
-| `FASTI_PUBLIC_URL`               | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
-| `FASTI_REMOTE_TRUSTED_PROXY`     | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
-| `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
-| `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
-| `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
-| `FASTI_EXTERNAL_BIND_IP`         | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP inside a detected container boundary is accepted.    |
-| `FASTI_BOUND_ADDR_FILE`          | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
+| Variable                     | Owner                    | Purpose                                                                                                                           |
+| ---------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `FASTI_LISTEN`               | `fastid`                 | Bind address as `IP:PORT`. Default: `127.0.0.1:8420`.                                                                             |
+| `FASTI_PORT`                 | launcher                 | Native or container host port. Default: `8420`.                                                                                   |
+| `FASTI_PORT_FALLBACK`        | `fastid` and launcher    | `fail` stops on a collision. Explicit `auto` selects an OS-assigned loopback port. Default: `fail`.                               |
+| `FASTI_DATA_ROOT`            | `fastid`                 | Required private directory for every durable router. It is never inferred.                                                        |
+| `FASTI_API_URL`              | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment.                              |
+| `FASTI_PUBLIC_URL`           | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
+| `FASTI_REMOTE_TRUSTED_PROXY` | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
+| `GOOGLE_BOOKS_API_KEY`       | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
+| `TMDB_API_READ_ACCESS_TOKEN` | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
+| `FASTI_CONTAINER_RUNTIME`    | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
+| `FASTI_EXTERNAL_BIND_IP`     | `fastid` and launcher    | Explicit outer bind IP for a wildcard container listener. Only a loopback IP inside a detected container boundary is accepted.    |
+| `FASTI_BOUND_ADDR_FILE`      | supervisor               | Optional file where `fastid` atomically publishes its actual bind address.                                                        |
 
 Non-loopback client and public URLs must use HTTPS. `localhost` and
 `127.0.0.1` are interchangeable when local name resolution uses IPv4. `[::1]`
@@ -100,6 +100,12 @@ subject resolution, membership, role, administrator continuity, cookie and
 CSRF controls, and Fasti session issuance. C1 must document the exact proxy,
 origin, cookie, and outage behavior before a remote browser session becomes an
 active network surface.
+
+TrailBase `v0.33.5` accepts protocol-relative values in its shared redirect
+validator. Keep its account and OAuth routes on loopback. Do not add them to a
+remote reverse-proxy allowlist until a pinned release rejects unsafe redirect
+forms and the conformance negative control passes. This is separate from the
+Fasti trusted-proxy controls above.
 
 `.internal` needs working name resolution and a certificate whose subject
 includes that host. Fasti uses the platform trust store. It does not issue a
