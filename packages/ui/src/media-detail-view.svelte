@@ -253,21 +253,25 @@
     );
   }
 
-  function refreshSelection(xid: ExternalId): ProviderSelection | null {
+  function providerMappingForIdentifier(
+    xid: ExternalId,
+  ): Omit<ProviderSelection, "provider_id"> | null {
     const namespace = xid.namespace.toLowerCase();
+    if (namespace === "googlebooks.volume" || namespace === "google-books") {
+      return { provider: "google-books", kind: "book" };
+    }
+    if (namespace === "tmdb.movie") return { provider: "tmdb", kind: "movie" };
+    if (namespace === "tmdb.tv") return { provider: "tmdb", kind: "show" };
     const currentKind = providerKindForRecord();
-    const mapping =
-      namespace === "googlebooks.volume" || namespace === "google-books"
-        ? { provider: "google-books", kind: "book" as const }
-        : namespace === "tmdb.movie"
-          ? { provider: "tmdb", kind: "movie" as const }
-          : namespace === "tmdb.tv"
-            ? { provider: "tmdb", kind: "show" as const }
-            : namespace === "tmdb" &&
-                (currentKind === "movie" || currentKind === "show")
-              ? { provider: "tmdb", kind: currentKind }
-              : null;
-    return mapping && mapping.kind === currentKind
+    return namespace === "tmdb" &&
+      (currentKind === "movie" || currentKind === "show")
+      ? { provider: "tmdb", kind: currentKind }
+      : null;
+  }
+
+  function refreshSelection(xid: ExternalId): ProviderSelection | null {
+    const mapping = providerMappingForIdentifier(xid);
+    return mapping?.kind === providerKindForRecord()
       ? { ...mapping, provider_id: xid.value }
       : null;
   }
@@ -1193,7 +1197,7 @@
             {#if metadataProblem}
               <p class="metadata-problem" role="alert">{metadataProblem}</p>
             {/if}
-            {#if record.externalIds.some((identifier) => refreshSelection(identifier)?.provider === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
+            {#if record.externalIds.some((identifier) => providerMappingForIdentifier(identifier)?.provider === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
               <TmdbAttribution />
             {/if}
           </section>

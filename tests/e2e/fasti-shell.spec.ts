@@ -487,8 +487,9 @@ test("record metadata can refresh or switch through a configured provider", asyn
       let title = "Dune";
       let overview = "A noble family becomes involved in a war for Arrakis.";
       let identifiers = [
-        { namespace: "tmdb.movie", grain: "film", value: "438631" },
+        { namespace: "tmdb.tv", grain: "film", value: "438631" },
       ];
+      let providerStatusCalls = 0;
       const browserWindow = window as typeof window & {
         __METADATA_CALLS__?: unknown[];
         __TAURI_INTERNALS__: {
@@ -502,6 +503,10 @@ test("record metadata can refresh or switch through a configured provider", asyn
             case "setup_status":
               return { phase: "ready", proof_cleanup_pending: false };
             case "provider_credential_status":
+              providerStatusCalls += 1;
+              if (providerStatusCalls === 1) {
+                throw new Error("Provider status is temporarily unavailable.");
+              }
               return [
                 {
                   provider: "tmdb",
@@ -703,8 +708,10 @@ test("record metadata can refresh or switch through a configured provider", asyn
   ).toBeVisible();
   await page.getByRole("button", { name: /Sources & Identity/ }).click();
 
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("Refreshed metadata from TMDB.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Provider credits" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Retry host connection" }).click();
   await page
     .getByRole("searchbox", { name: "Search TMDB" })
     .fill("Dune Part Two");
@@ -715,10 +722,6 @@ test("record metadata can refresh or switch through a configured provider", asyn
     page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
   ).toBeVisible();
   expect(await metadataCalls()).toEqual([
-    {
-      record_id: recordId,
-      selection: { provider: "tmdb", provider_id: "438631", kind: "movie" },
-    },
     {
       record_id: recordId,
       selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },

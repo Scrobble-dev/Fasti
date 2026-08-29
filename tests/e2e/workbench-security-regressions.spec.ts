@@ -767,9 +767,11 @@ test("Discover selects configured providers and refreshes explicit setup state",
     has: page.getByRole("heading", { name: "Breaking Bad", exact: true }),
   });
   await showResult.getByRole("button", { name: "Create Record" }).click();
-  await expect(
-    showResult.getByRole("button", { name: "Record ready" }),
-  ).toBeDisabled();
+  const completedAction = showResult.getByRole("button", {
+    name: "Record ready",
+  });
+  await expect(completedAction).toHaveAttribute("aria-disabled", "true");
+  await expect(completedAction).toBeFocused();
   await expect(showResult.getByRole("status")).toHaveText(
     "Record ID: rec_01991f588e0070008000000000000010",
   );

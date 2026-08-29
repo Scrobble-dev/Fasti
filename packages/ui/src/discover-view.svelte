@@ -70,8 +70,8 @@
   async function runCandidateAction(
     candidate: ProviderSearchCandidate,
   ): Promise<void> {
-    if (!onCandidateAction || actionKey) return;
     const key = candidateKey(candidate);
+    if (!onCandidateAction || actionKey || completedKeys.has(key)) return;
     actionKey = key;
     actionProblem = "";
     actionProblemKey = "";
@@ -334,7 +334,7 @@
                   <button
                     type="button"
                     class="track-btn"
-                    disabled={Boolean(actionKey) ||
+                    aria-disabled={Boolean(actionKey) ||
                       completedKeys.has(resultKey)}
                     onclick={() => runCandidateAction(result)}
                   >
@@ -485,6 +485,11 @@
   }
 
   button:disabled {
+    cursor: not-allowed;
+    opacity: 0.68;
+  }
+
+  button[aria-disabled="true"] {
     cursor: not-allowed;
     opacity: 0.68;
   }
