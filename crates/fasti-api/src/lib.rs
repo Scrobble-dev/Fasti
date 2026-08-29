@@ -1,6 +1,12 @@
 //! Fasti HTTP REST API definitions and router construction.
 
-use axum::{routing::get, Json, Router};
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
 use fasti_application::LocalKernel;
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
 use std::net::SocketAddr;
@@ -283,10 +289,26 @@ pub fn with_static_fallback(router: Router, static_dir: Option<&Path>) -> Router
     // response status to 404, which is right for a custom error page but
     // wrong for SPA client-side routing: `/status` is a real page in the
     // app, so it must come back 200 with index.html for the SPA's own
-    // router to take over.
+    // router to take over. That SPA behavior must not extend to `/api/*`,
+    // though: an unmatched API path (a typo, a removed endpoint) would
+    // otherwise silently come back 200 with the HTML shell instead of a 404,
+    // which every API client -- browser fetch, SDK, curl -- expects to see.
     let index_html = static_dir.join("index.html");
     let serve_dir = ServeDir::new(static_dir).fallback(ServeFile::new(index_html));
-    router.fallback_service(serve_dir)
+    router.fallback_service(tower::service_fn(move |request: Request| {
+        let serve_dir = serve_dir.clone();
+        async move {
+            if request.uri().path().starts_with("/api/") {
+                return Ok::<Response, std::convert::Infallible>(
+                    StatusCode::NOT_FOUND.into_response(),
+                );
+            }
+            let response = tower::ServiceExt::oneshot(serve_dir, request)
+                .await
+                .into_response();
+            Ok(response)
+        }
+    }))
 }
 
 /// Seeds the one-time development account with the given credential. The
@@ -412,6 +434,36 @@ mod tests {
             .await
             .expect("body");
         assert_eq!(body, "console.log(1)".as_bytes());
+    }
+
+    #[tokio::test]
+    async fn static_fallback_leaves_unmatched_api_paths_as_a_plain_404() {
+        let static_dir = tempfile::tempdir().expect("temporary static dir");
+        std::fs::write(
+            static_dir.path().join("index.html"),
+            "<html>fasti workbench</html>",
+        )
+        .expect("write index.html");
+
+        // A path under /api/* that no route matches must not fall back to
+        // the SPA shell with a 200 -- every API client expects a 404 there,
+        // not an HTML document.
+        let response = with_static_fallback(health_router(), Some(static_dir.path()))
+            .oneshot(
+                Request::get("/api/v1/not-a-real-route")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert!(
+            !String::from_utf8_lossy(&body).contains("fasti workbench"),
+            "an unmatched API path must not receive the SPA shell"
+        );
     }
 
     #[test]

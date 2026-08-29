@@ -248,7 +248,7 @@ async fn emby_native_completion_is_normalized_through_the_shared_boundary() {
 }
 
 #[tokio::test]
-async fn emby_identity_is_stable_across_byte_level_re_delivery_noise() {
+async fn emby_identity_recognizes_but_still_conflicts_on_byte_level_re_delivery_noise() {
     let (root, local, integrations) = routers().await;
     let credential = enroll_admin(&local, root.path()).await;
     let body = serde_json::json!({
@@ -289,32 +289,62 @@ async fn emby_identity_is_stable_across_byte_level_re_delivery_noise() {
     assert_eq!(committed.disposition, "committed");
 
     // Re-delivery with field reordering and unrelated whitespace -- pure
-    // byte-level noise on the same real event -- must resolve to the same
-    // identity, not commit a duplicate occurrence.
-    let mut reordered = body.clone();
-    if let Some(item) = reordered.get_mut("Item") {
-        *item = serde_json::json!({
+    // byte-level noise on the same real event. Hand-written as a raw string,
+    // not built by reordering a serde_json::Value and re-serializing it:
+    // this workspace doesn't enable serde_json's preserve_order feature, so
+    // Value's map is BTreeMap-backed and always serializes in sorted key
+    // order regardless of insertion order -- reordering a Value and calling
+    // .to_string() on it produces byte-identical output to the original,
+    // which would make this "byte-level noise" case not actually exercise
+    // any noise.
+    let reordered_bytes: &[u8] = br#"{
+        "Session": {"PlayState":  {"PositionTicks": 72000000000}},
+        "Item": {
             "ProviderIds": {"Tmdb": "4568", "Imdb": "tt7654322"},
+            "RunTimeTicks": 72000000000,
             "Name": "Fixture movie",
-            "RunTimeTicks": 72000000000_u64,
             "Id": "emby-item-2",
             "Type": "Movie"
-        });
-    }
-    let replayed = integrations
+        },
+        "UtcTimestamp":  "2026-08-27T12:00:00Z",
+        "PlayedToCompletion": true,
+        "Event": "playback.stop"
+    }"#;
+    assert_ne!(
+        reordered_bytes,
+        body.to_string().as_bytes(),
+        "the reordered fixture must actually differ at the byte level, or this test proves \
+         nothing about byte-level re-delivery noise"
+    );
+    // NOT a clean replay: `fasti-store`'s idempotency semantic_digest
+    // (crates/fasti-store/src/observation.rs::semantic_digest) hashes
+    // `command.prepared_evidence().digest()`, which is derived from the raw
+    // request bytes -- for every integration source, not just this one. Any
+    // byte-level difference in a re-delivery changes that digest and lands
+    // here regardless of identity stability. The identity fix this test
+    // guards still matters: before it, a reordered delivery derived a wholly
+    // different source_event_id and would have silently committed as a
+    // second, duplicate occurrence (disposition "committed" again); now it's
+    // recognized as the same occurrence and safely blocked as a conflict
+    // instead (safe_state "prior_state_retained"). Full idempotent replay
+    // under byte-level noise would require evidence digesting something
+    // canonical rather than raw bytes -- a broader change, tracked
+    // alongside the analogous Plex observed_at gap documented on
+    // plex_webhook_commits_and_conflicts_on_changed_evidence below.
+    let redelivered = integrations
         .clone()
-        .oneshot(send(reordered))
+        .oneshot(
+            bearer(
+                Request::post("/api/v1/integrations/emby/webhook"),
+                &credential,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(reordered_bytes))
+            .expect("request"),
+        )
         .await
         .expect("response");
-    assert_eq!(replayed.status(), StatusCode::OK);
-    let replayed: SubmitObservationResponse = serde_json::from_slice(
-        &to_bytes(replayed.into_body(), 16 * 1024)
-            .await
-            .expect("bounded body"),
-    )
-    .expect("replay receipt");
-    assert_eq!(replayed.disposition, "replayed");
-    assert_eq!(replayed.receipt_id, committed.receipt_id);
+    assert_eq!(redelivered.status(), StatusCode::CONFLICT);
 
     let mut changed = body;
     changed["Item"]["Name"] = serde_json::json!("Changed evidence");

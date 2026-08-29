@@ -27,7 +27,12 @@
   const DEVELOPMENT_UNBOUNDED_SESSION_MINUTES = 100 * 365 * 24 * 60;
   const isLoopbackHost =
     typeof window !== "undefined" &&
-    ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+    // WHATWG URL host serialization brackets IPv6 literals, so
+    // `location.hostname` for the IPv6 loopback address is "[::1]", not
+    // "::1".
+    ["localhost", "127.0.0.1", "::1", "[::1]"].includes(
+      window.location.hostname,
+    );
 
   let { show, host, session, onClose, onSessionChange }: Props = $props();
   let dialog: HTMLDialogElement | undefined;

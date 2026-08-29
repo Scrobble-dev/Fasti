@@ -11,18 +11,20 @@ pub struct CreateBrowserSessionRequest {
     #[schemars(length(min = 8, max = 128))]
     #[schema(min_length = 8, max_length = 128, format = "password")]
     pub password: String,
-    /// 5-1440 (24h) covers every normal deployment and is what this schema
-    /// documents. A daemon instance with the loopback-gated
-    /// FASTI_DEVELOPMENT_AUTO_LOGIN dev convenience active accepts a much
-    /// larger value (see apps/fastid/src/main.rs's
-    /// DEVELOPMENT_UNBOUNDED_SESSION_MINUTES); the runtime bound enforced by
-    /// CreateBrowserSessionCommand::try_new is the source of truth for what
-    /// a given instance actually accepts. schemars/utoipa's range/schema
-    /// attributes are documentation only and are not re-checked at
-    /// deserialization, so this is a deliberate, narrow documented exception
-    /// rather than a contract violation.
-    #[schemars(range(min = 5, max = 1440))]
-    #[schema(minimum = 5, maximum = 1440)]
+    /// 5-1440 (24h) covers every normal deployment. The published maximum
+    /// here is wider than that -- 52,560,000 (100 years), matching apps/
+    /// fastid/src/main.rs's DEVELOPMENT_UNBOUNDED_SESSION_MINUTES -- because
+    /// the generated SDK's client re-validates outgoing requests against
+    /// this exact published schema (packages/sdk/src/generated.ts's
+    /// validateOpenApiValue): a narrower published maximum would make the
+    /// SDK itself reject the value before a legitimate loopback dev-auto-
+    /// login request ever reached the daemon. The runtime bound enforced by
+    /// CreateBrowserSessionCommand::try_new is still the actual source of
+    /// truth for what a given instance accepts -- only a daemon with the
+    /// loopback-gated FASTI_DEVELOPMENT_AUTO_LOGIN convenience active
+    /// accepts anything above 1440, and rejects it (422) otherwise.
+    #[schemars(range(min = 5, max = 52_560_000))]
+    #[schema(minimum = 5, maximum = 52_560_000)]
     pub session_timeout_minutes: u32,
 }
 

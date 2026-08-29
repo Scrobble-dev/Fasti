@@ -796,6 +796,29 @@ test("generated record parser accepts required boolean fields", () => {
   assert.equal(record.poster.is_stale, false);
 });
 
+test("generated record parser rejects a response missing truncated", () => {
+  assert.throws(
+    () =>
+      parseListRecordsResponse({
+        records: [],
+      }),
+    FastiContractParseError,
+  );
+});
+
+test("client.listRecords() surfaces the truncated flag through the transport", async () => {
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    credential: "records-secret",
+    fetch: async () =>
+      new Response(JSON.stringify({ records: [], truncated: true }), {
+        headers: { "content-type": "application/json" },
+      }),
+  });
+
+  assert.deepEqual(await client.listRecords(), { records: [], truncated: true });
+});
+
 test("base URL semantics reject application paths instead of silently discarding them", () => {
   assert.throws(
     () => new FastiClient({ baseUrl: "http://127.0.0.1:8420/fasti" }),

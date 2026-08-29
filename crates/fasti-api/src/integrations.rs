@@ -686,13 +686,14 @@ fn plex_request(
     // Server/account identity distinguishes the same ratingKey scrobbled on
     // two different Plex servers. Falls back to the raw digest when
     // ratingKey is absent, since there's no other stable identity to key on.
-    let event_lexeme = match rating_key {
-        Some(rating_key) => format!(
-            "plex:{}:{rating_key}:{}",
-            server_uuid.unwrap_or_default(),
-            last_viewed_at.unwrap_or_default(),
-        ),
-        None => String::from_utf8_lossy(raw).into_owned(),
+    let event_lexeme = match (server_uuid, rating_key, last_viewed_at) {
+        (Some(server_uuid), Some(rating_key), Some(last_viewed_at)) => {
+            format!("plex:{server_uuid}:{rating_key}:{last_viewed_at}")
+        }
+        // Substituting an empty/zero default for a missing field here (as
+        // opposed to falling back to the raw digest) would let two distinct
+        // scrobbles that both omit the same field collide into one lexeme.
+        _ => String::from_utf8_lossy(raw).into_owned(),
     };
     let source_event_id = derive_deterministic_operation_id(&event_lexeme).to_string();
 
@@ -1084,6 +1085,38 @@ mod event_identity_tests {
         let rb = plex_request(&b, b"raw", correlation_id)
             .unwrap_or_else(|_| panic!("fixture b is valid"));
         assert_ne!(ra.source_event_id, rb.source_event_id);
+    }
+
+    /// Regression test: when Server.uuid or Metadata.lastViewedAt is absent,
+    /// the identity must fall back to the raw digest, not substitute an
+    /// empty/zero default -- otherwise two distinct scrobbles that both omit
+    /// the same field would derive the same lexeme and collide.
+    #[test]
+    fn plex_identity_falls_back_to_raw_bytes_when_server_uuid_is_missing() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let payload = |raw: &'static [u8]| {
+            (
+                serde_json::json!({
+                    "event": "media.scrobble",
+                    "Metadata": {
+                        "type": "movie",
+                        "ratingKey": "200",
+                        "lastViewedAt": 1787832000_i64,
+                    }
+                }),
+                raw,
+            )
+        };
+        let (a, raw_a) = payload(b"raw-a");
+        let (b, raw_b) = payload(b"raw-b");
+        let ra =
+            plex_request(&a, raw_a, correlation_id).unwrap_or_else(|_| panic!("fixture a valid"));
+        let rb =
+            plex_request(&b, raw_b, correlation_id).unwrap_or_else(|_| panic!("fixture b valid"));
+        assert_ne!(
+            ra.source_event_id, rb.source_event_id,
+            "two distinct scrobbles missing Server.uuid must not collide into one identity"
+        );
     }
 
     fn claim_tuples(identifiers: &[ObservationIdentifierInput]) -> Vec<(String, String, String)> {

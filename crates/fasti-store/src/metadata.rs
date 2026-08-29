@@ -582,6 +582,16 @@ mod tests {
         let foreign_workspace = WorkspaceId::new_v7();
 
         let connection = node.kernel.inner.connection.lock().expect("connection");
+        // A real workspace row, not just an arbitrary id: otherwise the
+        // attack write fails on the workspace_id foreign key before ever
+        // reaching the scope-guard trigger, and the test would pass even if
+        // that trigger regressed.
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                rusqlite::params![foreign_workspace.to_string(), timestamp(now())],
+            )
+            .expect("seed foreign workspace");
         let claim = FieldClaim::try_new(ns("tmdb"), "Original title", None, received(100), None)
             .expect("valid claim");
         write_field_claim(

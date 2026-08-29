@@ -224,9 +224,9 @@ const PRODUCTION_SCHEMAS = {
         "type": "string"
       },
       "session_timeout_minutes": {
-        "description": "5-1440 (24h) covers every normal deployment and is what this schema\ndocuments. A daemon instance with the loopback-gated\nFASTI_DEVELOPMENT_AUTO_LOGIN dev convenience active accepts a much\nlarger value (see apps/fastid/src/main.rs's\nDEVELOPMENT_UNBOUNDED_SESSION_MINUTES); the runtime bound enforced by\nCreateBrowserSessionCommand::try_new is the source of truth for what\na given instance actually accepts. schemars/utoipa's range/schema\nattributes are documentation only and are not re-checked at\ndeserialization, so this is a deliberate, narrow documented exception\nrather than a contract violation.",
+        "description": "5-1440 (24h) covers every normal deployment. The published maximum\nhere is wider than that -- 52,560,000 (100 years), matching apps/\nfastid/src/main.rs's DEVELOPMENT_UNBOUNDED_SESSION_MINUTES -- because\nthe generated SDK's client re-validates outgoing requests against\nthis exact published schema (packages/sdk/src/generated.ts's\nvalidateOpenApiValue): a narrower published maximum would make the\nSDK itself reject the value before a legitimate loopback dev-auto-\nlogin request ever reached the daemon. The runtime bound enforced by\nCreateBrowserSessionCommand::try_new is still the actual source of\ntruth for what a given instance accepts -- only a daemon with the\nloopback-gated FASTI_DEVELOPMENT_AUTO_LOGIN convenience active\naccepts anything above 1440, and rejects it (422) otherwise.",
         "format": "int32",
-        "maximum": 1440,
+        "maximum": 52560000,
         "minimum": 5,
         "type": "integer"
       },
