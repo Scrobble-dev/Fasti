@@ -66,6 +66,11 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * Calculates the median of a numeric collection.
+ * @param {number[]} values - The values to evaluate.
+ * @return {number} The middle value, or the average of the two middle values when the collection has an even length.
+ */
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -74,6 +79,11 @@ function median(values) {
     : sorted.at(middle);
 }
 
+/**
+ * Summarize numeric values by calculating their minimum, median, and maximum.
+ * @param {number[]} values - The values to summarize.
+ * @returns {{minimum: number, median: number, maximum: number}} The minimum, median, and maximum values.
+ */
 function summary(values) {
   return {
     minimum: Math.min(...values),
@@ -88,6 +98,11 @@ function shellQuote(value) {
     : `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+/**
+ * Reads a retained artifact after verifying its path and file identity.
+ * @param {object} artifact - Artifact metadata containing the relative path to read.
+ * @return {Buffer} The artifact contents.
+ */
 function readRetainedArtifactOnce(artifact) {
   assert(
     Number.isInteger(constants.O_NOFOLLOW),
@@ -142,6 +157,14 @@ function readRetainedArtifactOnce(artifact) {
   }
 }
 
+/**
+ * Validate a Tauri benchmark evidence receipt and its derived measurements.
+ * @param {object} evidence - The evidence receipt to validate.
+ * @param {object} [options] - Validation options.
+ * @param {boolean} [options.allowTestFixture=false] - Allow incomplete fixture evidence and skip artifact integrity verification.
+ * @param {boolean} [options.verifyArtifact=true] - Verify the retained measurement artifact's size and SHA-256 digest.
+ * @throws {Error} If the evidence fails schema, integrity, consistency, or verdict validation.
+ */
 export function validateEvidence(
   evidence,
   { allowTestFixture = false, verifyArtifact = true } = {},

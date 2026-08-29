@@ -57,6 +57,19 @@ def command_text(parts: list[str | Path]) -> str:
 
 
 def run_checked(parts: list[str | Path], *, timeout: float = 1200) -> str:
+    """
+    Execute a command from the repository root and return its trimmed standard output.
+    
+    Parameters:
+        parts (list[str | Path]): Command name and arguments.
+        timeout (float): Maximum execution time in seconds.
+    
+    Returns:
+        str: Trimmed standard output.
+    
+    Raises:
+        CaptureError: If the command exits with a nonzero status.
+    """
     result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         [str(part) for part in parts],
         cwd=ROOT,
@@ -592,6 +605,14 @@ def cgroup_usage(path: Path) -> tuple[int, int, int]:
 def stop_scope(
     unit: str, process: subprocess.Popen[bytes], cgroup_path: Path | None
 ) -> None:
+    """
+    Stops the benchmark systemd scope and verifies that its process has exited and no scope processes remain.
+    
+    Parameters:
+    	unit (str): Systemd scope unit to stop.
+    	process (subprocess.Popen[bytes]): Process started within the scope.
+    	cgroup_path (Path | None): Scope cgroup path used to verify remaining processes.
+    """
     subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["systemctl", "--user", "kill", "--signal=TERM", "--kill-whom=all", unit],
         cwd=ROOT,
@@ -642,6 +663,20 @@ def capture_once(
     steady_window_seconds: float,
     sample_interval_ms: int,
 ) -> dict[str, Any]:
+    """
+    Launch one benchmark run, measure startup and steady-state cgroup usage, and stop the run.
+    
+    Parameters:
+    	run (int): Identifier for the benchmark repetition.
+    	steady_window_seconds (float): Duration of steady-state sampling after readiness.
+    	sample_interval_ms (int): Interval between cgroup observations in milliseconds.
+    
+    Returns:
+    	dict[str, Any]: Run metadata containing startup time, memory measurements, peak process count, and command details.
+    
+    Raises:
+    	CaptureError: If the process exits before readiness, fails to become ready within 20 seconds, produces invalid cgroup observations, or has no steady-state observations.
+    """
     with tempfile.TemporaryDirectory(prefix="fasti-tauri-b1-") as temporary:
         ready_path = Path(temporary) / "ready"
         environment = os.environ.copy()
@@ -900,6 +935,13 @@ def capture(args: argparse.Namespace) -> int:
 
 
 def self_test() -> None:
+    """
+    Run the benchmark harness self-tests and report whether they pass.
+    
+    The checks cover external validator execution, fixture policy enforcement,
+    control-group validation, metric summarization, runner ID validation, and
+    hidden-window enforcement.
+    """
     require_command("node")
     run_checked(["node", str(VALIDATOR.relative_to(ROOT)), "--self-test"])
     fixture_scope()

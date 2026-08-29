@@ -32,6 +32,19 @@ class BundleError(RuntimeError):
 
 
 def run_checked(parts: list[str | Path], *, cwd: Path = ROOT) -> str:
+    """
+    Execute a Git command and return its trimmed standard output.
+    
+    Parameters:
+        parts (list[str | Path]): The Git executable and its arguments.
+        cwd (Path): Directory in which to execute the command.
+    
+    Returns:
+        str: The command's trimmed standard output.
+    
+    Raises:
+        BundleError: If the executable is not `git` or the command fails.
+    """
     if parts[0] != "git":
         raise BundleError(f"run_checked only permits the git executable, got: {parts[0]!r}")
     result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- nosec -- argv is a list (no shell); parts[0] is asserted to be the literal "git" above, and every other argument is either a literal or an internally-generated path.
@@ -119,6 +132,15 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def validate_manifest_source(source: str) -> dict[str, Any]:
+    """
+    Parse and validate a bundle manifest against the required JSON Schema.
+    
+    Parameters:
+        source (str): Manifest content encoded as strict JSON.
+    
+    Returns:
+        dict[str, Any]: The validated manifest.
+    """
     try:
         manifest = json.loads(source, object_pairs_hook=_reject_duplicate_keys)
     except BundleError:

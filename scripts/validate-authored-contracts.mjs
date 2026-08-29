@@ -34,6 +34,11 @@ const assertInternalReferencesOnly = (value, path = "$") => {
   }
 };
 
+/**
+ * Validates authored contract artifacts and their cross-document consistency.
+ * @param {string} root - Repository root containing the contract artifacts.
+ * @return {{asyncApiVersion: string, expandedDocumentCount: number, portabilityFormat: string}} Validation results including the AsyncAPI version, expanded JSON-LD document count, and portability format.
+ */
 export async function validateAuthoredContracts(root = repositoryRoot) {
   const asyncApiPath = resolve(root, "contracts/asyncapi/v1/transport.yaml");
   const conformanceOpenApiPath = resolve(

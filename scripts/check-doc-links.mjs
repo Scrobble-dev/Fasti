@@ -9,7 +9,11 @@ const repoRootReal = realpathSync(repoRoot);
 // resolve()/relative() only prove lexical containment; a symlinked ancestor
 // directory or the target itself could still resolve outside the repo on
 // the real filesystem. Call this only after existsSync() has confirmed the
-// lexically-contained path exists.
+/**
+ * Determines whether an existing path resolves within the repository.
+ * @param {string} lexicallyContainedPath - The path to check.
+ * @returns {boolean} `true` if the resolved path is the repository or one of its descendants, `false` otherwise.
+ */
 function isReallyContained(lexicallyContainedPath) {
   // Every caller passes a path that existsSync() has just confirmed exists
   // and that lexical containment has already checked immediately before.
@@ -35,6 +39,11 @@ const inlineLink = /!?\[[^\]]*\]\(([^)]+)\)/g;
 const definitionLink = /^\[(?!\^)[^\]]+\]:\s+(\S+)/gm;
 const failures = [];
 
+/**
+ * Validates a Markdown link target against the repository boundaries.
+ * @param {string} file - The Markdown file containing the link.
+ * @param {string} rawTarget - The link target to validate.
+ */
 function checkTarget(file, rawTarget) {
   let target = rawTarget.trim().replace(/^<|>$/g, "");
   target = target.replace(/\s+"[^"]*"$/, "");

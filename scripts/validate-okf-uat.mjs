@@ -130,6 +130,11 @@ function parseFrontmatter(source, label) {
   return { frontmatter, body: source.slice(match[0].length) };
 }
 
+/**
+ * Recursively finds Markdown files under a directory.
+ * @param {string} root - The directory to search.
+ * @return {Promise<string[]>} Sorted paths of the discovered Markdown files.
+ */
 async function markdownFiles(root) {
   const files = [];
   // root starts at the fixed okfRoot constant and recursion is confined to
@@ -146,6 +151,11 @@ async function markdownFiles(root) {
   return files.sort();
 }
 
+/**
+ * Extracts local and external targets from Markdown links and image links.
+ * @param {string} body - Markdown content to inspect.
+ * @return {string[]} The link and image targets found in the content.
+ */
 function markdownTargets(body) {
   const targets = [];
   const expression = /!?\[[^\]]*\]\(([^)\s]+)(?:|\s+"[^"]*")\)/gu;
@@ -155,6 +165,12 @@ function markdownTargets(body) {
   return targets;
 }
 
+/**
+ * Verifies that a Markdown link target resolves to an existing path within the repository.
+ * @param {string} sourcePath - The path of the file containing the link.
+ * @param {string} target - The link target to validate.
+ * @return {Promise<void>} Resolves when the target is valid or external.
+ */
 async function assertLocalTargetExists(sourcePath, target) {
   if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) {
     return;
@@ -190,6 +206,11 @@ function assertStringList(value, label) {
   }
 }
 
+/**
+ * Validates the OKF catalogue against repository structure and finalized B1 registry data.
+ * @param {object} registry - Capability registry used to verify catalogue identifiers and authorization metadata.
+ * @return {Promise<{conceptCount: number}>} The number of validated concept files.
+ */
 async function validateOkf(registry) {
   const files = await markdownFiles(okfRoot);
   assert.ok(files.length > 1, "OKF bundle must include concepts and an index");
@@ -413,6 +434,11 @@ async function validateOkf(registry) {
   return { conceptCount: concepts.length };
 }
 
+/**
+ * Parses CSV text into rows of field values.
+ * @param {string} source - The CSV text to parse.
+ * @return {string[][]} The parsed rows and fields.
+ */
 function parseCsv(source) {
   const rows = [];
   let row = [];
@@ -562,6 +588,10 @@ async function validateUat(registry) {
   };
 }
 
+/**
+ * Validates the identity UAT matrix against its published schema and required case set.
+ * @return {{caseCount: number, criticalCount: number, phaseCount: number}} Validation counts for identity UAT cases, critical-risk cases, and distinct phases.
+ */
 async function validateIdentityUat() {
   const rows = parseCsv(await readFile(identityUatCsvPath, "utf8"));
   assert.deepEqual(

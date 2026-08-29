@@ -36,6 +36,11 @@ const governedBuildRecipePath = join(here, "Dockerfile");
 const physicalProfilesPath = join(here, "physical-profiles.json");
 const physicalProfilesSchemaPath = join(here, "physical-profiles.schema.json");
 
+/**
+ * Loads and parses strict JSON from a file.
+ * @param {string} path - The path to the JSON file.
+ * @return {*} The parsed JSON value.
+ */
 function loadJson(path) {
   // path is always one of this file's own fixed constants (schema/budgets/
   // ledger/profile paths built from repositoryRoot) or the CLI's own
@@ -46,6 +51,11 @@ function loadJson(path) {
   return parseStrictJson(readFileSync(path, "utf8"), path);
 }
 
+/**
+ * Computes the SHA-256 digest of a file.
+ * @param {string} path - The file path.
+ * @return {string} The digest as a hexadecimal string.
+ */
 function sha256(path) {
   // See loadJson above: path is always a fixed local constant here.
   // eslint-disable-next-line security/detect-non-literal-fs-filename
@@ -65,6 +75,15 @@ function containedPath(root, target) {
   return value && !value.startsWith("..") && !isAbsolute(value);
 }
 
+/**
+ * Reads a governed regular file and records its content digest and size.
+ * @param {string} root - The directory that must contain the target.
+ * @param {string} target - The file path to read.
+ * @param {string} label - Label used in validation errors.
+ * @param {Object} [options] - Optional read hooks.
+ * @param {Function} [options.afterOpen] - Callback invoked after the file is opened and verified.
+ * @return {{bytes: Buffer, digest: string, size: number}} The file contents, SHA-256 digest, and byte size.
+ */
 function readContainedRegularFileOnce(
   root,
   target,
@@ -191,6 +210,12 @@ function assertSchema(validate, value, label) {
   }
 }
 
+/**
+ * Enforces a condition by throwing an error when it is false.
+ * @param {*} condition - The condition to evaluate.
+ * @param {string} message - The error message to throw when the condition is false.
+ * @throws {Error} If the condition is false.
+ */
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -201,7 +226,12 @@ function assert(condition, message) {
 // each call site's key is a bounded array index or one of a small,
 // file-local fixed set of literal strings, never an attacker-chosen
 // property name, but this still refuses to follow inherited properties
-// (e.g. "__proto__", "constructor") instead of silently returning them.
+/**
+ * Retrieves a property value only when the property belongs directly to the object.
+ * @param {object} object - The object to inspect.
+ * @param {string} key - The property name to retrieve.
+ * @return {*} The property's value, or `undefined` when it is not an own property.
+ */
 function ownProp(object, key) {
   // key is confirmed to be object's own property immediately above, never
   // an inherited one such as "__proto__" -- this guard is the sole reason
@@ -212,6 +242,11 @@ function ownProp(object, key) {
     : undefined;
 }
 
+/**
+ * Calculates the median of a numeric collection.
+ * @param {number[]} values - The values to summarize.
+ * @return {number} The middle value, or the average of the two middle values when the collection has an even length.
+ */
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
@@ -220,6 +255,11 @@ function median(values) {
     : ownProp(sorted, middle);
 }
 
+/**
+ * Summarizes numeric values with their minimum, median, and maximum.
+ * @param {number[]} values - The values to summarize.
+ * @returns {{minimum: number, median: number, maximum: number}} The minimum, median, and maximum values.
+ */
 function summarize(values) {
   return {
     minimum: Math.min(...values),
@@ -236,6 +276,11 @@ function round6(value) {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
+/**
+ * Calculates the 95th percentile using the nearest-rank method.
+ * @param {number[]} values - The values to evaluate.
+ * @return {number} The nearest-rank 95th percentile value.
+ */
 function p95NearestRank(values) {
   const ordered = [...values].sort((left, right) => left - right);
   const index = Math.max(
@@ -245,6 +290,14 @@ function p95NearestRank(values) {
   return ownProp(ordered, index);
 }
 
+/**
+ * Validates that a benchmark sample's aggregate metrics and idle CPU results are derived from its raw observations.
+ * @param {Object} sample - The benchmark sample containing observations and derived metrics.
+ * @param {string} scenarioId - Identifier used to describe validation failures.
+ * @param {boolean} withCgroup - Whether cgroup observations and aggregates are required.
+ * @param {boolean} idleExpected - Whether idle timing and CPU metrics must be validated.
+ * @param {Object} budgets - Timing budgets used to validate idle warm-up and measurement durations.
+ */
 function assertSampleDerivedFromObservations(
   sample,
   scenarioId,
@@ -429,6 +482,12 @@ function assertSampleDerivedFromObservations(
   }
 }
 
+/**
+ * Verifies that summary statistics match the expected sample-derived values.
+ * @param {Object} actual - The summary values to validate.
+ * @param {Object} expected - The expected minimum, median, and maximum values.
+ * @param {string} label - The label used in validation errors.
+ */
 function assertSummary(actual, expected, label) {
   for (const key of ["minimum", "median", "maximum"]) {
     assert(
@@ -474,6 +533,13 @@ const j4125Profile = physicalProfiles.profiles.j4125_calibrated;
 // dynamic RegExp input.
 const SAFE_REGEX_PATTERN = /^[A-Za-z0-9_ .^$*+?()[\]{}|:,\\-]{1,200}$/;
 
+/**
+ * Compiles an allow-listed regular expression pattern.
+ * @param {string} pattern - The regular expression pattern to compile.
+ * @param {string} flags - Regular expression flags.
+ * @param {string} label - Label used in validation errors.
+ * @return {RegExp} The compiled regular expression.
+ */
 function compileTrustedPattern(pattern, flags, label) {
   assert(
     typeof pattern === "string" && SAFE_REGEX_PATTERN.test(pattern),
@@ -486,6 +552,11 @@ function compileTrustedPattern(pattern, flags, label) {
   return new RegExp(pattern, flags); // nosemgrep
 }
 
+/**
+ * Classifies a runner based on its device-tree and CPU model fingerprints.
+ * @param {Object} runner - Runner hardware and physicality details.
+ * @return {string} The matching hardware profile identifier, or `"unclassified"` when no profile matches.
+ */
 function deriveHardwareProfile(runner) {
   const tree = runner.physicality?.device_tree;
   if (
@@ -1279,6 +1350,13 @@ function validateStaticFiles() {
   return budgets;
 }
 
+/**
+ * Validates benchmark evidence against the canonical schemas, policies, hardware requirements, scenarios, artifacts, and budget verdicts.
+ * @param {Object} evidence - Evidence receipt to validate.
+ * @param {string} [label="evidence"] - Label used to identify the evidence in validation messages.
+ * @param {boolean} [validateStatic=true] - Whether to validate and load the canonical static policy files.
+ * @param {string|null} [evidencePath=null] - Path to the evidence receipt used to verify retained artifacts.
+ */
 function validateEvidence(
   evidence,
   label = "evidence",
@@ -1761,10 +1839,20 @@ function validateEvidence(
   }
 }
 
+/**
+ * Summarize a field across benchmark samples.
+ * @param {Array<Object>} samples - The samples containing the field values.
+ * @param {string} field - The field to summarize.
+ * @return {Object} The minimum, median, and maximum values for the field.
+ */
 function fixtureSummary(samples, field) {
   return summarize(samples.map((sample) => ownProp(sample, field)));
 }
 
+/**
+ * Create deterministic B1 benchmark evidence for validation self-tests.
+ * @return {Object} A complete test-fixture evidence receipt containing runner metadata, benchmark scenarios, artifacts, and validation results.
+ */
 function makeSelfTestEvidence() {
   const budgets = loadJson(budgetsPath);
   const imageId = "sha256:" + "4".repeat(64);
@@ -2284,6 +2372,10 @@ function expectLedgerFailure(ledger, label) {
   throw new Error(`invalid device ledger passed after removing ${label}`);
 }
 
+/**
+ * Verifies that required packaging-spike ledger fields cannot be removed without causing validation failure.
+ * @return {number} The number of removal sentinel cases validated.
+ */
 function validatePackagingSpikeRemovalSentinels() {
   const ledger = loadJson(ledgerPath);
   let sentinels = 0;
@@ -2703,6 +2795,9 @@ function validateLedgerStateTransitions(validEvidence) {
   );
 }
 
+/**
+ * Verifies that retained receipt reads remain bound to one file descriptor and reject symlinked paths.
+ */
 function validateContainedReceiptReaderSentinels() {
   const root = mkdtempSync(join(tmpdir(), "fasti-b1-receipt-reader-"));
   try {

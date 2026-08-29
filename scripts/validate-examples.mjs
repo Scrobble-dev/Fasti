@@ -312,6 +312,11 @@ const validateLinkedDataReceipt = async (
   ]);
 };
 
+/**
+ * Validates repository examples against their governing registries and API specifications.
+ * @param {string} root - Repository root containing the generated contracts and examples.
+ * @return {{exampleCount: number, linkedDataCount: number, problemCount: number}} Validation counts for all examples, linked-data receipts, and problem examples.
+ */
 export async function validateExamples(root = repositoryRoot) {
   const [
     registry,

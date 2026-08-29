@@ -16,7 +16,14 @@ use std::{
 const ADDRESS_ENV: &str = "FASTI_CONFORMANCE_ADDR";
 const USAGE: &str = "B1 loopback-only conformance fixture (nondurable; not a production server)\n\nUsage:\n  b1-conformance-server 127.0.0.1:PORT\n\nEnvironment:\n  FASTI_CONFORMANCE_ADDR  Used when no address argument is supplied\n\nOptions:\n  -h, --help              Print this help";
 
-#[tokio::main]
+/// Runs the loopback-only B1 conformance server and reports its outcome through the process exit code.
+///
+/// # Examples
+///
+/// ```no_run
+/// // Start the server on the specified loopback address.
+/// // $ b1-conformance-server 127.0.0.1:8080
+/// ```
 async fn main() -> ExitCode {
     // nosemgrep: rust.lang.security.args.args -- args only pick the bind address, and
     // requested_invocation() below still rejects anything but 127.0.0.1; argv cannot
