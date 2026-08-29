@@ -1,6 +1,6 @@
 use crate::{ApplicationResult, CapabilityKey, RequestAccessContext, SecretMaterial};
 use chrono::{DateTime, Utc};
-use fasti_domain::{BrowserUserId, RequestCorrelationId};
+use fasti_domain::{BrowserSessionId, BrowserUserId, RequestCorrelationId};
 
 const MIN_PASSWORD_BYTES: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 128;
@@ -470,23 +470,23 @@ impl DeleteBrowserUserCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserSessionSummary {
-    session_id: String,
+    session_id: BrowserSessionId,
     created_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
     last_seen_at: DateTime<Utc>,
-    location: String,
-    device_type: String,
+    location: Option<String>,
+    device_type: Option<String>,
     is_current: bool,
 }
 
 impl BrowserSessionSummary {
     pub fn new(
-        session_id: String,
+        session_id: BrowserSessionId,
         created_at: DateTime<Utc>,
         expires_at: DateTime<Utc>,
         last_seen_at: DateTime<Utc>,
-        location: String,
-        device_type: String,
+        location: Option<String>,
+        device_type: Option<String>,
         is_current: bool,
     ) -> Self {
         Self {
@@ -500,8 +500,8 @@ impl BrowserSessionSummary {
         }
     }
 
-    pub fn session_id(&self) -> &str {
-        &self.session_id
+    pub const fn session_id(&self) -> BrowserSessionId {
+        self.session_id
     }
     pub const fn created_at(&self) -> DateTime<Utc> {
         self.created_at
@@ -512,11 +512,11 @@ impl BrowserSessionSummary {
     pub const fn last_seen_at(&self) -> DateTime<Utc> {
         self.last_seen_at
     }
-    pub fn location(&self) -> &str {
-        &self.location
+    pub fn location(&self) -> Option<&str> {
+        self.location.as_deref()
     }
-    pub fn device_type(&self) -> &str {
-        &self.device_type
+    pub fn device_type(&self) -> Option<&str> {
+        self.device_type.as_deref()
     }
     pub const fn is_current(&self) -> bool {
         self.is_current
@@ -550,7 +550,7 @@ pub struct EndSpecificBrowserSessionCommand {
     correlation_id: RequestCorrelationId,
     session: SecretMaterial,
     csrf: SecretMaterial,
-    target_session_id: String,
+    target_session_id: BrowserSessionId,
 }
 
 impl EndSpecificBrowserSessionCommand {
@@ -558,7 +558,7 @@ impl EndSpecificBrowserSessionCommand {
         correlation_id: RequestCorrelationId,
         session: SecretMaterial,
         csrf: SecretMaterial,
-        target_session_id: String,
+        target_session_id: BrowserSessionId,
     ) -> Self {
         Self {
             correlation_id,
@@ -576,10 +576,17 @@ impl EndSpecificBrowserSessionCommand {
     pub const fn csrf(&self) -> &SecretMaterial {
         &self.csrf
     }
-    pub fn target_session_id(&self) -> &str {
-        &self.target_session_id
+    pub const fn target_session_id(&self) -> BrowserSessionId {
+        self.target_session_id
     }
-    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial, String) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        RequestCorrelationId,
+        SecretMaterial,
+        SecretMaterial,
+        BrowserSessionId,
+    ) {
         (
             self.correlation_id,
             self.session,
