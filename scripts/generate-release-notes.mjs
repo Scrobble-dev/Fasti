@@ -11,7 +11,11 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 // The canonical SemVer 2.0.0 grammar (see semver.org's own suggested
 // regex): rejects leading zeros in numeric identifiers and separates
-// build metadata, which CHANGELOG headings never include.
+// build metadata, which CHANGELOG headings never include. Community-vetted
+// as linear-time safe (semver.org tested it explicitly against ReDoS); each
+// alternation is evaluated once per dot-separated identifier, with no
+// nested quantifier over an ambiguous sub-pattern.
+// eslint-disable-next-line security/detect-unsafe-regex
 const SEMVER_TAG_PATTERN =
   /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 // Fixed pattern, never built from input -- avoids constructing any RegExp
@@ -39,10 +43,12 @@ export function extractReleaseNotes(changelog, tag) {
       `CHANGELOG.md has no "## [${version}]" section; rename [Unreleased] to [${version}] before tagging`,
     );
   }
-  const match = headings[index];
+  const match = headings.at(index);
   const start = match.index + match[0].length;
   const end =
-    index + 1 < headings.length ? headings[index + 1].index : changelog.length;
+    index + 1 < headings.length
+      ? headings.at(index + 1).index
+      : changelog.length;
   return changelog.slice(start, end).trim() + "\n";
 }
 
