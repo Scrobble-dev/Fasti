@@ -9,6 +9,14 @@ publish.workspace = true
 description = "Fasti SQLite and filesystem adapters for the local kernel"
 
 [dependencies]
+webauthn-rs = { workspace = true }
+url = { workspace = true }
+sha1 = { workspace = true }
+hmac = { workspace = true }
+chacha20poly1305 = { workspace = true }
+base64 = { workspace = true }
+zeroize = { workspace = true }
+uuid = { workspace = true }
 chrono = { workspace = true }
 argon2 = { workspace = true }
 fasti-application = { workspace = true }
