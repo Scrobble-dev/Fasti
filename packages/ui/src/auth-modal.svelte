@@ -1,11 +1,12 @@
 <script lang="ts">
   import {
     IconDeviceDesktop,
-    IconDeviceMobile,
+    IconKey,
     IconLogin,
     IconLogout,
     IconPencil,
-    IconShieldLock,
+    IconRefresh,
+    IconShieldCheck,
     IconTrash,
     IconUserShield,
     IconX,
@@ -26,39 +27,43 @@
   }
 
   let { show, host, session, onClose, onSessionChange }: Props = $props();
-  let dialog: HTMLDialogElement | undefined;
+
+  let dialog = $state<HTMLDialogElement>();
   let username = $state("");
   let password = $state("");
   let sessionTimeoutMinutes = $state(60);
   let users = $state<BrowserUser[]>([]);
-  let activeSessions = $state<BrowserSessionItem[]>([]);
+  let sessions = $state<BrowserSessionItem[]>([]);
   let selectedUserId = $state<string | null>(null);
   let editUsername = $state("");
   let editPassword = $state("");
   let editActive = $state(true);
   let currentPassword = $state("");
-  let confirmDelete = $state(false);
+  let confirmDeleteUser = $state(false);
+  let pendingSessionId = $state<string | null>(null);
+  let confirmEndOthers = $state(false);
   let busy = $state(false);
   let problem = $state("");
   let notice = $state("");
   let signInInvalid = $state(false);
-  const usernamePattern = "[a-z0-9][a-z0-9._\\-]{2,63}";
 
+  const usernamePattern = "[a-z0-9][a-z0-9._\\-]{2,63}";
   const selectedUser = $derived(
     users.find((user) => user.user_id === selectedUserId) ?? null,
   );
 
   $effect(() => {
     if (!dialog) return;
-    if (show && !dialog.open) dialog.showModal();
-    else if (!show && dialog.open) dialog.close();
+    if (show && !dialog.open) {
+      dialog.showModal();
+    } else if (!show && dialog.open) {
+      dialog.close();
+    }
   });
 
   $effect(() => {
-    if (show && session) {
-      if (session.user.is_admin) void loadUsers();
-      void loadSessions();
-    }
+    if (!show || !session) return;
+    void refreshSessionData();
   });
 
   function problemDetails(error: unknown):
@@ -85,19 +90,22 @@
     if (details?.code === "authentication_failed") {
       return "The username or password is incorrect.";
     }
+    if (details?.code === "forbidden") {
+      return "This session does not have permission for that action.";
+    }
     if (
       details?.violations?.some(
         (violation) => violation.code === "last_active_administrator_required",
       )
     ) {
-      return "This is the only active administrator. Keep the account active.";
+      return "Keep at least one active administrator account.";
     }
     return error instanceof Error
       ? error.message
       : "Fasti could not complete the account request. Try again.";
   }
 
-  function formatExpiry(value: string): string {
+  function formatDate(value: string): string {
     const date = new Date(value);
     return Number.isNaN(date.getTime())
       ? value
@@ -105,6 +113,18 @@
           dateStyle: "medium",
           timeStyle: "short",
         }).format(date);
+  }
+
+  function clearMessages(): void {
+    problem = "";
+    notice = "";
+  }
+
+  async function refreshSessionData(): Promise<void> {
+    const tasks: Promise<void>[] = [];
+    if (host.listActiveSessions) tasks.push(loadSessions());
+    if (session?.user.is_admin && host.listBrowserUsers) tasks.push(loadUsers());
+    await Promise.all(tasks);
   }
 
   async function loadUsers(): Promise<void> {
@@ -119,41 +139,9 @@
   async function loadSessions(): Promise<void> {
     if (!host.listActiveSessions) return;
     try {
-      activeSessions = await host.listActiveSessions();
-    } catch (error) {
-      // Best effort load
-    }
-  }
-
-  async function revokeSession(sessionId: string): Promise<void> {
-    if (!host.endSpecificSession || busy) return;
-    busy = true;
-    problem = "";
-    notice = "";
-    try {
-      await host.endSpecificSession(sessionId);
-      notice = "Session revoked.";
-      await loadSessions();
+      sessions = await host.listActiveSessions();
     } catch (error) {
       problem = messageFor(error);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function revokeOtherSessions(): Promise<void> {
-    if (!host.endOtherSessions || busy) return;
-    busy = true;
-    problem = "";
-    notice = "";
-    try {
-      await host.endOtherSessions();
-      notice = "All other sessions have been revoked.";
-      await loadSessions();
-    } catch (error) {
-      problem = messageFor(error);
-    } finally {
-      busy = false;
     }
   }
 
@@ -161,8 +149,7 @@
     event.preventDefault();
     if (!host.createBrowserSession || busy) return;
     busy = true;
-    problem = "";
-    notice = "";
+    clearMessages();
     signInInvalid = false;
     try {
       const result = await host.createBrowserSession(
@@ -173,7 +160,6 @@
       password = "";
       onSessionChange(result);
       notice = `Signed in as ${result.user.username}.`;
-      if (result.user.is_admin) await loadUsers();
     } catch (error) {
       signInInvalid = problemDetails(error)?.code === "authentication_failed";
       problem = messageFor(error);
@@ -185,13 +171,56 @@
   async function signOut(): Promise<void> {
     if (!host.endBrowserSession || busy) return;
     busy = true;
-    problem = "";
+    clearMessages();
     try {
       await host.endBrowserSession();
+      sessions = [];
       users = [];
       selectedUserId = null;
       onSessionChange(null);
       notice = "Signed out.";
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function endSession(sessionId: string): Promise<void> {
+    if (!host.endSpecificSession || busy) return;
+    if (pendingSessionId !== sessionId) {
+      pendingSessionId = sessionId;
+      confirmEndOthers = false;
+      return;
+    }
+    busy = true;
+    clearMessages();
+    try {
+      await host.endSpecificSession(sessionId);
+      pendingSessionId = null;
+      notice = "Session ended.";
+      await loadSessions();
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function endOtherSessions(): Promise<void> {
+    if (!host.endOtherSessions || busy) return;
+    if (!confirmEndOthers) {
+      confirmEndOthers = true;
+      pendingSessionId = null;
+      return;
+    }
+    busy = true;
+    clearMessages();
+    try {
+      await host.endOtherSessions();
+      confirmEndOthers = false;
+      notice = "All other sessions ended.";
+      await loadSessions();
     } catch (error) {
       problem = messageFor(error);
     } finally {
@@ -205,23 +234,23 @@
     editPassword = "";
     editActive = user.active;
     currentPassword = "";
-    confirmDelete = false;
-    problem = "";
-    notice = "";
+    confirmDeleteUser = false;
+    clearMessages();
   }
 
   async function saveUser(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (!selectedUser || !host.updateBrowserUser || busy) return;
+
     const usernameChanged = editUsername.trim() !== selectedUser.username;
     const activeChanged = editActive !== selectedUser.active;
     if (!usernameChanged && !editPassword && !activeChanged) {
-      problem = "Change the username, password, or active state before saving.";
+      problem = "Change at least one account value before you save.";
       return;
     }
+
     busy = true;
-    problem = "";
-    notice = "";
+    clearMessages();
     try {
       const updated = await host.updateBrowserUser(selectedUser.user_id, {
         current_password: currentPassword,
@@ -232,24 +261,27 @@
       users = users.map((user) =>
         user.user_id === updated.user_id ? updated : user,
       );
-      currentPassword = "";
+
       const currentUserUpdated = updated.user_id === session?.user.user_id;
       const sessionInvalidated =
         currentUserUpdated &&
         (usernameChanged || Boolean(editPassword) || !updated.active);
+
+      currentPassword = "";
       editPassword = "";
+      selectedUserId = null;
       if (sessionInvalidated) {
         username = updated.username;
         users = [];
+        sessions = [];
         onSessionChange(null);
-        notice = "Account updated. Sign in again with the new details.";
+        notice = "Account updated. Sign in again.";
       } else {
         if (currentUserUpdated && session) {
           onSessionChange({ ...session, user: updated });
         }
         notice = `Saved ${updated.username}.`;
       }
-      selectedUserId = null;
     } catch (error) {
       problem = messageFor(error);
     } finally {
@@ -258,23 +290,29 @@
   }
 
   async function deleteUser(): Promise<void> {
-    if (!selectedUser || !host.deleteBrowserUser || !confirmDelete || busy)
+    if (
+      !selectedUser ||
+      !host.deleteBrowserUser ||
+      !confirmDeleteUser ||
+      busy
+    )
       return;
+
     const user = selectedUser;
     busy = true;
-    problem = "";
-    notice = "";
+    clearMessages();
     try {
       await host.deleteBrowserUser(user.user_id, currentPassword);
       users = users.filter((candidate) => candidate.user_id !== user.user_id);
       const deletedCurrentUser = user.user_id === session?.user.user_id;
       selectedUserId = null;
       currentPassword = "";
-      confirmDelete = false;
-      if (deletedCurrentUser) onSessionChange(null);
-      notice = deletedCurrentUser
-        ? "Account deleted. The development seed will not recreate it."
-        : "Account deleted.";
+      confirmDeleteUser = false;
+      if (deletedCurrentUser) {
+        sessions = [];
+        onSessionChange(null);
+      }
+      notice = "Account deleted.";
     } catch (error) {
       problem = messageFor(error);
     } finally {
@@ -295,15 +333,17 @@
     if (event.target === event.currentTarget) onClose();
   }}
 >
-  <section class="modal-card">
-    <header class="modal-header">
+  <section class="card modal-card">
+    <header class="card-header modal-header">
       <div>
-        <h2 id="auth-modal-title">Account access</h2>
-        <p>Browser sessions stay separate from integration tokens.</p>
+        <h2 id="auth-modal-title" class="card-title">Account access</h2>
+        <p class="text-secondary mb-0">
+          Browser sessions stay separate from integration credentials.
+        </p>
       </div>
       <button
         type="button"
-        class="icon-button"
+        class="btn btn-icon btn-ghost-secondary"
         onclick={onClose}
         aria-label="Close account dialog"
       >
@@ -311,20 +351,23 @@
       </button>
     </header>
 
-    <div class="modal-body">
+    <div class="card-body modal-body">
       {#if notice}
-        <p class="notice" role="status">{notice}</p>
+        <div class="alert alert-success" role="status">{notice}</div>
       {/if}
       {#if problem}
-        <p id="auth-problem" class="problem" role="alert">{problem}</p>
+        <div id="auth-problem" class="alert alert-danger" role="alert">
+          {problem}
+        </div>
       {/if}
 
       {#if !session}
         <form class="form-stack" onsubmit={signIn}>
-          <div class="form-field">
-            <label for="auth-username">Username</label>
+          <div>
+            <label class="form-label" for="auth-username">Username</label>
             <input
               id="auth-username"
+              class="form-control"
               type="text"
               autocomplete="username"
               minlength="3"
@@ -337,10 +380,11 @@
               required
             />
           </div>
-          <div class="form-field">
-            <label for="auth-password">Password</label>
+          <div>
+            <label class="form-label" for="auth-password">Password</label>
             <input
               id="auth-password"
+              class="form-control"
               type="password"
               autocomplete="current-password"
               minlength="8"
@@ -352,10 +396,13 @@
               required
             />
           </div>
-          <div class="form-field">
-            <label for="auth-session-timeout">Session duration</label>
+          <div>
+            <label class="form-label" for="auth-session-timeout">
+              Session duration
+            </label>
             <select
               id="auth-session-timeout"
+              class="form-select"
               bind:value={sessionTimeoutMinutes}
             >
               <option value={15}>15 minutes</option>
@@ -364,181 +411,238 @@
               <option value={1440}>24 hours</option>
               <option value={43200}>30 days</option>
               <option value={86400}>60 days</option>
-              <option value={5256000}>Indefinite (10 years)</option>
             </select>
           </div>
           <button
             type="submit"
-            class="primary-button"
+            class="btn btn-primary action-button"
             disabled={busy || !host.createBrowserSession}
           >
             <IconLogin size={18} />
             {busy ? "Signing in…" : "Sign in"}
           </button>
           {#if !host.createBrowserSession}
-            <p class="hint">
+            <p class="text-secondary mb-0">
               This host does not provide browser account sessions.
             </p>
           {/if}
         </form>
       {:else}
-        <div class="session-summary">
-          <IconUserShield size={22} aria-hidden="true" />
+        <section class="session-summary" aria-labelledby="current-session-title">
+          <IconUserShield size={24} aria-hidden="true" />
           <div>
-            <strong>{session.user.username}</strong>
-            <span>
-              {session.user.is_admin ? "Administrator" : "User"}
-              {session.user.is_test_account ? " · test account" : ""}
-            </span>
-            <span>Session expires {formatExpiry(session.expires_at)}</span>
+            <h3 id="current-session-title" class="h4 mb-1">
+              {session.user.username}
+            </h3>
+            <p class="text-secondary mb-1">
+              {session.user.is_admin ? "Administrator" : "User"}{session.user
+                .is_test_account
+                ? " · test account"
+                : ""}
+            </p>
+            <p class="text-secondary mb-0">
+              Expires {formatDate(session.expires_at)}
+            </p>
           </div>
           <button
             type="button"
-            class="secondary-button"
+            class="btn btn-outline-secondary action-button"
             onclick={signOut}
             disabled={busy}
           >
             <IconLogout size={17} /> Sign out
           </button>
-        </div>
+        </section>
 
         {#if host.listActiveSessions}
-          <section class="sessions-section" aria-labelledby="sessions-title">
+          <section class="section-block" aria-labelledby="sessions-title">
             <div class="section-heading">
-              <h3 id="sessions-title">Active Sessions</h3>
-              {#if activeSessions.filter((s) => !s.isCurrent).length > 0}
-                <button
-                  type="button"
-                  class="secondary-button danger-button"
-                  onclick={revokeOtherSessions}
-                  disabled={busy}
-                >
-                  <IconTrash size={15} /> Delete All Others
-                </button>
-              {/if}
-            </div>
-            {#if activeSessions.length === 0}
-              <p class="hint">No additional active sessions detected.</p>
-            {:else}
-              <div class="table-responsive">
-                <table class="table table-vcenter sessions-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Last Accessed</th>
-                      <th scope="col">Location</th>
-                      <th scope="col">Device Type</th>
-                      <th scope="col">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {#each activeSessions as sess (sess.sessionId)}
-                      <tr>
-                        <td>
-                          <div class="session-time">
-                            <strong>{formatExpiry(sess.lastSeenAt)}</strong>
-                            <span class="session-created"
-                              >Created: {formatExpiry(sess.createdAt)}</span
-                            >
-                          </div>
-                        </td>
-                        <td>
-                          <span class="location-badge">
-                            <span class="flag-icon" aria-hidden="true">🌐</span>
-                            {sess.location}
-                          </span>
-                        </td>
-                        <td>
-                          <span class="device-badge">
-                            <IconDeviceDesktop size={16} aria-hidden="true" />
-                            {sess.deviceType}
-                          </span>
-                        </td>
-                        <td>
-                          {#if sess.isCurrent}
-                            <span class="badge current-badge"
-                              >Current Session</span
-                            >
-                          {:else}
-                            <button
-                              type="button"
-                              class="text-button danger-text"
-                              onclick={() => revokeSession(sess.sessionId)}
-                              disabled={busy}
-                              title="Revoke session"
-                            >
-                              <IconTrash size={15} /> Delete
-                            </button>
-                          {/if}
-                        </td>
-                      </tr>
-                    {/each}
-                  </tbody>
-                </table>
+              <div>
+                <h3 id="sessions-title" class="h3 mb-1">Active sessions</h3>
+                <p class="text-secondary mb-0">
+                  End a session that you do not recognize.
+                </p>
               </div>
+              <button
+                type="button"
+                class="btn btn-outline-secondary btn-icon"
+                onclick={loadSessions}
+                disabled={busy}
+                aria-label="Refresh active sessions"
+              >
+                <IconRefresh size={17} />
+              </button>
+            </div>
+
+            {#if sessions.length === 0}
+              <div class="empty-state">
+                No active session inventory is available.
+              </div>
+            {:else}
+              <ul class="session-list">
+                {#each sessions as item (item.sessionId)}
+                  <li class="session-card">
+                    <div class="session-icon" aria-hidden="true">
+                      <IconDeviceDesktop size={20} />
+                    </div>
+                    <div class="session-details">
+                      <div class="session-title-row">
+                        <strong>{item.isCurrent ? "Current session" : "Browser session"}</strong>
+                        {#if item.isCurrent}
+                          <span class="badge bg-green-lt text-green">Current</span>
+                        {/if}
+                      </div>
+                      <dl>
+                        <div>
+                          <dt>Last activity</dt>
+                          <dd>{formatDate(item.lastSeenAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Created</dt>
+                          <dd>{formatDate(item.createdAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Expires</dt>
+                          <dd>{formatDate(item.expiresAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Network</dt>
+                          <dd>{item.location || "Not recorded"}</dd>
+                        </div>
+                        <div>
+                          <dt>Client</dt>
+                          <dd>{item.deviceType || "Not recorded"}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                    {#if !item.isCurrent && host.endSpecificSession}
+                      <div class="session-actions">
+                        {#if pendingSessionId === item.sessionId}
+                          <p class="text-secondary mb-2">End this session?</p>
+                          <button
+                            type="button"
+                            class="btn btn-danger action-button"
+                            onclick={() => endSession(item.sessionId)}
+                            disabled={busy}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-ghost-secondary action-button"
+                            onclick={() => (pendingSessionId = null)}
+                            disabled={busy}
+                          >
+                            Cancel
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            class="btn btn-outline-danger action-button"
+                            onclick={() => endSession(item.sessionId)}
+                            disabled={busy}
+                          >
+                            <IconTrash size={16} /> End session
+                          </button>
+                        {/if}
+                      </div>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+
+              {#if sessions.some((item) => !item.isCurrent) && host.endOtherSessions}
+                <div class="other-sessions-action">
+                  {#if confirmEndOthers}
+                    <p class="mb-2">
+                      End every other browser session for this account?
+                    </p>
+                    <div class="button-row">
+                      <button
+                        type="button"
+                        class="btn btn-danger action-button"
+                        onclick={endOtherSessions}
+                        disabled={busy}
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost-secondary action-button"
+                        onclick={() => (confirmEndOthers = false)}
+                        disabled={busy}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  {:else}
+                    <button
+                      type="button"
+                      class="btn btn-outline-danger action-button"
+                      onclick={endOtherSessions}
+                      disabled={busy}
+                    >
+                      <IconTrash size={16} /> End all other sessions
+                    </button>
+                  {/if}
+                </div>
+              {/if}
             {/if}
           </section>
         {/if}
 
         {#if session.user.is_admin && host.listBrowserUsers}
-          <section class="users" aria-labelledby="browser-users-title">
+          <section class="section-block" aria-labelledby="browser-users-title">
             <div class="section-heading">
-              <h3 id="browser-users-title">Profiles & Accounts</h3>
+              <div>
+                <h3 id="browser-users-title" class="h3 mb-1">
+                  Browser accounts
+                </h3>
+                <p class="text-secondary mb-0">
+                  These accounts are not media profiles.
+                </p>
+              </div>
               <button
                 type="button"
-                class="text-button"
+                class="btn btn-outline-secondary btn-icon"
                 onclick={loadUsers}
-                disabled={busy}>Refresh</button
+                disabled={busy}
+                aria-label="Refresh browser accounts"
               >
+                <IconRefresh size={17} />
+              </button>
             </div>
+
             {#if users.length === 0}
-              <p class="hint">No browser users are available.</p>
+              <div class="empty-state">No browser accounts are available.</div>
             {:else}
-              <ul class="profile-cards-list">
+              <ul class="account-list">
                 {#each users as user (user.user_id)}
-                  {@const isCurrent = user.user_id === session?.user.user_id}
-                  {@const initial = user.username
-                    ? user.username.charAt(0).toUpperCase()
-                    : "U"}
-                  <li class="profile-card" class:active-profile={isCurrent}>
-                    <div class="profile-avatar-row">
-                      <div
-                        class="profile-avatar"
-                        class:admin-avatar={user.is_admin}
-                      >
-                        <span>{initial}</span>
-                      </div>
-                      <div class="user-name">
-                        <div class="user-title-row">
-                          <strong>{user.username}</strong>
-                          {#if isCurrent}
-                            <span class="badge bg-green-lt text-dark fw-bold"
-                              >Signed in</span
-                            >
-                          {/if}
-                        </div>
-                        <div class="user-meta-row">
-                          <span class="role-pill"
-                            >{user.is_admin ? "Administrator" : "User"}</span
-                          >
-                          <span class="status-meta"
-                            >{user.active
-                              ? "Enabled"
-                              : "Disabled"}{user.is_test_account
-                              ? " · test"
-                              : ""}</span
-                          >
-                        </div>
-                      </div>
+                  <li class="account-card">
+                    <div class="avatar bg-primary-lt text-primary" aria-hidden="true">
+                      {user.username.charAt(0).toUpperCase()}
                     </div>
-                    <div class="profile-card-actions">
-                      <button
-                        type="button"
-                        class="secondary-button"
-                        onclick={() => beginEdit(user)}
-                      >
-                        <IconPencil size={16} /> Edit
-                      </button>
+                    <div class="account-details">
+                      <div class="session-title-row">
+                        <strong>{user.username}</strong>
+                        {#if user.user_id === session.user.user_id}
+                          <span class="badge bg-green-lt text-green">Signed in</span>
+                        {/if}
+                      </div>
+                      <span class="text-secondary">
+                        {user.is_admin ? "Administrator" : "User"} · {user.active
+                          ? "Enabled"
+                          : "Disabled"}
+                      </span>
                     </div>
+                    <button
+                      type="button"
+                      class="btn btn-outline-secondary action-button"
+                      onclick={() => beginEdit(user)}
+                      disabled={busy}
+                    >
+                      <IconPencil size={16} /> Edit
+                    </button>
                   </li>
                 {/each}
               </ul>
@@ -547,19 +651,22 @@
         {/if}
 
         {#if selectedUser}
-          <form class="edit-panel form-stack" onsubmit={saveUser}>
+          <form class="section-block form-stack" onsubmit={saveUser}>
             <div class="section-heading">
-              <h3>Edit {selectedUser.username}</h3>
+              <h3 class="h3 mb-0">Edit {selectedUser.username}</h3>
               <button
                 type="button"
-                class="text-button"
-                onclick={() => (selectedUserId = null)}>Cancel</button
+                class="btn btn-ghost-secondary action-button"
+                onclick={() => (selectedUserId = null)}
               >
+                Cancel
+              </button>
             </div>
-            <div class="form-field">
-              <label for="edit-username">Username</label>
+            <div>
+              <label class="form-label" for="edit-username">Username</label>
               <input
                 id="edit-username"
+                class="form-control"
                 type="text"
                 autocomplete="username"
                 minlength="3"
@@ -569,27 +676,36 @@
                 required
               />
             </div>
-            <div class="form-field">
-              <label for="edit-password">
-                New password <span>(leave blank to keep it)</span>
+            <div>
+              <label class="form-label" for="edit-password">
+                New password
               </label>
               <input
                 id="edit-password"
+                class="form-control"
                 type="password"
                 autocomplete="new-password"
                 minlength="8"
                 maxlength="128"
                 bind:value={editPassword}
+                placeholder="Leave empty to keep the current password"
               />
             </div>
-            <label class="check-row">
-              <input type="checkbox" bind:checked={editActive} />
-              Account is active
+            <label class="form-check form-switch action-check">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                bind:checked={editActive}
+              />
+              <span class="form-check-label">Account is enabled</span>
             </label>
-            <div class="form-field">
-              <label for="current-password">Your current password</label>
+            <div>
+              <label class="form-label" for="current-password">
+                Your current password
+              </label>
               <input
                 id="current-password"
+                class="form-control"
                 type="password"
                 autocomplete="current-password"
                 minlength="8"
@@ -597,35 +713,82 @@
                 bind:value={currentPassword}
                 required
               />
-              <span>Required to save changes or delete this user.</span>
+              <div class="form-hint">
+                Required to save changes or delete this account.
+              </div>
             </div>
-            <div class="form-actions">
+            <div class="button-row">
               <button
                 type="submit"
-                class="primary-button"
-                disabled={busy || !host.updateBrowserUser}>Save changes</button
+                class="btn btn-primary action-button"
+                disabled={busy || !host.updateBrowserUser}
               >
+                Save changes
+              </button>
             </div>
-            <div class="delete-zone">
-              <label class="check-row">
-                <input type="checkbox" bind:checked={confirmDelete} />
-                I understand that deleting {selectedUser.username} cannot be undone.
+            <div class="danger-zone">
+              <label class="form-check action-check">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  bind:checked={confirmDeleteUser}
+                />
+                <span class="form-check-label">
+                  I understand that account deletion cannot be undone.
+                </span>
               </label>
               <button
                 type="button"
-                class="danger-button"
+                class="btn btn-danger action-button"
                 onclick={deleteUser}
                 disabled={busy ||
-                  !confirmDelete ||
+                  !confirmDeleteUser ||
                   !currentPassword ||
                   !host.deleteBrowserUser}
               >
-                <IconTrash size={17} /> Delete user
+                <IconTrash size={17} /> Delete account
               </button>
             </div>
           </form>
         {/if}
       {/if}
+
+      <section class="section-block" aria-labelledby="future-auth-title">
+        <div class="section-heading">
+          <div>
+            <h3 id="future-auth-title" class="h3 mb-1">
+              Additional sign-in methods
+            </h3>
+            <p class="text-secondary mb-0">
+              The controls stay visible so the planned access work is not lost.
+            </p>
+          </div>
+          <IconShieldCheck size={22} aria-hidden="true" />
+        </div>
+        <ul class="future-method-list">
+          <li>
+            <IconKey size={18} aria-hidden="true" />
+            <div>
+              <strong>Passkey</strong>
+              <span>Not available in this build. Server challenges and credential recovery are required.</span>
+            </div>
+          </li>
+          <li>
+            <IconKey size={18} aria-hidden="true" />
+            <div>
+              <strong>Authenticator code</strong>
+              <span>Not available in this build. Fasti does not generate or store a placeholder secret.</span>
+            </div>
+          </li>
+          <li>
+            <IconKey size={18} aria-hidden="true" />
+            <div>
+              <strong>OIDC / SSO</strong>
+              <span>Not available in this build. Issuer validation, PKCE, and server-side secret storage are required.</span>
+            </div>
+          </li>
+        </ul>
+      </section>
     </div>
   </section>
 </dialog>
@@ -634,370 +797,232 @@
   .auth-dialog {
     position: fixed;
     inset: 0;
-    z-index: 9999;
     width: 100%;
     max-width: none;
     height: 100%;
     max-height: none;
     margin: 0;
+    padding: 1rem;
     border: 0;
     background: transparent;
-    display: grid;
-    place-items: center;
-    padding: 16px;
   }
+
   .auth-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.55);
+    background: rgb(0 0 0 / 55%);
   }
+
   .auth-dialog:not([open]) {
     display: none;
   }
+
   .modal-card {
-    width: min(100%, 680px);
-    max-height: min(88dvh, 760px);
+    width: min(100%, 48rem);
+    max-height: min(92dvh, 58rem);
+    margin: auto;
     overflow: auto;
-    background: var(--fasti-surface-paper);
     color: var(--fasti-text-primary);
-    border-radius: calc(12px * var(--tblr-border-radius-scale, 1));
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
+    background: var(--fasti-surface-paper);
   }
-  .modal-header {
+
+  .modal-header,
+  .section-heading,
+  .session-title-row,
+  .button-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding: 20px 24px 16px;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 22%, transparent);
+    gap: 0.75rem;
   }
-  h2,
-  h3,
-  p {
-    margin: 0;
+
+  .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--fasti-surface-paper);
   }
-  h2 {
-    font-family: var(--fasti-font-display);
-    font-size: 1.25rem;
-  }
-  h3 {
-    font-size: 1rem;
-  }
-  .modal-header p,
-  .hint,
-  .session-summary span,
-  .user-name span,
-  .form-field span {
-    color: var(--fasti-text-muted);
-    font-size: 0.875rem;
-  }
-  .modal-header p {
-    margin-top: 4px;
-  }
-  .modal-body {
-    padding: 24px;
-  }
+
+  .modal-body,
   .form-stack {
     display: grid;
-    gap: 16px;
+    gap: 1rem;
   }
-  .form-field {
-    display: grid;
-    gap: 6px;
-  }
-  .form-field label {
-    font-weight: 650;
-    font-size: 0.875rem;
-  }
-  input,
-  select {
-    width: 100%;
-    min-height: 44px;
-    padding: 9px 11px;
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 38%, transparent);
-    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
-    background: var(--fasti-surface-paper);
-    color: var(--fasti-text-primary);
-    font: inherit;
-    font-size: max(1rem, 16px);
-  }
-  button {
-    font: inherit;
-  }
-  :is(button, input, select):focus-visible {
-    outline: 3px solid var(--fasti-focus);
-    outline-offset: 2px;
-  }
-  .icon-button,
-  .primary-button,
-  .secondary-button,
-  .danger-button,
-  .text-button {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    cursor: pointer;
-  }
-  .icon-button {
-    min-width: 44px;
-    border: 0;
-    background: transparent;
-    color: var(--fasti-text-muted);
-  }
-  .primary-button,
-  .secondary-button,
-  .danger-button {
-    padding: 9px 14px;
-    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
-    font-weight: 650;
-  }
-  .primary-button {
-    border: 0;
-    background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast);
-  }
-  .secondary-button {
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 35%, transparent);
-    background: var(--fasti-surface-archive);
-    color: var(--fasti-text-primary);
-  }
-  .danger-button {
-    border: 1px solid var(--fasti-state-error, #b42318);
-    background: transparent;
-    color: var(--fasti-state-error, #b42318);
-  }
-  .text-button {
-    border: 0;
-    background: transparent;
-    color: var(--fasti-action-primary);
-    font-weight: 650;
-  }
-  button:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-  .notice,
-  .problem {
-    padding: 10px 12px;
-    margin-bottom: 16px;
-    border-radius: calc(6px * var(--tblr-border-radius-scale, 1));
-    overflow-wrap: anywhere;
-  }
-  .notice {
-    background: color-mix(
-      in srgb,
-      var(--fasti-state-success, #087a55) 12%,
-      transparent
-    );
-  }
-  .problem {
-    background: color-mix(
-      in srgb,
-      var(--fasti-state-error, #b42318) 11%,
-      transparent
-    );
-    color: var(--fasti-state-error, #b42318);
-  }
+
   .session-summary {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 12px;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--tblr-border-color);
+    border-radius: var(--tblr-border-radius);
   }
-  .session-summary div,
-  .user-name {
-    min-width: 0;
+
+  .section-block {
     display: grid;
-    gap: 2px;
-    overflow-wrap: anywhere;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--tblr-border-color);
   }
-  .users {
-    margin-top: 28px;
-  }
-  .section-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .profile-cards-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 12px;
-    margin-bottom: 0;
+
+  .session-list,
+  .account-list,
+  .future-method-list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
     padding: 0;
     list-style: none;
   }
-  .profile-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 14px;
+
+  .session-card,
+  .account-card,
+  .future-method-list li {
+    display: grid;
+    align-items: start;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--tblr-border-color);
+    border-radius: var(--tblr-border-radius);
     background: var(--fasti-surface-archive);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
-    border-radius: calc(8px * var(--tblr-border-radius-scale, 1));
-    transition: border-color 100ms ease;
   }
-  .profile-card.active-profile {
-    border-color: var(--fasti-action-primary);
-    background: color-mix(
-      in srgb,
-      var(--fasti-action-primary) 6%,
-      var(--fasti-surface-archive)
-    );
+
+  .session-card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
-  .profile-avatar-row {
-    display: flex;
+
+  .account-card {
+    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 12px;
   }
-  .profile-avatar {
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    background: var(--fasti-action-primary);
-    color: var(--fasti-action-contrast);
+
+  .future-method-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .future-method-list div,
+  .session-details,
+  .account-details {
+    min-width: 0;
+  }
+
+  .future-method-list span {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--fasti-text-muted);
+  }
+
+  .session-icon {
     display: grid;
+    width: 2.5rem;
+    height: 2.5rem;
     place-items: center;
-    font-weight: 700;
-    font-size: 0.95rem;
-    flex-shrink: 0;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--fasti-action-primary) 12%, transparent);
+    color: var(--fasti-action-primary);
   }
-  .profile-avatar.admin-avatar {
-    background: var(--fasti-brand-mark, #8b2e2a);
-    color: var(--fasti-brand-contrast, #fff);
-  }
-  .user-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .user-meta-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 0.78rem;
-    color: var(--fasti-text-muted);
-  }
-  .role-pill {
-    font-family: var(--fasti-font-mono);
-    font-size: 0.72rem;
-  }
-  .edit-panel {
-    margin-top: 28px;
-    padding-top: 20px;
-    border-top: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 28%, transparent);
-  }
-  .check-row {
-    display: flex;
-    min-height: 44px;
-    align-items: center;
-    gap: 10px;
-    line-height: 1.4;
-  }
-  .check-row input {
-    width: 20px;
-    min-height: 20px;
-    margin-top: 1px;
-    accent-color: var(--fasti-action-primary);
-  }
-  .form-actions {
-    display: flex;
-    justify-content: flex-end;
-  }
-  .delete-zone {
+
+  dl {
     display: grid;
-    gap: 12px;
-    margin-top: 8px;
-    padding-top: 16px;
-    border-top: 1px solid
-      color-mix(in srgb, var(--fasti-state-error, #b42318) 35%, transparent);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    margin: 0.75rem 0 0;
   }
-  .sessions-section {
-    margin-top: 24px;
-    padding-top: 18px;
-    border-top: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+
+  dl div {
+    min-width: 0;
   }
-  .table-responsive {
-    overflow-x: auto;
-    margin-top: 10px;
-  }
-  .sessions-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-  }
-  .sessions-table th {
-    text-align: left;
-    padding: 8px 10px;
-    border-bottom: 2px solid
-      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+
+  dt {
     color: var(--fasti-text-muted);
     font-size: 0.75rem;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
   }
-  .sessions-table td {
-    padding: 10px;
-    border-bottom: 1px solid
-      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
-    vertical-align: middle;
+
+  dd {
+    margin: 0.15rem 0 0;
+    overflow-wrap: anywhere;
   }
-  .session-time {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+
+  .session-actions {
+    min-width: 9rem;
+    text-align: end;
   }
-  .session-created {
-    font-size: 0.75rem;
+
+  .other-sessions-action,
+  .danger-zone {
+    padding: 1rem;
+    border: 1px solid color-mix(in srgb, var(--fasti-state-error) 35%, transparent);
+    border-radius: var(--tblr-border-radius);
+  }
+
+  .danger-zone {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .empty-state {
+    padding: 1rem;
+    border: 1px dashed var(--tblr-border-color);
+    border-radius: var(--tblr-border-radius);
     color: var(--fasti-text-muted);
   }
-  .location-badge,
-  .device-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.82rem;
+
+  .action-button,
+  .action-check,
+  :global(.auth-dialog .btn-icon) {
+    min-height: 2.75rem;
   }
-  .current-badge {
-    display: inline-block;
-    padding: 3px 8px;
-    border-radius: calc(var(--tblr-border-radius-scale, 1) * 4px);
-    background: color-mix(
-      in srgb,
-      var(--fasti-state-success, #087a55) 15%,
-      transparent
-    );
-    color: var(--fasti-state-success, #087a55);
-    font-size: 0.75rem;
-    font-weight: 700;
+
+  :is(button, input, select):focus-visible {
+    outline: 3px solid var(--fasti-focus);
+    outline-offset: 2px;
   }
-  .danger-text {
-    color: var(--fasti-state-error, #b42318);
-    font-size: 0.82rem;
-  }
-  @media (max-width: 36rem) {
+
+  @media (max-width: 40rem) {
+    .auth-dialog {
+      padding: 0.5rem;
+    }
+
     .modal-card {
-      max-height: calc(100dvh - 16px);
+      max-height: calc(100dvh - 1rem);
     }
+
+    .session-summary,
+    .session-card,
+    .account-card {
+      grid-template-columns: 1fr;
+    }
+
+    .session-actions {
+      min-width: 0;
+      text-align: start;
+    }
+
+    dl {
+      grid-template-columns: 1fr;
+    }
+
     .modal-header,
-    .modal-body {
-      padding-inline: 16px;
+    .section-heading {
+      align-items: flex-start;
     }
-    .session-summary {
-      grid-template-columns: auto minmax(0, 1fr);
+
+    .button-row {
+      align-items: stretch;
+      flex-direction: column;
     }
-    .session-summary .secondary-button {
-      grid-column: 1 / -1;
-      width: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
     }
   }
 </style>
