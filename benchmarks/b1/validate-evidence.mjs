@@ -251,8 +251,8 @@ function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0
-    ? (ownProp(sorted, middle - 1) + ownProp(sorted, middle)) / 2
-    : ownProp(sorted, middle);
+    ? (sorted.at(middle - 1) + sorted.at(middle)) / 2
+    : sorted.at(middle);
 }
 
 /**
@@ -287,7 +287,7 @@ function p95NearestRank(values) {
     0,
     Math.min(ordered.length - 1, Math.ceil(ordered.length * 0.95) - 1),
   );
-  return ownProp(ordered, index);
+  return ordered.at(index);
 }
 
 /**
