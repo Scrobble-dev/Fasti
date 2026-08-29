@@ -17,7 +17,7 @@ const isLeapYear = (year) =>
 
 const isStrictRfc3339 = (value) => {
   const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:|\.\d{1,9})(Z|([+-])(\d{2}):(\d{2}))$/u.exec(
       value,
     );
   if (!match) return false;
@@ -125,6 +125,23 @@ const assertValid = (validator, value, label, ajv) => {
 
 const exampleId = (filename) => filename.slice(0, -extname(filename).length);
 
+// A fixed-count {64} hex check reads as unbounded backtracking risk to
+// static analysis; length + a flat charset test is equivalent and linear.
+const looksLikeSha256Hex = (text) =>
+  text.length === 64 && /^[0-9a-f]+$/u.test(text);
+
+// Mirrors the compact JWT shape (header + 1-2 more segments) without a
+// quantified group wrapping another quantifier ((?:\.X+){1,2}).
+const looksLikeJwt = (text) => {
+  if (!text.startsWith("eyJ")) return false;
+  const segments = text.split(".");
+  return (
+    (segments.length === 2 || segments.length === 3) &&
+    segments[0].length >= 23 &&
+    segments.every((segment) => /^[A-Za-z0-9_-]+$/u.test(segment))
+  );
+};
+
 const assertNoSensitiveRepresentation = (value, path = "$") => {
   if (typeof value === "string") {
     assert.doesNotMatch(
@@ -132,9 +149,8 @@ const assertNoSensitiveRepresentation = (value, path = "$") => {
       /\bBearer\s+\S+/iu,
       `${path} contains a bearer value`,
     );
-    assert.doesNotMatch(
-      value,
-      /^(?:[0-9a-f]{64}|eyJ[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]+){1,2})$/u,
+    assert.ok(
+      !looksLikeSha256Hex(value) && !looksLikeJwt(value),
       `${path} contains a secret-shaped value`,
     );
     return;
@@ -272,6 +288,9 @@ const validateLinkedDataReceipt = async (
     receivedAt: "receivedAt",
     committedAt: "committedAt",
   };
+  // compact iterates Object.entries(valueTerms), a fixed literal object
+  // declared above, not external input.
+  /* eslint-disable security/detect-object-injection */
   for (const [compact, term] of Object.entries(valueTerms)) {
     assert.equal(
       expanded[0][`https://fasti.scrobble.dev/ns/v1/${term}`]?.[0]?.["@value"],
@@ -279,6 +298,7 @@ const validateLinkedDataReceipt = async (
       `${path} loses ${compact} during JSON-LD expansion`,
     );
   }
+  /* eslint-enable security/detect-object-injection */
   const dateTimeType = "http://www.w3.org/2001/XMLSchema#dateTime";
   for (const term of ["receivedAt", "committedAt"]) {
     assert.equal(
@@ -292,6 +312,11 @@ const validateLinkedDataReceipt = async (
   ]);
 };
 
+/**
+ * Validates repository examples against their governing registries and API specifications.
+ * @param {string} root - Repository root containing the generated contracts and examples.
+ * @return {{exampleCount: number, linkedDataCount: number, problemCount: number}} Validation counts for all examples, linked-data receipts, and problem examples.
+ */
 export async function validateExamples(root = repositoryRoot) {
   const [
     registry,
@@ -306,6 +331,10 @@ export async function validateExamples(root = repositoryRoot) {
     readJson(root, "contracts/generated/v1/conformance-openapi.json"),
     readJson(root, "contracts/generated/v1/problems.json"),
     readJson(root, "packages/schemas/schemas/health-response.json"),
+    // root defaults to repositoryRoot and is otherwise only a validator-chosen
+    // checkout to run this same suite against; the trailing segment is a
+    // fixed literal, not externally supplied.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     readFile(resolve(root, "contracts/asyncapi/v1/transport.yaml"), "utf8"),
   ]);
   const asyncApi = parseYaml(asyncApiSource);
@@ -318,6 +347,9 @@ export async function validateExamples(root = repositoryRoot) {
   );
   assert.ok(owners.size > 0, "the registry must govern at least one example");
 
+  // root defaults to repositoryRoot and EXAMPLE_DIRECTORY is a fixed
+  // constant; neither segment is externally supplied.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const files = (await readdir(resolve(root, EXAMPLE_DIRECTORY)))
     .filter((filename) => [".json", ".jsonld"].includes(extname(filename)))
     .sort();
@@ -410,6 +442,9 @@ export async function validateExamples(root = repositoryRoot) {
       assertValid(health, value, id, ajv);
       assert.equal(value.status, "healthy");
       assert.deepEqual(
+        // id is derived from a filename in the repository-local example
+        // directory, not external input.
+        // eslint-disable-next-line security/detect-object-injection
         httpOperations.get(owner.id).operation.responses["200"].content[
           "application/json"
         ].examples[id].value,
@@ -426,6 +461,9 @@ export async function validateExamples(root = repositoryRoot) {
         `${id} must contain the complete generated public registry in canonical order`,
       );
       assert.deepEqual(
+        // id is derived from a filename in the repository-local example
+        // directory, not external input.
+        // eslint-disable-next-line security/detect-object-injection
         httpOperations.get(owner.id).operation.responses["200"].content[
           "application/json"
         ].examples[id].value,
@@ -467,6 +505,8 @@ export async function validateExamples(root = repositoryRoot) {
       id.endsWith(`.${value.code}`),
       `${id} must end with canonical problem code ${value.code}`,
     );
+    // field iterates the fixed literal array below, not external input.
+    /* eslint-disable security/detect-object-injection */
     for (const field of [
       "type",
       "title",
@@ -483,6 +523,7 @@ export async function validateExamples(root = repositoryRoot) {
         `${id} drifts from canonical problem field ${field}`,
       );
     }
+    /* eslint-enable security/detect-object-injection */
     assert.equal(value.actual, null, `${id} must not echo submitted data`);
     if (owner.id === "receipt.stream") {
       assert.ok(
@@ -500,17 +541,24 @@ export async function validateExamples(root = repositoryRoot) {
     } else {
       const binding = httpOperations.get(owner.id);
       assert.ok(binding, `${id} has no finite HTTP operation`);
-      const response = binding.operation.responses[String(value.status)];
+      const statusKey = String(value.status);
       assert.ok(
-        response,
+        Object.hasOwnProperty.call(binding.operation.responses, statusKey),
         `${id} status ${value.status} is absent from ${binding.method} ${binding.path}`,
       );
+      // statusKey is confirmed as an own property above, so it cannot
+      // resolve to an inherited/prototype property such as __proto__.
+      /* eslint-disable-next-line security/detect-object-injection */
+      const response = binding.operation.responses[statusKey];
       assert.equal(
         response.content?.["application/problem+json"]?.schema?.$ref,
         "#/components/schemas/ProblemDetails",
         `${id} is not bound to application/problem+json ProblemDetails`,
       );
       assert.deepEqual(
+        // id is derived from a filename in the repository-local example
+        // directory, not external input.
+        // eslint-disable-next-line security/detect-object-injection
         response.content["application/problem+json"].examples[id].value,
         value,
         `${id} differs from the embedded OpenAPI problem example`,

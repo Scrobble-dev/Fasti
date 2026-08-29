@@ -130,8 +130,16 @@ function parseFrontmatter(source, label) {
   return { frontmatter, body: source.slice(match[0].length) };
 }
 
+/**
+ * Recursively finds Markdown files under a directory.
+ * @param {string} root - The directory to search.
+ * @return {Promise<string[]>} Sorted paths of the discovered Markdown files.
+ */
 async function markdownFiles(root) {
   const files = [];
+  // root starts at the fixed okfRoot constant and recursion is confined to
+  // that tree via entry.name from this same readdir call, not external input.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   for (const entry of await readdir(root, { withFileTypes: true })) {
     const path = resolve(root, entry.name);
     if (entry.isDirectory()) {
@@ -143,15 +151,26 @@ async function markdownFiles(root) {
   return files.sort();
 }
 
+/**
+ * Extracts local and external targets from Markdown links and image links.
+ * @param {string} body - Markdown content to inspect.
+ * @return {string[]} The link and image targets found in the content.
+ */
 function markdownTargets(body) {
   const targets = [];
-  const expression = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu;
+  const expression = /!?\[[^\]]*\]\(([^)\s]+)(?:|\s+"[^"]*")\)/gu;
   for (const match of body.matchAll(expression)) {
     targets.push(match[1].replace(/^<|>$/gu, ""));
   }
   return targets;
 }
 
+/**
+ * Verifies that a Markdown link target resolves to an existing path within the repository.
+ * @param {string} sourcePath - The path of the file containing the link.
+ * @param {string} target - The link target to validate.
+ * @return {Promise<void>} Resolves when the target is valid or external.
+ */
 async function assertLocalTargetExists(sourcePath, target) {
   if (target.startsWith("#") || /^[a-z][a-z0-9+.-]*:/iu.test(target)) {
     return;
@@ -169,6 +188,8 @@ async function assertLocalTargetExists(sourcePath, target) {
     resolvedTarget.startsWith(repositoryPrefix),
     `${relative(repositoryRoot, sourcePath)} links outside the repository: ${target}`,
   );
+  // resolvedTarget is confirmed to stay within repositoryPrefix above.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const targetStat = await stat(resolvedTarget).catch(() => null);
   assert.ok(
     targetStat,
@@ -185,6 +206,11 @@ function assertStringList(value, label) {
   }
 }
 
+/**
+ * Validates the OKF catalogue against repository structure and finalized B1 registry data.
+ * @param {object} registry - Capability registry used to verify catalogue identifiers and authorization metadata.
+ * @return {Promise<{conceptCount: number}>} The number of validated concept files.
+ */
 async function validateOkf(registry) {
   const files = await markdownFiles(okfRoot);
   assert.ok(files.length > 1, "OKF bundle must include concepts and an index");
@@ -197,6 +223,9 @@ async function validateOkf(registry) {
   const documents = new Map();
   for (const path of files) {
     const label = relative(repositoryRoot, path);
+    // path was discovered by markdownFiles(okfRoot) above, not supplied
+    // externally.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     const source = await readFile(path, "utf8");
     const { frontmatter, body } = parseFrontmatter(source, label);
     documents.set(path, { frontmatter, body });
@@ -354,6 +383,9 @@ async function validateOkf(registry) {
     },
   ];
 
+  // key iterates the fixed catalogueDefinitions array declared above, not
+  // external input.
+  /* eslint-disable security/detect-object-injection */
   for (const { name, key, values } of catalogueDefinitions) {
     const path = resolve(okfRoot, name);
     const document = documents.get(path);
@@ -367,6 +399,7 @@ async function validateOkf(registry) {
       );
     }
   }
+  /* eslint-enable security/detect-object-injection */
 
   const capabilityCatalogue = documents.get(
     resolve(okfRoot, "capabilities.md"),
@@ -401,12 +434,20 @@ async function validateOkf(registry) {
   return { conceptCount: concepts.length };
 }
 
+/**
+ * Parses CSV text into rows of field values.
+ * @param {string} source - The CSV text to parse.
+ * @return {string[][]} The parsed rows and fields.
+ */
 function parseCsv(source) {
   const rows = [];
   let row = [];
   let field = "";
   let quoted = false;
   for (let index = 0; index < source.length; index += 1) {
+    // index is a numeric loop counter bounded by source.length, not
+    // external input.
+    // eslint-disable-next-line security/detect-object-injection
     const character = source[index];
     if (quoted) {
       if (character === '"' && source[index + 1] === '"') {
@@ -547,6 +588,10 @@ async function validateUat(registry) {
   };
 }
 
+/**
+ * Validates the identity UAT matrix against its published schema and required case set.
+ * @return {{caseCount: number, criticalCount: number, phaseCount: number}} Validation counts for identity UAT cases, critical-risk cases, and distinct phases.
+ */
 async function validateIdentityUat() {
   const rows = parseCsv(await readFile(identityUatCsvPath, "utf8"));
   assert.deepEqual(
@@ -608,6 +653,9 @@ async function validateIdentityUat() {
       "source_basis",
     ]) {
       assert.ok(
+        // field iterates the fixed literal array above and column maps the
+        // fixed IDENTITY_UAT_HEADER, so both accesses are repo-local.
+        // eslint-disable-next-line security/detect-object-injection
         row[column[field]].trim().length > 0,
         `${id} must state a ${field}`,
       );
