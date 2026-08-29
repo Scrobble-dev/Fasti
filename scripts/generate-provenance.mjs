@@ -20,6 +20,10 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
  * @return {Promise<string>} The digest as a hexadecimal string.
  */
 async function sha256(path) {
+  // path is one of this CI-only script's own subjectPaths CLI arguments --
+  // artifact paths the same workflow run just downloaded into a fixed temp
+  // directory, not externally supplied.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const bytes = await readFile(path);
   return createHash("sha256").update(bytes).digest("hex");
 }
