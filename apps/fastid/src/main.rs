@@ -338,6 +338,14 @@ async fn main() -> Result<()> {
                         password = %password,
                         "Fasti seeded the one-time development browser account; record this password now, it is not stored or shown again"
                     );
+                    // Printed directly, not just logged: tracing_subscriber's
+                    // default filter hides `info!` unless RUST_LOG is set,
+                    // which would otherwise make this one-time password
+                    // invisible in every deployment that doesn't set it
+                    // (this repo's own systemd/podman quadlet units don't).
+                    println!(
+                        "Fasti seeded the one-time development browser account.\n  username: testadmin\n  password: {password}\nRecord this now -- it is not stored or shown again."
+                    );
                 }
             }
             let max_session_minutes =
