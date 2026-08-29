@@ -62,6 +62,17 @@ input:focus-visible {
   max-width: 100%;
   object-fit: contain;
 }
+.navbar__toggle,
+.navbar-sidebar__close,
+.navbar-sidebar__back,
+.navbar__items--right .clean-btn,
+.navbar button[aria-label*="dark and light mode"] {
+  min-width: var(--fasti-touch-target-min);
+  min-height: var(--fasti-touch-target-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .navbar__item,
 .menu__link,
 .footer__link-item {

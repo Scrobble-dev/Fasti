@@ -12,7 +12,20 @@ export default function Root({ children }: { children: ReactNode }): ReactNode {
       attributes: true,
       attributeFilter: ["data-theme"],
     });
-    return () => observer.disconnect();
+    const closeNavigation = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const close = document.querySelector<HTMLButtonElement>(
+        ".navbar-sidebar__close",
+      );
+      if (!close || !document.querySelector(".navbar-sidebar--show")) return;
+      close.click();
+      document.querySelector<HTMLButtonElement>(".navbar__toggle")?.focus();
+    };
+    document.addEventListener("keydown", closeNavigation);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("keydown", closeNavigation);
+    };
   }, []);
   return children;
 }
