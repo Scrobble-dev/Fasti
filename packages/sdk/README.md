@@ -47,8 +47,9 @@ The initialization proof and bearer credential exist only in JSON bodies. A trus
 Integration clients use separately revocable scoped bearer credentials. Do not
 copy a bearer secret into browser storage. The generated production parsers
 cover the active observation, identity-record, and profile-state DTOs. PR A's
-dormant session model does not create a generated browser-authentication
-surface. C1 owns the `HttpOnly`, `Secure`, and `SameSite` cookie, strict CSRF,
+dormant session model generates governed `later_body` capability and problem
+metadata, but no browser HTTP operation, DTO, client method, or security
+scheme. C1 owns the `HttpOnly`, `Secure`, and `SameSite` cookie, strict CSRF,
 session inventory, and revocation contract when production activation passes.
 
 ## Exercise the B1 contract

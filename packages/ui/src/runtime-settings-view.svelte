@@ -1605,7 +1605,8 @@
 
           {#if !canAccessProfileData}
             <p class="managed-note">
-              Sign in to manage this profile's Nuvio Collections document.
+              Profile data access is unavailable in this host. Open Fasti in a
+              host that provides profile-data access.
             </p>
           {:else if host.getNuvioCollections && host.replaceNuvioCollections && host.clearNuvioCollections}
             {@const counts = nuvioCounts(nuvioDocument)}

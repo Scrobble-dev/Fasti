@@ -51,12 +51,12 @@ These are acceptance requirements, not recorded pass results.
 
 ## Contract disposition
 
-| Surface | PR A disposition |
-| --- | --- |
-| OpenAPI and generated SDK | No production human-auth or browser-session route. No generated surface is permitted for dormant-only behavior. |
-| AsyncAPI | Not applicable. PR A adds no external asynchronous authentication or session event channel. |
-| JSON-LD | Not applicable. Authentication secrets and session state are private security state, not public semantic entities. |
-| Public CLI | Not applicable. PR A uses direct deterministic fixtures and exposes no public authentication or session command. |
+| Surface                   | PR A disposition                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAPI and generated SDK | No production human-auth or browser-session HTTP operation, DTO, client method, or security scheme. Governed `later_body` capability and problem metadata remains visible. |
+| AsyncAPI                  | Not applicable. PR A adds no external asynchronous authentication or session event channel.                                                                                |
+| JSON-LD                   | Not applicable. Authentication secrets and session state are private security state, not public semantic entities.                                                         |
+| Public CLI                | Not applicable. PR A uses direct deterministic fixtures and exposes no public authentication or session command.                                                           |
 
 ## Exact-head delivery gate
 

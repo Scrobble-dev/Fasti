@@ -525,6 +525,15 @@ test("Account and security stays unavailable and separate from first-run setup",
   ).toHaveCount(0);
   await expect(taskMap).not.toContainText("Signed in");
   await expect(taskMap).not.toContainText("Active & Protected");
+  await expect(taskMap.getByLabel("Username")).toHaveCount(0);
+  await expect(taskMap.getByLabel("Password")).toHaveCount(0);
+  await expect(
+    taskMap.getByRole("button", {
+      name: /sign in|sign out|create account|manage sessions|revoke session|end session/i,
+    }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Metadata credentials" }).click();
+  await page.getByRole("link", { name: "Account and security" }).click();
   await page.waitForLoadState("networkidle");
   expect(browserAuthRequests).toEqual([]);
   await expectAxeClean(page);
