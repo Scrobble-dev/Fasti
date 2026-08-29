@@ -46,6 +46,21 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
     ["embyObservation", "/api/v1/integrations/emby/webhook"],
     ["plexObservation", "/api/v1/integrations/plex/webhook"],
   ]);
+  assert.deepEqual(
+    Object.keys(value.channels).sort(),
+    [...expectedChannels.keys()].sort(),
+    "integration AsyncAPI channels drifted from the expected set",
+  );
+  const expectedOperations = new Set(
+    [...expectedChannels.keys()].map(
+      (channel) => `receive${channel[0].toUpperCase()}${channel.slice(1)}`,
+    ),
+  );
+  assert.deepEqual(
+    Object.keys(value.operations).sort(),
+    [...expectedOperations].sort(),
+    "integration AsyncAPI operations drifted from the expected set",
+  );
   for (const [channel, address] of expectedChannels) {
     // channel and address iterate the fixed expectedChannels map above, not
     // external input.

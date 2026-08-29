@@ -202,7 +202,8 @@ wrong/revoked bearer -> authentication fails
 valid scoped bearer + valid template -> durable commit
 same event + same evidence -> original receipt replay
 same event + changed evidence -> 409 with no second mutation
-invalid media type or identifier -> 422 with no occurrence
+invalid HTTP media type -> 415 with no occurrence
+invalid media identity -> 422 with no occurrence
 oversized body -> bounded rejection
 integration router -> Nuvio route present
 integration router -> bootstrap/records/generic observation absent
