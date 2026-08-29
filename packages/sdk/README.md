@@ -40,11 +40,16 @@ Stop the daemon with `Ctrl-C`. This health call does not prove any B1 fixture ro
 
 ## Durable local setup
 
-Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. Browser test accounts are disabled by default. An isolated loopback-only data root can opt in with `FASTI_DEVELOPMENT_TEST_ACCOUNT=true`; remote listeners reject that setting.
+Set `FASTI_DATA_ROOT` and keep the listener on loopback to mount durable node initialization and first-client enrollment. The generated client exposes these operations as `initializeDurableNode` and `enrollDurableFirstClient`. Both mutations run once and never retry. PR A provides no development browser account, local password path, or production browser-session route.
 
 The initialization proof and bearer credential exist only in JSON bodies. A trusted local host shell must store them in permission-restricted credential storage. Do not print them or put them in URLs, command arguments, logs, `localStorage`, or `sessionStorage`.
 
-First-party browser requests use `credentials: "include"` and the `HttpOnly` session cookie. Browser mutations also present the readable CSRF cookie through `X-Fasti-CSRF`. Integration clients use separately revocable scoped bearer credentials. Configure `FastiClient` with `useBrowserSession: true` and a `csrfToken` resolver for the browser path; do not copy a session or bearer secret into browser storage. The generated production parsers cover browser account, observation, identity-record, and profile-state DTOs.
+Integration clients use separately revocable scoped bearer credentials. Do not
+copy a bearer secret into browser storage. The generated production parsers
+cover the active observation, identity-record, and profile-state DTOs. PR A's
+dormant session model does not create a generated browser-authentication
+surface. C1 owns the `HttpOnly`, `Secure`, and `SameSite` cookie, strict CSRF,
+session inventory, and revocation contract when production activation passes.
 
 ## Exercise the B1 contract
 

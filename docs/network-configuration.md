@@ -12,7 +12,6 @@ reverse-proxy address from changing the daemon bind address.
 | `FASTI_API_URL`                  | launcher or app build    | Origin used by a client or health probe. Do not include credentials, a path, a query, or a fragment.                              |
 | `FASTI_PUBLIC_URL`               | launcher or app settings | External origin shown to people. It does not bind a socket or configure a proxy.                                                  |
 | `FASTI_REMOTE_TRUSTED_PROXY`     | `fastid`                 | Exact `true` opts a non-loopback durable listener into the authenticated router behind trusted TLS termination. Default: `false`. |
-| `FASTI_DEVELOPMENT_TEST_ACCOUNT` | `fastid`                 | Exact `true` seeds the one-time `testadmin` account on a loopback durable listener. Default: `false`. Remote listeners reject it. |
 | `GOOGLE_BOOKS_API_KEY`           | Desktop provider adapter | Optional process-managed Google Books key. It overrides the app credential store and is sent only in `X-Goog-Api-Key`.            |
 | `TMDB_API_READ_ACCESS_TOKEN`     | Desktop provider adapter | Optional process-managed TMDB API Read Access Token. It overrides the app credential store and is sent only as a bearer header.   |
 | `FASTI_CONTAINER_RUNTIME`        | launcher                 | `podman` or `docker`. Default: `podman`.                                                                                          |
@@ -91,27 +90,16 @@ cargo run --locked -p fastid
 
 The trusted proxy must terminate HTTPS and must not expose the cleartext
 upstream directly. The remote router omits node initialization and first-client
-enrollment. It accepts browser sessions or existing scoped bearer credentials
-for durable data routes. Remote session cookies are `Secure`, `HttpOnly`, and
-`SameSite=Strict`; the readable strict CSRF cookie is required as an exact
-`X-Fasti-CSRF` proof for browser mutations.
+enrollment. PR A accepts only existing scoped bearer client credentials for
+durable data routes. It exposes no development human account, local password,
+or production browser-session path.
 
-Development accounts are disabled by default in every build. For an isolated
-loopback-only data root, an operator can opt in explicitly:
-
-```bash
-FASTI_LISTEN=127.0.0.1:8420 \
-FASTI_DATA_ROOT=/path/to/private/fasti-data \
-FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
-cargo run --locked -p fastid
-```
-
-This creates `testadmin` with password `testadmin` once and marks it as a test
-account. A remote listener rejects the setting. Rename and deletion do not
-clear the durable seed marker, so startup never recreates the account. Fasti
-also rejects browser-account or credential changes that would leave no active
-administrator that can manage browser users. This is not a supported production
-provisioning or recovery path.
+TrailBase is the selected separate human-account platform. Production browser
+authentication remains unavailable until C1 proves TrailBase exchange, stable
+subject resolution, membership, role, administrator continuity, cookie and
+CSRF controls, and Fasti session issuance. C1 must document the exact proxy,
+origin, cookie, and outage behavior before a remote browser session becomes an
+active network surface.
 
 `.internal` needs working name resolution and a certificate whose subject
 includes that host. Fasti uses the platform trust store. It does not issue a

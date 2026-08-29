@@ -1,16 +1,24 @@
-# ADR-0005: Keep the Fasti core small and evaluate TrailBase only as an identity issuer
+# ADR-0005: Keep the Fasti core small and use TrailBase for human identity
 
-- Status: Accepted for the framework boundary; TrailBase remains a gated spike
+- Status: Amended; framework boundary accepted and TrailBase selection final
 - Date: 2026-08-29
 - Public contract: Unchanged; no route, event, schema, SDK method, CLI command, or permission is activated
 - Reviewed references: Loco 1.1.0 and TrailBase 0.33.5
+
+The approved
+[TrailBase authentication programme](../plans/trailbase-authentication-remediation.md)
+supersedes this ADR's earlier optional-issuer, local-account, migration, and
+rollback proposal. The earlier rationale remains below where it still explains
+the Loco and bounded-context decisions.
 
 ## Context
 
 Fasti already has a Rust application core, Axum delivery, a controlled SQLite
 writer, explicit SQL, generated contracts, a native daemon, a desktop review
-host, and native plus OCI development paths. It also has local browser sessions,
-scoped API credentials, profile grants, and object authorization.
+host, and native plus OCI development paths. An earlier PR branch also proposed
+local browser accounts and active browser sessions. That proposal is
+superseded. The current foundation has scoped API credentials, profile grants,
+object authorization, and a dormant Fasti browser-session model.
 
 Loco supplies useful defaults for a new Axum application. Its main value is the
 pre-wired application context, route inventory, generators, SeaORM model and
@@ -33,13 +41,17 @@ following Fasti's existing rules.
 2. Do not adopt Loco as the Fasti application framework.
 3. Use Loco as a reference for developer-experience patterns, not as a runtime
    dependency.
-4. Evaluate TrailBase as an optional human identity issuer only.
+4. Use TrailBase as the selected separate, private human-account platform.
 5. Do not use TrailBase Record APIs, realtime APIs, migrations, ACLs, or SQLite
    database as Fasti domain storage.
-6. Keep the implemented local account path until a TrailBase adapter proves
-   complete migration and rollback.
-7. Add no second broad framework beside TrailBase. A later external identity
-   provider must use the same issuer adapter and must remain optional.
+6. Remove the proposed local `BrowserUser`, password, and development-account
+   path. It is not a compatibility surface.
+7. Keep Fasti's browser-session model dormant until C1 proves the TrailBase
+   exchange, subject anchor, membership, role, administrator continuity, and
+   session issuance.
+8. Add no second broad application framework beside TrailBase. Named external
+   identity integrations must remain bounded adapters under their approved
+   package plans.
 
 ## Why Loco is not the core framework
 
@@ -66,7 +78,8 @@ changing its runtime framework.
 
 ## TrailBase boundary
 
-TrailBase may own these human-account functions:
+TrailBase owns only the human-account functions proven by the selected release
+and its current official evidence, including where supported:
 
 - password and social sign-in;
 - email verification and password reset;
@@ -78,6 +91,7 @@ TrailBase may own these human-account functions:
 Fasti continues to own:
 
 - the durable `issuer + subject` binding;
+- opaque Fasti browser sessions and their inventory and revocation;
 - workspaces and profiles;
 - roles and administrator state;
 - devices, clients, credentials, and grants;
@@ -86,43 +100,46 @@ Fasti continues to own:
 - local automation and Nuvio-specific delegated authorization.
 
 The systems communicate through a versioned adapter. They do not share tables.
-A TrailBase access token identifies a subject. It does not grant a Fasti scope.
-Fasti validates the token and then checks the subject's current local access.
+A short-lived TrailBase proof identifies a subject. It does not grant a Fasti
+scope. Fasti validates the proof through the documented TrailBase boundary and
+then checks the current Fasti subject state, membership, role, profile,
+grant, scope, and epoch state before it issues an opaque Fasti browser session.
 
-A short-lived signed access token can remain valid until it expires even after
-its refresh token is revoked. The selected token lifetime is therefore an
-explicit Fasti security policy and test condition. Refresh tokens remain with
-the identity issuer and the platform credential store or a secure, HttpOnly
-browser session. They do not enter Fasti logs, URLs, exports, screenshots, or
-ordinary browser storage.
+A short-lived proof can remain valid until it expires after related upstream
+state changes. Its lifetime and validation path are explicit Fasti security
+policy and test conditions. TrailBase refresh sessions remain TrailBase state.
+Fasti stores neither their plaintext value nor TrailBase database rows. Secrets
+do not enter Fasti logs, URLs, exports, screenshots, or ordinary browser
+storage.
 
-Do not assume that TrailBase provides passkeys, multi-factor authentication,
-OpenID Provider discovery, or a TV device-authorization grant. The selected
-release must document and pass each claimed flow. Until then, those Fasti
-methods stay unavailable and visible as planned work.
+Do not assume a TrailBase function until the selected release's current
+documentation and source prove it. Passkeys, recovery codes, OpenID Provider
+discovery, and a TV device-authorization grant are not part of the TrailBase
+boundary without that evidence. Their approved Fasti packages keep the methods
+visible and unavailable until their own server-owned capability passes.
 
-## TrailBase spike gates
+## TrailBase integration and activation gates
 
-The spike is successful only when one exact TrailBase release passes all of
-these checks:
+TrailBase selection is final. Production activation is blocked until one exact,
+pinned TrailBase release passes all applicable checks:
 
 1. Password and one social sign-in complete through the real browser flow.
 2. Desktop/mobile authorization-code and PKCE complete without putting tokens in
    URLs or local storage.
-3. Fasti validates issuer, subject, audience, signature, algorithm, expiry, and
-   not-before claims with a pinned trust configuration.
+3. Fasti validates the exact proof through TrailBase's documented public trust
+   boundary and rejects substitution, replay, expiry, and subject confusion.
 4. A TrailBase subject maps to one Fasti subject without using a TrailBase row ID
    as a Fasti primary key.
 5. Revocation and disabled-account behavior are bounded by a documented access
    token lifetime.
-6. The existing local account can migrate, or coexist during a bounded migration,
-   without duplicate administrators or orphaned profiles.
-7. Rollback restores the prior local path without changing Fasti records or
-   Chronicle state.
+6. No local password, `BrowserUser`, development account, or compatibility
+   layer is present.
+7. Rollback disables the TrailBase exchange and production Fasti session path
+   without changing Fasti records or Chronicle state.
 8. Native, desktop, and OCI packaging keep data and secrets in explicit durable
    locations.
-9. Network-denied local operation remains available for an already authorized
-   household administrator.
+9. TrailBase outage behavior for an already issued Fasti session is explicit,
+   bounded, and tested.
 10. Backup and restore state clearly which identity data is included and how a
     restored node regains administrator access.
 11. Startup, idle memory, failure isolation, upgrade, and downgrade stay within
@@ -131,18 +148,18 @@ these checks:
     CSRF, redirect validation, account takeover, refresh replay, and log
     redaction.
 
-A failed gate keeps TrailBase optional or rejects it. It does not trigger a
-second Fasti authentication implementation.
+A failed gate blocks production activation. It does not reopen the platform
+decision or trigger a second Fasti authentication implementation.
 
 ## Local development modes
 
 | Goal | Command or shape | Rule |
 | --- | --- | --- |
-| Fast Rust and web iteration | `./scripts/dev.sh` | Default contributor path. Native daemon and Vite; no mandatory sidecar. |
+| Fast Rust and web iteration | `./scripts/dev.sh` | Default PR A contributor path. Native daemon and Vite; human sign-in remains unavailable. |
 | Trusted desktop review | `FASTI_DATA_ROOT=/private/path ./scripts/dev.sh --desktop` | One Tauri host with the embedded local kernel. |
 | Daemon/CLI container proof | `docker build .` | Produces the runtime-equivalent default image. Docker requires BuildKit; Podman/Buildah must keep unused-stage pruning enabled. |
 | One-container product review | `docker build --target local -t fasti:local .` | Adds the pre-built Workbench to `fastid`; remains review-only until release gates pass. |
-| Identity issuer spike | Explicit opt-in profile | Starts TrailBase beside Fasti with a separate data directory and clear health state. Never required for the normal loop. |
+| TrailBase integration package | Explicit pinned profile | Starts TrailBase beside Fasti as a separate process with a separate data directory and clear health state. It does not activate production sessions before C1. |
 
 Docker's deprecated legacy builder is not supported. The Dockerfile contains a
 modern-builder feature gate, so CI and local builds fail instead of silently
@@ -186,9 +203,10 @@ directly to Chronicle or identity tables.
 
 - Fasti does not receive Loco's generators automatically.
 - Contributors keep one runtime and one persistence model.
-- TrailBase can reduce account-flow work without becoming Fasti's backend.
-- The current local authentication work is preserved until replacement evidence
-  exists.
+- TrailBase owns proven human-account flows without becoming Fasti's
+  application backend.
+- The proposed local account path is removed. The final Fasti session model
+  stays dormant until C1 activation evidence exists.
 - Future agents have a fail-closed repository check against accidental Loco
   adoption and unpinned Docker bases.
 - OpenAPI, AsyncAPI, JSON Schema, JSON-LD, SDK, and CLI outputs remain unchanged
