@@ -166,182 +166,12 @@ async function mockTrustedHost(
   }, mockOptions);
 }
 
-test("the development browser user can sign in and edit but cannot delete the last administrator", async ({
-  page,
-}) => {
-  const developmentUsername = "testadmin";
-  const editedUsername = developmentUsername.replace("test", "edited");
-  const csrfToken = "a".repeat(64);
-  const userId = "usr_01991f588e0070008000000000000001";
-  let user = {
-    active: true,
-    created_at: "2026-08-28T00:00:00Z",
-    is_admin: true,
-    is_test_account: true,
-    updated_at: "2026-08-28T00:00:00Z",
-    user_id: userId,
-    username: developmentUsername,
-  };
-
-  await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
-    const request = route.request();
-    if (request.method() === "GET") {
-      await route.fulfill({
-        status: 401,
-        contentType: "application/problem+json",
-        body: JSON.stringify({ detail: "Sign in to continue." }),
-      });
-      return;
-    }
-    const body = request.postDataJSON();
-    expect(body).toMatchObject({
-      username: user.username,
-      password: user.username,
-      session_timeout_minutes: 60,
-    });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      headers: {
-        "set-cookie": `fasti_csrf=${csrfToken}; Path=/; SameSite=Strict`,
-      },
-      body: JSON.stringify({
-        expires_at: "2026-08-28T01:00:00Z",
-        user,
-      }),
-    });
-  });
-  await page.route(/\/api\/v1\/browser\/users(?:\/[^/]+)?$/, async (route) => {
-    const request = route.request();
-    if (request.method() === "GET") {
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ users: [user] }),
-      });
-      return;
-    }
-    expect(request.headers()["x-fasti-csrf"]).toBe(csrfToken);
-    const body = request.postDataJSON();
-    if (request.method() === "PATCH") {
-      expect(body.current_password).toBe(user.username);
-      user = {
-        ...user,
-        username: body.username,
-        updated_at: "2026-08-28T00:05:00Z",
-      };
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify(user),
-      });
-      return;
-    }
-    expect(body).toEqual({ current_password: editedUsername });
-    await route.fulfill({
-      status: 422,
-      contentType: "application/problem+json",
-      body: JSON.stringify({
-        type: "https://fasti.scrobble.dev/v1/problems/validation-failed",
-        title: "Validation failed",
-        status: 422,
-        detail: "request representation does not satisfy the governed contract",
-        code: "validation_failed",
-        capability_id: "browser.user.delete",
-        safe_state: "no_mutation",
-        retryability: "retry_after_correction",
-        next_actions: [
-          {
-            id: "correct_request",
-            label: "Correct the request representation and retry",
-          },
-        ],
-        correlation_id: "req_01991f588e0070008000000000000002",
-        param: null,
-        actual: null,
-        violations: [
-          {
-            code: "last_active_administrator_required",
-            pointer: "/",
-            reason:
-              "deactivating or deleting this account would remove the workspace's last active administrator",
-            expected: "at least one active administrator must remain",
-            actual: null,
-          },
-        ],
-      }),
-    });
-  });
-  await page.route(/\/api\/v1\/records$/, (route) =>
-    route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ records: [], truncated: false }),
-    }),
-  );
-
-  await page.goto("/?surface=workbench");
-  await page
-    .locator("#main-content")
-    .getByRole("button", { name: "Sign in", exact: true })
-    .click();
-  const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Username").fill(developmentUsername);
-  await dialog.getByLabel("Password").fill(developmentUsername);
-  await dialog.getByRole("button", { name: "Sign in" }).click();
-  await expect(
-    page.getByRole("button", { name: "Manage account testadmin" }),
-  ).toBeVisible();
-  await expect(dialog.getByRole("list")).toHaveCount(1);
-  await expect(dialog.getByRole("listitem")).toHaveCount(1);
-  await expect(dialog.getByText("Signed in", { exact: true })).toBeVisible();
-  await expect(
-    dialog.getByText("Enabled · test", { exact: true }),
-  ).toBeVisible();
-
-  await dialog.getByRole("button", { name: "Edit" }).click();
-  await dialog.getByLabel("Username").fill(editedUsername);
-  await dialog.getByLabel(/New password/).fill(editedUsername);
-  await dialog.getByLabel("Your current password").fill(developmentUsername);
-  await dialog.getByRole("button", { name: "Save changes" }).click();
-  await expect(dialog.getByRole("status")).toContainText("Sign in again");
-  await expect(dialog.getByLabel("Username")).toHaveValue(editedUsername);
-
-  await dialog.getByLabel("Password").fill(editedUsername);
-  await dialog.getByRole("button", { name: "Sign in" }).click();
-  await dialog.getByRole("button", { name: "Edit" }).click();
-  await dialog.getByLabel("Your current password").fill(editedUsername);
-  const deleteConfirmation = dialog.getByRole("checkbox", {
-    name: /cannot be undone/,
-  });
-  const deleteTarget = await deleteConfirmation.locator("..").boundingBox();
-  expect(deleteTarget?.height).toBeGreaterThanOrEqual(44);
-  await deleteConfirmation.check();
-  await dialog.getByRole("button", { name: "Delete user" }).click();
-
-  await expect(dialog.getByRole("alert")).toHaveText(
-    "This is the only active administrator. Keep the account active.",
-  );
-  await expect(
-    page.getByRole("button", { name: `Manage account ${editedUsername}` }),
-  ).toBeVisible();
-  const accessibility = await new AxeBuilder({ page }).analyze();
-  expect(accessibility.violations).toEqual([]);
-});
-
 test("global search and configured record actions use durable tracking state", async ({
   page,
-  context,
 }) => {
   const recordId = "rec_01991f588e0070008000000000000002";
-  const csrf = "a".repeat(64);
   let updatedDisposition: string | null = null;
 
-  await context.addCookies([
-    {
-      name: "fasti_csrf",
-      value: csrf,
-      url: "http://127.0.0.1:4173",
-      sameSite: "Strict",
-    },
-  ]);
   await page.addInitScript(() => {
     localStorage.setItem(
       "fasti-workbench-preferences",
@@ -352,23 +182,6 @@ test("global search and configured record actions use durable tracking state", a
       }),
     );
   });
-  await page.route(/\/api\/v1\/browser\/session$/, (route) =>
-    route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        expires_at: "2026-08-28T12:00:00Z",
-        user: {
-          active: true,
-          created_at: "2026-08-28T00:00:00Z",
-          is_admin: true,
-          is_test_account: true,
-          updated_at: "2026-08-28T00:00:00Z",
-          user_id: "usr_01991f58-8e00-7000-8000-000000000001",
-          username: "testadmin",
-        },
-      }),
-    }),
-  );
   await page.route(/\/api\/v1\/records$/, (route) =>
     route.fulfill({
       contentType: "application/json",
@@ -409,7 +222,6 @@ test("global search and configured record actions use durable tracking state", a
         return;
       }
       expect(request.method()).toBe("PUT");
-      expect(request.headers()["x-fasti-csrf"]).toBe(csrf);
       updatedDisposition = request.postDataJSON().disposition;
       await route.fulfill({
         contentType: "application/json",

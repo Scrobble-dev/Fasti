@@ -22,8 +22,6 @@ const server = createServer((request, response) => {
   let payload;
   if (url.pathname === "/api/v1/health") {
     payload = { status: "healthy", version: "0.1.0-test" };
-  } else if (url.pathname === "/api/v1/browser/session") {
-    payload = { authenticated: false, session: null };
   } else if (url.pathname === "/api/v1/profile/nuvio-collections") {
     payload = [];
   } else if (url.pathname === "/api/v1/profile/record-tracking-dispositions") {
