@@ -34,3 +34,36 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=3s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:8420/api/v1/health || exit 1
 
 CMD ["/usr/local/bin/fastid"]
+
+# ---------------------------------------------------------------------------
+# Optional "local" target: fastid plus the pre-built web UI, so one container
+# is the whole product with no separate reverse proxy. NOT part of the
+# default build (`docker build .` still produces exactly the image above --
+# CI's existing `docker build --tag fasti:b0 .` and release.yml's multi-arch
+# build are unaffected). Build with:
+#   docker build --target local --tag fasti:local .
+# apps/web is B4 review-only (see docs/dev-loop.md) -- this target exists so
+# anyone can run it easily, it does not change that status.
+# ---------------------------------------------------------------------------
+# Not digest-pinned like the stages above (those were resolved by hand on
+# 2026-08-22). .github/dependabot.yml now tracks the docker ecosystem, so
+# Dependabot will propose pinning this on its normal weekly cadence.
+FROM node:22-alpine AS web-builder
+RUN corepack enable
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages/tokens/package.json packages/tokens/package.json
+COPY packages/sdk/package.json packages/sdk/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --frozen-lockfile
+COPY brand/ ./brand/
+COPY packages/tokens/ packages/tokens/
+COPY packages/sdk/ packages/sdk/
+COPY packages/ui/ packages/ui/
+COPY apps/web/ apps/web/
+RUN pnpm --filter @fasti/tokens --filter @fasti/sdk --filter @fasti/ui --filter @fasti/web run build
+
+FROM runtime AS local
+COPY --from=web-builder --chown=fasti:fasti /app/apps/web/dist /srv/fasti-web
+ENV FASTI_STATIC_DIR=/srv/fasti-web

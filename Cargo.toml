@@ -42,6 +42,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Web & API
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.6", features = ["fs"] }
 
 # SQLite & Persistence
 rusqlite = { version = "0.32", features = ["backup", "bundled", "chrono", "hooks", "uuid"] }
