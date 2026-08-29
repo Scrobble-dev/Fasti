@@ -17,6 +17,11 @@
     onSessionChange: (session: BrowserSession | null) => void;
   }
 
+  // Matches apps/fastid/src/main.rs's DEVELOPMENT_UNBOUNDED_SESSION_MINUTES.
+  // Only accepted by the server when FASTI_DEVELOPMENT_AUTO_LOGIN is set on a
+  // loopback durable listener; rejected (422) otherwise.
+  const DEVELOPMENT_UNBOUNDED_SESSION_MINUTES = 100 * 365 * 24 * 60;
+
   let { show, host, session, onClose, onSessionChange }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
   let username = $state("");
@@ -309,6 +314,9 @@
               <option value={60}>1 hour</option>
               <option value={480}>8 hours</option>
               <option value={1440}>24 hours</option>
+              <option value={DEVELOPMENT_UNBOUNDED_SESSION_MINUTES}
+                >Don't expire (dev only)</option
+              >
             </select>
           </div>
           <button

@@ -370,7 +370,7 @@ impl BrowserAccountPort for SqliteKernel {
         &self,
         username: BrowserUsername,
         password: BrowserPassword,
-    ) -> ApplicationResult<()> {
+    ) -> ApplicationResult<bool> {
         let capability = CapabilityKey::CreateBrowserSession;
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
         {
@@ -385,7 +385,7 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             )?;
             if seeded {
-                return Ok(());
+                return Ok(false);
             }
         }
 
@@ -433,7 +433,7 @@ impl BrowserAccountPort for SqliteKernel {
             correlation_id,
         )?;
         if already_seeded {
-            return Ok(());
+            return Ok(false);
         }
         map_sql(
             transaction.execute(
@@ -461,7 +461,8 @@ impl BrowserAccountPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        map_sql(transaction.commit(), capability, correlation_id)
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(true)
     }
 
     fn create_browser_session(
@@ -942,6 +943,7 @@ mod tests {
                 BrowserUsername::try_new(username).expect("username"),
                 BrowserPassword::try_new(password).expect("password"),
                 60,
+                fasti_application::MAX_SESSION_MINUTES,
             )
             .expect("command"),
         )
@@ -1156,7 +1158,7 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("testadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
-                    60,
+                    60,fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command"),
             )
@@ -1199,7 +1201,7 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("editedadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
-                    60,
+                    60,fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command"),
             )
@@ -1230,7 +1232,7 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("editedadmin").expect("username"),
                     BrowserPassword::try_new("editedadmin").expect("password"),
-                    60,
+                    60,fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command"),
             )
@@ -1311,7 +1313,7 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("editedadmin").expect("username"),
                     BrowserPassword::try_new("editedadmin").expect("password"),
-                    60,
+                    60,fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command")
             )
@@ -1322,7 +1324,7 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("testadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
-                    60,
+                    60,fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command")
             )
