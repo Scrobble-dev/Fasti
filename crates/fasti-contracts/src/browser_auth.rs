@@ -94,26 +94,6 @@ pub struct SwitchProfileRequest {
     pub profile_id: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct WebAuthnPasskeyDto {
-    pub credential_id: String,
-    pub name: String,
-    #[schema(format = "date-time")]
-    pub created_at: String,
-    #[schema(format = "date-time")]
-    pub last_used_at: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct MfaStatusResponse {
-    pub passkeys_enabled: bool,
-    pub totp_enabled: bool,
-    pub recovery_codes_remaining: u32,
-    pub passkeys: Vec<WebAuthnPasskeyDto>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
