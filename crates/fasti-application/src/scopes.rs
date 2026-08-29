@@ -39,7 +39,6 @@ define_scope_keys!(
     (CorrectionWrite, "correction_write"),
     (WorkspaceExport, "workspace_export"),
     (WorkspaceVerify, "workspace_verify"),
-    (BrowserUserManage, "browser_user_manage"),
 );
 
 #[cfg(test)]

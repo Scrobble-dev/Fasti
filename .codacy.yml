@@ -1,6 +1,74 @@
+---
+# Codacy Configuration for Fasti
+# Ref: https://docs.codacy.com/repositories-configure/codacy-configuration-file/
+
 engines:
   agentlinter:
     exclude_paths:
       # security@scrobble.dev is the intentional, required public reporting
       # contact in our security policy -- not a PII leak.
       - "SECURITY.md"
+  duplication:
+    exclude_paths:
+      - "contracts/generated/**"
+      - "packages/sdk/src/generated/**"
+      - "target/**"
+      - "benchmarks/b1/fixtures/**"
+      - "brand/assets/**"
+      - "apps/desktop/src-tauri/gen/**"
+      - "tests/fixtures/**"
+  clippy:
+    enabled: true
+    exclude_paths:
+      - "target/**"
+      - "contracts/generated/**"
+  eslint:
+    enabled: true
+    exclude_paths:
+      - "packages/sdk/src/generated/**"
+      - "target/**"
+      - "dist/**"
+      - "node_modules/**"
+  shellcheck:
+    enabled: true
+  markdownlint:
+    enabled: true
+    exclude_paths:
+      - "contracts/generated/**"
+  remark-lint:
+    enabled: true
+    exclude_paths:
+      - "contracts/generated/**"
+  stylelint:
+    enabled: true
+  trivy:
+    enabled: true
+    exclude_paths:
+      - "benchmarks/b1/fixtures/**"
+
+languages:
+  rust:
+    exclude_paths:
+      - "contracts/generated/**"
+      - "target/**"
+  typescript:
+    exclude_paths:
+      - "packages/sdk/src/generated/**"
+      - "dist/**"
+  javascript:
+    exclude_paths:
+      - "dist/**"
+  markdown:
+    exclude_paths:
+      - "contracts/generated/**"
+
+exclude_paths:
+  - "contracts/generated/**"
+  - "packages/sdk/src/generated/**"
+  - "target/**"
+  - "benchmarks/b1/fixtures/**"
+  - "brand/assets/**"
+  - "apps/desktop/src-tauri/gen/**"
+  - "tests/fixtures/**"
+  - "pnpm-lock.yaml"
+  - "Cargo.lock"

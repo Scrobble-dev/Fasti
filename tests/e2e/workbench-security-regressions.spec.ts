@@ -55,34 +55,6 @@ async function fulfillRecords(route: Route, title?: string, poster?: string) {
   });
 }
 
-async function installBrowserSession(
-  page: Page,
-  origin = browserOrigin,
-): Promise<void> {
-  await page.route(`${origin}/api/v1/browser/session`, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      headers: {
-        "access-control-allow-origin": browserOrigin,
-        "access-control-allow-credentials": "true",
-      },
-      body: JSON.stringify({
-        expires_at: "2026-08-28T23:00:00Z",
-        user: {
-          user_id: "usr_01991f588e0070008000000000000001",
-          username: "testadmin",
-          is_admin: true,
-          is_test_account: true,
-          active: true,
-          created_at: "2026-08-28T00:00:00Z",
-          updated_at: "2026-08-28T00:00:00Z",
-        },
-      }),
-    }),
-  );
-}
-
 test("browser history keeps the Workbench and status route synchronized", async ({
   page,
 }) => {
@@ -111,206 +83,6 @@ test("browser history keeps the Workbench and status route synchronized", async 
 
   await page.goForward();
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-});
-
-test("browser account dialog supports keyboard navigation and escape", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open account access" }).click();
-
-  const dialog = page.getByRole("dialog", { name: "Account access" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByLabel("Username").focus();
-  await page.keyboard.press("Tab");
-  await expect(dialog.getByLabel("Password")).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-});
-
-test("a rejected browser sign-in stays disconnected and recoverable", async ({
-  page,
-}) => {
-  await page.route(/\/api\/v1\/browser\/session$/, (route) =>
-    route.fulfill({
-      status: 401,
-      contentType: "application/problem+json",
-      body: JSON.stringify({
-        type: "https://fasti.scrobble.dev/v1/problems/authentication-failed",
-        title: "Authentication failed",
-        status: 401,
-        detail: "the presented local credential is not active",
-        code: "authentication_failed",
-        capability_id: "browser.session.create",
-        safe_state: "no_mutation",
-        retryability: "not_retryable",
-        next_actions: [
-          {
-            id: "use_active_credential",
-            label: "Use an active local credential or enroll again",
-          },
-        ],
-        correlation_id: "req_01991f588e0070008000000000000002",
-        param: null,
-        actual: null,
-        violations: [],
-      }),
-    }),
-  );
-  await page.goto("/");
-  await page
-    .locator("#main-content")
-    .getByRole("button", { name: "Sign in", exact: true })
-    .click();
-  const dialog = page.getByRole("dialog", { name: "Account access" });
-  const username = dialog.getByLabel("Username");
-  const password = dialog.getByLabel("Password");
-  await expect(username).toHaveValue("");
-  await expect(dialog).not.toContainText("testadmin / testadmin");
-  await username.fill("testadmin");
-  await password.fill("incorrect-password");
-  await dialog.getByRole("button", { name: "Sign in" }).click();
-
-  await expect(dialog.getByRole("alert")).toContainText("username or password");
-  await expect(username).toHaveAttribute("aria-invalid", "true");
-  await expect(password).toHaveAttribute("aria-invalid", "true");
-  await username.fill("editedadmin");
-  await expect(username).toHaveAttribute("aria-invalid", "false");
-  await expect(password).toHaveAttribute("aria-invalid", "false");
-  await expect(username).not.toHaveAttribute(
-    "aria-describedby",
-    "auth-problem",
-  );
-  await expect(
-    page
-      .locator("#main-content")
-      .getByRole("button", { name: "Sign in", exact: true }),
-  ).toBeVisible();
-});
-
-test("profile settings discard the previous browser account state", async ({
-  page,
-  context,
-}) => {
-  const csrf = "a".repeat(64);
-  const users = {
-    a: {
-      user_id: "usr_01991f58-8e00-7000-8000-000000000001",
-      username: "account-a",
-      is_admin: true,
-      is_test_account: false,
-      active: true,
-      created_at: "2026-08-28T00:00:00Z",
-      updated_at: "2026-08-28T00:00:00Z",
-    },
-    b: {
-      user_id: "usr_01991f58-8e00-7000-8000-000000000002",
-      username: "account-b",
-      is_admin: true,
-      is_test_account: false,
-      active: true,
-      created_at: "2026-08-28T00:00:00Z",
-      updated_at: "2026-08-28T00:00:00Z",
-    },
-  } as const;
-  let currentUser: (typeof users)[keyof typeof users] | null = users.a;
-  let releaseAccountB: (() => void) | undefined;
-  let accountBRequests = 0;
-
-  await context.addCookies([
-    {
-      name: "fasti_csrf",
-      value: csrf,
-      url: browserOrigin,
-      sameSite: "Strict",
-    },
-  ]);
-  await page.route(/\/api\/v1\/browser\/session$/, async (route) => {
-    const method = route.request().method();
-    if (method === "DELETE") {
-      currentUser = null;
-      await route.fulfill({ status: 204 });
-      return;
-    }
-    if (method === "POST") currentUser = users.b;
-    if (!currentUser) {
-      await route.fulfill({ status: 401 });
-      return;
-    }
-    await route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({
-        expires_at: "2026-08-28T23:00:00Z",
-        user: currentUser,
-      }),
-    });
-  });
-  await page.route(/\/api\/v1\/browser\/users$/, (route) =>
-    route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ users: currentUser ? [currentUser] : [] }),
-    }),
-  );
-  await page.route(/\/api\/v1\/profile\/nuvio-collections$/, async (route) => {
-    if (currentUser?.user_id === users.a.user_id) {
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({
-          document: [
-            {
-              id: "account-a-private",
-              title: "Account A private",
-              folders: [],
-            },
-          ],
-        }),
-      });
-      return;
-    }
-    accountBRequests += 1;
-    await new Promise<void>((resolve) => (releaseAccountB = resolve));
-    await route.fulfill({
-      status: 403,
-      contentType: "application/problem+json",
-      body: JSON.stringify({
-        type: "https://fasti.scrobble.dev/v1/problems/forbidden",
-        title: "Forbidden",
-        status: 403,
-        detail: "request is not authorized for this capability",
-        code: "forbidden",
-        capability_id: "profile.nuvio_collections.get",
-        safe_state: "no_mutation",
-        retryability: "not_retryable",
-        next_actions: [
-          {
-            id: "verify_request_authorization",
-            label: "Verify the request context and local grant",
-          },
-        ],
-        correlation_id: "req_01991f588e0070008000000000000002",
-        param: null,
-        actual: null,
-        violations: [],
-      }),
-    });
-  });
-
-  await page.goto("/settings/collections");
-  await expect(page.getByText("Account A private")).toBeVisible();
-  await page.getByRole("button", { name: "Manage account account-a" }).click();
-  const dialog = page.getByRole("dialog", { name: "Account access" });
-  await dialog.getByRole("button", { name: "Sign out" }).click();
-  await dialog.getByLabel("Username").fill("account-b");
-  await dialog.getByLabel("Password").fill("account-b-password");
-  await dialog.getByRole("button", { name: "Sign in" }).click();
-
-  await expect.poll(() => accountBRequests).toBe(1);
-  await expect(page.getByText("Account A private")).toHaveCount(0);
-  releaseAccountB?.();
-  await expect(page.getByRole("alert")).toContainText(
-    "request is not authorized for this capability",
-  );
-  await expect(page.getByText("Account A private")).toHaveCount(0);
 });
 
 test("endpoint testing rejects a contract-invalid health response", async ({
@@ -369,7 +141,6 @@ test("a saved service URL owns browser record and status requests after reload",
       JSON.stringify({ service_url: serviceUrl }),
     );
   }, savedOrigin);
-  await installBrowserSession(page, savedOrigin);
   await page.route(`${savedOrigin}/api/v1/records`, async (route) => {
     const request = route.request();
     if (request.method() === "OPTIONS") {
@@ -422,32 +193,14 @@ test("a saved service URL owns browser record and status requests after reload",
   await expect(page.getByText(savedOrigin, { exact: true })).toBeVisible();
 });
 
-test("changing the browser service URL resets the origin-bound session state", async ({
+test("changing the browser service URL preserves truthful unavailable account state", async ({
   page,
 }) => {
-  await installBrowserSession(page);
   await page.route(/\/api\/v1\/records$/, (route) => fulfillRecords(route));
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "A bounded local record" }).first(),
   ).toBeVisible();
-
-  await page.route("https://new.fasti.test/api/v1/browser/session", (route) =>
-    route.fulfill({
-      status: 401,
-      contentType: "application/problem+json",
-      headers: {
-        "access-control-allow-origin": browserOrigin,
-        "access-control-allow-credentials": "true",
-      },
-      body: JSON.stringify({
-        type: "about:blank",
-        title: "Unauthorized",
-        status: 401,
-        detail: "Sign in is required.",
-      }),
-    }),
-  );
 
   await openWorkbenchSection(page, "Settings");
   await page.getByLabel("Service URL").fill("https://new.fasti.test");
@@ -477,7 +230,6 @@ test("record summaries stay truthful, bounded, and free of poster egress", async
       "https://tracker.example/poster.jpg",
     ),
   );
-  await installBrowserSession(page);
   await page.goto("/");
   await expect(
     page.getByRole("heading", { name: "Summary-only record" }).first(),

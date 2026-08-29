@@ -222,7 +222,6 @@ pub(crate) async fn accept_observation_request(
                 authentication,
                 CapabilityKey::AcceptObservation,
                 correlation_id,
-                true,
             )?;
             let operation_material = serde_json::to_string(&(
                 "observation",
@@ -287,7 +286,7 @@ pub(crate) async fn accept_observation_request(
     post,
     path = "/api/v1/observations",
     tag = "observations",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     request_body = SubmitObservationRequest,
     responses(
         (status = 200, description = "Durable observation receipt; a safe retry can return a replayed disposition", body = SubmitObservationResponse),
@@ -312,12 +311,8 @@ pub(crate) async fn submit_observation(
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
-    let authentication = request_authentication(
-        &headers,
-        CapabilityKey::AcceptObservation,
-        correlation_id,
-        true,
-    )?;
+    let authentication =
+        request_authentication(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     let evidence_bytes = serde_json::to_vec(&request).map_err(|_| {
         application_problem(Box::new(FastiProblem::integrity_failed(
             CapabilityKey::AcceptObservation,

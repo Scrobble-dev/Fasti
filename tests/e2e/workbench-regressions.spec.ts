@@ -451,6 +451,7 @@ test("direct canonical and compatibility Settings routes preserve one active sec
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const [path, name] of [
+    ["/settings/account", "Account and security"],
     ["/settings", "Network"],
     ["/settings/metadata", "Metadata credentials"],
     ["/settings/providers", "Metadata credentials"],
@@ -490,24 +491,85 @@ test("direct canonical and compatibility Settings routes preserve one active sec
   }
 });
 
-test("signed-out Collections does not request profile data", async ({
+test("Account and security stays unavailable and separate from first-run setup", async ({
   page,
 }) => {
-  let profileRequests = 0;
+  const browserAuthRequests: string[] = [];
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/v1/profile/nuvio-collections")
-      profileRequests += 1;
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/v1/browser/")) browserAuthRequests.push(path);
   });
 
-  await page.goto("/settings/collections");
+  await page.goto("/settings/account");
+  const taskMap = page.getByTestId("account-security-task-map");
+  const guidedSetup = page.getByTestId("first-run-guided-setup");
+
   await expect(
-    page.getByText(
-      "Sign in to manage this profile's Nuvio Collections document.",
-    ),
+    taskMap.getByRole("heading", { name: "Account and security" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(taskMap.getByTestId("account-access-unavailable")).toContainText(
+    "PR C1",
+  );
+  await expect(
+    taskMap.getByRole("heading", { name: "Browser sessions" }),
+  ).toBeVisible();
+  await expect(
+    guidedSetup.getByRole("heading", { name: "First-run guided setup" }),
+  ).toBeVisible();
+  await expect(guidedSetup).toContainText("separate first-run flow");
+  await expect(
+    taskMap.getByRole("heading", { name: "First-run guided setup" }),
+  ).toHaveCount(0);
+  await expect(
+    guidedSetup.getByRole("heading", { name: "Browser sessions" }),
+  ).toHaveCount(0);
+  await expect(taskMap).not.toContainText("Signed in");
+  await expect(taskMap).not.toContainText("Active & Protected");
+  await expect(taskMap.getByLabel("Username")).toHaveCount(0);
+  await expect(taskMap.getByLabel("Password")).toHaveCount(0);
+  await expect(
+    taskMap.getByRole("button", {
+      name: /sign in|sign out|create account|manage sessions|revoke session|end session/i,
+    }),
+  ).toHaveCount(0);
+  await page.getByRole("link", { name: "Metadata credentials" }).click();
+  await page.getByRole("link", { name: "Account and security" }).click();
   await page.waitForLoadState("networkidle");
-  expect(profileRequests).toBe(0);
+  expect(browserAuthRequests).toEqual([]);
+  await expectAxeClean(page);
+});
+
+test("account shortcut keeps the unavailable state and opens the task map", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const accountShortcut = page.getByRole("button", {
+    name: "Open account access",
+  });
+  await accountShortcut.click();
+
+  const dialog = page.getByRole("dialog", { name: "Account access" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId("account-access-unavailable")).toContainText(
+    "PR C1",
+  );
+  await expectAxeClean(page);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(accountShortcut).toBeFocused();
+
+  await accountShortcut.click();
+  await dialog
+    .getByRole("button", { name: /Open Account and security/ })
+    .click();
+
+  await expect(page).toHaveURL(/\/settings\/account$/);
+  await expect(
+    page.getByTestId("account-security-task-map").getByRole("heading", {
+      name: "Account and security",
+    }),
+  ).toBeVisible();
+  await expect(page.locator("#main-content")).toBeFocused();
 });
 
 for (const viewport of [...mobileViewports, ...desktopViewports]) {
@@ -515,10 +577,10 @@ for (const viewport of [...mobileViewports, ...desktopViewports]) {
     page,
   }) => {
     await page.setViewportSize(viewport);
-    for (const path of ["/", "/settings"] as const) {
+    for (const path of ["/", "/settings", "/settings/account"] as const) {
       await page.goto(path);
       await expectNoHorizontalOverflow(page);
-      if (path === "/settings") {
+      if (path.startsWith("/settings")) {
         const main = await page.locator("#main-content").boundingBox();
         const settings = await page
           .locator(".settings-container")

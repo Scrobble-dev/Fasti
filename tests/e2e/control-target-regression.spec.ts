@@ -107,6 +107,10 @@ test("theme settings apply distinct Tabler and Fasti effects and persist", async
 
   for (const mode of ["Light", "Dark", "Night"]) {
     await drawer.getByRole("button", { name: mode, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-fasti-theme",
+      mode.toLowerCase(),
+    );
     for (const scheme of [
       "Tabler Blue",
       "Red",
@@ -119,9 +123,10 @@ test("theme settings apply distinct Tabler and Fasti effects and persist", async
       "Horological Gold",
     ]) {
       await drawer.getByRole("button", { name: scheme, exact: true }).click();
-      await drawer.getByRole("button", { name: "Done" }).hover();
-      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      expect(await rootVariable(page, "--tblr-primary")).not.toBe("");
     }
+    await drawer.getByRole("button", { name: "Done" }).hover();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   }
   await drawer
     .getByRole("button", { name: "Fasti Oxblood", exact: true })

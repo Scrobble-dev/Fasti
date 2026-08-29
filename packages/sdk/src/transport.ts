@@ -3,8 +3,6 @@ import {
   LOCAL_BOOTSTRAP_OPERATIONS,
   LOCAL_RUNTIME_OPERATIONS,
   FastiContractParseError,
-  parseBrowserSessionResponse,
-  parseBrowserUserDto,
   parseAcceptObservationRequest,
   parseAcceptObservationResponse,
   parseAttachIdentifierRequest,
@@ -13,15 +11,12 @@ import {
   parseClientEnrollmentResponse,
   parseCreateRecordRequest,
   parseCreateRecordResponse,
-  parseCreateBrowserSessionRequest,
-  parseDeleteBrowserUserRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
-  parseListBrowserUsersResponse,
   parseListTrackingDispositionsResponse,
   parseNuvioCollectionsDocumentDto,
   parseNuvioCollectionsStateDto,
@@ -32,7 +27,6 @@ import {
   parseRegisterNamespaceResponse,
   parseSetTrackingDispositionRequest,
   parseTrackingDispositionStateDto,
-  parseUpdateBrowserUserRequest,
   parseReplayReceiptResponse,
   parseSubmitObservationRequest,
   parseSubmitObservationResponse,
@@ -41,22 +35,17 @@ import {
   type AcceptObservationResponse,
   type AttachIdentifierRequest,
   type AttachIdentifierResponse,
-  type BrowserSessionResponse,
-  type BrowserUserDto,
   type CapabilityDiscoveryResponse,
   type CapabilityId,
   type ClientEnrollmentResponse,
   type CreateRecordRequest,
   type CreateRecordResponse,
-  type CreateBrowserSessionRequest,
-  type DeleteBrowserUserRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
-  type ListBrowserUsersResponse,
   type ListTrackingDispositionsResponse,
   type NuvioCollectionsDocumentDto,
   type NuvioCollectionsStateDto,
@@ -71,7 +60,6 @@ import {
   type SubmitObservationRequest,
   type SubmitObservationResponse,
   type TrackingDispositionStateDto,
-  type UpdateBrowserUserRequest,
 } from "./generated.js";
 
 export * from "./generated.js";
@@ -98,8 +86,6 @@ export type CredentialProvider = string | (() => string | Promise<string>);
 export interface FastiClientOptions {
   readonly baseUrl: string;
   readonly credential?: CredentialProvider;
-  readonly useBrowserSession?: boolean;
-  readonly csrfToken?: CredentialProvider;
   readonly timeoutMs?: number;
   readonly retryPolicy?: Partial<RetryPolicy>;
   readonly fetch?: typeof globalThis.fetch;
@@ -234,7 +220,6 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
-const USER_ID = /^usr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -243,8 +228,6 @@ const HEALTH_PROBLEM_CONTRACT = {
 export class FastiClient {
   readonly #baseUrl: URL;
   readonly #credential?: CredentialProvider;
-  readonly #useBrowserSession: boolean;
-  readonly #csrfToken?: CredentialProvider;
   readonly #timeoutMs: number;
   readonly #retryPolicy: RetryPolicy;
   readonly #fetch: typeof globalThis.fetch;
@@ -252,8 +235,6 @@ export class FastiClient {
   constructor(options: FastiClientOptions) {
     this.#baseUrl = normalizeBaseUrl(options.baseUrl);
     this.#credential = options.credential;
-    this.#useBrowserSession = options.useBrowserSession ?? false;
-    this.#csrfToken = options.csrfToken;
     this.#timeoutMs = positiveInteger(
       options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       "timeoutMs",
@@ -699,125 +680,6 @@ export class FastiClient {
     });
   }
 
-  createBrowserSession(
-    request: CreateBrowserSessionRequest,
-    options: CallOptions = {},
-  ): Promise<BrowserSessionResponse> {
-    const operation = LOCAL_RUNTIME_OPERATIONS.createBrowserSession;
-    const body = parseOutgoing(
-      parseCreateBrowserSessionRequest,
-      request,
-      "Create browser session request",
-    );
-    return this.#jsonOperation({
-      method: operation.method,
-      path: operation.path,
-      authenticated: operation.authenticated,
-      problemContract: operation,
-      retryMode: "never",
-      body,
-      responseParser: parseBrowserSessionResponse,
-      responseLabel: "Create browser session response",
-      options,
-    });
-  }
-
-  readBrowserSession(
-    options: CallOptions = {},
-  ): Promise<BrowserSessionResponse> {
-    const operation = LOCAL_RUNTIME_OPERATIONS.readBrowserSession;
-    return this.#jsonOperation({
-      method: operation.method,
-      path: operation.path,
-      authenticated: operation.authenticated,
-      problemContract: operation,
-      retryMode: "safe",
-      responseParser: parseBrowserSessionResponse,
-      responseLabel: "Read browser session response",
-      options,
-    });
-  }
-
-  endBrowserSession(options: CallOptions = {}): Promise<void> {
-    const operation = LOCAL_RUNTIME_OPERATIONS.endBrowserSession;
-    return this.#jsonOperation({
-      method: operation.method,
-      path: operation.path,
-      authenticated: operation.authenticated,
-      problemContract: operation,
-      retryMode: "never",
-      responseParser: undefined,
-      responseLabel: "End browser session response",
-      options,
-    });
-  }
-
-  listBrowserUsers(
-    options: CallOptions = {},
-  ): Promise<ListBrowserUsersResponse> {
-    const operation = LOCAL_RUNTIME_OPERATIONS.listBrowserUsers;
-    return this.#jsonOperation({
-      method: operation.method,
-      path: operation.path,
-      authenticated: operation.authenticated,
-      problemContract: operation,
-      retryMode: "safe",
-      responseParser: parseListBrowserUsersResponse,
-      responseLabel: "List browser users response",
-      options,
-    });
-  }
-
-  updateBrowserUser(
-    userId: string,
-    request: UpdateBrowserUserRequest,
-    options: CallOptions = {},
-  ): Promise<BrowserUserDto> {
-    const operation = LOCAL_RUNTIME_OPERATIONS.updateBrowserUser;
-    const safeUserId = contractPathIdentifier(userId, USER_ID, "userId");
-    const body = parseOutgoing(
-      parseUpdateBrowserUserRequest,
-      request,
-      "Update browser user request",
-    );
-    return this.#jsonOperation({
-      method: operation.method,
-      path: operation.path.replace("{user_id}", encodeURIComponent(safeUserId)),
-      authenticated: operation.authenticated,
-      problemContract: operation,
-      retryMode: "never",
-      body,
-      responseParser: parseBrowserUserDto,
-      responseLabel: "Update browser user response",
-      options,
-    });
-  }
-
-  deleteBrowserUser(
-    userId: string,
-    request: DeleteBrowserUserRequest,
-    options: CallOptions = {},
-  ): Promise<void> {
-    const operation = LOCAL_RUNTIME_OPERATIONS.deleteBrowserUser;
-    const safeUserId = contractPathIdentifier(userId, USER_ID, "userId");
-    const body = parseOutgoing(
-      parseDeleteBrowserUserRequest,
-      request,
-      "Delete browser user request",
-    );
-    return this.#jsonOperation({
-      method: operation.method,
-      path: operation.path.replace("{user_id}", encodeURIComponent(safeUserId)),
-      authenticated: operation.authenticated,
-      problemContract: operation,
-      retryMode: "never",
-      body,
-      responseParser: undefined,
-      responseLabel: "Delete browser user response",
-      options,
-    });
-  }
-
   listIntegrations(
     options: CallOptions = {},
   ): Promise<{ integrations: Array<Record<string, unknown>> }> {
@@ -879,7 +741,7 @@ export class FastiClient {
               method: "GET",
               headers,
               signal: scope.signal,
-              credentials: this.#useBrowserSession ? "include" : "same-origin",
+              credentials: "same-origin",
             },
           );
         } catch {
@@ -1043,7 +905,6 @@ export class FastiClient {
           "application/json",
           input.authenticated,
           scope.signal,
-          input.method !== "GET",
         );
         if (serializedBody !== undefined) {
           headers.set("Content-Type", "application/json");
@@ -1056,7 +917,7 @@ export class FastiClient {
             headers,
             body: serializedBody,
             signal: scope.signal,
-            credentials: this.#useBrowserSession ? "include" : "same-origin",
+            credentials: "same-origin",
           });
         } catch {
           throw new NetworkRequestError();
@@ -1141,7 +1002,6 @@ export class FastiClient {
     accept: string,
     authenticated: boolean,
     signal: AbortSignal,
-    mutation = false,
   ): Promise<Headers> {
     const headers = new Headers({ Accept: accept });
     if (authenticated && this.#credential !== undefined) {
@@ -1152,19 +1012,6 @@ export class FastiClient {
         );
       }
       headers.set("Authorization", `Bearer ${credential}`);
-    } else if (authenticated && this.#useBrowserSession && mutation) {
-      if (this.#csrfToken === undefined) {
-        throw new CredentialProviderError(
-          "Browser-session mutations require a CSRF token provider",
-        );
-      }
-      const csrf = await resolveCredential(this.#csrfToken, signal);
-      if (!/^[0-9a-f]{64}$/.test(csrf)) {
-        throw new CredentialProviderError(
-          "Browser-session CSRF token must be 64 lowercase hexadecimal characters",
-        );
-      }
-      headers.set("X-Fasti-CSRF", csrf);
     }
     return headers;
   }

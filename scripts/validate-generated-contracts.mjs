@@ -80,9 +80,6 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     SwaggerParser.validate(conformanceOpenapi),
   ]);
   assert.deepEqual(Object.keys(openapi.paths), [
-    "/api/v1/browser/session",
-    "/api/v1/browser/users",
-    "/api/v1/browser/users/{user_id}",
     "/api/v1/client-enrollments",
     "/api/v1/health",
     "/api/v1/integrations",
@@ -102,19 +99,22 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   ]);
   assert.deepEqual(Object.keys(openapi.components.securitySchemes), [
     "bootstrap_bearer",
-    "browser_session",
     "credential_bearer",
   ]);
-  assert.deepEqual(openapi.paths["/api/v1/browser/session"].get.security, [
-    { browser_session: [] },
-  ]);
+  assert.equal(
+    Object.keys(openapi.paths).some((path) =>
+      path.startsWith("/api/v1/browser/"),
+    ),
+    false,
+    "PR A must not publish browser authentication routes before C1",
+  );
   assert.deepEqual(
     openapi.paths["/api/v1/records"].get.security,
-    [{ credential_bearer: [] }, { browser_session: [] }],
+    [{ credential_bearer: [] }],
     "list_records security must match scoped authorization",
   );
   const nuvioCollections = openapi.paths["/api/v1/profile/nuvio-collections"];
-  const profileSecurity = [{ credential_bearer: [] }, { browser_session: [] }];
+  const profileSecurity = [{ credential_bearer: [] }];
   assert.deepEqual(nuvioCollections.delete.security, profileSecurity);
   assert.deepEqual(nuvioCollections.get.security, profileSecurity);
   assert.deepEqual(nuvioCollections.put.security, profileSecurity);
@@ -166,7 +166,7 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
 
   assert.equal(registry.contract_version, "1.0.0");
   assert.equal(registry.capability_base_uri.endsWith("/v1/"), true);
-  assert.equal(registry.capabilities.length, 36);
+  assert.equal(registry.capabilities.length, 39);
   const capabilityIds = registry.capabilities.map(({ id }) => id);
   assert.equal(new Set(capabilityIds).size, capabilityIds.length);
   assert.deepEqual(capabilityIds, [...capabilityIds].sort());
@@ -185,11 +185,8 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     if (capability.id === "observation.accept") return "b1_observation_accept";
     if (capability.id === "receipt.replay") return "b1_receipt_replay";
     if (capability.id === "receipt.stream") return "b1_receipt_stream";
-    if (
-      capability.id.startsWith("browser.session.") ||
-      capability.id.startsWith("browser.user.")
-    ) {
-      return "b2_browser_auth";
+    if (capability.id.startsWith("browser.")) {
+      return "c1_browser_session_foundation";
     }
     if (
       capability.id.startsWith("profile.record.tracking_disposition.") ||
@@ -318,7 +315,6 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   const healthCapability = capabilities.get("system.health");
   assert.deepEqual(Object.keys(openapi.components.securitySchemes).sort(), [
     "bootstrap_bearer",
-    "browser_session",
     "credential_bearer",
   ]);
   for (const scheme of [
@@ -328,12 +324,6 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     assert.equal(scheme.type, "http");
     assert.equal(scheme.scheme, "bearer");
   }
-  assert.deepEqual(openapi.components.securitySchemes.browser_session, {
-    type: "apiKey",
-    name: "fasti_session",
-    in: "cookie",
-    description: "Opaque HttpOnly browser session cookie",
-  });
   assert.equal(healthOperation["x-fasti-capability-id"], healthCapability.id);
   assert.equal(
     healthOperation["x-fasti-authorization"],
@@ -364,29 +354,12 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
         operation.operationId === "initialize_node"
           ? [{ bootstrap_bearer: [] }]
           : [
-                "read_session",
-                "end_session",
-                "list_users",
-                "update_user",
-                "delete_user",
+                "health_check",
+                "enroll_first_client",
+                "integration_status",
               ].includes(operation.operationId)
-            ? [{ browser_session: [] }]
-            : [
-                  "nuvio_webhook",
-                  "tautulli_webhook",
-                  "jellyfin_webhook",
-                  "emby_webhook",
-                  "plex_webhook",
-                ].includes(operation.operationId)
-              ? [{ credential_bearer: [] }]
-              : [
-                    "health_check",
-                    "enroll_first_client",
-                    "create_session",
-                    "integration_status",
-                  ].includes(operation.operationId)
-                ? undefined
-                : [{ credential_bearer: [] }, { browser_session: [] }];
+            ? undefined
+            : [{ credential_bearer: [] }];
       assert.deepEqual(
         operation.security,
         security,

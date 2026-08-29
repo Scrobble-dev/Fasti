@@ -177,7 +177,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 21] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 15] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -342,72 +342,6 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 21] = [
         request: None,
         response: Some("NuvioCollectionsStateDto"),
         retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "createBrowserSession",
-        operation_id: "create_session",
-        method: "post",
-        path: "/api/v1/browser/session",
-        capability_id: "browser.session.create",
-        authenticated: false,
-        request: Some("CreateBrowserSessionRequest"),
-        response: Some("BrowserSessionResponse"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "readBrowserSession",
-        operation_id: "read_session",
-        method: "get",
-        path: "/api/v1/browser/session",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("BrowserSessionResponse"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "endBrowserSession",
-        operation_id: "end_session",
-        method: "delete",
-        path: "/api/v1/browser/session",
-        capability_id: "browser.session.end",
-        authenticated: true,
-        request: None,
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "listBrowserUsers",
-        operation_id: "list_users",
-        method: "get",
-        path: "/api/v1/browser/users",
-        capability_id: "browser.user.list",
-        authenticated: true,
-        request: None,
-        response: Some("ListBrowserUsersResponse"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "updateBrowserUser",
-        operation_id: "update_user",
-        method: "patch",
-        path: "/api/v1/browser/users/{user_id}",
-        capability_id: "browser.user.update",
-        authenticated: true,
-        request: Some("UpdateBrowserUserRequest"),
-        response: Some("BrowserUserDto"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "deleteBrowserUser",
-        operation_id: "delete_user",
-        method: "delete",
-        path: "/api/v1/browser/users/{user_id}",
-        capability_id: "browser.user.delete",
-        authenticated: true,
-        request: Some("DeleteBrowserUserRequest"),
-        response: None,
-        retry: "never",
     },
 ];
 
@@ -1062,7 +996,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3"],
+            vec!["b0", "b1", "b2", "b3", "c1"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -1070,7 +1004,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3"],
+            vec!["b1", "b2", "b3", "c1"],
         ),
     ] {
         openapi
@@ -1221,13 +1155,6 @@ fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
             "production security scheme {name} must be HTTP bearer"
         );
     }
-    let browser = value_at(openapi, "/components/securitySchemes/browser_session")?;
-    ensure!(
-        string_at(browser, "/type")? == "apiKey"
-            && string_at(browser, "/in")? == "cookie"
-            && string_at(browser, "/name")? == "fasti_session",
-        "production browser_session security scheme must use the fasti_session cookie"
-    );
     Ok(())
 }
 
@@ -1248,15 +1175,10 @@ fn validate_production_operation_security(
         | "set_tracking_disposition"
         | "get_nuvio_collections"
         | "replace_nuvio_collections"
-        | "clear_nuvio_collections" => vec!["credential_bearer", "browser_session"],
+        | "clear_nuvio_collections" => vec!["credential_bearer"],
         "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
         | "plex_webhook" => vec!["credential_bearer"],
-        "read_session" | "end_session" | "list_users" | "update_user" | "delete_user" => {
-            vec!["browser_session"]
-        }
-        "create_session" | "enroll_first_client" | "health_check" | "integration_status" => {
-            Vec::new()
-        }
+        "enroll_first_client" | "health_check" | "integration_status" => Vec::new(),
         other => anyhow::bail!("unknown production operation {other}"),
     };
     if expected.is_empty() {
@@ -1288,22 +1210,25 @@ fn validate_production_operation_security(
     Ok(())
 }
 
-fn enrich_production_health_openapi(
+fn enrich_governed_success_operation_openapi(
     workspace_root: &Path,
     openapi: &mut Value,
     public_registry: &Value,
+    capability_id: &str,
+    path_pointer: &str,
+    example_id: &str,
 ) -> anyhow::Result<()> {
     let capability = array_at(public_registry, "/capabilities")?
         .iter()
-        .find(|capability| string_at(capability, "/id").ok() == Some("system.health"))
-        .context("public registry omits system.health")?;
+        .find(|capability| string_at(capability, "/id").ok() == Some(capability_id))
+        .with_context(|| format!("public registry omits {capability_id}"))?;
     let operation = openapi
-        .pointer_mut("/paths/~1api~1v1~1health/get")
+        .pointer_mut(path_pointer)
         .and_then(Value::as_object_mut)
-        .context("production OpenAPI omits GET /api/v1/health")?;
+        .with_context(|| format!("production OpenAPI omits operation at {path_pointer}"))?;
     operation.insert(
         "x-fasti-capability-id".to_owned(),
-        Value::String("system.health".to_owned()),
+        Value::String(capability_id.to_owned()),
     );
     operation.insert(
         "x-fasti-required-scopes".to_owned(),
@@ -1327,13 +1252,13 @@ fn enrich_production_health_openapi(
         Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
     );
     ensure!(
-        example_ids.len() == 1 && example_ids[0].as_str() == Some("system.health.success"),
-        "production health must own exactly the governed health success example"
+        example_ids.len() == 1 && example_ids[0].as_str() == Some(example_id),
+        "production {capability_id} must own exactly the governed {example_id} example"
     );
-    let example = load_governed_example(workspace_root, "system.health.success", &Value::Null)?;
+    let example = load_governed_example(workspace_root, example_id, &Value::Null)?;
     ensure!(
         example.media_type == "application/json",
-        "system.health.success must be an application/json example"
+        "{example_id} must be an application/json example"
     );
     let media = operation
         .get_mut("responses")
@@ -1343,14 +1268,31 @@ fn enrich_production_health_openapi(
         .and_then(Value::as_object_mut)
         .and_then(|content| content.get_mut("application/json"))
         .and_then(Value::as_object_mut)
-        .context("production health 200 response omits application/json")?;
+        .with_context(|| {
+            format!("production {capability_id} 200 response omits application/json")
+        })?;
     media.insert(
         "examples".to_owned(),
         serde_json::json!({
-            "system.health.success": { "value": example.payload }
+            example_id: { "value": example.payload }
         }),
     );
     Ok(())
+}
+
+fn enrich_production_health_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    enrich_governed_success_operation_openapi(
+        workspace_root,
+        openapi,
+        public_registry,
+        "system.health",
+        "/paths/~1api~1v1~1health/get",
+        "system.health.success",
+    )
 }
 
 /// Enriches GET /api/v1/integrations directly, bypassing the generic
@@ -1363,65 +1305,14 @@ fn enrich_production_integration_status_openapi(
     openapi: &mut Value,
     public_registry: &Value,
 ) -> anyhow::Result<()> {
-    let capability = array_at(public_registry, "/capabilities")?
-        .iter()
-        .find(|capability| string_at(capability, "/id").ok() == Some("integration.status"))
-        .context("public registry omits integration.status")?;
-    let operation = openapi
-        .pointer_mut("/paths/~1api~1v1~1integrations/get")
-        .and_then(Value::as_object_mut)
-        .context("production OpenAPI omits GET /api/v1/integrations")?;
-    operation.insert(
-        "x-fasti-capability-id".to_owned(),
-        Value::String("integration.status".to_owned()),
-    );
-    operation.insert(
-        "x-fasti-required-scopes".to_owned(),
-        Value::Array(array_at(capability, "/scopes")?.clone()),
-    );
-    operation.insert(
-        "x-fasti-authorization".to_owned(),
-        Value::String(string_at(capability, "/authorization")?.to_owned()),
-    );
-    operation.insert(
-        "x-fasti-problem-codes".to_owned(),
-        Value::Array(array_at(capability, "/problems")?.clone()),
-    );
-    let example_ids = array_at(capability, "/examples")?.clone();
-    operation.insert(
-        "x-fasti-example-ids".to_owned(),
-        Value::Array(example_ids.clone()),
-    );
-    operation.insert(
-        "x-fasti-runtime-availability".to_owned(),
-        Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
-    );
-    ensure!(
-        example_ids.len() == 1 && example_ids[0].as_str() == Some("integration.status.success"),
-        "production integration status must own exactly the governed status success example"
-    );
-    let example =
-        load_governed_example(workspace_root, "integration.status.success", &Value::Null)?;
-    ensure!(
-        example.media_type == "application/json",
-        "integration.status.success must be an application/json example"
-    );
-    let media = operation
-        .get_mut("responses")
-        .and_then(Value::as_object_mut)
-        .and_then(|responses| responses.get_mut("200"))
-        .and_then(|response| response.get_mut("content"))
-        .and_then(Value::as_object_mut)
-        .and_then(|content| content.get_mut("application/json"))
-        .and_then(Value::as_object_mut)
-        .context("production integration status 200 response omits application/json")?;
-    media.insert(
-        "examples".to_owned(),
-        serde_json::json!({
-            "integration.status.success": { "value": example.payload }
-        }),
-    );
-    Ok(())
+    enrich_governed_success_operation_openapi(
+        workspace_root,
+        openapi,
+        public_registry,
+        "integration.status",
+        "/paths/~1api~1v1~1integrations/get",
+        "integration.status.success",
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2271,12 +2162,6 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "SetTrackingDispositionRequest",
         "TrackingDispositionStateDto",
         "ListTrackingDispositionsResponse",
-        "CreateBrowserSessionRequest",
-        "BrowserUserDto",
-        "BrowserSessionResponse",
-        "ListBrowserUsersResponse",
-        "UpdateBrowserUserRequest",
-        "DeleteBrowserUserRequest",
         "NuvioCollectionsStateDto",
     ] {
         let schema = schemas
@@ -2417,15 +2302,6 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "parseListTrackingDispositionsResponse",
             "ListTrackingDispositionsResponse",
         ),
-        (
-            "parseCreateBrowserSessionRequest",
-            "CreateBrowserSessionRequest",
-        ),
-        ("parseBrowserUserDto", "BrowserUserDto"),
-        ("parseBrowserSessionResponse", "BrowserSessionResponse"),
-        ("parseListBrowserUsersResponse", "ListBrowserUsersResponse"),
-        ("parseUpdateBrowserUserRequest", "UpdateBrowserUserRequest"),
-        ("parseDeleteBrowserUserRequest", "DeleteBrowserUserRequest"),
         (
             "parseNuvioCollectionsDocumentDto",
             "NuvioCollectionsDocumentDto",

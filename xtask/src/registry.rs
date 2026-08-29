@@ -18,7 +18,7 @@ const EXPECTED_PROFILES: [&str; 12] = [
     "b1_receipt_stream",
     "b1_records",
     "b2_profile_state",
-    "b2_browser_auth",
+    "c1_browser_session_foundation",
     "health",
     "later_b2",
     "later_b3",
@@ -386,6 +386,7 @@ fn validate_capabilities(registry: &Registry) -> anyhow::Result<()> {
                 AuthorizationKind::Unauthenticated => requirement.is_unauthenticated(),
                 AuthorizationKind::BootstrapOnly => requirement.is_bootstrap_only(),
                 AuthorizationKind::LocalOperator => requirement.is_local_operator(),
+                AuthorizationKind::BrowserSession => requirement.is_browser_session(),
                 AuthorizationKind::Scoped => {
                     !requirement.is_unauthenticated()
                         && !requirement.is_bootstrap_only()
@@ -623,14 +624,18 @@ const fn expected_surface_profile(key: CapabilityKey) -> &'static str {
         CapabilityKey::CreateBrowserSession
         | CapabilityKey::ReadBrowserSession
         | CapabilityKey::EndBrowserSession
-        | CapabilityKey::ListBrowserUsers
-        | CapabilityKey::UpdateBrowserUser
-        | CapabilityKey::DeleteBrowserUser => "b2_browser_auth",
+        | CapabilityKey::ListBrowserSessions
+        | CapabilityKey::RevokeBrowserSession
+        | CapabilityKey::RevokeOtherBrowserSessions
+        | CapabilityKey::RevokeAllBrowserSessions
+        | CapabilityKey::RotateBrowserSession
+        | CapabilityKey::SelectBrowserSessionProfile => "c1_browser_session_foundation",
         _ => match key.contract_body() {
             CapabilityBody::B1 => "b1_http_fixture",
             CapabilityBody::B2 => "later_b2",
             CapabilityBody::B3 => "later_b3",
             CapabilityBody::B0 => "health",
+            CapabilityBody::C1 => "c1_browser_session_foundation",
         },
     }
 }
@@ -641,6 +646,7 @@ const fn body_rank(body: CapabilityBody) -> u8 {
         CapabilityBody::B1 => 1,
         CapabilityBody::B2 => 2,
         CapabilityBody::B3 => 3,
+        CapabilityBody::C1 => 4,
     }
 }
 

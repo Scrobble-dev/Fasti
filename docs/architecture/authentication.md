@@ -4,7 +4,7 @@ Fasti has several credential types. They are not interchangeable. The access
 bounded context owns client credentials and authorization. Presentation code
 can request a host capability, but it does not invent a sign-in protocol.
 
-## Implemented credentials
+## Active non-human credentials
 
 | Credential                             | Owner and purpose                                                                                   | Storage and disclosure                                                                                                                                                                        | Current UI                                                                                                                                     |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -20,46 +20,72 @@ have a user-defined name or expiry. Add those only as an access-domain contract
 change with migration, OpenAPI or IPC projection, SDK updates, and lifecycle
 tests. Do not add presentation-only fields.
 
-## Preserved sign-in methods
+None of these credentials authenticates a person or satisfies recent human
+authentication.
+
+## PR A dormant session foundation
+
+PR A defines the final Fasti `AuthSubject`, `FastiBrowserSession`,
+`BrowserSessionId`, and `SessionPolicy` ownership. It keeps the session model
+dormant. It mounts no production human-account, sign-in, session-issuance,
+inventory, or revocation route.
+
+The dormant model must use opaque random session secrets, digest-only storage,
+exact opaque public identifiers, idle and absolute expiry, rotation, bounded
+activity updates, Origin and Host validation, strict cross-site request
+forgery protection, and session-local selection of an existing authorized
+profile grant. Direct domain, application, and store fixtures can verify this
+model. They do not make browser authentication available.
+
+Production browser sessions remain `Unavailable until C1`. C1 must prove the
+pinned TrailBase exchange, durable TrailBase anchor, membership and role
+authorization, administrator continuity, browser binding, session issuance,
+refresh-session cleanup, and exact-head negative controls.
+
+## Required sign-in methods
 
 The Workbench keeps the planned methods visible so future work does not erase
-the approved interface. Only **API Credential** accepts input now. The other
-tabs state the missing host contract and do not generate placeholder secrets.
+the approved interface. Each unavailable control states its owning package and
+next action. It does not generate or store placeholder security state.
 
-| Method          | Required owner and completion evidence                                                                                                                                                                                                                                                                     |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Passkey         | Access-owned browser-session capability; registered WebAuthn relying party; server-issued registration and authentication challenges; origin binding; credential lifecycle and recovery; accessible-authentication, replay, cross-origin, and device-loss tests.                                           |
-| OIDC / SSO      | Access-owned browser-session capability; governed issuer and static client registration; state, nonce, and PKCE validation; consent and canonical Fasti scopes; refresh and revocation policy; redirect, issuer-confusion, and logout tests. Dynamic client registration remains off.                      |
-| NuvioTV Device  | Access-owned device-authorization capability; server-issued device and user codes; separate browser approval; bounded expiry; polling interval and backoff; client scopes and revocation; denial, expiry, replay, and polling tests.                                                                       |
-| Master Password | Access-owned browser-session capability; password hashing and upgrade policy; rate limits; CSRF protection; recent-authentication and recovery policy; breached-password and lockout disposition; accessible authentication without cognitive tests. A raw password must never be sent to the Records API. |
+| Method | Owner and activation gate |
+| --- | --- |
+| TrailBase password, registration, verification, reset, social sign-in, and supported TOTP | TrailBase in B, then Fasti exchange in C1. Fasti does not store the human password or TOTP secret. |
+| Fasti browser session | Fasti Access. Dormant in A; production issuance, inventory, rotation, and revocation activate only after C1. |
+| Passkey and Fasti recovery code | Fasti Access in D, linked to `AuthSubject` with a verified WebAuthn ceremony and active TrailBase-anchor check. |
+| Generic OpenID Connect and Authentik sign-in | Identity Integration in E1/E3. Require discovery, state, nonce, S256 Proof Key for Code Exchange, exact issuer and subject, token validation, linking policy, and logout evidence. |
+| Fasti OAuth and Nuvio or command-line device approval | Fasti Access in E2. Require approved clients, scopes, profile consent, bounded codes, polling, rotation, revocation, and replay tests. |
 
-These are owned B4 access and presentation TODOs. A method becomes active only
+These methods are approved MVP work. A method becomes active only
 when its backend capability, host adapter, typed problem recovery, generated
 client surface, threat review, and end-to-end tests land together. A Svelte-only
 implementation is a regression.
 
-## Identity issuer evaluation
+## Selected identity architecture
 
-[ADR-0005](adr-0005-framework-and-auth-adoption.md) controls framework and
-identity-provider adoption.
+[ADR-0005](adr-0005-framework-and-auth-adoption.md) records the earlier
+framework evaluation. Its optional TrailBase and django-allauth conclusions
+are superseded by the approved
+[TrailBase authentication programme](../plans/trailbase-authentication-remediation.md).
 
-TrailBase is a candidate identity issuer. It is not an accepted replacement for
-the implemented local credentials yet. A TrailBase adapter may authenticate a
-human subject and mint short-lived access tokens. Fasti still owns workspaces,
-profiles, roles, client grants, capability scopes, object authorization, audit,
-and Chronicle state.
+TrailBase is the selected private, local human-account platform. It runs as a
+separate, pinned, unmodified process with a separate data root. Fasti uses only
+documented public TrailBase APIs. TrailBase owns only proven human-account
+functions. Fasti owns `AuthSubject`, browser sessions, workspaces, memberships,
+roles, profiles, grants, scopes, clients, devices, passkeys, recovery codes,
+authorization, audit, and Chronicle state.
 
-The durable identity key is `issuer + subject`. Fasti must not store a
-TrailBase database row ID as its own user identity. Fasti must not read or write
-TrailBase tables directly. TrailBase tokens do not authorize a Fasti operation
-until the access application service checks the current local grants.
+Fasti assigns one stable `TrailBaseInstanceId` to the installation and links it
+to the proven TrailBase subject. Fasti must not use a TrailBase database row ID
+as its identity, read or write TrailBase tables, or use TrailBase Record APIs
+for Fasti data. TrailBase proof does not authorize a Fasti operation until the
+application service checks current subject, membership, role, profile grant,
+scope, and epoch state.
 
-Do not remove the current local account path during the evaluation. The
-TrailBase spike must prove migration, rollback, package operation, network-denied
-local access, token-expiry behavior, backup/restore boundaries, and memory limits
-before any default changes. Do not claim passkeys, multi-factor authentication,
-or TV device authorization from TrailBase unless the selected release documents
-and passes those flows.
+The superseded local `BrowserUser`, password, development account, custom TOTP,
+backup-code, WebAuthn-shaped, and fabricated OpenID Connect paths are not a
+compatibility surface. Keep useful user controls visible as truthful
+unavailable states until their approved owner passes its package gate.
 
 ## Contract disposition
 
@@ -68,18 +94,23 @@ and passes those flows.
 - The authenticated receipt stream remains owned by AsyncAPI and requires its
   documented `receipt_read` bearer scope.
 - Credentials and browser sessions are security state, not linked-data domain
-  entities. JSON-LD is not applicable unless a future public domain vocabulary
-  genuinely needs a non-secret authorization concept.
+  entities. `JSON-LD: N/A — security state, no public semantic entity`.
+- PR A adds no externally visible asynchronous authentication event.
+  `AsyncAPI: N/A — synchronous dormant state with no event channel`.
+- PR A adds no public command-line authentication operation.
+  `Public CLI: N/A — direct deterministic fixtures only; activation belongs to C1`.
 - Tauri administrator and provider-secret commands are local IPC. They do not
   create an undocumented HTTP or AsyncAPI surface.
-- ADR-0005 and the TrailBase evaluation change no current route, event, schema,
-  SDK method, CLI command, or permission. OpenAPI and AsyncAPI remain unchanged.
+- C1 and later packages must update each applicable OpenAPI, SDK, permission,
+  typed problem, command-line, and documentation surface with the behavior.
 
 ## Compatibility reference
 
-The boundary was checked against the local `origin/vendor/floppy-pr-791`
-snapshot at `a50c9d98`. Its useful invariant is the separation between browser
-sessions, scoped integration tokens, first-party headless sessions, and OIDC
-delegated tokens. Fasti reuses that boundary, not Floppy's Django/allauth
-implementation. Fasti keeps one access-domain scope vocabulary and its own
-local-first storage and host adapters.
+The boundary was checked against the historical local
+`origin/vendor/floppy-pr-791` snapshot at `a50c9d98`. Its useful invariant is
+the separation between browser sessions, scoped integration tokens,
+first-party headless sessions, and OpenID Connect delegated tokens. The former
+Django/allauth choice is `SUPERSEDED`; it is behavioral context, not an
+implementation dependency or compatibility requirement. Fasti keeps one
+Access scope vocabulary and its own local-first authorization, storage, and
+host adapters.

@@ -261,12 +261,19 @@ impl AuthorizationRequirement {
         matches!(self.kind, AuthorizationKind::LocalOperator)
     }
 
+    /// Return true when the adapter must validate an opaque Fasti browser
+    /// session and its current subject and authorization epochs.
+    pub const fn is_browser_session(&self) -> bool {
+        matches!(self.kind, AuthorizationKind::BrowserSession)
+    }
+
     pub const fn required_scopes(&self) -> &'static [ScopeKey] {
         match self.kind {
             AuthorizationKind::Scoped => self.capability.required_scopes(),
             AuthorizationKind::Unauthenticated
             | AuthorizationKind::BootstrapOnly
-            | AuthorizationKind::LocalOperator => &[],
+            | AuthorizationKind::LocalOperator
+            | AuthorizationKind::BrowserSession => &[],
         }
     }
 }
@@ -308,6 +315,10 @@ pub fn authorize(
         // data root and its exclusive lock. No credential/grant snapshot can
         // be promoted into that proof by this ordinary request evaluator.
         AuthorizationKind::LocalOperator => false,
+        // Browser-session authority is proved by the Access store against the
+        // digest, CSRF value, expiry, revocation, and current subject epochs.
+        // A client credential snapshot cannot satisfy it.
+        AuthorizationKind::BrowserSession => false,
         AuthorizationKind::Scoped => {
             let required_scopes = requirement.capability.required_scopes();
             match (

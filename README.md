@@ -92,9 +92,9 @@ This runs `fastid` and the web UI together, in one container, on one URL. Use th
    podman run --rm --user 0:0 --volume fasti-data:/data fasti:local chown fasti:fasti /data
    ```
 
-4. Start the container. `FASTI_DEVELOPMENT_TEST_ACCOUNT=true` gives you a
-   real account to sign in with right away. Remove it once you set up your
-   own account; it works only over loopback, never on a public listener.
+4. Start the container. PR A does not provide a human account or browser
+   sign-in path. TrailBase integration and Fasti browser-session activation
+   remain unavailable until C1.
 
    ```bash
    podman run --detach --name fasti \
@@ -102,13 +102,12 @@ This runs `fastid` and the web UI together, in one container, on one URL. Use th
      --volume fasti-data:/data \
      --env FASTI_DATA_ROOT=/data \
      --env FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
-     --env FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
      fasti:local
    ```
 
-5. Open [http://127.0.0.1:8420](http://127.0.0.1:8420) in your browser and
-   sign in with username `testadmin`, password `testadmin`. This is the
-   whole product: the UI and the API, on one URL.
+5. Open [http://127.0.0.1:8420](http://127.0.0.1:8420) in your browser. The
+   review UI and active API surfaces share one URL. Account and security must
+   show the persistent unavailable state until C1 activates real sign-in.
 
 **To stop it:** `podman stop fasti`. **To start it again:** `podman start fasti` (skip step 4 -- the container already exists).
 
@@ -128,7 +127,7 @@ Fasti has no playback engine and no transcoding or decoding responsibility. Play
 
 ## Current status
 
-This repository is an engineering baseline, not a supported public release. No published container, package, desktop application, import adapter, replication service, or supported installation exists yet. With an explicit data root, the production daemon mounts durable bootstrap, browser-session, observation, identity-record, and profile-state routes for direct loopback or an explicitly declared loopback-only container port forward. It can mount the authenticated non-bootstrap subset on a non-loopback listener only behind an explicitly trusted HTTPS proxy. The pre-production Workbench uses those real browser-session and data surfaces; it is not deployed or a supported product release. Identity review and B3 correction/portability paths remain staged behind internal application ports for review. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
+This repository is an engineering baseline, not a supported public release. No published container, package, desktop application, import adapter, replication service, or supported installation exists yet. With an explicit data root, the production daemon mounts durable bootstrap, observation, identity-record, and profile-state routes for direct loopback or an explicitly declared loopback-only container port forward. It can mount the authenticated non-bootstrap subset on a non-loopback listener only behind an explicitly trusted HTTPS proxy. Those active routes use scoped bearer client credentials. PR A keeps the Fasti browser-session model dormant and mounts no production human-account or browser-session route. The pre-production Workbench uses the active data surfaces and shows account access as unavailable until C1. It is not deployed or a supported product release. Identity review and B3 correction/portability paths remain staged behind internal application ports for review. B1 remains open until all exact-head evidence is assembled and the milestone verifier passes.
 
 The production daemon deliberately exposes only behavior it can prove:
 
@@ -136,16 +135,16 @@ The production daemon deliberately exposes only behavior it can prove:
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/v1/health`                                                                                | Implemented in `fastid` and described by the production OpenAPI document                                                                                |
 | One-time node initialization/enrollment                                                             | Durable production routes require `FASTI_DATA_ROOT` and direct loopback or an explicit loopback-only container port forward; one-time secrets remain in JSON bodies |
-| Browser sessions and user administration                                                            | Durable local and explicitly trusted-proxy remote routes; browser sessions stay separate from scoped bearer integration credentials                     |
+| Human accounts and browser sessions                                                                  | Dormant PR A foundation only; production sign-in, issuance, inventory, and revocation are unavailable until C1                                           |
 | B1 conformance HTTP and SSE                                                                         | Executable only in the feature-gated, loopback-only conformance server; all fixture successes declare `fixture_only` availability and `none` durability |
-| `POST /api/v1/observations`                                                                         | Durable production route authorized by a scoped bearer credential or browser session                                                                    |
-| Records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable production routes authorized by a scoped bearer credential or browser session                                                                   |
+| `POST /api/v1/observations`                                                                         | Durable production route authorized by a scoped bearer client credential                                                                                |
+| Records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable production routes authorized by scoped bearer client credentials                                                                                |
 | B2 local kernel                                                                                     | Constructed by `fastid` for durable local setup; evidence, receipt, and identity review operations remain internal                                      |
 | B3 correction and portability                                                                       | Implemented behind application ports and Linux SQLite/filesystem adapters for review; not mounted by `fastid` or `fasti` and not a release claim        |
 | `POST /api/v1/events`                                                                               | Absent from production; returns `404` until the B2 public contract and delivery adapter are activated together                                          |
 | `fasti capability list/show`                                                                        | Reads the generated public capability registry locally; it does not activate later-body runtime behavior                                                |
 | `fasti export`, `restore`, and `verify`                                                             | Reserved for B3; exit nonzero and change no data                                                                                                        |
-| Browser Workbench                                                                                   | Pre-production Tabler UI over implemented browser-session and data surfaces; not a supported installation or release                                    |
+| Browser Workbench                                                                                   | Pre-production Tabler UI over active data surfaces; account and session controls remain unavailable until C1; not a supported installation or release   |
 | Desktop interface                                                                                   | Trusted-host review candidate only; unavailable commands remain disabled and B8 still owns supported packaging and release evidence                     |
 | Public images and binaries                                                                          | Disabled until the B8 readiness gate and an explicit release action                                                                                     |
 
@@ -156,7 +155,7 @@ TMDB credentials and return bounded neutral search candidates. Provider search
 is local Tauri IPC, not a daemon HTTP route. The browser does not accept secrets
 or execute provider requests. See [network configuration](docs/network-configuration.md#provider-network-policy).
 
-The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, review state, and durable receipts behind application ports. Node initialization and first-client enrollment remain limited to direct loopback or an explicitly declared loopback-only container port forward. Observation acceptance, browser account sessions, identity records, identifiers, namespaces, profile tracking disposition, and profile-scoped Nuvio custom Collections configuration are available through the production composition root. The remaining paths (evidence, receipts, identity review) are exercised by the Rust suites but stay unavailable through production HTTP. Their problems stay staged until the owning public surfaces are activated.
+The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, review state, and durable receipts behind application ports. Node initialization and first-client enrollment remain limited to direct loopback or an explicitly declared loopback-only container port forward. Observation acceptance, identity records, identifiers, namespaces, profile tracking disposition, and profile-scoped Nuvio custom Collections configuration are available through the production composition root with scoped bearer client credentials. The PR A browser-session foundation remains dormant. The remaining paths (human accounts and sessions, evidence, receipts, and identity review) stay unavailable through production HTTP until their owning package activates them. Their problems stay staged until the owning public surfaces are activated.
 
 ## Constitution
 
@@ -196,7 +195,7 @@ packages/ui          pre-production Tabler Workbench; presentation only, with no
 xtask                deterministic generation and fail-closed verification
 ```
 
-Player, replication, connector, and provider-keyed projection packages are not active workspace boundaries. The browser Workbench consumes generated production contracts but does not own domain rules or authorize a supported release. The B4 presentation and desktop packages are review candidates, not supported packages. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. Browser sessions adapt the existing profile/client/grant authorization state instead of creating a second rule set.
+Player, replication, connector, and provider-keyed projection packages are not active workspace boundaries. The browser Workbench consumes generated production contracts but does not own domain rules or authorize a supported release. The B4 presentation and desktop packages are review candidates, not supported packages. The retired core, activity, and auth scaffolds are also gone; their unsafe or duplicate models did not become compatibility aliases. The dormant Fasti browser-session model reuses the existing profile, client, and grant authorization state instead of creating a second rule set. C1 owns production activation.
 
 Native `fastid` binds to `127.0.0.1:8420` by default. Set `FASTI_LISTEN` to an explicit `IP:PORT` value when another listener is required. Port collisions fail closed by default. With `FASTI_PORT_FALLBACK=auto`, an occupied loopback port can recover to an OS-assigned port; public and wildcard listeners always fail closed. The local OCI image sets `FASTI_LISTEN=0.0.0.0:8420` so an operator can publish the container port deliberately. See [network configuration](docs/network-configuration.md) for custom domains, `.internal`, system CA trust, public URLs, loopback aliases, Docker, Podman, and collision behavior.
 
@@ -255,9 +254,9 @@ FASTI_DATA_ROOT=/path/to/private/fasti-data \
 cargo run --locked -p fastid
 ```
 
-The production OpenAPI document defines the initialization and enrollment requests. The TypeScript SDK exposes them as `initializeDurableNode` and `enrollDurableFirstClient`. Keep the returned proof and credential out of logs, URLs, shell history, and browser storage. Development browser accounts are disabled by default. `FASTI_DEVELOPMENT_TEST_ACCOUNT=true` creates the one-time `testadmin` / `testadmin` account only on a loopback durable listener; `fastid` rejects that setting on a remote listener. The seed is not recreated after an account rename or deletion. Fasti rejects browser-account or credential changes that would leave no active administrator with current browser-user management access. Stop the daemon with `Ctrl-C`. The same bind activates observation acceptance, browser sessions, identity records/identifiers/namespaces, and profile tracking disposition; it does not activate identity review, portability, installation, or release readiness.
+The production OpenAPI document defines the initialization and enrollment requests. The TypeScript SDK exposes them as `initializeDurableNode` and `enrollDurableFirstClient`. Keep the returned proof and credential out of logs, URLs, shell history, and browser storage. PR A has no development browser account or local password path. Stop the daemon with `Ctrl-C`. The same bind activates observation acceptance, identity records, identifiers, namespaces, and profile tracking disposition; it does not activate human sign-in, browser sessions, identity review, portability, installation, or release readiness.
 
-The local container launcher uses a wildcard inner listener with an explicit loopback-only `FASTI_EXTERNAL_BIND_IP` assertion. Remote development instead uses the authenticated non-bootstrap router and requires an explicit data root, `FASTI_REMOTE_TRUSTED_PROXY=true`, and an absolute HTTPS `FASTI_PUBLIC_URL`. Every build keeps the development test account disabled unless a loopback listener explicitly enables it. See [network configuration](docs/network-configuration.md) for the exact boundaries and proxy requirements.
+The local container launcher uses a wildcard inner listener with an explicit loopback-only `FASTI_EXTERNAL_BIND_IP` assertion. Remote development instead uses the authenticated non-bootstrap router and requires an explicit data root, `FASTI_REMOTE_TRUSTED_PROXY=true`, and an absolute HTTPS `FASTI_PUBLIC_URL`. PR A exposes no human-account substitute on either listener. See [network configuration](docs/network-configuration.md) for the exact boundaries and proxy requirements.
 
 The scoped launcher supplies its private data root in native and container modes. It refuses to report success unless both health and the real durable router are present:
 
@@ -284,7 +283,7 @@ pnpm install --frozen-lockfile
 pnpm dev:web
 ```
 
-Open `http://127.0.0.1:5173/?surface=workbench`. If the loopback daemon started with `FASTI_DEVELOPMENT_TEST_ACCOUNT=true`, sign in with `testadmin` / `testadmin`, then rename the account and change its password. Fasti will not apply an account or credential change that removes the last active administrator that can manage browser users. The Vite-only proxy forwards `/api` to the default loopback daemon at `127.0.0.1:8420`. It is test tooling, not the owner of custom-domain, certificate, container, Tauri, or runtime listener configuration. See the [browser harness QA evidence](docs/qa/b4-truthful-shell-evidence.md) for the test scope and release limits.
+Open `http://127.0.0.1:5173/?surface=workbench`. The Workbench shows the Account and security structure, but human sign-in and browser-session controls remain unavailable until C1. The Vite-only proxy forwards `/api` to the default loopback daemon at `127.0.0.1:8420`. It is test tooling, not the owner of custom-domain, certificate, container, Tauri, identity, or runtime listener configuration. See the [browser harness QA evidence](docs/qa/b4-truthful-shell-evidence.md) for the test scope and release limits.
 
 To inspect the governed public capability identifiers without starting a service:
 
@@ -346,7 +345,7 @@ The local image contains `fastid` and `fasti`, runs as the non-root `fasti` user
 
 The approved [brand and design system](brand/DESIGN.md) is a protected input. B0 preserves its tokens, logos, boards, preview assets, accessibility rules, and ADHD/AuDHD state-continuity requirements byte-for-byte.
 
-The pre-production Workbench is the active B4 interface over the headless contract and local kernel. It provides media-first navigation, poster and row views, a Tabler vertical navbar with narrow-screen offcanvas navigation, browser account access, global record and navigation search, implemented data reads, configurable grouped record actions, profile-owned tracking disposition, profile-scoped Nuvio custom Collections import/export, and a Tabler-based theme panel governed by Fasti tokens. Unsupported completion, progress, watchlist, collection membership, review, and tag mutations remain visibly unavailable instead of reporting prototype success. There is no playback control and no persistent “offline ready” badge.
+The pre-production Workbench is the active B4 interface over the headless contract and local kernel. It provides media-first navigation, poster and row views, a Tabler vertical navbar with narrow-screen offcanvas navigation, a truthful unavailable Account and security structure, global record and navigation search, implemented data reads, configurable grouped record actions, profile-owned tracking disposition, profile-scoped Nuvio custom Collections import/export, and a Tabler-based theme panel governed by Fasti tokens. Unsupported account access, completion, progress, watchlist, collection membership, review, and tag mutations remain visibly unavailable instead of reporting prototype success. There is no playback control and no persistent “offline ready” badge.
 
 ## Relationship to Scrobble.dev
 
@@ -356,9 +355,9 @@ The pre-production Workbench is the active B4 interface over the headless contra
 
 - **B0: Controlling baseline** — remove false claims and public publishing paths; keep native and OCI builds honest.
 - **B1: Executable contract spine** — software surfaces are executable and drift-proof; closure still requires a current aggregate manifest with QA, Tauri, and same-attempt x86_64/aarch64 envelope receipts.
-- **B2: Local kernel** — observation acceptance, browser sessions, identity records/identifiers/namespaces, profile tracking state, and profile-scoped Nuvio custom Collections configuration are activated on durable local and governed remote surfaces; bootstrap stays loopback-only; evidence, receipts, and identity review remain behind internal ports for review.
+- **B2: Local kernel** — observation acceptance, identity records/identifiers/namespaces, profile tracking state, and profile-scoped Nuvio custom Collections configuration are activated on durable local and governed remote surfaces; bootstrap stays loopback-only; browser sessions are dormant until C1; evidence, receipts, and identity review remain behind internal ports for review.
 - **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
-- **B4: Product experience** — the Tabler Workbench, browser-account lifecycle, global search, configurable record actions, profile-owned tracking disposition, Nuvio custom Collections file interchange, trusted-host Google Books/TMDB metadata selection and refresh, and bounded local poster delivery are active pre-production work; full release evidence remains open.
+- **B4: Product experience** — the Tabler Workbench, truthful unavailable Account and security structure, global search, configurable record actions, profile-owned tracking disposition, Nuvio custom Collections file interchange, trusted-host Google Books/TMDB metadata selection and refresh, and bounded local poster delivery are active pre-production work; C1 owns browser-account activation and full release evidence remains open.
 - **B5 and later** — implement provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
 
 Nuvio tracking, pairing, and synchronization remain behind the B7 provider gate, applicable B8 evidence, and maintainer agreement. The B2 custom Collections file interchange is profile catalog configuration only; it does not create a Nuvio client, use Nuvio provider identifiers as Fasti identity, or activate tracking sync. See [ROADMAP.md](ROADMAP.md) for the dependency order.

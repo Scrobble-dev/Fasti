@@ -15,9 +15,9 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Native `fastid` binds to `127.0.0.1:8420` unless `FASTI_LISTEN` is set to an explicit `IP:PORT` value. Automatic collision recovery stays on the requested loopback address. It never moves a public or wildcard listener.
 - Client and public origins reject credentials, paths, queries, and fragments. Non-loopback origins require HTTPS and platform certificate validation.
 - Non-loopback durable routes require an explicit data root, `FASTI_REMOTE_TRUSTED_PROXY=true`, and an absolute HTTPS `FASTI_PUBLIC_URL`. Remote bootstrap routes remain absent.
-- Browser passwords use Argon2 hashes. Authentication performs dummy password work for unknown users and applies persistent per-account lockout after repeated failures.
-- Browser sessions are opaque digests in SQLite. The session cookie is `HttpOnly` and `SameSite=Strict`; remote cookies are also `Secure`. Browser mutations require the matching strict CSRF cookie and `X-Fasti-CSRF` header. Account changes require the current password and invalidate affected sessions.
-- The one-time development account is disabled by default and explicitly marked as test data when enabled. `FASTI_DEVELOPMENT_TEST_ACCOUNT=true` is accepted only on a loopback durable listener; remote listeners reject it. Rename and deletion survive restart and never trigger recreation. Fasti rejects browser-account or credential changes that would leave a workspace without an active administrator with current browser-user management access.
+- PR A keeps only a dormant Fasti browser-session foundation. It does not expose production human-account, sign-in, session-issuance, inventory, or revocation routes. The earlier PR #93 `BrowserUser`, local password, development account, custom TOTP, WebAuthn-shaped, backup-code, and fabricated OpenID Connect paths are superseded and cannot be used as security controls.
+- The dormant session design requires an opaque random secret, digest-only storage, an exact opaque public session identifier, idle and absolute expiry, rotation, bounded activity updates, Origin and Host checks, strict cross-site request forgery protection, and session-local selection of an existing authorized profile grant. These are PR A implementation and test obligations, not proof of an active production session.
+- Production browser authentication remains `Unavailable` until C1 proves TrailBase exchange, the durable TrailBase anchor, membership and role authorization, administrator continuity, session issuance, and exact-head negative controls. TrailBase runs as a separate pinned service and never authorizes a Fasti operation without Fasti application authorization.
 - The local OCI image deliberately binds to `0.0.0.0:8420`, runs as the non-root `fasti` user, and requires the operator to publish a host port. Durable routes remain disabled unless a detected container boundary and `FASTI_EXTERNAL_BIND_IP` explicitly establish the outer loopback-only port forward. Native wildcard listeners cannot replay that assertion.
 - Repository automation has read-only contents permission and cannot log in to GHCR, push images or attestations, publish packages, or create GitHub Releases.
 - The event-submission route is absent rather than returning an unauthenticated false committed receipt.
@@ -31,7 +31,7 @@ The project will acknowledge and investigate reports as maintainer availability 
 - Durable setup publishes `already_initialized`, `bootstrap_closed`, `integrity_failed`, and `storage_unavailable`. Authentication, cursor, evidence, identity, and review failures remain staged until their public routes activate.
 - `cargo-deny` (`deny.toml`) gates the main workspace's dependency licenses, advisories, and sources in CI; a documented allowlist keeps every dependency compatible with distributing Fasti under AGPL-3.0-or-later as a dependency, not a derivative.
 
-These controls make the development baseline and B2 review implementation safer. Durable local routes require an explicit data root and direct loopback or an explicitly declared loopback-only container port forward. The authenticated remote subset additionally requires explicit trusted-proxy and HTTPS-origin configuration. This does not make Fasti a supported service.
+These controls make the development baseline and B2 review implementation safer. Durable local routes require an explicit data root and direct loopback or an explicitly declared loopback-only container port forward. The authenticated remote subset excludes human-account and browser-session routes until C1 activates them with explicit trusted-proxy and HTTPS-origin evidence. This does not make Fasti a supported service.
 
 ## Temporary dependency exception
 
@@ -67,6 +67,8 @@ The system must fail closed when authorization, durability, limits, source ident
 
 B2-B8 must still prove, rather than merely document:
 
+- PR A's dormant session migration, deterministic fixtures, restart, expiry, rotation, fixation, exact identifier, Origin, Host, cross-site request forgery, concurrent revocation, and profile-isolation behavior without mounting a production browser-session route;
+- C1's pinned TrailBase exchange, trust root, account lifecycle, subject anchor, membership, administrator continuity, browser binding, production session issuance, refresh-session cleanup, outage behavior, and clone fencing before browser authentication becomes available;
 - first-client enrollment, closed bootstrap, rotation, revocation, expiry, current-epoch authorization, and profile isolation under process-crash, restart, concurrency, and supported physical-storage tests;
 - strict body, stream, byte, temporary-space, archive, and concurrency limits before expensive work;
 - streamed evidence hashing, same-filesystem durable promotion, orphan quotas, and safe cleanup;

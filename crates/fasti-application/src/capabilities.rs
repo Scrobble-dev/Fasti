@@ -8,6 +8,7 @@ pub enum CapabilityBody {
     B1,
     B2,
     B3,
+    C1,
 }
 
 impl CapabilityBody {
@@ -17,6 +18,7 @@ impl CapabilityBody {
             Self::B1 => "B1",
             Self::B2 => "B2",
             Self::B3 => "B3",
+            Self::C1 => "C1",
         }
     }
 }
@@ -43,6 +45,7 @@ pub enum AuthorizationKind {
     Unauthenticated,
     BootstrapOnly,
     LocalOperator,
+    BrowserSession,
     Scoped,
 }
 
@@ -248,14 +251,15 @@ define_capabilities!(
     ),
     (
         CreateBrowserSession,
-        B2,
-        B2,
+        C1,
+        C1,
         Finalized,
-        Implemented,
+        LaterBody,
         Unauthenticated,
         [],
         [
-            AuthenticationFailed,
+            CapabilityUnavailable,
+            Forbidden,
             IntegrityFailed,
             MalformedJson,
             PayloadTooLarge,
@@ -267,88 +271,153 @@ define_capabilities!(
     ),
     (
         ReadBrowserSession,
-        B2,
-        B2,
+        C1,
+        C1,
         Finalized,
-        Implemented,
-        Scoped,
+        LaterBody,
+        BrowserSession,
         [],
         [
-            AuthenticationFailed,
-            Forbidden,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
     ),
     (
         EndBrowserSession,
-        B2,
-        B2,
+        C1,
+        C1,
         Finalized,
-        Implemented,
-        Scoped,
+        LaterBody,
+        BrowserSession,
         [],
         [
-            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
     ),
     (
-        ListBrowserUsers,
-        B2,
-        B2,
+        ListBrowserSessions,
+        C1,
+        C1,
         Finalized,
-        Implemented,
-        Scoped,
-        [BrowserUserManage],
+        LaterBody,
+        BrowserSession,
+        [],
         [
-            AuthenticationFailed,
-            Forbidden,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
             IntegrityFailed,
+            SessionPolicyChanged,
             StorageUnavailable
         ],
         []
     ),
     (
-        UpdateBrowserUser,
-        B2,
-        B2,
+        RevokeBrowserSession,
+        C1,
+        C1,
         Finalized,
-        Implemented,
-        Scoped,
-        [BrowserUserManage],
+        LaterBody,
+        BrowserSession,
+        [],
         [
-            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
-            MalformedJson,
-            PayloadTooLarge,
+            SessionPolicyChanged,
             StorageUnavailable,
-            UnsupportedMediaType,
             ValidationFailed
         ],
         []
     ),
     (
-        DeleteBrowserUser,
-        B2,
-        B2,
+        RevokeOtherBrowserSessions,
+        C1,
+        C1,
         Finalized,
-        Implemented,
-        Scoped,
-        [BrowserUserManage],
+        LaterBody,
+        BrowserSession,
+        [],
         [
-            AuthenticationFailed,
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
             Forbidden,
             IntegrityFailed,
-            MalformedJson,
-            PayloadTooLarge,
+            SessionPolicyChanged,
             StorageUnavailable,
-            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        RevokeAllBrowserSessions,
+        C1,
+        C1,
+        Finalized,
+        LaterBody,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        RotateBrowserSession,
+        C1,
+        C1,
+        Finalized,
+        LaterBody,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        SelectBrowserSessionProfile,
+        C1,
+        C1,
+        Finalized,
+        LaterBody,
+        BrowserSession,
+        [],
+        [
+            BrowserSessionExpired,
+            BrowserSessionRevoked,
+            CapabilityUnavailable,
+            Forbidden,
+            IntegrityFailed,
+            SessionPolicyChanged,
+            StorageUnavailable,
             ValidationFailed
         ],
         []

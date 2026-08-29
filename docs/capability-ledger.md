@@ -18,13 +18,13 @@ Those commands report contract state. They do not activate later-body runtime be
 | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `system.health`                                                                                              | Implemented by the production daemon and its production OpenAPI document                                                                              |
 | `system.node.initialize` and `access.client.enroll`                                                          | Durable production routes with `FASTI_DATA_ROOT` and direct loopback or an explicit loopback-only port forward; also covered by the nondurable fixture |
-| Browser session and browser-user administration                                                              | Durable local and explicitly trusted-proxy remote routes; sessions remain separate from scoped bearer integration credentials                         |
-| `observation.accept`                                                                                         | Durable production HTTP route (`POST /api/v1/observations`), authorized by a scoped bearer credential or browser session                              |
+| PR A browser-session foundation                                                                              | Dormant domain, application, and store model only. Production identity, sign-in, session issuance, inventory, and revocation are `Unavailable until C1` |
+| `observation.accept`                                                                                         | Durable production HTTP route (`POST /api/v1/observations`), authorized by a scoped bearer client credential                                           |
 | Other B1 administration, receipt, and `receipt.stream` capabilities                                          | Executable only in the feature-gated loopback conformance fixture; state is bounded, in-memory, and nondurable                                        |
 | Identity records, identifiers, namespaces, profile tracking disposition, and Nuvio Collections configuration | Durable local and authenticated remote HTTP routes, covered by `cargo xtask contract verify`                                                          |
 | Identity review (inspect, defer, resume, resolve)                                                            | Implemented behind internal B2 ports for review; no production route exists                                                                           |
 | Corrections and portability                                                                                  | Implemented behind internal B3 ports for review; export, restore, and verify remain explicit nonzero CLI guards                                       |
-| Browser Workbench                                                                                            | Pre-production browser session and implemented data surfaces; not a supported installation or release                                                 |
+| Browser Workbench                                                                                            | Pre-production data surfaces. Human sign-in and Account and security controls must show one persistent unavailable state until C1                     |
 | Trusted desktop network settings and provider metadata                                                       | Local Tauri IPC search/read, bounded local artwork, and atomic Google Books/TMDB claim writes; no public mutation route or browser provider execution |
 | Product packaging and release behavior                                                                       | Later bodies; absent now                                                                                                                              |
 
@@ -32,7 +32,19 @@ The fixture separates contract proof from availability claims. Its finite routes
 
 Required surfaces are generated or validated from the registry across domain/application ownership, OpenAPI 3.1, AsyncAPI 3.x, JSON Schema 2020-12, JSON-LD 1.1, OKF, semantic examples, CLI, typed TypeScript HTTP/SSE SDK, knowledge, and package smoke. Reasoned `N/A` is explicit—for example, operational health has no event stream and access administration is not linked-data domain state.
 
-The browser Workbench consumes generated production DTO parsers and browser-session cookies. Its global search uses loaded records and valid navigation commands. Its shared, configurable record-action registry mutates only active host capabilities; unsupported completion, progress, watchlist, collection membership, review, and tag operations stay disabled. Profile tracking disposition and Nuvio custom Collections configuration use governed profile-state routes on web and the same application ports on Desktop. Collections import accepts the NuvioTV bare-array wire shape, normalizes it under fixed bounds, and stores one document per workspace/profile. It never fetches imported URLs. Integration clients continue to use separately revocable scoped bearer credentials. The local Vite proxy is QA tooling, not an endpoint-configuration authority. Browser account and profile configuration request/response operations are OpenAPI-owned; they do not add an AsyncAPI event channel or public JSON-LD identity.
+The browser Workbench consumes generated production DTO parsers for active data capabilities. It does not receive a production human-session cookie in PR A. Its global search uses loaded records and valid navigation commands. Its shared, configurable record-action registry mutates only active host capabilities; unsupported completion, progress, watchlist, collection membership, review, and tag operations stay disabled. Profile tracking disposition and Nuvio custom Collections configuration use governed profile-state routes on web and the same application ports on Desktop. Collections import accepts the NuvioTV bare-array wire shape, normalizes it under fixed bounds, and stores one document per workspace/profile. It never fetches imported URLs. Integration clients continue to use separately revocable scoped bearer credentials. The local Vite proxy is QA tooling, not an endpoint-configuration authority.
+
+PR A records these authentication contract dispositions:
+
+| Surface | Disposition |
+| --- | --- |
+| Production OpenAPI and SDK | No human-account or browser-session route. C1 owns activation and the public contract. |
+| AsyncAPI | `N/A — PR A exposes no externally visible asynchronous authentication event.` |
+| JSON-LD | `N/A — subjects, sessions, credentials, and tokens are security state, not public semantic entities.` |
+| Public CLI | `N/A — PR A uses direct deterministic domain, application, and store fixtures; C1 owns trusted identity bootstrap and activation commands.` |
+
+Reserved or dormant authentication identifiers do not authorize a route,
+session, fixture listener, success response, or UI success state.
 
 The trusted Tauri host can persist non-secret network preferences, test a
 configured Fasti service, store Google Books and TMDB credentials in the
@@ -45,7 +57,7 @@ claims to an existing Record. These mutations are not daemon HTTP routes. The
 additive Record read projection is generated into OpenAPI and the TypeScript
 SDK; AsyncAPI and JSON-LD remain not applicable to this local IPC body.
 
-`cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1. The mandatory headless QA and developer-experience gates also pass on this branch. Closure requires the exact-head aggregate manifest, including the governed Tauri package and same-workflow-attempt x86_64/aarch64 low-hardware envelope packages from one exact `dev` push. Until `cargo xtask test milestone --body B1` passes, B1 remains in progress and B2 is not authorized.
+`cargo xtask contract verify --locked` is the deterministic software gate. Its success receipt does not close B1 or PR A. Closure requires evidence bound to the exact reviewed head, including the applicable headless, developer-experience, Tauri, and same-workflow-attempt x86_64/aarch64 low-hardware packages. Until `cargo xtask test milestone --body B1` passes, B1 remains in progress and B2 is not authorized. Until the future Access body A gate passes, the dormant session foundation is not complete evidence.
 
 `cargo xtask test milestone --body B8b` is the fail-closed gate for public release readiness (checksums, SBOM, provenance, final security review, and release notes — see [B8b release readiness](architecture/b8b-release-readiness.md)). It stays unsatisfiable today: it requires a passing B8a manifest as a prerequisite, and B8a's own evidence formalization is not implemented; and it requires a `Pass` design review, which cannot be legitimately claimed until B4 (the UI) ships. Preparing this evidence does not activate release behavior — the table above still holds until B8's explicit, out-of-band publishing action.
 

@@ -1,547 +1,534 @@
-use crate::{ApplicationResult, CapabilityKey, RequestAccessContext, SecretMaterial};
+use crate::{ApplicationResult, SecretMaterial};
 use chrono::{DateTime, Utc};
-use fasti_domain::{BrowserUserId, RequestCorrelationId};
-
-const MIN_PASSWORD_BYTES: usize = 8;
-const MAX_PASSWORD_BYTES: usize = 128;
-const MIN_SESSION_MINUTES: u32 = 5;
-/// The default, general-purpose maximum browser session lifetime (24h).
-/// `CreateBrowserSessionCommand::try_new` also accepts a caller-supplied
-/// ceiling above the floor for opt-in, non-default deployments (currently
-/// only the loopback-gated `FASTI_DEVELOPMENT_AUTO_LOGIN` dev convenience);
-/// production callers should pass this constant.
-pub const MAX_SESSION_MINUTES: u32 = 24 * 60;
+use fasti_domain::{
+    AuthSubject, AuthSubjectId, BrowserSessionId, FastiBrowserSession, ProfileGrantId,
+    RequestCorrelationId, WorkspaceId,
+};
+use std::{collections::HashSet, error::Error, fmt, time::Duration};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BrowserAuthInputError;
+pub struct SessionPolicyInputError;
 
-impl std::fmt::Display for BrowserAuthInputError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("browser authentication input is invalid")
+impl fmt::Display for SessionPolicyInputError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(
+            "session policy durations must be positive whole seconds and internally ordered",
+        )
     }
 }
 
-impl std::error::Error for BrowserAuthInputError {}
+impl Error for SessionPolicyInputError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserRequestBoundaryError {
+    InvalidPolicy,
+    MissingOrigin,
+    MissingHost,
+    OriginMismatch,
+    HostMismatch,
+}
+
+impl fmt::Display for BrowserRequestBoundaryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::InvalidPolicy => "browser request boundary policy is invalid",
+            Self::MissingOrigin => "browser mutation is missing Origin",
+            Self::MissingHost => "browser mutation is missing Host",
+            Self::OriginMismatch => "browser mutation Origin is not allowed",
+            Self::HostMismatch => "browser mutation Host is not allowed",
+        })
+    }
+}
+
+impl Error for BrowserRequestBoundaryError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BrowserUsername(String);
+pub struct BrowserRequestBoundaryPolicy {
+    allowed_origin: String,
+    allowed_host: String,
+}
 
-impl BrowserUsername {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, BrowserAuthInputError> {
-        let value = value.into();
-        let valid = (3..=64).contains(&value.len())
-            && value
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValidatedBrowserRequestBoundary(());
+
+impl BrowserRequestBoundaryPolicy {
+    pub fn try_new(
+        allowed_origin: impl Into<String>,
+        allowed_host: impl Into<String>,
+    ) -> Result<Self, BrowserRequestBoundaryError> {
+        let allowed_origin = allowed_origin.into();
+        let allowed_host = allowed_host.into();
+        let authority = allowed_origin
+            .strip_prefix("https://")
+            .or_else(|| allowed_origin.strip_prefix("http://"));
+        if authority.is_none_or(|value| {
+            value.is_empty()
+                || value
+                    .bytes()
+                    .any(|byte| matches!(byte, b'/' | b'?' | b'#' | b',' | b'@'))
+        }) || allowed_origin
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace())
+            || allowed_host.is_empty()
+            || allowed_host
                 .bytes()
-                .next()
-                .is_some_and(|byte| byte.is_ascii_alphanumeric())
-            && value.bytes().all(|byte| {
-                byte.is_ascii_lowercase()
-                    || byte.is_ascii_digit()
-                    || matches!(byte, b'.' | b'-' | b'_')
-            });
-        valid.then_some(Self(value)).ok_or(BrowserAuthInputError)
+                .any(|byte| byte.is_ascii_whitespace() || byte == b',')
+            || !authority.is_some_and(|value| value.eq_ignore_ascii_case(&allowed_host))
+        {
+            return Err(BrowserRequestBoundaryError::InvalidPolicy);
+        }
+        Ok(Self {
+            allowed_origin,
+            allowed_host,
+        })
     }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// A bounded password that cannot be logged through `Debug` or cloned.
-pub struct BrowserPassword(Vec<u8>);
-
-impl BrowserPassword {
-    pub fn try_new(value: impl Into<String>) -> Result<Self, BrowserAuthInputError> {
-        let bytes = value.into().into_bytes();
-        let valid = (MIN_PASSWORD_BYTES..=MAX_PASSWORD_BYTES).contains(&bytes.len())
-            && !bytes.iter().any(u8::is_ascii_control);
-        valid.then_some(Self(bytes)).ok_or(BrowserAuthInputError)
-    }
-
-    pub fn expose_bytes(&self) -> &[u8] {
-        &self.0
+    pub fn validate(
+        &self,
+        origin: Option<&str>,
+        host: Option<&str>,
+    ) -> Result<ValidatedBrowserRequestBoundary, BrowserRequestBoundaryError> {
+        let origin = origin.ok_or(BrowserRequestBoundaryError::MissingOrigin)?;
+        let host = host.ok_or(BrowserRequestBoundaryError::MissingHost)?;
+        if !origin.eq_ignore_ascii_case(&self.allowed_origin) {
+            return Err(BrowserRequestBoundaryError::OriginMismatch);
+        }
+        if !host.eq_ignore_ascii_case(&self.allowed_host) {
+            return Err(BrowserRequestBoundaryError::HostMismatch);
+        }
+        Ok(ValidatedBrowserRequestBoundary(()))
     }
 }
 
-impl Drop for BrowserPassword {
-    fn drop(&mut self) {
-        self.0.fill(0);
+/// Governed browser-session timings.
+///
+/// PR A deliberately has no `Default`: the approved plan does not provide
+/// source-backed values. The configuration owner must supply the approved
+/// values before C1 can issue a production session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionPolicy {
+    browser_idle_timeout: Duration,
+    browser_absolute_lifetime: Duration,
+    remembered_browser_lifetime: Duration,
+    last_seen_write_interval: Duration,
+}
+
+impl SessionPolicy {
+    pub fn try_new(
+        browser_idle_timeout: Duration,
+        browser_absolute_lifetime: Duration,
+        remembered_browser_lifetime: Duration,
+        last_seen_write_interval: Duration,
+    ) -> Result<Self, SessionPolicyInputError> {
+        let durations = [
+            browser_idle_timeout,
+            browser_absolute_lifetime,
+            remembered_browser_lifetime,
+            last_seen_write_interval,
+        ];
+        if durations
+            .iter()
+            .any(|duration| duration.is_zero() || duration.subsec_nanos() != 0)
+            || browser_idle_timeout > browser_absolute_lifetime
+            || browser_absolute_lifetime > remembered_browser_lifetime
+            || last_seen_write_interval > browser_idle_timeout
+        {
+            return Err(SessionPolicyInputError);
+        }
+        Ok(Self {
+            browser_idle_timeout,
+            browser_absolute_lifetime,
+            remembered_browser_lifetime,
+            last_seen_write_interval,
+        })
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BrowserUserView {
-    user_id: BrowserUserId,
-    username: String,
-    is_admin: bool,
-    is_test_account: bool,
-    active: bool,
-    created_at: DateTime<Utc>,
-    updated_at: DateTime<Utc>,
-}
-
-impl BrowserUserView {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        user_id: BrowserUserId,
-        username: String,
-        is_admin: bool,
-        is_test_account: bool,
-        active: bool,
-        created_at: DateTime<Utc>,
-        updated_at: DateTime<Utc>,
-    ) -> Self {
-        Self {
-            user_id,
-            username,
-            is_admin,
-            is_test_account,
-            active,
-            created_at,
-            updated_at,
+    pub const fn browser_idle_timeout(self) -> Duration {
+        self.browser_idle_timeout
+    }
+    pub const fn browser_absolute_lifetime(self) -> Duration {
+        self.browser_absolute_lifetime
+    }
+    pub const fn remembered_browser_lifetime(self) -> Duration {
+        self.remembered_browser_lifetime
+    }
+    pub const fn last_seen_write_interval(self) -> Duration {
+        self.last_seen_write_interval
+    }
+    pub const fn absolute_lifetime(self, remembered: bool) -> Duration {
+        if remembered {
+            self.remembered_browser_lifetime
+        } else {
+            self.browser_absolute_lifetime
         }
     }
+}
 
-    pub const fn user_id(&self) -> BrowserUserId {
-        self.user_id
+pub struct CreateAuthSubjectCommand {
+    correlation_id: RequestCorrelationId,
+    subject: AuthSubject,
+}
+
+impl CreateAuthSubjectCommand {
+    pub const fn new(correlation_id: RequestCorrelationId, subject: AuthSubject) -> Self {
+        Self {
+            correlation_id,
+            subject,
+        }
     }
-    pub fn username(&self) -> &str {
-        &self.username
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
     }
-    pub const fn is_admin(&self) -> bool {
-        self.is_admin
-    }
-    pub const fn is_test_account(&self) -> bool {
-        self.is_test_account
-    }
-    pub const fn active(&self) -> bool {
-        self.active
-    }
-    pub const fn created_at(&self) -> DateTime<Utc> {
-        self.created_at
-    }
-    pub const fn updated_at(&self) -> DateTime<Utc> {
-        self.updated_at
+    pub const fn subject(&self) -> AuthSubject {
+        self.subject
     }
 }
 
 pub struct CreateBrowserSessionCommand {
     correlation_id: RequestCorrelationId,
-    username: BrowserUsername,
-    password: BrowserPassword,
-    lifetime_minutes: u32,
+    subject_id: AuthSubjectId,
+    workspace_id: WorkspaceId,
+    authorized_profile_grants: Vec<ProfileGrantId>,
+    selected_profile_grant_id: ProfileGrantId,
+    policy: SessionPolicy,
+    remembered: bool,
+    now: DateTime<Utc>,
 }
 
 impl CreateBrowserSessionCommand {
-    /// `max_lifetime_minutes` is the caller's ceiling for this request; pass
-    /// [`MAX_SESSION_MINUTES`] unless a deliberately relaxed, non-default
-    /// deployment ceiling applies (see its doc comment).
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         correlation_id: RequestCorrelationId,
-        username: BrowserUsername,
-        password: BrowserPassword,
-        lifetime_minutes: u32,
-        max_lifetime_minutes: u32,
-    ) -> Result<Self, BrowserAuthInputError> {
-        if max_lifetime_minutes < MIN_SESSION_MINUTES
-            || !(MIN_SESSION_MINUTES..=max_lifetime_minutes).contains(&lifetime_minutes)
+        subject_id: AuthSubjectId,
+        workspace_id: WorkspaceId,
+        authorized_profile_grants: Vec<ProfileGrantId>,
+        selected_profile_grant_id: ProfileGrantId,
+        policy: SessionPolicy,
+        remembered: bool,
+        now: DateTime<Utc>,
+    ) -> Result<Self, SessionPolicyInputError> {
+        let unique: HashSet<_> = authorized_profile_grants.iter().copied().collect();
+        if unique.len() != authorized_profile_grants.len()
+            || !unique.contains(&selected_profile_grant_id)
         {
-            return Err(BrowserAuthInputError);
+            return Err(SessionPolicyInputError);
         }
         Ok(Self {
             correlation_id,
-            username,
-            password,
-            lifetime_minutes,
+            subject_id,
+            workspace_id,
+            authorized_profile_grants,
+            selected_profile_grant_id,
+            policy,
+            remembered,
+            now,
         })
     }
-
     pub const fn correlation_id(&self) -> RequestCorrelationId {
         self.correlation_id
     }
-    pub const fn username(&self) -> &BrowserUsername {
-        &self.username
+    pub const fn subject_id(&self) -> AuthSubjectId {
+        self.subject_id
     }
-    pub const fn password(&self) -> &BrowserPassword {
-        &self.password
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
     }
-    pub const fn lifetime_minutes(&self) -> u32 {
-        self.lifetime_minutes
+    pub fn authorized_profile_grants(&self) -> &[ProfileGrantId] {
+        &self.authorized_profile_grants
+    }
+    pub const fn selected_profile_grant_id(&self) -> ProfileGrantId {
+        self.selected_profile_grant_id
+    }
+    pub const fn policy(&self) -> SessionPolicy {
+        self.policy
+    }
+    pub const fn remembered(&self) -> bool {
+        self.remembered
+    }
+    pub const fn now(&self) -> DateTime<Utc> {
+        self.now
     }
 }
 
 pub struct CreatedBrowserSession {
-    user: BrowserUserView,
-    session: SecretMaterial,
-    csrf: SecretMaterial,
-    expires_at: DateTime<Utc>,
+    session: FastiBrowserSession,
+    session_secret: SecretMaterial,
+    csrf_secret: SecretMaterial,
 }
 
 impl CreatedBrowserSession {
-    pub fn new(
-        user: BrowserUserView,
-        session: SecretMaterial,
-        csrf: SecretMaterial,
-        expires_at: DateTime<Utc>,
+    pub const fn new(
+        session: FastiBrowserSession,
+        session_secret: SecretMaterial,
+        csrf_secret: SecretMaterial,
     ) -> Self {
         Self {
-            user,
             session,
-            csrf,
-            expires_at,
+            session_secret,
+            csrf_secret,
         }
     }
-    pub const fn user(&self) -> &BrowserUserView {
-        &self.user
+    pub const fn session(&self) -> FastiBrowserSession {
+        self.session
     }
-    pub const fn session(&self) -> &SecretMaterial {
-        &self.session
+    pub const fn session_secret(&self) -> &SecretMaterial {
+        &self.session_secret
     }
-    pub const fn csrf(&self) -> &SecretMaterial {
-        &self.csrf
-    }
-    pub const fn expires_at(&self) -> DateTime<Utc> {
-        self.expires_at
+    pub const fn csrf_secret(&self) -> &SecretMaterial {
+        &self.csrf_secret
     }
 }
 
-pub struct AuthenticateBrowserSessionQuery {
+pub struct BrowserSessionQuery {
     correlation_id: RequestCorrelationId,
-    capability: CapabilityKey,
-    session: SecretMaterial,
-    csrf: Option<SecretMaterial>,
-    require_csrf: bool,
+    session_secret: SecretMaterial,
+    now: DateTime<Utc>,
 }
 
-impl AuthenticateBrowserSessionQuery {
-    pub fn new(
+impl BrowserSessionQuery {
+    pub const fn new(
         correlation_id: RequestCorrelationId,
-        capability: CapabilityKey,
-        session: SecretMaterial,
-        csrf: Option<SecretMaterial>,
-        require_csrf: bool,
+        session_secret: SecretMaterial,
+        now: DateTime<Utc>,
     ) -> Self {
-        assert!(capability
-            .allowed_problem_codes()
-            .contains(&crate::ProblemCode::AuthenticationFailed));
         Self {
             correlation_id,
-            capability,
-            session,
-            csrf,
-            require_csrf,
+            session_secret,
+            now,
         }
     }
     pub const fn correlation_id(&self) -> RequestCorrelationId {
         self.correlation_id
     }
-    pub const fn capability(&self) -> CapabilityKey {
-        self.capability
+    pub const fn session_secret(&self) -> &SecretMaterial {
+        &self.session_secret
     }
-    pub const fn session(&self) -> &SecretMaterial {
-        &self.session
-    }
-    pub const fn csrf(&self) -> Option<&SecretMaterial> {
-        self.csrf.as_ref()
-    }
-    pub const fn require_csrf(&self) -> bool {
-        self.require_csrf
+    pub const fn now(&self) -> DateTime<Utc> {
+        self.now
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserSessionMutationCommand {
+    correlation_id: RequestCorrelationId,
+    session_secret: SecretMaterial,
+    csrf_secret: SecretMaterial,
+    _request_boundary: ValidatedBrowserRequestBoundary,
+    now: DateTime<Utc>,
+}
+
+impl BrowserSessionMutationCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session_secret: SecretMaterial,
+        csrf_secret: SecretMaterial,
+        request_boundary: ValidatedBrowserRequestBoundary,
+        now: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session_secret,
+            csrf_secret,
+            _request_boundary: request_boundary,
+            now,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session_secret(&self) -> &SecretMaterial {
+        &self.session_secret
+    }
+    pub const fn csrf_secret(&self) -> &SecretMaterial {
+        &self.csrf_secret
+    }
+    pub const fn now(&self) -> DateTime<Utc> {
+        self.now
+    }
+}
+
+pub struct TargetBrowserSessionCommand {
+    proof: BrowserSessionMutationCommand,
+    target_session_id: BrowserSessionId,
+}
+
+impl TargetBrowserSessionCommand {
+    pub const fn new(
+        proof: BrowserSessionMutationCommand,
+        target_session_id: BrowserSessionId,
+    ) -> Self {
+        Self {
+            proof,
+            target_session_id,
+        }
+    }
+    pub const fn proof(&self) -> &BrowserSessionMutationCommand {
+        &self.proof
+    }
+    pub const fn target_session_id(&self) -> BrowserSessionId {
+        self.target_session_id
+    }
+}
+
+pub struct SelectBrowserSessionProfileCommand {
+    proof: BrowserSessionMutationCommand,
+    target_profile_grant_id: ProfileGrantId,
+}
+
+impl SelectBrowserSessionProfileCommand {
+    pub const fn new(
+        proof: BrowserSessionMutationCommand,
+        target_profile_grant_id: ProfileGrantId,
+    ) -> Self {
+        Self {
+            proof,
+            target_profile_grant_id,
+        }
+    }
+    pub const fn proof(&self) -> &BrowserSessionMutationCommand {
+        &self.proof
+    }
+    pub const fn target_profile_grant_id(&self) -> ProfileGrantId {
+        self.target_profile_grant_id
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AuthenticatedBrowserSession {
-    user: BrowserUserView,
-    access: RequestAccessContext,
-    expires_at: DateTime<Utc>,
+    subject: AuthSubject,
+    session: FastiBrowserSession,
 }
 
 impl AuthenticatedBrowserSession {
-    pub fn new(
-        user: BrowserUserView,
-        access: RequestAccessContext,
-        expires_at: DateTime<Utc>,
-    ) -> Self {
+    pub const fn new(subject: AuthSubject, session: FastiBrowserSession) -> Self {
+        Self { subject, session }
+    }
+    pub const fn subject(self) -> AuthSubject {
+        self.subject
+    }
+    pub const fn session(self) -> FastiBrowserSession {
+        self.session
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrowserSessionSummary {
+    session: FastiBrowserSession,
+    is_current: bool,
+}
+
+impl BrowserSessionSummary {
+    pub const fn new(session: FastiBrowserSession, is_current: bool) -> Self {
         Self {
-            user,
-            access,
-            expires_at,
-        }
-    }
-    pub const fn user(&self) -> &BrowserUserView {
-        &self.user
-    }
-    pub const fn access(&self) -> &RequestAccessContext {
-        &self.access
-    }
-    pub const fn expires_at(&self) -> DateTime<Utc> {
-        self.expires_at
-    }
-}
-
-pub struct EndBrowserSessionCommand {
-    correlation_id: RequestCorrelationId,
-    session: SecretMaterial,
-    csrf: SecretMaterial,
-}
-
-impl EndBrowserSessionCommand {
-    pub const fn new(
-        correlation_id: RequestCorrelationId,
-        session: SecretMaterial,
-        csrf: SecretMaterial,
-    ) -> Self {
-        Self {
-            correlation_id,
             session,
-            csrf,
+            is_current,
         }
     }
-    pub const fn correlation_id(&self) -> RequestCorrelationId {
-        self.correlation_id
+    pub const fn session(self) -> FastiBrowserSession {
+        self.session
     }
-    pub const fn session(&self) -> &SecretMaterial {
-        &self.session
-    }
-    pub const fn csrf(&self) -> &SecretMaterial {
-        &self.csrf
-    }
-    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial) {
-        (self.correlation_id, self.session, self.csrf)
+    pub const fn is_current(self) -> bool {
+        self.is_current
     }
 }
 
-pub struct ListBrowserUsersQuery {
-    correlation_id: RequestCorrelationId,
-    session: SecretMaterial,
-}
-
-impl ListBrowserUsersQuery {
-    pub const fn new(correlation_id: RequestCorrelationId, session: SecretMaterial) -> Self {
-        Self {
-            correlation_id,
-            session,
-        }
-    }
-    pub const fn correlation_id(&self) -> RequestCorrelationId {
-        self.correlation_id
-    }
-    pub const fn session(&self) -> &SecretMaterial {
-        &self.session
-    }
-    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial) {
-        (self.correlation_id, self.session)
-    }
-}
-
-pub struct UpdateBrowserUserCommand {
-    correlation_id: RequestCorrelationId,
-    session: SecretMaterial,
-    csrf: SecretMaterial,
-    target_user_id: BrowserUserId,
-    current_password: BrowserPassword,
-    username: Option<BrowserUsername>,
-    password: Option<BrowserPassword>,
-    active: Option<bool>,
-}
-
-impl UpdateBrowserUserCommand {
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_new(
-        correlation_id: RequestCorrelationId,
-        session: SecretMaterial,
-        csrf: SecretMaterial,
-        target_user_id: BrowserUserId,
-        current_password: BrowserPassword,
-        username: Option<BrowserUsername>,
-        password: Option<BrowserPassword>,
-        active: Option<bool>,
-    ) -> Result<Self, BrowserAuthInputError> {
-        if username.is_none() && password.is_none() && active.is_none() {
-            return Err(BrowserAuthInputError);
-        }
-        Ok(Self {
-            correlation_id,
-            session,
-            csrf,
-            target_user_id,
-            current_password,
-            username,
-            password,
-            active,
-        })
-    }
-    pub const fn correlation_id(&self) -> RequestCorrelationId {
-        self.correlation_id
-    }
-    pub const fn session(&self) -> &SecretMaterial {
-        &self.session
-    }
-    pub const fn csrf(&self) -> &SecretMaterial {
-        &self.csrf
-    }
-    pub const fn target_user_id(&self) -> BrowserUserId {
-        self.target_user_id
-    }
-    pub const fn current_password(&self) -> &BrowserPassword {
-        &self.current_password
-    }
-    pub const fn username(&self) -> Option<&BrowserUsername> {
-        self.username.as_ref()
-    }
-    pub const fn password(&self) -> Option<&BrowserPassword> {
-        self.password.as_ref()
-    }
-    pub const fn active(&self) -> Option<bool> {
-        self.active
-    }
-    #[allow(clippy::type_complexity)]
-    pub fn into_parts(
-        self,
-    ) -> (
-        RequestCorrelationId,
-        SecretMaterial,
-        SecretMaterial,
-        BrowserUserId,
-        BrowserPassword,
-        Option<BrowserUsername>,
-        Option<BrowserPassword>,
-        Option<bool>,
-    ) {
-        (
-            self.correlation_id,
-            self.session,
-            self.csrf,
-            self.target_user_id,
-            self.current_password,
-            self.username,
-            self.password,
-            self.active,
-        )
-    }
-}
-
-pub struct DeleteBrowserUserCommand {
-    correlation_id: RequestCorrelationId,
-    session: SecretMaterial,
-    csrf: SecretMaterial,
-    target_user_id: BrowserUserId,
-    current_password: BrowserPassword,
-}
-
-impl DeleteBrowserUserCommand {
-    pub const fn new(
-        correlation_id: RequestCorrelationId,
-        session: SecretMaterial,
-        csrf: SecretMaterial,
-        target_user_id: BrowserUserId,
-        current_password: BrowserPassword,
-    ) -> Self {
-        Self {
-            correlation_id,
-            session,
-            csrf,
-            target_user_id,
-            current_password,
-        }
-    }
-    pub const fn correlation_id(&self) -> RequestCorrelationId {
-        self.correlation_id
-    }
-    pub const fn session(&self) -> &SecretMaterial {
-        &self.session
-    }
-    pub const fn csrf(&self) -> &SecretMaterial {
-        &self.csrf
-    }
-    pub const fn target_user_id(&self) -> BrowserUserId {
-        self.target_user_id
-    }
-    pub const fn current_password(&self) -> &BrowserPassword {
-        &self.current_password
-    }
-    pub fn into_parts(
-        self,
-    ) -> (
-        RequestCorrelationId,
-        SecretMaterial,
-        SecretMaterial,
-        BrowserUserId,
-        BrowserPassword,
-    ) {
-        (
-            self.correlation_id,
-            self.session,
-            self.csrf,
-            self.target_user_id,
-            self.current_password,
-        )
-    }
-}
-
-pub trait BrowserAccountPort: Send + Sync {
-    /// Seeds the one-time development browser account if it does not exist
-    /// yet. Returns `true` when this call actually created it, `false` when
-    /// an account was already seeded (the given credential is then unused).
-    fn ensure_development_browser_user(
-        &self,
-        username: BrowserUsername,
-        password: BrowserPassword,
-    ) -> ApplicationResult<bool>;
+/// Dormant PR A persistence boundary. Production composition must reject every
+/// associated capability until C1 supplies a proven identity exchange.
+pub trait BrowserSessionPort: Send + Sync {
+    fn create_auth_subject(&self, command: CreateAuthSubjectCommand) -> ApplicationResult<()>;
     fn create_browser_session(
         &self,
         command: CreateBrowserSessionCommand,
     ) -> ApplicationResult<CreatedBrowserSession>;
     fn authenticate_browser_session(
         &self,
-        query: AuthenticateBrowserSessionQuery,
+        query: BrowserSessionQuery,
     ) -> ApplicationResult<AuthenticatedBrowserSession>;
-    fn end_browser_session(&self, command: EndBrowserSessionCommand) -> ApplicationResult<()>;
-    fn list_browser_users(
+    fn list_browser_sessions(
         &self,
-        query: ListBrowserUsersQuery,
-    ) -> ApplicationResult<Vec<BrowserUserView>>;
-    fn update_browser_user(
+        query: BrowserSessionQuery,
+    ) -> ApplicationResult<Vec<BrowserSessionSummary>>;
+    fn revoke_current_browser_session(
         &self,
-        command: UpdateBrowserUserCommand,
-    ) -> ApplicationResult<BrowserUserView>;
-    fn delete_browser_user(&self, command: DeleteBrowserUserCommand) -> ApplicationResult<bool>;
+        command: BrowserSessionMutationCommand,
+    ) -> ApplicationResult<bool>;
+    fn revoke_browser_session(
+        &self,
+        command: TargetBrowserSessionCommand,
+    ) -> ApplicationResult<bool>;
+    fn revoke_other_browser_sessions(
+        &self,
+        command: BrowserSessionMutationCommand,
+    ) -> ApplicationResult<u64>;
+    fn revoke_all_browser_sessions(
+        &self,
+        command: BrowserSessionMutationCommand,
+    ) -> ApplicationResult<u64>;
+    fn rotate_browser_session(
+        &self,
+        command: BrowserSessionMutationCommand,
+    ) -> ApplicationResult<CreatedBrowserSession>;
+    fn select_browser_session_profile(
+        &self,
+        command: SelectBrowserSessionProfileCommand,
+    ) -> ApplicationResult<CreatedBrowserSession>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn browser_credentials_are_bounded() {
-        assert!(BrowserUsername::try_new("testadmin").is_ok());
-        assert!(BrowserUsername::try_new("Test Admin").is_err());
-        assert!(BrowserPassword::try_new("testadmin").is_ok());
-        assert!(BrowserPassword::try_new("short").is_err());
-        assert!(CreateBrowserSessionCommand::try_new(
-            RequestCorrelationId::new_v7(),
-            BrowserUsername::try_new("testadmin").expect("username"),
-            BrowserPassword::try_new("testadmin").expect("password"),
-            0,
-            MAX_SESSION_MINUTES,
+    fn policy() -> SessionPolicy {
+        SessionPolicy::try_new(
+            Duration::from_secs(30),
+            Duration::from_secs(120),
+            Duration::from_secs(240),
+            Duration::from_secs(10),
         )
-        .is_err());
+        .expect("valid deterministic policy")
     }
 
     #[test]
-    fn session_lifetime_is_bounded_by_the_caller_supplied_ceiling() {
-        let session = |lifetime, max| {
-            CreateBrowserSessionCommand::try_new(
-                RequestCorrelationId::new_v7(),
-                BrowserUsername::try_new("testadmin").expect("username"),
-                BrowserPassword::try_new("testadmin").expect("password"),
-                lifetime,
-                max,
-            )
-        };
-        assert!(session(MAX_SESSION_MINUTES, MAX_SESSION_MINUTES).is_ok());
-        assert!(session(MAX_SESSION_MINUTES + 1, MAX_SESSION_MINUTES).is_err());
-        assert!(session(MAX_SESSION_MINUTES + 1, MAX_SESSION_MINUTES * 100).is_ok());
-        assert!(session(MIN_SESSION_MINUTES - 1, MAX_SESSION_MINUTES * 100).is_err());
+    fn policy_rejects_zero_and_invalid_ordering_without_inventing_defaults() {
+        assert!(SessionPolicy::try_new(
+            Duration::ZERO,
+            Duration::from_secs(2),
+            Duration::from_secs(3),
+            Duration::from_secs(1),
+        )
+        .is_err());
+        assert!(SessionPolicy::try_new(
+            Duration::from_millis(1_500),
+            Duration::from_secs(2),
+            Duration::from_secs(3),
+            Duration::from_secs(1),
+        )
+        .is_err());
+        assert_eq!(policy().browser_idle_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn browser_mutation_boundary_rejects_missing_and_mismatched_origin_or_host() {
+        let policy =
+            BrowserRequestBoundaryPolicy::try_new("https://fasti.example", "fasti.example")
+                .expect("valid boundary policy");
+        assert_eq!(
+            policy.validate(None, Some("fasti.example")),
+            Err(BrowserRequestBoundaryError::MissingOrigin)
+        );
+        assert_eq!(
+            policy.validate(Some("https://fasti.example"), None),
+            Err(BrowserRequestBoundaryError::MissingHost)
+        );
+        assert_eq!(
+            policy.validate(Some("https://attacker.example"), Some("fasti.example")),
+            Err(BrowserRequestBoundaryError::OriginMismatch)
+        );
+        assert_eq!(
+            policy.validate(Some("https://fasti.example"), Some("attacker.example")),
+            Err(BrowserRequestBoundaryError::HostMismatch)
+        );
+        assert!(policy
+            .validate(Some("https://fasti.example"), Some("fasti.example"))
+            .is_ok());
     }
 }

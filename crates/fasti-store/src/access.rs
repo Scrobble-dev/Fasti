@@ -37,7 +37,6 @@ pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::CorrectionWrite,
     ScopeKey::WorkspaceExport,
     ScopeKey::WorkspaceVerify,
-    ScopeKey::BrowserUserManage,
 ];
 
 pub(crate) const V8_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] = &[
@@ -49,7 +48,6 @@ pub(crate) const V8_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] = &[
     ScopeKey::CorrectionWrite,
     ScopeKey::WorkspaceExport,
     ScopeKey::WorkspaceVerify,
-    ScopeKey::BrowserUserManage,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

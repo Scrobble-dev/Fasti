@@ -14,11 +14,10 @@ use std::path::Path;
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
-    openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme},
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
     Modify, OpenApi,
 };
 
-mod browser_auth;
 mod integrations;
 mod local;
 mod nuvio_collections;
@@ -77,13 +76,6 @@ impl Modify for ProductionSecurityAddon {
                         .build(),
                 ),
             );
-            components.add_security_scheme(
-                "browser_session",
-                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::with_description(
-                    "fasti_session",
-                    "Opaque HttpOnly browser session cookie",
-                ))),
-            );
         }
     }
 }
@@ -94,12 +86,6 @@ impl Modify for ProductionSecurityAddon {
         health_check,
         local::initialize_node,
         local::enroll_first_client,
-        browser_auth::create_session,
-        browser_auth::read_session,
-        browser_auth::end_session,
-        browser_auth::list_users,
-        browser_auth::update_user,
-        browser_auth::delete_user,
         nuvio_collections::clear_nuvio_collections,
         nuvio_collections::get_nuvio_collections,
         nuvio_collections::replace_nuvio_collections,
@@ -121,21 +107,16 @@ impl Modify for ProductionSecurityAddon {
         HealthResponse,
         fasti_contracts::AttachIdentifierRequest,
         fasti_contracts::AttachIdentifierResponse,
-        fasti_contracts::BrowserSessionResponse,
-        fasti_contracts::BrowserUserDto,
         fasti_contracts::ClientEnrollmentResponse,
-        fasti_contracts::CreateBrowserSessionRequest,
         fasti_contracts::CreateRecordRequest,
         fasti_contracts::CreateRecordResponse,
         fasti_contracts::CredentialSchemeDto,
         fasti_contracts::EnrollFirstClientRequest,
         fasti_contracts::InitializeNodeRequest,
-        fasti_contracts::DeleteBrowserUserRequest,
         fasti_contracts::IntegrationObservationRequest,
         fasti_contracts::IntegrationStatusDto,
         fasti_contracts::IntegrationStatusListResponse,
         fasti_contracts::ListRecordsResponse,
-        fasti_contracts::ListBrowserUsersResponse,
         fasti_contracts::ListTrackingDispositionsResponse,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::NuvioCatalogSourceDto,
@@ -158,7 +139,6 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::TrackingDispositionDto,
         fasti_contracts::TrackingDispositionStateDto,
         fasti_contracts::TrackingDispositionUpdateDto,
-        fasti_contracts::UpdateBrowserUserRequest,
         ProblemActionDto,
         ProblemDetails,
         ViolationDto
@@ -185,13 +165,7 @@ pub fn health_router() -> Router {
 /// provider adapters. Node bootstrap, generic record mutation, and the generic
 /// observation endpoint are never mounted here.
 pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
-    let state = local::LocalApiState {
-        kernel,
-        secure_cookies: false,
-        // Unused: this router never mounts local::router()'s browser session
-        // endpoints, only the isolated webhook adapters.
-        max_session_minutes: fasti_application::MAX_SESSION_MINUTES,
-    };
+    let state = local::LocalApiState { kernel };
     health_router().merge(integrations::router().with_state(state))
 }
 
@@ -219,7 +193,6 @@ pub fn api_router(
     kernel: Arc<dyn LocalKernel>,
     local_exposure_addr: SocketAddr,
     data_root: &Path,
-    max_session_minutes: u32,
 ) -> Router {
     assert!(
         local_exposure_addr.ip().is_loopback(),
@@ -238,11 +211,9 @@ pub fn api_router(
         .expect("bootstrap secret must be preparable before serving any route");
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
-        secure_cookies: false,
-        max_session_minutes,
     };
     health_router()
-        .merge(local::router(kernel, true, false, max_session_minutes))
+        .merge(local::router(kernel, true))
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -252,7 +223,6 @@ pub fn remote_api_router(
     kernel: Arc<dyn LocalKernel>,
     bind_addr: SocketAddr,
     data_root: &Path,
-    max_session_minutes: u32,
 ) -> Router {
     assert!(
         !bind_addr.ip().is_loopback(),
@@ -264,11 +234,9 @@ pub fn remote_api_router(
     );
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
-        secure_cookies: true,
-        max_session_minutes,
     };
     health_router()
-        .merge(local::router(kernel, false, true, max_session_minutes))
+        .merge(local::router(kernel, false))
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -309,22 +277,6 @@ pub fn with_static_fallback(router: Router, static_dir: Option<&Path>) -> Router
             Ok(response)
         }
     }))
-}
-
-/// Seeds the one-time development account with the given credential. The
-/// durable marker prevents this call from recreating an account after it is
-/// renamed or deleted. Returns `true` when this call actually created the
-/// account (the caller should surface `password` to the operator then), or
-/// `false` when an account already existed (`password` was not used).
-pub fn ensure_development_test_account(
-    kernel: &dyn LocalKernel,
-    password: fasti_application::BrowserPassword,
-) -> fasti_application::ApplicationResult<bool> {
-    kernel.ensure_development_browser_user(
-        fasti_application::BrowserUsername::try_new("testadmin")
-            .expect("development username is valid"),
-        password,
-    )
 }
 
 #[cfg(test)]
@@ -498,9 +450,6 @@ mod tests {
             "/api/v1/health",
             "/api/v1/node/initialization",
             "/api/v1/client-enrollments",
-            "/api/v1/browser/session",
-            "/api/v1/browser/users",
-            "/api/v1/browser/users/{user_id}",
             "/api/v1/observations",
             "/api/v1/records",
             "/api/v1/records/identifiers",
@@ -517,15 +466,11 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 19);
+        assert_eq!(document.paths.paths.len(), 16);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
         let value = serde_json::to_value(&document).expect("OpenAPI JSON value");
-        assert_eq!(
-            value.pointer("/components/securitySchemes/browser_session/type"),
-            Some(&serde_json::json!("apiKey"))
-        );
         assert_eq!(
             value.pointer("/components/securitySchemes/credential_bearer/scheme"),
             Some(&serde_json::json!("bearer"))
@@ -539,14 +484,7 @@ mod tests {
                 .pointer("/paths/~1api~1v1~1records/get/security")
                 .and_then(serde_json::Value::as_array)
                 .map(Vec::len),
-            Some(2)
-        );
-        assert_eq!(
-            value
-                .pointer("/paths/~1api~1v1~1browser~1session/get/security/0/browser_session")
-                .and_then(serde_json::Value::as_array)
-                .map(Vec::len),
-            Some(0)
+            Some(1)
         );
         assert!(value
             .pointer("/paths/~1api~1v1~1health/get/security")
@@ -566,12 +504,6 @@ mod tests {
             "NuvioCollectionsDocumentDto",
             "NuvioCollectionsStateDto",
             "ClientEnrollmentResponse",
-            "CreateBrowserSessionRequest",
-            "BrowserSessionResponse",
-            "BrowserUserDto",
-            "ListBrowserUsersResponse",
-            "UpdateBrowserUserRequest",
-            "DeleteBrowserUserRequest",
             "ObservationIdentifierInput",
             "ObservationIngressKind",
             "SubmitObservationRequest",
@@ -610,19 +542,14 @@ mod tests {
     #[tokio::test]
     async fn documented_health_route_is_mounted() {
         let (root, kernel) = test_kernel();
-        let response = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        )
-        .oneshot(
-            Request::get("/api/v1/health")
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("router response");
+        let response = api_router(kernel, test_bind_addr(), root.path())
+            .oneshot(
+                Request::get("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
 
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -631,12 +558,7 @@ mod tests {
     #[tokio::test]
     async fn nuvio_collections_replace_get_and_clear_use_the_authenticated_profile() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
         let credential = enroll_admin(&app, root.path()).await.credential;
         let document = r#"[{"id":"collection","title":"Collection","folders":[{"id":"folder","title":"Folder","sources":[{"provider":"tmdb","tmdbSourceType":"discover","mediaType":"movie","filters":{"voteCountGte":10,"vote_count.gte":10},"id":"source"}]}]}]"#;
 
@@ -762,257 +684,39 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
-    fn browser_cookie_pair(response: &axum::response::Response) -> (String, String) {
-        let cookies: Vec<_> = response
-            .headers()
-            .get_all(header::SET_COOKIE)
-            .iter()
-            .map(|value| {
-                value
-                    .to_str()
-                    .expect("set-cookie header")
-                    .split(';')
-                    .next()
-                    .expect("cookie pair")
-                    .to_owned()
-            })
-            .collect();
-        let csrf = cookies
-            .iter()
-            .find_map(|cookie| cookie.strip_prefix("fasti_csrf="))
-            .expect("CSRF cookie")
-            .to_owned();
-        (cookies.join("; "), csrf)
-    }
-
-    #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn development_browser_account_signs_in_edits_and_retains_the_last_administrator() {
+    async fn browser_authentication_routes_are_absent_until_c1() {
         let (root, kernel) = test_kernel();
-        ensure_development_test_account(
-            kernel.as_ref(),
-            fasti_application::BrowserPassword::try_new("testadmin").expect("test password"),
-        )
-        .expect("seed test account");
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
 
-        let login = app
-            .clone()
-            .oneshot(
-                Request::post("/api/v1/browser/session")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        r#"{"username":"testadmin","password":"testadmin","session_timeout_minutes":60}"#,
-                    ))
-                    .expect("login request"),
-            )
-            .await
-            .expect("login response");
-        assert_eq!(login.status(), StatusCode::OK);
-        assert_eq!(
-            login
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .and_then(|value| value.to_str().ok()),
-            Some("private, no-store")
-        );
-        let (cookies, csrf) = browser_cookie_pair(&login);
-        let session: fasti_contracts::BrowserSessionResponse =
-            serde_json::from_slice(&to_bytes(login.into_body(), 4096).await.expect("login body"))
-                .expect("session response");
-
-        let listed = app
-            .clone()
-            .oneshot(
-                Request::get("/api/v1/records")
-                    .header(header::COOKIE, &cookies)
-                    .body(Body::empty())
-                    .expect("list request"),
-            )
-            .await
-            .expect("list response");
-        assert_eq!(listed.status(), StatusCode::OK);
-
-        let missing_csrf = app
-            .clone()
-            .oneshot(
-                Request::post("/api/v1/records")
-                    .header(header::COOKIE, &cookies)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"grain":"film"}"#))
-                    .expect("create request"),
-            )
-            .await
-            .expect("create response");
-        assert_eq!(missing_csrf.status(), StatusCode::FORBIDDEN);
-
-        let created = app
-            .clone()
-            .oneshot(
-                Request::post("/api/v1/records")
-                    .header(header::COOKIE, &cookies)
-                    .header("x-fasti-csrf", &csrf)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"grain":"film"}"#))
-                    .expect("create request"),
-            )
-            .await
-            .expect("create response");
-        assert_eq!(created.status(), StatusCode::OK);
-
-        let collections = app
-            .clone()
-            .oneshot(
-                Request::put("/api/v1/profile/nuvio-collections")
-                    .header(header::COOKIE, &cookies)
-                    .header("x-fasti-csrf", &csrf)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        r#"[{"id":"remote","title":"Remote","folders":[]}]"#,
-                    ))
-                    .expect("Nuvio Collections request"),
-            )
-            .await
-            .expect("Nuvio Collections response");
-        assert_eq!(collections.status(), StatusCode::OK);
-
-        let updated = app
-            .clone()
-            .oneshot(
-                Request::patch(format!(
-                    "/api/v1/browser/users/{}",
-                    session.user.user_id
-                ))
-                .header(header::COOKIE, &cookies)
-                .header("x-fasti-csrf", &csrf)
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"current_password":"testadmin","username":"editedadmin","password":"editedadmin","active":null}"#,
-                ))
-                .expect("update request"),
-            )
-            .await
-            .expect("update response");
-        assert_eq!(updated.status(), StatusCode::OK);
-
-        let expired = app
-            .clone()
-            .oneshot(
-                Request::get("/api/v1/browser/session")
-                    .header(header::COOKIE, &cookies)
-                    .body(Body::empty())
-                    .expect("session request"),
-            )
-            .await
-            .expect("session response");
-        assert_eq!(expired.status(), StatusCode::UNAUTHORIZED);
-
-        let login = app
-            .clone()
-            .oneshot(
-                Request::post("/api/v1/browser/session")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        r#"{"username":"editedadmin","password":"editedadmin","session_timeout_minutes":60}"#,
-                    ))
-                    .expect("login request"),
-            )
-            .await
-            .expect("login response");
-        assert_eq!(login.status(), StatusCode::OK);
-        let (cookies, csrf) = browser_cookie_pair(&login);
-
-        let deleted = app
-            .oneshot(
-                Request::delete(format!("/api/v1/browser/users/{}", session.user.user_id))
-                    .header(header::COOKIE, &cookies)
-                    .header("x-fasti-csrf", &csrf)
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"current_password":"editedadmin"}"#))
-                    .expect("delete request"),
-            )
-            .await
-            .expect("delete response");
-        assert_eq!(deleted.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        let problem: fasti_contracts::ProblemDetails = serde_json::from_slice(
-            &to_bytes(deleted.into_body(), 4096)
+        for (method, path) in [
+            (Method::POST, "/api/v1/browser/session"),
+            (Method::GET, "/api/v1/browser/sessions"),
+            (Method::GET, "/api/v1/browser/users"),
+            (Method::GET, "/api/v1/browser/auth/passkeys"),
+            (Method::POST, "/api/v1/browser/auth/totp/enroll/begin"),
+            (Method::POST, "/api/v1/browser/auth/oidc/discover"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("browser authentication request"),
+                )
                 .await
-                .expect("delete problem body"),
-        )
-        .expect("delete problem");
-        assert_eq!(problem.code, "validation_failed");
-        assert_eq!(problem.violations.len(), 1);
-        assert_eq!(
-            problem.violations[0].code,
-            "last_active_administrator_required"
-        );
-        assert_eq!(problem.violations[0].pointer, "/");
-    }
-
-    #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn remote_router_omits_bootstrap_and_sets_secure_session_cookies() {
-        let (root, kernel) = test_kernel();
-        ensure_development_test_account(
-            kernel.as_ref(),
-            fasti_application::BrowserPassword::try_new("testadmin").expect("test password"),
-        )
-        .expect("seed test account");
-        let app = remote_api_router(
-            kernel,
-            "0.0.0.0:8420".parse().expect("remote bind address"),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
-
-        let bootstrap = app
-            .clone()
-            .oneshot(
-                Request::post("/api/v1/node/initialization")
-                    .body(Body::empty())
-                    .expect("bootstrap request"),
-            )
-            .await
-            .expect("bootstrap response");
-        assert_eq!(bootstrap.status(), StatusCode::NOT_FOUND);
-
-        let login = app
-            .oneshot(
-                Request::post("/api/v1/browser/session")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        r#"{"username":"testadmin","password":"testadmin","session_timeout_minutes":60}"#,
-                    ))
-                    .expect("login request"),
-            )
-            .await
-            .expect("login response");
-        assert_eq!(login.status(), StatusCode::OK);
-        let set_cookies: Vec<_> = login
-            .headers()
-            .get_all(header::SET_COOKIE)
-            .iter()
-            .map(|value| value.to_str().expect("set-cookie header"))
-            .collect();
-        assert_eq!(set_cookies.len(), 2);
-        assert!(set_cookies.iter().all(|cookie| cookie.contains("; Secure")));
+                .expect("router response");
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn node_initialization_refuses_a_missing_or_wrong_bootstrap_secret() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
 
         let missing_header = app
             .clone()
@@ -1065,24 +769,14 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_secret_survives_a_router_rebuild_and_has_owner_only_permissions() {
         let (root, kernel) = test_kernel();
-        let _first_router = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let _first_router = api_router(kernel.clone(), test_bind_addr(), root.path());
         let first_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after first priming");
 
         // Simulates a daemon restart against the same data root: a second
         // api_router build must not regenerate (and thereby invalidate) the
         // secret a legitimate client may have already read.
-        let _second_router = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let _second_router = api_router(kernel, test_bind_addr(), root.path());
         let second_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after second priming");
         assert_eq!(first_read, second_read);
@@ -1106,12 +800,7 @@ mod tests {
     #[tokio::test]
     async fn durable_bootstrap_issues_one_credential_and_closes_initialization() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
         let bootstrap_secret = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after api_router primes it");
 
@@ -1219,12 +908,7 @@ mod tests {
     #[tokio::test]
     async fn observation_requires_bearer_and_replays_one_source_event_exactly_once() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -1311,12 +995,7 @@ mod tests {
     #[tokio::test]
     async fn partial_progress_is_rejected_without_creating_false_history() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
         let credential = enroll_admin(&app, root.path()).await.credential;
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
@@ -1402,19 +1081,14 @@ mod tests {
     #[tokio::test]
     async fn event_submission_alias_is_absent() {
         let (root, kernel) = test_kernel();
-        let response = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        )
-        .oneshot(
-            Request::post("/api/v1/events")
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("router response");
+        let response = api_router(kernel, test_bind_addr(), root.path())
+            .oneshot(
+                Request::post("/api/v1/events")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -1431,21 +1105,16 @@ mod tests {
             ("POST", "/api/v1/credential-revocations"),
             ("PUT", "/api/v1/listener-configuration"),
         ] {
-            let response = api_router(
-                kernel.clone(),
-                test_bind_addr(),
-                root.path(),
-                fasti_application::MAX_SESSION_MINUTES,
-            )
-            .oneshot(
-                Request::builder()
-                    .method(method)
-                    .uri(path)
-                    .body(Body::empty())
-                    .expect("valid request"),
-            )
-            .await
-            .expect("router response");
+            let response = api_router(kernel.clone(), test_bind_addr(), root.path())
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("valid request"),
+                )
+                .await
+                .expect("router response");
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
         }
     }
@@ -1454,12 +1123,7 @@ mod tests {
     #[tokio::test]
     async fn records_require_bearer_and_support_create_list_attach_and_namespace_registration() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
 
         let unauthorized = app
             .clone()
@@ -1603,12 +1267,7 @@ mod tests {
     #[tokio::test]
     async fn profile_tracking_disposition_is_authenticated_set_list_and_unset() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-            fasti_application::MAX_SESSION_MINUTES,
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
         let unauthorized = app
             .clone()
             .oneshot(

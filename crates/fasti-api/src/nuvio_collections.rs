@@ -44,7 +44,7 @@ fn state_dto(
     get,
     path = "/api/v1/profile/nuvio-collections",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     responses(
         (status = 200, description = "The authenticated profile's Nuvio custom Collections document", body = NuvioCollectionsStateDto),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
@@ -60,16 +60,11 @@ pub(crate) async fn get_nuvio_collections(
 ) -> HttpResult<NuvioCollectionsStateDto> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::GetNuvioCollections;
-    let authentication = request_authentication(&headers, capability, correlation_id, false)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let kernel = state.kernel;
     let document = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-            false,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.get_nuvio_collections(GetNuvioCollectionsQuery::new(correlation_id, access))
     })
     .await?;
@@ -80,7 +75,7 @@ pub(crate) async fn get_nuvio_collections(
     put,
     path = "/api/v1/profile/nuvio-collections",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     request_body = NuvioCollectionsDocumentDto,
     responses(
         (status = 200, description = "The authenticated profile's normalized Nuvio custom Collections document", body = NuvioCollectionsStateDto),
@@ -102,7 +97,7 @@ pub(crate) async fn replace_nuvio_collections(
 ) -> HttpResult<NuvioCollectionsStateDto> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ReplaceNuvioCollections;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
     let document = request
@@ -110,13 +105,8 @@ pub(crate) async fn replace_nuvio_collections(
         .map_err(|error| invalid_document(correlation_id, error))?;
     let kernel = state.kernel;
     let document = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-            true,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.replace_nuvio_collections(ReplaceNuvioCollectionsCommand::new(
             correlation_id,
             access,
@@ -131,7 +121,7 @@ pub(crate) async fn replace_nuvio_collections(
     delete,
     path = "/api/v1/profile/nuvio-collections",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     responses(
         (status = 200, description = "The authenticated profile no longer has a Nuvio custom Collections document", body = NuvioCollectionsStateDto),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
@@ -147,16 +137,11 @@ pub(crate) async fn clear_nuvio_collections(
 ) -> HttpResult<NuvioCollectionsStateDto> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ClearNuvioCollections;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let kernel = state.kernel;
     run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-            true,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.clear_nuvio_collections(ClearNuvioCollectionsCommand::new(correlation_id, access))
     })
     .await?;

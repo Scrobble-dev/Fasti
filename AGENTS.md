@@ -40,7 +40,7 @@ Provider identifiers are evidence, not canonical identity.
 - Contracts project the same meaning into APIs, events, schemas, SDKs, and docs.
 - Adapters must not redefine business rules.
 - Reuse existing ownership before creating new abstractions.
-- Before adding a framework, service, database, queue, or authentication library, read [`docs/architecture/adr-0005-framework-and-auth-adoption.md`](docs/architecture/adr-0005-framework-and-auth-adoption.md). Loco is a developer-experience reference, not a Fasti runtime dependency. TrailBase is only an optional identity-issuer spike. It cannot own Fasti state, scopes, grants, or object authorization. A different decision requires an updated ADR, migration and rollback proof, and the applicable repository guard change in the same pull request.
+- Before adding a framework, service, database, queue, or authentication library, read [`docs/architecture/adr-0005-framework-and-auth-adoption.md`](docs/architecture/adr-0005-framework-and-auth-adoption.md) and the approved [TrailBase authentication programme](docs/plans/trailbase-authentication-remediation.md). ADR-0005 records the earlier evaluation; its optional TrailBase and django-allauth conclusions are superseded. TrailBase is the selected separate human-account service. Loco remains a developer-experience reference, not a Fasti runtime dependency. TrailBase cannot own Fasti state, sessions, scopes, grants, profiles, or object authorization. A later change requires an updated ADR, migration and rollback proof, and the applicable repository guard change in the same pull request.
 - Keep provider integrations modular.
 - Keep wire provider IDs separate from external identifier namespaces. Reuse
   `fasti_application::provider_identity_mapping` for Google Books and TMDB
@@ -73,7 +73,7 @@ Generated files are outputs, not sources of truth.
 - Resolve provider hosts once, reject every unsafe answer, disable redirects and system proxies, and pin the authorized addresses before loading a credential.
 - Treat `TMDB_API_READ_ACCESS_TOKEN` as a TMDB API Read Access Token. Send it only in a sensitive `Authorization: Bearer` header; never fall back to the v3 `api_key` URL parameter.
 - Keep provider credentials in environment variables or the platform credential store. Never return them to Svelte, browser storage, logs, URLs, screenshots, fixtures, or proof bundles.
-- Keep development browser accounts disabled by default. Permit the explicit test account only on a loopback durable listener. Until a governed recovery capability exists, reject browser-account or credential changes that would leave a workspace without an active administrator with current browser-user management access.
+- PR A has no production human-account or browser-session route. Its final session model remains dormant until C1 proves TrailBase exchange, subject anchoring, membership, administrator continuity, and session issuance. Do not add or enable a development browser account as a substitute.
 - Scope app-managed provider credentials to the physical Fasti data root. They are node-wide across profiles until a real authenticated profile-private provider capability exists. Never fall back to an unscoped account.
 - Derive app-managed credential accounts from `SqliteKernel::data_root_identity()`, not from a configured path. Bind the identity to the opened root descriptor and its persisted random lock nonce. Renaming an opened root must keep its account; replacing that path with another root must select another account.
 - Keep node connection settings separate from provider outbound policy. A provider allow list must not block an operator-selected `.internal` Fasti service URL.
@@ -180,7 +180,7 @@ Read [`brand/DESIGN.md`](brand/DESIGN.md) before making any visual or UI decisio
 
 <!-- FASTI_CHESTERTON_POLICY_END -->
 
-- <!-- FASTI_AUTH_BOUNDARY_START --> **Authentication boundary**: Follow [`docs/architecture/authentication.md`](docs/architecture/authentication.md). Browser sessions, scoped API client credentials, packaged-host administrator credentials, passkeys, passwords, device authorization, and OIDC tokens are distinct credential models. Never collapse them into one token or simulate a backend flow in Svelte.
+- <!-- FASTI_AUTH_BOUNDARY_START --> **Authentication boundary**: Follow [`docs/architecture/authentication.md`](docs/architecture/authentication.md). TrailBase human credentials, dormant and active Fasti browser sessions, scoped API client credentials, packaged-host administrator credentials, passkeys, device authorization, and OpenID Connect tokens are distinct credential models. Never collapse them into one token or simulate a backend flow in Svelte.
 
 <!-- FASTI_AUTH_BOUNDARY_END -->
 

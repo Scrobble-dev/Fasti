@@ -63,6 +63,7 @@
           "authorization": {
             "enum": [
               "bootstrap_only",
+              "browser_session",
               "local_operator",
               "scoped",
               "unauthenticated"
@@ -77,7 +78,8 @@
             "enum": [
               "b1",
               "b2",
-              "b3"
+              "b3",
+              "c1"
             ],
             "type": "string"
           },
@@ -116,10 +118,13 @@
             "enum": [
               "browser.session.create",
               "browser.session.end",
+              "browser.session.profile.select",
               "browser.session.read",
-              "browser.user.delete",
-              "browser.user.list",
-              "browser.user.update",
+              "browser.session.revoke",
+              "browser.session.rotate",
+              "browser.sessions.list",
+              "browser.sessions.revoke_all",
+              "browser.sessions.revoke_others",
               "client.enroll",
               "correction.chain.append",
               "correction.chain.inspect",
@@ -163,6 +168,8 @@
                 "already_initialized",
                 "authentication_failed",
                 "bootstrap_closed",
+                "browser_session_expired",
+                "browser_session_revoked",
                 "capability_unavailable",
                 "capacity_exceeded",
                 "forbidden",
@@ -175,6 +182,7 @@
                 "payload_too_large",
                 "receipt_not_found",
                 "record_not_found",
+                "session_policy_changed",
                 "storage_unavailable",
                 "unsupported_media_type",
                 "validation_failed"
@@ -189,14 +197,14 @@
               "b0",
               "b1",
               "b2",
-              "b3"
+              "b3",
+              "c1"
             ],
             "type": "string"
           },
           "scopes": {
             "items": {
               "enum": [
-                "browser_user_manage",
                 "capability_read",
                 "client_enroll",
                 "correction_read",
@@ -229,8 +237,8 @@
               "b1_receipt_replay",
               "b1_receipt_stream",
               "b1_records",
-              "b2_browser_auth",
               "b2_profile_state",
+              "c1_browser_session_foundation",
               "health",
               "later_b2",
               "later_b3"
@@ -266,8 +274,8 @@
             "items": {
               "$ref": "#/components/schemas/CapabilityDescriptorDto"
             },
-            "maxItems": 36,
-            "minItems": 36,
+            "maxItems": 39,
+            "minItems": 39,
             "type": "array",
             "uniqueItems": true
           },
@@ -316,8 +324,8 @@
                 "b1_receipt_replay",
                 "b1_receipt_stream",
                 "b1_records",
-                "b2_browser_auth",
                 "b2_profile_state",
+                "c1_browser_session_foundation",
                 "health",
                 "later_b2",
                 "later_b3"
@@ -350,7 +358,8 @@
             "enum": [
               "b0",
               "b1",
-              "b2"
+              "b2",
+              "c1"
             ],
             "type": "string"
           },
@@ -395,7 +404,8 @@
               "b0",
               "b1",
               "b2",
-              "b3"
+              "b3",
+              "c1"
             ],
             "type": [
               "string",
@@ -433,7 +443,8 @@
             "enum": [
               "b1",
               "b2",
-              "b3"
+              "b3",
+              "c1"
             ],
             "type": "string"
           },
@@ -937,16 +948,17 @@
                         {
                           "authorization": "unauthenticated",
                           "bounded_context": "browser.authentication",
-                          "contract_body": "b2",
+                          "contract_body": "c1",
                           "examples": [],
                           "id": "browser.session.create",
                           "lifecycle": {
                             "contract_state": "finalized",
-                            "introduced_in": "b2",
-                            "runtime_availability": "implemented"
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
                           },
                           "problems": [
-                            "authentication_failed",
+                            "capability_unavailable",
+                            "forbidden",
                             "integrity_failed",
                             "malformed_json",
                             "payload_too_large",
@@ -954,133 +966,210 @@
                             "unsupported_media_type",
                             "validation_failed"
                           ],
-                          "runtime_body": "b2",
+                          "runtime_body": "c1",
                           "scopes": [],
-                          "surface_profile": "b2_browser_auth",
+                          "surface_profile": "c1_browser_session_foundation",
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "browser_session",
                           "bounded_context": "browser.authentication",
-                          "contract_body": "b2",
+                          "contract_body": "c1",
                           "examples": [],
                           "id": "browser.session.end",
                           "lifecycle": {
                             "contract_state": "finalized",
-                            "introduced_in": "b2",
-                            "runtime_availability": "implemented"
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
                           },
                           "problems": [
-                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
                             "forbidden",
                             "integrity_failed",
+                            "session_policy_changed",
                             "storage_unavailable"
                           ],
-                          "runtime_body": "b2",
+                          "runtime_body": "c1",
                           "scopes": [],
-                          "surface_profile": "b2_browser_auth",
+                          "surface_profile": "c1_browser_session_foundation",
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "browser_session",
                           "bounded_context": "browser.authentication",
-                          "contract_body": "b2",
+                          "contract_body": "c1",
+                          "examples": [],
+                          "id": "browser.session.profile.select",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "forbidden",
+                            "integrity_failed",
+                            "session_policy_changed",
+                            "storage_unavailable",
+                            "validation_failed"
+                          ],
+                          "runtime_body": "c1",
+                          "scopes": [],
+                          "surface_profile": "c1_browser_session_foundation",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "browser_session",
+                          "bounded_context": "browser.authentication",
+                          "contract_body": "c1",
                           "examples": [],
                           "id": "browser.session.read",
                           "lifecycle": {
                             "contract_state": "finalized",
-                            "introduced_in": "b2",
-                            "runtime_availability": "implemented"
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
                           },
                           "problems": [
-                            "authentication_failed",
-                            "forbidden",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
                             "integrity_failed",
+                            "session_policy_changed",
                             "storage_unavailable"
                           ],
-                          "runtime_body": "b2",
+                          "runtime_body": "c1",
                           "scopes": [],
-                          "surface_profile": "b2_browser_auth",
+                          "surface_profile": "c1_browser_session_foundation",
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "browser_session",
                           "bounded_context": "browser.authentication",
-                          "contract_body": "b2",
+                          "contract_body": "c1",
                           "examples": [],
-                          "id": "browser.user.delete",
+                          "id": "browser.session.revoke",
                           "lifecycle": {
                             "contract_state": "finalized",
-                            "introduced_in": "b2",
-                            "runtime_availability": "implemented"
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
                           },
                           "problems": [
-                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
                             "forbidden",
                             "integrity_failed",
-                            "malformed_json",
-                            "payload_too_large",
+                            "session_policy_changed",
                             "storage_unavailable",
-                            "unsupported_media_type",
                             "validation_failed"
                           ],
-                          "runtime_body": "b2",
-                          "scopes": [
-                            "browser_user_manage"
-                          ],
-                          "surface_profile": "b2_browser_auth",
+                          "runtime_body": "c1",
+                          "scopes": [],
+                          "surface_profile": "c1_browser_session_foundation",
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "browser_session",
                           "bounded_context": "browser.authentication",
-                          "contract_body": "b2",
+                          "contract_body": "c1",
                           "examples": [],
-                          "id": "browser.user.list",
+                          "id": "browser.session.rotate",
                           "lifecycle": {
                             "contract_state": "finalized",
-                            "introduced_in": "b2",
-                            "runtime_availability": "implemented"
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
                           },
                           "problems": [
-                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
                             "forbidden",
                             "integrity_failed",
+                            "session_policy_changed",
                             "storage_unavailable"
                           ],
-                          "runtime_body": "b2",
-                          "scopes": [
-                            "browser_user_manage"
-                          ],
-                          "surface_profile": "b2_browser_auth",
+                          "runtime_body": "c1",
+                          "scopes": [],
+                          "surface_profile": "c1_browser_session_foundation",
                           "uat": []
                         },
                         {
-                          "authorization": "scoped",
+                          "authorization": "browser_session",
                           "bounded_context": "browser.authentication",
-                          "contract_body": "b2",
+                          "contract_body": "c1",
                           "examples": [],
-                          "id": "browser.user.update",
+                          "id": "browser.sessions.list",
                           "lifecycle": {
                             "contract_state": "finalized",
-                            "introduced_in": "b2",
-                            "runtime_availability": "implemented"
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
                           },
                           "problems": [
-                            "authentication_failed",
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "integrity_failed",
+                            "session_policy_changed",
+                            "storage_unavailable"
+                          ],
+                          "runtime_body": "c1",
+                          "scopes": [],
+                          "surface_profile": "c1_browser_session_foundation",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "browser_session",
+                          "bounded_context": "browser.authentication",
+                          "contract_body": "c1",
+                          "examples": [],
+                          "id": "browser.sessions.revoke_all",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
                             "forbidden",
                             "integrity_failed",
-                            "malformed_json",
-                            "payload_too_large",
+                            "session_policy_changed",
+                            "storage_unavailable"
+                          ],
+                          "runtime_body": "c1",
+                          "scopes": [],
+                          "surface_profile": "c1_browser_session_foundation",
+                          "uat": []
+                        },
+                        {
+                          "authorization": "browser_session",
+                          "bounded_context": "browser.authentication",
+                          "contract_body": "c1",
+                          "examples": [],
+                          "id": "browser.sessions.revoke_others",
+                          "lifecycle": {
+                            "contract_state": "finalized",
+                            "introduced_in": "c1",
+                            "runtime_availability": "later_body"
+                          },
+                          "problems": [
+                            "browser_session_expired",
+                            "browser_session_revoked",
+                            "capability_unavailable",
+                            "forbidden",
+                            "integrity_failed",
+                            "session_policy_changed",
                             "storage_unavailable",
-                            "unsupported_media_type",
                             "validation_failed"
                           ],
-                          "runtime_body": "b2",
-                          "scopes": [
-                            "browser_user_manage"
-                          ],
-                          "surface_profile": "b2_browser_auth",
+                          "runtime_body": "c1",
+                          "scopes": [],
+                          "surface_profile": "c1_browser_session_foundation",
                           "uat": []
                         },
                         {
@@ -2285,59 +2374,6 @@
                             "state": "not_applicable"
                           }
                         },
-                        "b2_browser_auth": {
-                          "cli": {
-                            "reason": "Browser accounts are administered through the first-party web surface.",
-                            "state": "not_applicable"
-                          },
-                          "domain_application": {
-                            "binding_visibility": "internal",
-                            "state": "required"
-                          },
-                          "http_openapi": {
-                            "binding": "openapi:{capability_id}",
-                            "binding_visibility": "public",
-                            "state": "required"
-                          },
-                          "json_ld": {
-                            "reason": "Private browser authentication state is not linked data.",
-                            "state": "not_applicable"
-                          },
-                          "json_schema": {
-                            "binding": "schema:production-openapi-operation:{capability_id}",
-                            "binding_visibility": "public",
-                            "state": "required"
-                          },
-                          "knowledge": {
-                            "binding": "knowledge:problem-catalog",
-                            "binding_visibility": "public",
-                            "state": "required"
-                          },
-                          "okf": {
-                            "binding": "okf:capability-catalog",
-                            "binding_visibility": "public",
-                            "state": "required"
-                          },
-                          "package_smoke": {
-                            "body": "b3",
-                            "reason": "The authenticated HTTP contract is proven by API integration tests in B2.",
-                            "state": "later_body"
-                          },
-                          "sdk": {
-                            "binding": "sdk:{capability_id}",
-                            "binding_visibility": "public",
-                            "state": "required"
-                          },
-                          "sse_asyncapi": {
-                            "reason": "Browser authentication uses finite requests and has no event stream.",
-                            "state": "not_applicable"
-                          },
-                          "ui": {
-                            "binding": "ui:{capability_id}",
-                            "binding_visibility": "public",
-                            "state": "required"
-                          }
-                        },
                         "b2_profile_state": {
                           "cli": {
                             "body": "b3",
@@ -2390,6 +2426,59 @@
                             "binding": "ui:{capability_id}",
                             "binding_visibility": "public",
                             "state": "required"
+                          }
+                        },
+                        "c1_browser_session_foundation": {
+                          "cli": {
+                            "reason": "Browser sessions are administered through the first-party web surface.",
+                            "state": "not_applicable"
+                          },
+                          "domain_application": {
+                            "binding_visibility": "internal",
+                            "state": "required"
+                          },
+                          "http_openapi": {
+                            "body": "c1",
+                            "reason": "Browser session HTTP routes require the TrailBase-backed C1 runtime.",
+                            "state": "later_body"
+                          },
+                          "json_ld": {
+                            "reason": "Private browser authentication state is not linked data.",
+                            "state": "not_applicable"
+                          },
+                          "json_schema": {
+                            "body": "c1",
+                            "reason": "Browser session request and response schemas require the C1 runtime contract.",
+                            "state": "later_body"
+                          },
+                          "knowledge": {
+                            "binding": "knowledge:problem-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "okf": {
+                            "binding": "okf:capability-catalog",
+                            "binding_visibility": "public",
+                            "state": "required"
+                          },
+                          "package_smoke": {
+                            "body": "c1",
+                            "reason": "The authenticated HTTP contract requires the C1 runtime.",
+                            "state": "later_body"
+                          },
+                          "sdk": {
+                            "body": "c1",
+                            "reason": "Browser session SDK methods require the C1 HTTP contract.",
+                            "state": "later_body"
+                          },
+                          "sse_asyncapi": {
+                            "reason": "Browser authentication uses finite requests and has no event stream.",
+                            "state": "not_applicable"
+                          },
+                          "ui": {
+                            "body": "c1",
+                            "reason": "PR A keeps the Account and security controls visibly unavailable until C1.",
+                            "state": "later_body"
                           }
                         },
                         "health": {

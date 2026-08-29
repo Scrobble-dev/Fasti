@@ -3,7 +3,7 @@ use fasti_domain::{Grain, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 9;
+pub(crate) const SCHEMA_VERSION: i64 = 10;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -49,6 +49,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 8 {
         migrate_v9(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 9 {
+        migrate_v10(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -867,6 +872,79 @@ fn migrate_v9(connection: &Connection) -> Result<()> {
     connection.execute_batch(&sql)
 }
 
+fn migrate_v10(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        -- Remove the PR-only simulated identity and factor state. These tables
+        -- never represented a supported user population or compatibility
+        -- boundary. IF EXISTS also repairs developer roots that ran the
+        -- previously edited v8 migration.
+        DROP TABLE IF EXISTS auth_ephemeral_challenges;
+        DROP TABLE IF EXISTS oidc_provider_configs;
+        DROP TABLE IF EXISTS user_backup_codes;
+        DROP TABLE IF EXISTS user_passkeys;
+        DROP TABLE IF EXISTS user_totp;
+        DROP TABLE IF EXISTS browser_sessions;
+        DROP TABLE IF EXISTS browser_auth_bootstrap;
+        DROP TABLE IF EXISTS browser_users;
+
+        CREATE TABLE auth_subjects (
+            auth_subject_id TEXT PRIMARY KEY,
+            lifecycle TEXT NOT NULL
+                CHECK (lifecycle IN ('active', 'disabled', 'deleted', 'recovery_pending')),
+            auth_epoch INTEGER NOT NULL CHECK (auth_epoch >= 0),
+            authorization_epoch INTEGER NOT NULL CHECK (authorization_epoch >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE auth_subject_profile_grants (
+            auth_subject_id TEXT NOT NULL
+                REFERENCES auth_subjects(auth_subject_id) ON DELETE CASCADE,
+            profile_grant_id TEXT NOT NULL
+                REFERENCES profile_grants(grant_id) ON DELETE CASCADE,
+            PRIMARY KEY (auth_subject_id, profile_grant_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TABLE fasti_browser_sessions (
+            browser_session_id TEXT PRIMARY KEY,
+            session_digest TEXT NOT NULL UNIQUE,
+            csrf_digest TEXT NOT NULL,
+            auth_subject_id TEXT NOT NULL
+                REFERENCES auth_subjects(auth_subject_id) ON DELETE CASCADE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            selected_profile_grant_id TEXT NOT NULL
+                REFERENCES profile_grants(grant_id),
+            created_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            idle_expires_at TEXT NOT NULL,
+            absolute_expires_at TEXT NOT NULL,
+            idle_timeout_seconds INTEGER NOT NULL CHECK (idle_timeout_seconds > 0),
+            last_seen_write_interval_seconds INTEGER NOT NULL
+                CHECK (last_seen_write_interval_seconds > 0),
+            revoked_at TEXT,
+            auth_epoch INTEGER NOT NULL CHECK (auth_epoch >= 0),
+            authorization_epoch INTEGER NOT NULL CHECK (authorization_epoch >= 0),
+            rotation_generation INTEGER NOT NULL CHECK (rotation_generation >= 0),
+            CHECK (last_seen_at >= created_at),
+            CHECK (idle_expires_at <= absolute_expires_at)
+        ) STRICT;
+        CREATE INDEX fasti_browser_sessions_subject_idx
+            ON fasti_browser_sessions(auth_subject_id, revoked_at, absolute_expires_at);
+
+        CREATE TABLE fasti_browser_session_grants (
+            browser_session_id TEXT NOT NULL
+                REFERENCES fasti_browser_sessions(browser_session_id) ON DELETE CASCADE,
+            profile_grant_id TEXT NOT NULL REFERENCES profile_grants(grant_id),
+            PRIMARY KEY (browser_session_id, profile_grant_id)
+        ) STRICT, WITHOUT ROWID;
+        "#,
+    )?;
+    transaction.pragma_update(None, "user_version", 10)?;
+    transaction.commit()
+}
+
 fn migration_conflict(message: &str) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
@@ -1342,16 +1420,57 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .expect("enable foreign keys");
-        migrate_v1(&connection).expect("version one");
-        migrate_v2(&connection).expect("version two");
-        migrate_v3(&connection).expect("version three");
-        migrate_v4(&connection).expect("version four");
-        migrate_v5(&connection).expect("version five");
-        migrate_v6(&connection).expect("version six");
-        migrate_v7(&connection).expect("version seven");
-        migrate_v8(&connection).expect("version eight");
-        migrate_v9(&connection).expect("version nine");
+        migrate_to_version_nine(&connection);
         connection
+    }
+
+    fn migrate_to_version_nine(connection: &Connection) {
+        migrate_v1(connection).expect("version one");
+        migrate_v2(connection).expect("version two");
+        migrate_v3(connection).expect("version three");
+        migrate_v4(connection).expect("version four");
+        migrate_v5(connection).expect("version five");
+        migrate_v6(connection).expect("version six");
+        migrate_v7(connection).expect("version seven");
+        migrate_v8(connection).expect("version eight");
+        migrate_v9(connection).expect("version nine");
+    }
+
+    fn seed_version_nine_browser_state(connection: &Connection) {
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_v9', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_v9', 'wsp_v9', '2026-08-24T00:00:01Z');
+                INSERT INTO clients(client_id, workspace_id, status,
+                                    current_credential_epoch, created_at)
+                    VALUES ('cli_v9', 'wsp_v9', 'active', 1,
+                            '2026-08-24T00:00:02Z');
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, failed_login_count,
+                    created_at, updated_at
+                ) VALUES (
+                    'usr_v9', 'developer', 'removed-pr-only-digest', 'cli_v9',
+                    'prf_v9', 1, 1, 1, 0, '2026-08-24T00:00:03Z',
+                    '2026-08-24T00:00:03Z'
+                );
+                INSERT INTO browser_sessions(
+                    session_digest, csrf_digest, user_id, expires_at,
+                    created_at, last_seen_at
+                ) VALUES (
+                    'session-v9', 'csrf-v9', 'usr_v9',
+                    '2026-08-24T01:00:00Z', '2026-08-24T00:00:04Z',
+                    '2026-08-24T00:00:04Z'
+                );
+                INSERT INTO records(record_id, workspace_id, grain, status, created_at)
+                    VALUES ('rec_v9', 'wsp_v9', 'film', 'active',
+                            '2026-08-24T00:00:05Z');
+                "#,
+            )
+            .expect("seed populated version-nine developer root");
     }
 
     fn seed_legacy_provider_records(connection: &Connection) {
@@ -1557,7 +1676,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 9);
+        assert_eq!(version, SCHEMA_VERSION);
 
         let mut statement = connection
             .prepare(
@@ -1700,7 +1819,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 9);
+        assert_eq!(version, SCHEMA_VERSION);
         let legacy: String = connection
             .query_row(
                 "SELECT namespace FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
@@ -1733,7 +1852,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("rollback state");
-        assert_eq!(state, (9, "tmdb".to_owned(), 1));
+        assert_eq!(state, (SCHEMA_VERSION, "tmdb".to_owned(), 1));
     }
 
     #[test]
@@ -1764,7 +1883,12 @@ mod tests {
             .expect("rollback state");
         assert_eq!(
             state,
-            (9, "chapter".to_owned(), "google-books".to_owned(), 0)
+            (
+                SCHEMA_VERSION,
+                "chapter".to_owned(),
+                "google-books".to_owned(),
+                0
+            )
         );
     }
 
@@ -1790,7 +1914,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("rollback state");
-        assert_eq!(state, (9, "tmdb".to_owned(), 2, 0));
+        assert_eq!(state, (SCHEMA_VERSION, "tmdb".to_owned(), 2, 0));
     }
 
     #[test]
@@ -1812,7 +1936,7 @@ mod tests {
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .expect("schema version");
-            assert_eq!(version, 9);
+            assert_eq!(version, SCHEMA_VERSION);
             let legacy: (String, String) = connection
                 .query_row(
                     "SELECT namespace, value FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
@@ -1856,7 +1980,12 @@ mod tests {
             .expect("legacy state preserved");
         assert_eq!(
             state,
-            (9, "series".to_owned(), "tmdb".to_owned(), "film".to_owned())
+            (
+                SCHEMA_VERSION,
+                "series".to_owned(),
+                "tmdb".to_owned(),
+                "film".to_owned()
+            )
         );
         let canonical_definitions: i64 = connection
             .query_row(
@@ -1928,50 +2057,6 @@ mod tests {
             .collect();
         expected.sort_unstable();
         assert_eq!(scopes, expected);
-    }
-
-    #[test]
-    fn browser_users_cannot_cross_workspace_client_and_profile_ownership() {
-        let connection = migrated_connection();
-        connection
-            .execute_batch(
-                r#"
-                INSERT INTO workspaces(workspace_id, created_at)
-                    VALUES ('wsp_browser_a', '2026-08-24T00:00:00Z');
-                INSERT INTO workspaces(workspace_id, created_at)
-                    VALUES ('wsp_browser_b', '2026-08-24T00:00:00Z');
-                INSERT INTO profiles(profile_id, workspace_id, created_at)
-                    VALUES ('prf_browser_a', 'wsp_browser_a', '2026-08-24T00:00:00Z');
-                INSERT INTO profiles(profile_id, workspace_id, created_at)
-                    VALUES ('prf_browser_b', 'wsp_browser_b', '2026-08-24T00:00:00Z');
-                INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at)
-                    VALUES ('cli_browser_a', 'wsp_browser_a', 'active', 1, '2026-08-24T00:00:00Z');
-                "#,
-            )
-            .expect("seed browser ownership graph");
-        let insert_user = |user_id: &str, profile_id: &str| {
-            connection.execute(
-                r#"
-                INSERT INTO browser_users(
-                    user_id, username, password_hash, client_id, profile_id,
-                    is_admin, is_test_account, active, created_at, updated_at
-                ) VALUES (?1, ?1, 'hash', 'cli_browser_a', ?2, 1, 1, 1, ?3, ?3)
-                "#,
-                params![user_id, profile_id, CREATED_AT],
-            )
-        };
-
-        assert!(insert_user("usr_cross", "prf_browser_b").is_err());
-        assert_eq!(
-            insert_user("usr_same", "prf_browser_a").expect("same workspace"),
-            1
-        );
-        assert!(connection
-            .execute(
-                "UPDATE browser_users SET profile_id = 'prf_browser_b' WHERE user_id = 'usr_same'",
-                [],
-            )
-            .is_err());
     }
 
     /// Seed the minimum row set that a real version-one database would hold.
@@ -2144,6 +2229,151 @@ mod tests {
     }
 
     #[test]
+    fn version_ten_replaces_browser_user_and_rejects_pr_only_factor_tables() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_v1(&connection).expect("v1");
+        migrate_v2(&connection).expect("v2");
+        migrate_v3(&connection).expect("v3");
+        migrate_v4(&connection).expect("v4");
+        migrate_v5(&connection).expect("v5");
+        migrate_v6(&connection).expect("v6");
+        migrate_v7(&connection).expect("v7");
+        migrate_v8(&connection).expect("v8");
+        migrate_v9(&connection).expect("v9");
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE user_passkeys (passkey_id TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE user_totp (user_id TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE user_backup_codes (code_hash TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE oidc_provider_configs (workspace_id TEXT PRIMARY KEY) STRICT;
+                CREATE TABLE auth_ephemeral_challenges (challenge_id TEXT PRIMARY KEY) STRICT;
+                "#,
+            )
+            .expect("simulate developer root created by the edited v8");
+
+        migrate(&connection).expect("forward migration");
+
+        for removed in [
+            "browser_users",
+            "browser_sessions",
+            "browser_auth_bootstrap",
+            "user_passkeys",
+            "user_totp",
+            "user_backup_codes",
+            "oidc_provider_configs",
+            "auth_ephemeral_challenges",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+                    [removed],
+                    |row| row.get(0),
+                )
+                .expect("table inventory");
+            assert_eq!(exists, 0, "{removed} survived the truth-reset migration");
+        }
+        for retained in [
+            "auth_subjects",
+            "auth_subject_profile_grants",
+            "fasti_browser_sessions",
+            "fasti_browser_session_grants",
+        ] {
+            let exists: i64 = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?1)",
+                    [retained],
+                    |row| row.get(0),
+                )
+                .expect("table inventory");
+            assert_eq!(exists, 1, "{retained} is missing");
+        }
+    }
+
+    #[test]
+    fn version_ten_failed_forward_is_atomic_and_retryable() {
+        let connection = version_nine_connection();
+        seed_version_nine_browser_state(&connection);
+        connection
+            .execute_batch("CREATE TABLE auth_subjects (auth_subject_id TEXT PRIMARY KEY) STRICT;")
+            .expect("inject a forward-migration conflict");
+
+        migrate(&connection).expect_err("conflicting forward migration must fail");
+        let state: (i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), (SELECT COUNT(*) FROM browser_users), (SELECT COUNT(*) FROM browser_sessions)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("failed-forward state");
+        assert_eq!(state, (9, 1, 1), "v10 failure must roll back every drop");
+
+        connection
+            .execute("DROP TABLE auth_subjects", [])
+            .expect("remove injected conflict");
+        migrate(&connection).expect("retry forward migration");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("schema version");
+        assert_eq!(version, 10);
+    }
+
+    #[test]
+    fn version_ten_restart_and_old_binary_rollback_use_a_closed_copy() {
+        let root = tempfile::tempdir().expect("temporary migration rehearsal");
+        let version_nine = root.path().join("fasti-v9.sqlite3");
+        let backup = root.path().join("fasti-v9.backup.sqlite3");
+        let rollback = root.path().join("fasti-v9.rollback.sqlite3");
+        {
+            let connection = Connection::open(&version_nine).expect("version-nine database");
+            connection
+                .pragma_update(None, "foreign_keys", "ON")
+                .expect("enable foreign keys");
+            migrate_to_version_nine(&connection);
+            seed_version_nine_browser_state(&connection);
+        }
+        fs::copy(&version_nine, &backup).expect("closed pre-migration backup");
+
+        {
+            let connection = Connection::open(&version_nine).expect("forward database");
+            connection
+                .pragma_update(None, "foreign_keys", "ON")
+                .expect("enable foreign keys");
+            migrate(&connection).expect("forward migration");
+            let state: (i64, i64, i64) = connection
+                .query_row(
+                    "SELECT (SELECT user_version FROM pragma_user_version), (SELECT COUNT(*) FROM records WHERE record_id = 'rec_v9'), (SELECT COUNT(*) FROM auth_subjects)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("forward state");
+            assert_eq!(state, (10, 1, 0));
+        }
+        {
+            let connection = Connection::open(&version_nine).expect("restart database");
+            migrate(&connection).expect("restart migration is idempotent");
+            let version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("restart schema version");
+            assert_eq!(version, 10);
+        }
+
+        fs::copy(&backup, &rollback).expect("restore old-binary rollback copy");
+        let connection = Connection::open(&rollback).expect("rollback database");
+        let state: (i64, i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), (SELECT COUNT(*) FROM browser_users WHERE user_id = 'usr_v9'), (SELECT COUNT(*) FROM browser_sessions WHERE user_id = 'usr_v9'), (SELECT COUNT(*) FROM records WHERE record_id = 'rec_v9')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("restored version-nine state");
+        assert_eq!(state, (9, 1, 1, 1));
+    }
+
+    #[test]
     fn version_four_upgrade_preserves_existing_schema_and_adds_later_tables() {
         let connection = Connection::open_in_memory().expect("in-memory SQLite");
         connection
@@ -2193,9 +2423,9 @@ mod tests {
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
         // column, migrate_v6's two metadata tables, and migrate_v7's profile
-        // tracking table, migrate_v8's browser authentication tables, and
-        // migrate_v9's Nuvio Collections table -- all additive, so every v4
-        // table and column remains.
+        // tracking table, migrate_v9's Nuvio Collections table, and v10's
+        // final dormant Access tables. V10 deliberately replaces the
+        // unsupported browser-user tables introduced by v8.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
@@ -2204,9 +2434,10 @@ mod tests {
                 "metadata_field_overrides".to_owned(),
                 "profile_record_tracking_dispositions".to_owned(),
                 "profile_nuvio_collections".to_owned(),
-                "browser_auth_bootstrap".to_owned(),
-                "browser_sessions".to_owned(),
-                "browser_users".to_owned(),
+                "auth_subject_profile_grants".to_owned(),
+                "auth_subjects".to_owned(),
+                "fasti_browser_session_grants".to_owned(),
+                "fasti_browser_sessions".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

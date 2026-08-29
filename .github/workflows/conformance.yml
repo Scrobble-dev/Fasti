@@ -13,6 +13,8 @@ jobs:
   contract-conformance:
     name: OpenAPI, AsyncAPI, JSON Schema, JSON-LD, OKF, and SDK parity
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1

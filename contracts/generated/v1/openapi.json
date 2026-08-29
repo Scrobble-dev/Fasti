@@ -53,61 +53,6 @@
         ],
         "type": "object"
       },
-      "BrowserSessionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "expires_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "user": {
-            "$ref": "#/components/schemas/BrowserUserDto"
-          }
-        },
-        "required": [
-          "user",
-          "expires_at"
-        ],
-        "type": "object"
-      },
-      "BrowserUserDto": {
-        "additionalProperties": false,
-        "properties": {
-          "active": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "is_admin": {
-            "type": "boolean"
-          },
-          "is_test_account": {
-            "type": "boolean"
-          },
-          "updated_at": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "user_id": {
-            "type": "string"
-          },
-          "username": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "username",
-          "is_admin",
-          "is_test_account",
-          "active",
-          "created_at",
-          "updated_at"
-        ],
-        "type": "object"
-      },
       "ClaimedPrecisionDto": {
         "enum": [
           "date",
@@ -148,35 +93,6 @@
         ],
         "type": "object"
       },
-      "CreateBrowserSessionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "password": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 8,
-            "type": "string"
-          },
-          "session_timeout_minutes": {
-            "description": "5-1440 (24h) covers every normal deployment. The published maximum\nhere is wider than that -- 52,560,000 (100 years), matching apps/\nfastid/src/main.rs's DEVELOPMENT_UNBOUNDED_SESSION_MINUTES -- because\nthe generated SDK's client re-validates outgoing requests against\nthis exact published schema (packages/sdk/src/generated.ts's\nvalidateOpenApiValue): a narrower published maximum would make the\nSDK itself reject the value before a legitimate loopback dev-auto-\nlogin request ever reached the daemon. The runtime bound enforced by\nCreateBrowserSessionCommand::try_new is still the actual source of\ntruth for what a given instance accepts -- only a daemon with the\nloopback-gated FASTI_DEVELOPMENT_AUTO_LOGIN convenience active\naccepts anything above 1440, and rejects it (422) otherwise.",
-            "format": "int32",
-            "maximum": 52560000,
-            "minimum": 5,
-            "type": "integer"
-          },
-          "username": {
-            "maxLength": 64,
-            "minLength": 3,
-            "type": "string"
-          }
-        },
-        "required": [
-          "username",
-          "password",
-          "session_timeout_minutes"
-        ],
-        "type": "object"
-      },
       "CreateRecordRequest": {
         "additionalProperties": false,
         "properties": {
@@ -212,21 +128,6 @@
           "Bearer"
         ],
         "type": "string"
-      },
-      "DeleteBrowserUserRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "current_password": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 8,
-            "type": "string"
-          }
-        },
-        "required": [
-          "current_password"
-        ],
-        "type": "object"
       },
       "EnrollFirstClientRequest": {
         "additionalProperties": false,
@@ -445,21 +346,6 @@
         },
         "required": [
           "integrations"
-        ],
-        "type": "object"
-      },
-      "ListBrowserUsersResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "users": {
-            "items": {
-              "$ref": "#/components/schemas/BrowserUserDto"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "users"
         ],
         "type": "object"
       },
@@ -1293,44 +1179,6 @@
         ],
         "type": "string"
       },
-      "UpdateBrowserUserRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "active": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "current_password": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 8,
-            "type": "string"
-          },
-          "password": {
-            "format": "password",
-            "maxLength": 128,
-            "minLength": 8,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "username": {
-            "maxLength": 64,
-            "minLength": 3,
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "current_password"
-        ],
-        "type": "object"
-      },
       "ViolationDto": {
         "additionalProperties": false,
         "properties": {
@@ -1367,12 +1215,6 @@
         "scheme": "bearer",
         "type": "http"
       },
-      "browser_session": {
-        "description": "Opaque HttpOnly browser session cookie",
-        "in": "cookie",
-        "name": "fasti_session",
-        "type": "apiKey"
-      },
       "credential_bearer": {
         "bearerFormat": "64-character lowercase hexadecimal credential",
         "description": "Enrolled Fasti client credential sent only in the Authorization header.",
@@ -1396,616 +1238,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/api/v1/browser/session": {
-      "delete": {
-        "operationId": "end_session",
-        "responses": {
-          "204": {
-            "description": "Browser session ended"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Browser session is missing or inactive"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "CSRF proof is missing or invalid"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Durable state failed an integrity check"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Local storage is unavailable"
-          }
-        },
-        "security": [
-          {
-            "browser_session": []
-          }
-        ],
-        "tags": [
-          "browser authentication"
-        ],
-        "x-fasti-authorization": "scoped",
-        "x-fasti-capability-id": "browser.session.end",
-        "x-fasti-example-ids": [],
-        "x-fasti-problem-codes": [
-          "authentication_failed",
-          "forbidden",
-          "integrity_failed",
-          "storage_unavailable"
-        ],
-        "x-fasti-required-scopes": [],
-        "x-fasti-runtime-availability": "implemented"
-      },
-      "get": {
-        "operationId": "read_session",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrowserSessionResponse"
-                }
-              }
-            },
-            "description": "The current authenticated browser session"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Browser session is missing or inactive"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Session no longer has active access"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Durable state failed an integrity check"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Local storage is unavailable"
-          }
-        },
-        "security": [
-          {
-            "browser_session": []
-          }
-        ],
-        "tags": [
-          "browser authentication"
-        ],
-        "x-fasti-authorization": "scoped",
-        "x-fasti-capability-id": "browser.session.read",
-        "x-fasti-example-ids": [],
-        "x-fasti-problem-codes": [
-          "authentication_failed",
-          "forbidden",
-          "integrity_failed",
-          "storage_unavailable"
-        ],
-        "x-fasti-required-scopes": [],
-        "x-fasti-runtime-availability": "implemented"
-      },
-      "post": {
-        "operationId": "create_session",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateBrowserSessionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrowserSessionResponse"
-                }
-              }
-            },
-            "description": "An authenticated browser session"
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Malformed JSON"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Username or password is invalid"
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Request body exceeds the bounded transport limit"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Content-Type is not application/json"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Input does not satisfy the browser authentication contract"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Durable state failed an integrity check"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Local storage is unavailable"
-          }
-        },
-        "tags": [
-          "browser authentication"
-        ],
-        "x-fasti-authorization": "unauthenticated",
-        "x-fasti-capability-id": "browser.session.create",
-        "x-fasti-example-ids": [],
-        "x-fasti-problem-codes": [
-          "authentication_failed",
-          "integrity_failed",
-          "malformed_json",
-          "payload_too_large",
-          "storage_unavailable",
-          "unsupported_media_type",
-          "validation_failed"
-        ],
-        "x-fasti-required-scopes": [],
-        "x-fasti-runtime-availability": "implemented"
-      }
-    },
-    "/api/v1/browser/users": {
-      "get": {
-        "operationId": "list_users",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListBrowserUsersResponse"
-                }
-              }
-            },
-            "description": "Browser users visible to an administrator"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Browser session is missing or inactive"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Browser session lacks user-management access"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Durable state failed an integrity check"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Local storage is unavailable"
-          }
-        },
-        "security": [
-          {
-            "browser_session": []
-          }
-        ],
-        "tags": [
-          "browser authentication"
-        ],
-        "x-fasti-authorization": "scoped",
-        "x-fasti-capability-id": "browser.user.list",
-        "x-fasti-example-ids": [],
-        "x-fasti-problem-codes": [
-          "authentication_failed",
-          "forbidden",
-          "integrity_failed",
-          "storage_unavailable"
-        ],
-        "x-fasti-required-scopes": [
-          "browser_user_manage"
-        ],
-        "x-fasti-runtime-availability": "implemented"
-      }
-    },
-    "/api/v1/browser/users/{user_id}": {
-      "delete": {
-        "operationId": "delete_user",
-        "parameters": [
-          {
-            "description": "Browser user identifier",
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteBrowserUserRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Browser user deleted"
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Malformed JSON"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Browser session is missing or inactive"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Administration, CSRF, or password re-authentication failed"
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Request body exceeds the bounded transport limit"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Content-Type is not application/json"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Target user is invalid"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Durable state failed an integrity check"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Local storage is unavailable"
-          }
-        },
-        "security": [
-          {
-            "browser_session": []
-          }
-        ],
-        "tags": [
-          "browser authentication"
-        ],
-        "x-fasti-authorization": "scoped",
-        "x-fasti-capability-id": "browser.user.delete",
-        "x-fasti-example-ids": [],
-        "x-fasti-problem-codes": [
-          "authentication_failed",
-          "forbidden",
-          "integrity_failed",
-          "malformed_json",
-          "payload_too_large",
-          "storage_unavailable",
-          "unsupported_media_type",
-          "validation_failed"
-        ],
-        "x-fasti-required-scopes": [
-          "browser_user_manage"
-        ],
-        "x-fasti-runtime-availability": "implemented"
-      },
-      "patch": {
-        "operationId": "update_user",
-        "parameters": [
-          {
-            "description": "Browser user identifier",
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateBrowserUserRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BrowserUserDto"
-                }
-              }
-            },
-            "description": "Updated browser user"
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Malformed JSON"
-          },
-          "401": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Browser session is missing or inactive"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Administration, CSRF, or password re-authentication failed"
-          },
-          "413": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Request body exceeds the bounded transport limit"
-          },
-          "415": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Content-Type is not application/json"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Input or target user is invalid"
-          },
-          "500": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Durable state failed an integrity check"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "Local storage is unavailable"
-          }
-        },
-        "security": [
-          {
-            "browser_session": []
-          }
-        ],
-        "tags": [
-          "browser authentication"
-        ],
-        "x-fasti-authorization": "scoped",
-        "x-fasti-capability-id": "browser.user.update",
-        "x-fasti-example-ids": [],
-        "x-fasti-problem-codes": [
-          "authentication_failed",
-          "forbidden",
-          "integrity_failed",
-          "malformed_json",
-          "payload_too_large",
-          "storage_unavailable",
-          "unsupported_media_type",
-          "validation_failed"
-        ],
-        "x-fasti-required-scopes": [
-          "browser_user_manage"
-        ],
-        "x-fasti-runtime-availability": "implemented"
-      }
-    },
     "/api/v1/client-enrollments": {
       "post": {
         "operationId": "enroll_first_client",
@@ -3490,9 +2722,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -3868,9 +3097,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -3970,9 +3196,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -4060,9 +3283,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -4200,9 +3420,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -4320,9 +3537,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -4517,9 +3731,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -4640,9 +3851,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -4814,9 +4022,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [
@@ -5015,9 +4220,6 @@
         "security": [
           {
             "credential_bearer": []
-          },
-          {
-            "browser_session": []
           }
         ],
         "tags": [

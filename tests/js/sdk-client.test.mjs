@@ -17,7 +17,6 @@ import {
   connectionEndpoint,
   normalizeBaseUrl,
   parseAcceptObservationRequest,
-  parseBrowserSessionResponse,
   parseHealthResponse,
   parseListRecordsResponse,
   parseReceiptCommittedEvent,
@@ -48,149 +47,21 @@ const contractIds = {
   observation: v7("obs", "6"),
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
-  user: v7("usr", "9"),
 };
 
-test("browser session DTOs enforce generated boolean schemas", () => {
-  const session = {
-    expires_at: "2026-08-28T12:00:00Z",
-    user: {
-      active: true,
-      created_at: "2026-08-28T10:00:00Z",
-      is_admin: true,
-      is_test_account: true,
-      updated_at: "2026-08-28T10:00:00Z",
-      user_id: "usr_01991f58-8e00-7000-8000-000000000001",
-      username: "testadmin",
-    },
-  };
-
-  assert.deepEqual(parseBrowserSessionResponse(session), session);
-  assert.throws(
-    () =>
-      parseBrowserSessionResponse({
-        ...session,
-        user: { ...session.user, active: "true" },
-      }),
-    FastiContractParseError,
-  );
-});
-
-test("browser session SDK uses generated DTOs, cookies, CSRF, and exact empty responses", async () => {
-  const csrf = "a".repeat(64);
-  const user = {
-    active: true,
-    created_at: "2026-08-28T10:00:00Z",
-    is_admin: true,
-    is_test_account: true,
-    updated_at: "2026-08-28T10:00:00Z",
-    user_id: contractIds.user,
-    username: "testadmin",
-  };
-  const session = { expires_at: "2026-08-28T12:00:00Z", user };
-  const calls = [];
+test("browser authentication SDK methods are absent until C1", () => {
   const client = new FastiClient({
     baseUrl: "http://127.0.0.1:8420",
-    useBrowserSession: true,
-    csrfToken: csrf,
-    fetch: async (url, init) => {
-      const method = init?.method ?? "GET";
-      const path = new URL(url).pathname;
-      calls.push({
-        path,
-        method,
-        csrf: new Headers(init?.headers).get("x-fasti-csrf"),
-        credentials: init?.credentials,
-        body: init?.body === undefined ? undefined : JSON.parse(init.body),
-      });
-      if (method === "DELETE") return new Response(null, { status: 204 });
-      const body =
-        path === "/api/v1/browser/users"
-          ? { users: [user] }
-          : path.startsWith("/api/v1/browser/users/")
-            ? user
-            : session;
-      return new Response(JSON.stringify(body), {
-        headers: { "content-type": "application/json" },
-      });
-    },
   });
-
-  assert.deepEqual(
-    await client.createBrowserSession({
-      username: user.username,
-      password: user.username,
-      session_timeout_minutes: 60,
-    }),
-    session,
-  );
-  assert.deepEqual(await client.readBrowserSession(), session);
-  await client.endBrowserSession();
-  assert.deepEqual(await client.listBrowserUsers(), { users: [user] });
-  assert.deepEqual(
-    await client.updateBrowserUser(contractIds.user, {
-      current_password: user.username,
-      username: "editedadmin",
-    }),
-    user,
-  );
-  await client.deleteBrowserUser(contractIds.user, {
-    current_password: user.username,
-  });
-
-  assert.deepEqual(
-    calls.map(({ path, method, csrf: header, credentials }) => ({
-      path,
-      method,
-      csrf: header,
-      credentials,
-    })),
-    [
-      {
-        path: "/api/v1/browser/session",
-        method: "POST",
-        csrf: null,
-        credentials: "include",
-      },
-      {
-        path: "/api/v1/browser/session",
-        method: "GET",
-        csrf: null,
-        credentials: "include",
-      },
-      {
-        path: "/api/v1/browser/session",
-        method: "DELETE",
-        csrf,
-        credentials: "include",
-      },
-      {
-        path: "/api/v1/browser/users",
-        method: "GET",
-        csrf: null,
-        credentials: "include",
-      },
-      {
-        path: `/api/v1/browser/users/${contractIds.user}`,
-        method: "PATCH",
-        csrf,
-        credentials: "include",
-      },
-      {
-        path: `/api/v1/browser/users/${contractIds.user}`,
-        method: "DELETE",
-        csrf,
-        credentials: "include",
-      },
-    ],
-  );
-  assert.throws(
-    () =>
-      client.updateBrowserUser("not-a-user", {
-        current_password: user.username,
-      }),
-    /userId does not match the generated contract/,
-  );
+  for (const method of [
+    "createBrowserSession",
+    "readBrowserSession",
+    "endBrowserSession",
+    "listBrowserSessions",
+    "listBrowserUsers",
+  ]) {
+    assert.equal(client[method], undefined);
+  }
 });
 
 test("health omits credentials and returns the exact public contract", async () => {
@@ -626,22 +497,17 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "clearNuvioCollections",
           "configureListener",
           "constructor",
-          "createBrowserSession",
           "createRecord",
-          "deleteBrowserUser",
           "discoverCapabilities",
-          "endBrowserSession",
           "enrollDurableFirstClient",
           "enrollFirstClient",
           "getNuvioCollections",
           "health",
           "initializeDurableNode",
           "initializeNode",
-          "listBrowserUsers",
           "listIntegrations",
           "listRecords",
           "listTrackingDispositions",
-          "readBrowserSession",
           "receiptEvents",
           "registerNamespace",
           "replaceNuvioCollections",
@@ -651,7 +517,6 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "selectProfile",
           "setTrackingDisposition",
           "submitObservation",
-          "updateBrowserUser",
         ]);
       },
     );
@@ -866,7 +731,7 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 36);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 39);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
     12,
@@ -1297,7 +1162,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 36);
+    assert.equal(discovery.capabilities.length, 39);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>

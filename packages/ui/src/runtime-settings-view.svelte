@@ -14,6 +14,7 @@
     IconRefresh,
     IconTags,
     IconTrash,
+    IconUser,
     IconWorld,
   } from "@tabler/icons-svelte";
   import NetworkSettings from "./network-settings.svelte";
@@ -36,6 +37,7 @@
     canAccessProfileData?: boolean;
     profileDataIdentity?: string;
     activeTab?:
+      | "account"
       | "network"
       | "providers"
       | "preferences"
@@ -44,6 +46,7 @@
       | "system";
     onTabChange?: (
       tab:
+        | "account"
         | "network"
         | "providers"
         | "preferences"
@@ -75,6 +78,7 @@
   }: Props = $props();
 
   let active:
+    | "account"
     | "network"
     | "providers"
     | "preferences"
@@ -780,6 +784,7 @@
           onchange={(event) =>
             switchTab(event.currentTarget.value as typeof active)}
         >
+          <option value="account">Account and security</option>
           <option value="network">Network</option>
           <option value="providers">Metadata credentials</option>
           <option value="preferences">Preferences & Metadata</option>
@@ -790,6 +795,14 @@
       </div>
 
       <nav class="settings-nav list-group" aria-label="Settings sections">
+        <a
+          href="/settings/account"
+          class="list-group-item list-group-item-action"
+          class:active={active === "account"}
+          aria-current={active === "account" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "account")}
+          ><IconUser size={16} aria-hidden="true" /> Account and security</a
+        >
         <a
           href="/settings"
           class="list-group-item list-group-item-action"
@@ -841,7 +854,154 @@
     </div>
 
     <div class="settings-panel">
-      {#if active === "network"}
+      {#if active === "account"}
+        <section
+          class="card mb-3"
+          aria-labelledby="account-security-title"
+          data-testid="account-security-task-map"
+        >
+          <div class="card-header">
+            <div>
+              <h2 id="account-security-title" class="card-title h3 mb-1">
+                Account and security
+              </h2>
+              <p class="card-subtitle text-secondary mb-0">
+                Use this permanent task map to review account protection and
+                access.
+              </p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div
+              class="alert alert-warning"
+              role="status"
+              data-testid="account-access-unavailable"
+            >
+              <div>
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                  <strong>Unavailable</strong>
+                  <span class="badge bg-warning-lt text-dark"
+                    >PR C1 required</span
+                  >
+                </div>
+                <p class="mb-2">
+                  Browser sign-in, authentication methods, and session inventory
+                  depend on PR C1: TrailBase identity bootstrap and production
+                  browser sessions.
+                </p>
+                <p class="mb-0">
+                  Continue local work that does not need an account. Operators
+                  must complete and merge PR C1 before enabling these controls.
+                </p>
+              </div>
+            </div>
+
+            <div class="list-group" aria-label="Account and security tasks">
+              <div class="list-group-item">
+                <div
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+                >
+                  <div>
+                    <h3 class="h4 mb-1">Sign-in methods</h3>
+                    <p class="text-secondary mb-0">
+                      Password, TOTP, passkeys, and recovery codes.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
+                </div>
+              </div>
+              <div class="list-group-item">
+                <div
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+                >
+                  <div>
+                    <h3 class="h4 mb-1">Browser sessions</h3>
+                    <p class="text-secondary mb-0">
+                      Review current access, expiry, and revocation after PR C1.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
+                </div>
+              </div>
+              <div class="list-group-item">
+                <div
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+                >
+                  <div>
+                    <h3 class="h4 mb-1">Devices and clients</h3>
+                    <p class="text-secondary mb-0">
+                      Paired devices, registered clients, and personal access
+                      tokens.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
+                </div>
+              </div>
+              <div class="list-group-item">
+                <div
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+                >
+                  <div>
+                    <h3 class="h4 mb-1">External identity providers</h3>
+                    <p class="text-secondary mb-0">
+                      Generic OpenID Connect and named Authentik support.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
+                </div>
+              </div>
+              <div class="list-group-item">
+                <div
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+                >
+                  <div>
+                    <h3 class="h4 mb-1">Security policy</h3>
+                    <p class="text-secondary mb-0">
+                      Session duration, recent authentication, and access
+                      invalidation.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="card card-sm"
+          aria-labelledby="first-run-setup-title"
+          data-testid="first-run-guided-setup"
+        >
+          <div class="card-body">
+            <div
+              class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+            >
+              <div>
+                <h2 id="first-run-setup-title" class="h3 mb-1">
+                  First-run guided setup
+                </h2>
+                <p class="text-secondary mb-0">
+                  This remains a separate first-run flow. After PR C1, it will
+                  guide initial account, recovery, and external identity setup.
+                  It does not replace the permanent task map above.
+                </p>
+              </div>
+              <span class="badge bg-blue-lt text-dark">Separate flow</span>
+            </div>
+          </div>
+        </section>
+      {:else if active === "network"}
         <NetworkSettings
           scope={host.networkConfigurationScope}
           configuration={network}
@@ -1445,7 +1605,8 @@
 
           {#if !canAccessProfileData}
             <p class="managed-note">
-              Sign in to manage this profile's Nuvio Collections document.
+              Profile data access is unavailable in this host. Open Fasti in a
+              host that provides profile-data access.
             </p>
           {:else if host.getNuvioCollections && host.replaceNuvioCollections && host.clearNuvioCollections}
             {@const counts = nuvioCounts(nuvioDocument)}

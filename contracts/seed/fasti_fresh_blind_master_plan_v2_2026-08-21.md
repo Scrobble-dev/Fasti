@@ -7,6 +7,14 @@
 **Relationship:** Scrobble.dev is the neutral vocabulary, knowledge, schema, and conformance vehicle. Fasti is one implementation.  
 **Supersession:** This document replaces the identity, metadata, provider, reconciliation, migration, and related roadmap sections of the earlier Fasti blueprint where they conflict. It re-tests the rest of the plan rather than assuming it is correct.
 
+> **Historical source notice (29 August 2026):** This seed predates the
+> TrailBase authentication programme. Its django-allauth issuer, local-auth,
+> browser-account, and compatibility proposals are superseded. TrailBase is the
+> selected separate human-account service. Fasti owns its subject links,
+> browser sessions, authorization, profiles, grants, scopes, and application
+> state. Keep the superseded text below as decision provenance; do not execute
+> it as the current authentication plan.
+
 ---
 
 ## 0. Decision in one minute
@@ -101,7 +109,7 @@ This plan treats every previous Fasti conclusion as a hypothesis. The stack, seq
 This document uses these labels:
 
 - **LOCKED:** required for repository foundation.
-- **PROVISIONAL:** direction is chosen but needs a spike or permission.
+- **PROVISIONAL:** direction is chosen but needs a spike or current source review.
 - **OBSERVED:** supported by current source or documentation.
 - **REJECTED:** explicitly excluded.
 - **GATE:** must be proved before the related release claim.
@@ -113,7 +121,10 @@ The design lessons come primarily from **Electric-Town/anime-crosswalk-mappings*
 ### 2.3 Research limits
 
 - The panels in this report are synthetic expert-role audits. No real named experts participated.
-- Direct AniList use by a tracker is not assumed to be permitted. Current AniList terms prohibit competing tracker use without authorization, and direct support is gated on written permission or another lawful integration path [S13].
+- **SUPERSEDED:** This seed originally treated Fasti as a competing tracker and
+  gated all direct AniList use on written permission. Fasti is not a competing
+  tracker. Public metadata use follows current official API terms and limits;
+  any future authenticated tracker operation is a separate capability [S13].
 - AniList identifiers are present in current Nuvio-related work, but this research did not prove that current Nuvio releases now use the AniList API directly for their general metadata pipeline.
 - Electric-Town anime-crosswalk-mappings currently supplies a schema, policy, fixtures, and conformance work, not a published production dataset [S1–S4].
 
@@ -285,7 +296,7 @@ Media records arrive with incomplete, inconsistent, stale, provider-specific, or
 - Automatic title-only matching.
 - Automatic entity merges from heuristic scores.
 - Full mirroring of provider catalogues.
-- Direct AniList tracker integration without authorization.
+- Authenticated AniList tracker operations without a separately sourced capability contract.
 - Executable mapping scripts in user-defined API Connections.
 - A global ontology that forces every media domain into one hierarchy.
 - AI deciding canonical identity without deterministic evidence and user review.
@@ -470,7 +481,7 @@ crates/
 
 services/
   node/
-  auth/                 # django-allauth sidecar, uv
+  auth/                 # SUPERSEDED historical django-allauth sidecar proposal
   notify/               # Apprise adapter, uv
 
 apps/
@@ -1656,7 +1667,7 @@ Do not force every source into one “metadata provider” interface.
 | Identity source | Return identifier and relation assertions | provider external-ID endpoints, Wikidata where permitted |
 | Mapping bundle | Supply versioned topology/mapping assertions | Electric-Town-compatible artifacts, AniBridge bundle |
 | Catalogue source | Return candidate rows/collections | AIOmetadata, Stremio catalogues, Kaptain/Xperience exports |
-| Tracker account | Read/write user state | SIMKL, MAL, AniList if authorized, future services |
+| Tracker account | Read/write user state | SIMKL, MAL, and any future separately sourced authenticated AniList capability |
 | Player connector | Observe activity and hand off playback | Nuvio, Kodi, Jellyfin, VLC, local apps |
 | Importer/exporter | Translate a file/API dialect | Floppy, Yamtrack, Cinephage, generic compatibility profiles |
 | Connection | User-defined declarative external endpoint/topic mapping | HTTP, webhook, MQTT |
@@ -1834,10 +1845,16 @@ However:
 - relation edges are provider assertions, not universal truth;
 - nested schedules require correct independent pagination;
 - unknown episode totals must remain unknown;
-- current terms prohibit competing tracker use without authorization;
+- authenticated tracker operations require their own current terms and source review;
 - API rate and availability limits require bounded cache and fallback.
 
-**Decision:** design the AniList adapter and conformance fixtures now. Do not enable direct production tracker integration until Fasti has explicit permission or a clearly compliant path. AniChart does not bypass this gate.
+**Decision (corrected 29 August 2026):** Fasti is not a competing tracker with
+AniList. Public metadata use does not need a separate permission gate beyond
+the current documented API terms and limits. Design the metadata adapter and
+conformance fixtures against current official evidence. Treat any future
+authenticated write or tracker operation as a separate capability with its own
+terms, authorization, and source review. AniChart is not evidence for that
+separate capability.
 
 ### 21.4 MAL, Kitsu, AniDB, TMDB, and TVDB
 
@@ -2832,9 +2849,13 @@ WebTransport remains the preferred live transport. HTTP snapshot/delta and mutat
 
 Fasti may display or cache provider data under one set of terms while a public CC0 mapping artifact requires a much stricter acquisition route. Do not publish a provider identifier assertion to Electric-Town or Scrobble.dev merely because Fasti received it.
 
-### 32.4 AniList gate
+### 32.4 AniList boundary — corrected
 
-Current AniList terms explicitly restrict use in competing trackers. Direct Fasti integration requires authorization. A user-supplied token does not automatically remove that obligation.
+Fasti is not a competing tracker. Public AniList metadata use does not require
+a bespoke permission gate beyond the current documented API terms and limits.
+A user token does not by itself authorize a future write or tracker capability;
+that separate operation requires its own contract, source review, scopes, and
+tests.
 
 ### 32.5 Privacy
 
@@ -2950,7 +2971,7 @@ The identity review does not justify replacing the selected core stack.
 | UI | Svelte 5 + TypeScript + Vite | LOCKED |
 | Design system | Tabler Core + Tabler Icons + custom media components | LOCKED |
 | Desktop/mobile shell | Tauri 2 | LOCKED, mobile background behavior needs spike |
-| Initial identity issuer | django-allauth sidecar | PROVISIONAL and replaceable |
+| Human identity platform | TrailBase as a separate private service | SELECTED; supersedes the historical django-allauth proposal |
 | Notifications | Rust domain + private Apprise adapter | LOCKED architecture, adapter spike needed |
 | Live transport | WebTransport preferred; HTTP/WebSocket/SSE fallbacks | PROVISIONAL implementation |
 | Discovery | DNS-SD over mDNS | LOCKED capability, implementation library provisional |
@@ -2960,7 +2981,7 @@ The identity review does not justify replacing the selected core stack.
 | Knowledge | Markdown + JSON-LD + OKF + KCS | LOCKED |
 | Mapping data | Versioned pluggable bundles | LOCKED boundary |
 | AniBridge | Optional bundle adapter | PROVISIONAL |
-| AniList | Adapter design only until authorized | GATED |
+| AniList | Public metadata adapter under current documented terms and limits | SELECTED boundary; authenticated tracker operations remain separate |
 | PGlite/Turso/Fjall | No canonical role in 1.0 | REJECTED/DEFERRED |
 
 ### 34.1 Why not a graph database
@@ -2972,9 +2993,13 @@ The identity review does not justify replacing the selected core stack.
 - most queries begin from an exact namespace/ID or Fasti entity;
 - mapping bundles can be indexed and traversed in bounded form.
 
-### 34.2 Why not full Django
+### 34.2 Historical Django/allauth decision — superseded
 
-Identity complexity increases the need for a small, explicit domain core. Django-allauth remains an authentication issuer sidecar. It must not own Fasti entities, assertions, resolution policies, or Chronicle data.
+This section is retained as provenance. Django-allauth is not the current
+issuer and there is no authentication compatibility layer. TrailBase is the
+selected separate human-account service. It must not own Fasti entities,
+assertions, resolution policies, Chronicle data, browser sessions,
+authorization, profiles, grants, or scopes.
 
 ### 34.3 Why not one universal provider abstraction
 
@@ -3084,7 +3109,7 @@ Prioritization uses:
 - AniBridge bundle adapter and staged updates.
 - Local mapping overlays.
 - MAL/Kitsu/TMDB/TVDB adapters as permitted.
-- AniList adapter fixtures and authorization decision.
+- AniList public-metadata adapter fixtures and current terms review.
 - Nuvio exact write/read routing.
 - Kodi/Stremio/Nuvio observation profiles.
 - Play With.
@@ -3098,7 +3123,7 @@ Prioritization uses:
 - bundle update never silently moves history;
 - two external players produce exact state;
 - Fasti works with no mapping bundle installed;
-- AniList remains disabled unless permission gate is satisfied.
+- AniList metadata stays disabled until its adapter, limits, attribution, and conformance evidence pass.
 
 ### Milestone 4 — Custom records, fields, and provider SDK beta
 
@@ -3194,7 +3219,7 @@ Prioritization uses:
 - Defer automatic public overlay publication.
 - Defer executable WASI plugins.
 - Defer Cloudflare deployment until local product and identity contracts pass.
-- Defer direct AniList support until authorization.
+- Defer AniList metadata support until the adapter and current-terms evidence pass; keep authenticated tracker operations separate.
 
 ---
 
@@ -3519,7 +3544,7 @@ A release cannot claim identity interoperability until:
 | 13 | IMDb identity engineer | IMDb is a valuable bridge identifier. | It is not a complete metadata or episode-topology contract. |
 | 14 | Anime mapping engineer | One-to-one mapping is structurally wrong for common high-traffic anime. | Range, offset, discontinuity, cardinality, numbering space, and negative assertions are mandatory. |
 | 15 | MAL integration engineer | MAL may be a provider coordinate, not the Fasti identity. | Avoid mandatory MAL resolution and preserve inaccessible/deleted IDs. |
-| 16 | AniList API and policy reviewer | AniList relations and schedules are useful evidence. | Direct tracker use is permission-gated; no architectural dependency. |
+| 16 | AniList API and policy reviewer | AniList relations and schedules are useful evidence. | Public metadata follows current terms and limits; authenticated tracker operations are separate; no architectural dependency. |
 | 17 | Kitsu integration engineer | Kitsu IDs often arrive in add-on and SIMKL workflows. | Retain them even when the active display provider cannot use them. |
 | 18 | SIMKL integration engineer | SIMKL supplies useful cross-provider aliases and tracker state. | Preserve route provenance and do not assume its mappings are current or complete. |
 | 19 | Nuvio/Stremio engineer | Read enrichment can use broad aliases while exact writes need provider-native IDs. | Resolver intent must be explicit in every call. |
@@ -3538,7 +3563,7 @@ A release cannot claim identity interoperability until:
 | 32 | Application-security engineer | Provider URLs, manifests, bundles, imports, and plugins create several trust boundaries. | Centralize network policy, secret storage, parser limits, signatures, and scopes. |
 | 33 | SSRF specialist | Generic API Connections and metadata providers can reach protected networks. | Deny private/link-local/metadata destinations by default and revalidate redirects and DNS. |
 | 34 | Privacy engineer | Media history and unresolved source evidence are sensitive household data. | Minimize logs, separate profiles, encrypt secrets, and make sharing explicit. |
-| 35 | Identity/auth engineer | Account identity and media identity are unrelated bounded contexts. | Keep django-allauth issuer details outside the media identity model. |
+| 35 | Identity/auth engineer | Account identity and media identity are unrelated bounded contexts. | Historical django-allauth detail is superseded. Keep TrailBase issuer and subject details outside the media identity model. |
 | 36 | Mobile platform engineer | Offline queues and background limits will dominate mobile reliability. | Prove suspension, key storage, and delayed retry before promising invisible sync. |
 | 37 | Tauri engineer | Shared web UI can reach desktop and mobile quickly. | Keep native plugins bounded and do not put domain logic in the webview. |
 | 38 | Accessibility engineer | Reconciliation can become inaccessible if represented only as a graph or confidence color. | Provide list/table views, textual evidence, keyboard paths, and persistent focus. |
@@ -3575,7 +3600,7 @@ The independent roles strongly agree on seven points:
 | Automatic healing | Auto-accept high-score candidates | Require review for every new assertion | Auto-accept only reversible, policy-approved assertions; never auto-merge or move history. |
 | External mapping data | Depend on best current service | Vendor immutable snapshots | Prefer verified local snapshots and overlays; live services may provide candidates. |
 | Graph database | Natural fit for identity graph | Operational overhead is unjustified | SQLite relational model first. |
-| AniList | Strong default anime source | Terms and rate limits make it unsafe | Design adapter and fixtures; ship only with authorization. |
+| AniList | Strong default anime source | Terms, limits, and availability require governed use | Design the public-metadata adapter and fixtures; ship only after current-terms and conformance evidence. |
 | User transparency | Show all evidence | Avoid overwhelming ordinary users | Summary first, expandable evidence, full diagnostics and export. |
 | Custom fields | Maximum freedom | Strong schema governance | Typed versioned fields with bounded indexes and namespace registration. |
 
@@ -3861,7 +3886,7 @@ domain profile:
 | SQLite graph query performance | Load 1M external assertions and 5M mapping edges; run bounded resolution workloads | p95 within budget with bounded memory and no unbounded recursive query. |
 | Automatic assertion admission | Replay real imports with policy variants | False automatic attachment below agreed threshold; all accepted decisions explainable. |
 | Metadata field merge policies | Compare TMDB/TVDB/MAL/Kitsu/Google Books/MusicBrainz fixtures | Each field has deterministic locale/source/user-override behavior. |
-| AniList integration | Obtain written permission and test rate/availability | Authorized use, bounded adapter, no runtime dependency. |
+| AniList metadata integration | Review current official terms and test rate/availability | Compliant public-metadata use, bounded adapter, no runtime dependency. |
 | AniBridge adapter | Validate current release artifact against Fasti and Electric-Town cases | Directionality, ranges, ratios, provenance, versioning, and stale-target checks survive. |
 | Custom field indexing | Benchmark generated/indexed SQLite columns versus side index table | Safe migrations, bounded storage, and useful query performance. |
 | Reconciliation UX | Test with migration, provider switch, and topology conflict tasks | Users identify safe action, preserve context, and complete without external help. |
@@ -3918,7 +3943,7 @@ Proceed with a gated foundation. Do not proceed directly to broad provider imple
 | False entity merge | Medium | Critical | No title merge; irreversibility gate; negative assertions; preview; rollback | Any verified false automatic merge | Disable related policy, quarantine affected decisions, restore split from decision log | Identity, M0-M2 |
 | Mapping update silently changes history | Medium | Critical | Pin interpretation decision/bundle; impact preview; no auto-move | Occurrence target changes after bundle install | Roll back bundle and interpretation decisions; publish incident report | Identity/Chronicle, M1-M3 |
 | Provider disappears or deletes IDs | High | High | Stable Fasti IDs; source snapshots; tombstones; last-known-good | 404/410 spike or project shutdown | Mark source stale, retain record, route to alternates, preserve export | Metadata, all phases |
-| AniList or another provider rejects tracker use | Medium | High | Permission gate; adapter isolation; no canonical dependency | Written denial, rate restriction, ToS change | Disable integration, retain source IDs, use licensed alternatives/manual import | Provider governance |
+| AniList or another provider changes metadata terms or limits | Medium | High | Current-terms review; adapter isolation; no canonical dependency | Terms, rate, or availability change | Disable affected capability, retain source IDs, use licensed alternatives or manual import | Provider governance |
 | Data-license contamination enters public bundle | Medium | Critical | Acquisition-route registry; separate app data from publishable assertions; reviews | Unknown/forbidden source in bundle build | Block release, revoke artifact, rotate manifest, notify consumers | Data governance |
 | Malicious or compromised mapping bundle | Low-medium | Critical | Signatures, hashes, schema validation, limits, staged diff, source trust | Signature failure, abnormal impact, revocation | Reject/rollback bundle; quarantine source; security advisory | Supply chain, M3+ |
 | Reconciliation queue overwhelms users | Medium | High | Safe unresolved state; grouping; batch rules; priority by blocked outcome | Queue age/size exceeds target; high abandonment | Reduce auto-generated cases, improve source coverage, offer scoped batch decisions | Product/UX |
@@ -4348,7 +4373,7 @@ The first ninety days prove the record, not the platform.
 
 - multi-user workspace/profile minimum;
 - Tabler/Svelte Chronicle shell;
-- local auth and optional allauth bridge integration boundary;
+- TrailBase human-account boundary and dormant Fasti browser-session foundation; the historical local-auth and allauth bridge proposal is superseded;
 - local backup/restore equivalence;
 - mDNS discovery and secure-pairing spike;
 - one player observation path;
@@ -4402,7 +4427,7 @@ A real user can:
 | Events | AsyncAPI 3.x from shared event definitions. |
 | Schemas | JSON Schema 2020-12. |
 | Knowledge | Markdown, OKF, JSON-LD outputs generated from governed definitions. |
-| Auth boundary | django-allauth may be an initial replaceable issuer sidecar; it does not own media identity. |
+| Auth boundary | TrailBase is the selected separate human-account service. Fasti owns subject links, browser sessions, authorization, profiles, grants, scopes, and media identity. The historical django-allauth proposal is superseded. |
 | Notifications | First-class Rust domain; Apprise is a private optional delivery adapter. |
 | Local discovery | DNS-SD over mDNS, explicit pairing, manual/QR fallback. |
 | Sync | Local outbox, idempotency receipts, ordered accepted changes, snapshots/deltas, tombstones. |
@@ -4419,7 +4444,7 @@ A real user can:
 - exact common grain names across all media domains;
 - automatic assertion-admission policy;
 - AniBridge artifact adapter;
-- AniList direct integration after authorization;
+- AniList public-metadata integration after current-terms, limit, and conformance evidence;
 - OpenRefine reconciliation compatibility;
 - local TLS/pairing UX;
 - mobile background reliability;
@@ -4435,7 +4460,7 @@ Fasti must not claim:
 - lossless migration before real-source replay passes;
 - exact cross-provider anime mapping before conformance and target-validation gates pass;
 - full offline multi-device sync before mobile/process-kill chaos tests pass;
-- AniList support before permission and adapter tests pass;
+- AniList metadata support before current-terms, limit, and adapter tests pass;
 - secure plugin ecosystem before signatures, revocation, permissions, limits, and reporting exist;
 - low-end performance before published benchmark evidence exists;
 - neutral standard ownership before Scrobble.dev governance receives external review.
@@ -4482,7 +4507,10 @@ Fasti must not claim:
 
 ### Evidence posture
 
-The current source material supports the architecture and test plan. It does not prove production performance, provider permission, automatic-match accuracy, user comprehension, or mobile reliability. Those claims remain gated by the named spikes and UAT.
+The current source material supports the architecture and test plan. It does
+not prove production performance, continuing provider-terms compliance,
+automatic-match accuracy, user comprehension, or mobile reliability. Those
+claims remain gated by the named spikes and UAT.
 
 
 ## 54. Evidence references
@@ -4524,4 +4552,3 @@ The following references support the externally verifiable design claims in this
 | **S31** | https://github.com/ryan-winkler/strategy-skills-for-claude/blob/main/skills/05-risk-performance-and-value-governance/risk-and-mitigation.md | Risk-register method. |
 | **S32** | https://github.com/ryan-winkler/strategy-skills-for-claude/blob/main/skills/05-risk-performance-and-value-governance/war-gaming.md | War-game method. |
 | **S33** | https://github.com/ryan-winkler/strategy-skills-for-claude/blob/main/skills/06-alignment-and-executive-communication/narrative-builder.md | Answer-first narrative and hostile-question method. |
-
