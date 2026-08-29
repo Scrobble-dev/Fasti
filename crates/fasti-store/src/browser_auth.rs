@@ -247,6 +247,15 @@ fn authenticate_session(
         }
         return Err(problem(session_problem(state), capability, correlation_id));
     }
+    validate_grants(
+        connection,
+        subject.id(),
+        session.workspace_id(),
+        &[session.selected_profile_grant_id()],
+        ProblemCode::SessionPolicyChanged,
+        capability,
+        correlation_id,
+    )?;
 
     let write_interval = ChronoDuration::seconds(row.10);
     if at >= session.last_seen_at() + write_interval {
@@ -272,6 +281,7 @@ fn validate_grants(
     subject_id: AuthSubjectId,
     workspace_id: WorkspaceId,
     grants: &[ProfileGrantId],
+    invalid_code: ProblemCode,
     capability: CapabilityKey,
     correlation_id: fasti_domain::RequestCorrelationId,
 ) -> ApplicationResult<()> {
@@ -303,7 +313,7 @@ fn validate_grants(
             correlation_id,
         )?;
         if exists != 1 {
-            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+            return Err(problem(invalid_code, capability, correlation_id));
         }
     }
     Ok(())
@@ -328,6 +338,7 @@ fn insert_session(
         subject.id(),
         workspace_id,
         grants,
+        ProblemCode::Forbidden,
         capability,
         correlation_id,
     )?;
@@ -489,6 +500,7 @@ fn rotate_session(
         current.subject().id(),
         current.session().workspace_id(),
         &grants,
+        ProblemCode::Forbidden,
         capability,
         correlation_id,
     )?;
@@ -1501,6 +1513,48 @@ mod tests {
                 )),
             ProblemCode::Forbidden,
         );
+    }
+
+    #[test]
+    fn session_authentication_rechecks_selected_grant_and_client_state() {
+        for revoke in ["grant", "client"] {
+            let fixture = fixture();
+            let created = create_session(&fixture, &fixture.grants[..1], fixture.grants[0], 0);
+            let connection = fixture
+                .kernel
+                .lock_connection(
+                    CapabilityKey::ReadBrowserSession,
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                )
+                .expect("connection");
+            if revoke == "grant" {
+                connection
+                    .execute(
+                        "UPDATE profile_grants SET status = 'revoked', revoked_at = ?1 WHERE grant_id = ?2",
+                        params![timestamp(fixture.created_at), fixture.grants[0].to_string()],
+                    )
+                    .expect("revoke selected grant");
+            } else {
+                connection
+                    .execute(
+                        "UPDATE clients SET status = 'revoked' WHERE workspace_id = ?1",
+                        [fixture.workspace_id.to_string()],
+                    )
+                    .expect("revoke grant-owning client");
+            }
+            drop(connection);
+
+            assert_problem(
+                fixture
+                    .kernel
+                    .authenticate_browser_session(BrowserSessionQuery::new(
+                        fasti_domain::RequestCorrelationId::new_v7(),
+                        secret_copy(created.session_secret()),
+                        fixture.created_at + ChronoDuration::seconds(1),
+                    )),
+                ProblemCode::SessionPolicyChanged,
+            );
+        }
     }
 
     #[test]
