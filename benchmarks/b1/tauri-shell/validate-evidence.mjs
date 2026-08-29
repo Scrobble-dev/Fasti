@@ -24,17 +24,30 @@ const repositoryRoot = resolve(
 const here = join(repositoryRoot, "benchmarks/b1/tauri-shell");
 const artifactRoot = resolve(here, "evidence/artifacts");
 const schema = parseStrictJson(
+  // here is a fixed module-relative constant (optionally rebased via the
+  // operator-set FASTI_EVIDENCE_WORKSPACE_ROOT env var) and the trailing
+  // segment is a fixed literal, not externally supplied.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   readFileSync(join(here, "evidence.schema.json"), "utf8"),
   "Tauri evidence schema",
 );
 const performanceSchema = parseStrictJson(
+  // here is a fixed module-relative constant and the trailing segments are
+  // fixed literals, not externally supplied.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   readFileSync(join(here, "..", "evidence.schema.json"), "utf8"),
   "B1 performance evidence schema",
 );
 const fixturePolicySchema = parseStrictJson(
+  // here is a fixed module-relative constant and the trailing segment is a
+  // fixed literal, not externally supplied.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   readFileSync(join(here, "fixture-policy.schema.json"), "utf8"),
   "Tauri fixture policy schema",
 );
+// here is a fixed module-relative constant and the trailing segment is a
+// fixed literal, not externally supplied.
+// eslint-disable-next-line security/detect-non-literal-fs-filename
 const fixturePolicyBytes = readFileSync(join(here, "fixture-policy.json"));
 const fixturePolicy = parseStrictJson(
   fixturePolicyBytes.toString("utf8"),
@@ -53,14 +66,24 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * Calculates the median of a numeric collection.
+ * @param {number[]} values - The values to evaluate.
+ * @return {number} The middle value, or the average of the two middle values when the collection has an even length.
+ */
 function median(values) {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0
-    ? (sorted[middle - 1] + sorted[middle]) / 2
-    : sorted[middle];
+    ? (sorted.at(middle - 1) + sorted.at(middle)) / 2
+    : sorted.at(middle);
 }
 
+/**
+ * Summarize numeric values by calculating their minimum, median, and maximum.
+ * @param {number[]} values - The values to summarize.
+ * @returns {{minimum: number, median: number, maximum: number}} The minimum, median, and maximum values.
+ */
 function summary(values) {
   return {
     minimum: Math.min(...values),
@@ -75,6 +98,11 @@ function shellQuote(value) {
     : `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+/**
+ * Reads a retained artifact after verifying its path and file identity.
+ * @param {object} artifact - Artifact metadata containing the relative path to read.
+ * @return {Buffer} The artifact contents.
+ */
 function readRetainedArtifactOnce(artifact) {
   assert(
     Number.isInteger(constants.O_NOFOLLOW),
@@ -88,13 +116,21 @@ function readRetainedArtifactOnce(artifact) {
       !isAbsolute(lexicalRelative),
     "Tauri artifact path escapes the private evidence package",
   );
+  // artifactRoot is a fixed constant, not derived from evidence input.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const artifactRootReal = realpathSync(artifactRoot);
+  // candidate's lexical containment within artifactRoot is already asserted
+  // above.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const candidateRealBefore = realpathSync(candidate);
   const realRelative = relative(artifactRootReal, candidateRealBefore);
   assert(
     realRelative && !realRelative.startsWith("..") && !isAbsolute(realRelative),
     "Tauri artifact resolves outside the private evidence package",
   );
+  // candidate's real-path containment within artifactRoot is asserted above,
+  // and O_NOFOLLOW blocks a symlink swap at open time.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const descriptor = openSync(
     candidate,
     constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -104,7 +140,13 @@ function readRetainedArtifactOnce(artifact) {
       fstatSync(descriptor).isFile(),
       "Tauri artifact is not a regular file",
     );
+    // descriptor is the already-opened, already-validated file above, not a
+    // path.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     const bytes = readFileSync(descriptor);
+    // re-resolves the same already-validated candidate path to detect a
+    // TOCTOU swap after opening.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
     assert(
       realpathSync(candidate) === candidateRealBefore,
       "Tauri artifact path changed during verification",
@@ -115,6 +157,14 @@ function readRetainedArtifactOnce(artifact) {
   }
 }
 
+/**
+ * Validate a Tauri benchmark evidence receipt and its derived measurements.
+ * @param {object} evidence - The evidence receipt to validate.
+ * @param {object} [options] - Validation options.
+ * @param {boolean} [options.allowTestFixture=false] - Allow incomplete fixture evidence and skip artifact integrity verification.
+ * @param {boolean} [options.verifyArtifact=true] - Verify the retained measurement artifact's size and SHA-256 digest.
+ * @throws {Error} If the evidence fails schema, integrity, consistency, or verdict validation.
+ */
 export function validateEvidence(
   evidence,
   { allowTestFixture = false, verifyArtifact = true } = {},
@@ -182,6 +232,8 @@ export function validateEvidence(
       "Tauri retained artifact SHA-256 does not recompute",
     );
   }
+  // field iterates the fixed literal array below, not external input.
+  /* eslint-disable security/detect-object-injection */
   for (const field of [
     "startup_ms",
     "steady_cgroup_memory_bytes",
@@ -196,6 +248,7 @@ export function validateEvidence(
       `${field} summary is not derived from samples`,
     );
   }
+  /* eslint-enable security/detect-object-injection */
   assert(
     evidence.samples.every(
       (sample) =>
@@ -507,12 +560,20 @@ if (process.argv[2] === "--self-test") {
   console.log("PASS: canonical hidden Tauri fixture policy schema");
 } else if (process.argv.length === 3) {
   validateEvidence(
-    parseStrictJson(readFileSync(process.argv[2], "utf8"), process.argv[2]),
+    parseStrictJson(
+      // process.argv[2] is the operator-supplied positional argument
+      // identifying which evidence file to validate; it is the direct
+      // target of this CLI invocation, not a segment interpolated into
+      // another path.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      readFileSync(process.argv[2], "utf8"),
+      process.argv[2],
+    ),
   );
   console.log(`PASS: validated Tauri shell evidence ${process.argv[2]}`);
 } else {
   console.error(
-    "usage: validate-evidence.mjs --self-test | --policy | <evidence.json>",
+    "usage: validate-evidence.mjs --self-test | --policy | evidence.json path",
   );
   process.exit(2);
 }

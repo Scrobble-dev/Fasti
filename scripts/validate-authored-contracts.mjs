@@ -83,6 +83,9 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
     "contracts/portability/v2/workspace-manifest.example.json",
   );
 
+  // asyncApiPath is root (default repositoryRoot, or a validator-chosen
+  // checkout) plus a fixed literal segment, not externally supplied.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const asyncApiSource = await readFile(asyncApiPath, "utf8");
   const asyncApiDocument = parseYamlDocument(asyncApiSource, {
     uniqueKeys: true,
@@ -97,11 +100,15 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
   const conformanceOpenApi = await readStrictJson(conformanceOpenApiPath);
   const problemCatalog = await readStrictJson(problemCatalogPath);
   const capabilityRegistry = await readStrictJson(capabilityRegistryPath);
+  // profileName is a surface_profile name drawn from this same repo-local
+  // capabilityRegistry document, not external input.
+  /* eslint-disable security/detect-object-injection */
   const streamCapabilities = capabilityRegistry.capabilities.filter(
     ({ surface_profile: profileName }) =>
       capabilityRegistry.surface_profiles[profileName].sse_asyncapi.state ===
       "required",
   );
+  /* eslint-enable security/detect-object-injection */
   assert.equal(
     streamCapabilities.length,
     1,
@@ -194,6 +201,9 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
       .properties;
   const receiptProperties =
     conformanceOpenApi.components.schemas.ObservationReceiptDto.properties;
+  // field and key each iterate the fixed literal arrays declared here, not
+  // external input.
+  /* eslint-disable security/detect-object-injection */
   for (const field of ["receipt_id", "operation_id", "observation_id"]) {
     const eventConstraint = Object.fromEntries(
       ["type", "format", "minLength", "maxLength", "pattern"].map((key) => [
@@ -213,6 +223,7 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
       `AsyncAPI ${field} must reuse every Utoipa receipt identifier constraint`,
     );
   }
+  /* eslint-enable security/detect-object-injection */
   assert.deepEqual(
     eventProperties.committed_at,
     receiptProperties.committed_at,
@@ -221,6 +232,9 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
   const resolutionSchemaName = receiptProperties.resolution.$ref
     .split("/")
     .at(-1);
+  // resolutionSchemaName is a $ref pointer name from this same repo-local
+  // conformanceOpenApi document, not external input.
+  /* eslint-disable security/detect-object-injection */
   assert.equal(
     eventProperties.resolution.const,
     conformanceOpenApi.components.schemas[resolutionSchemaName].enum[0],
@@ -231,6 +245,7 @@ export async function validateAuthoredContracts(root = repositoryRoot) {
     1,
     "B1 receipt events require a single governed resolution",
   );
+  /* eslint-enable security/detect-object-injection */
   assert.equal(
     eventProperties.correlation_id.pattern,
     "^req_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",

@@ -84,11 +84,15 @@ if (process.argv[2] === "--self-test") {
   parseManifest(Buffer.concat(chunks).toString("utf8"), "stdin manifest");
   console.log("PASS: canonical runner bundle manifest");
 } else if (process.argv.length === 3) {
+  // process.argv[2] is the operator-supplied positional argument
+  // identifying which manifest file to validate; it is the direct target of
+  // this CLI invocation, not a segment interpolated into another path.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   parseManifest(readFileSync(process.argv[2], "utf8"), process.argv[2]);
   console.log(`PASS: canonical runner bundle manifest ${process.argv[2]}`);
 } else {
   console.error(
-    "usage: validate-runner-bundle.mjs --self-test | --stdin | <manifest.json>",
+    "usage: validate-runner-bundle.mjs --self-test | --stdin | manifest.json path",
   );
   process.exit(2);
 }
