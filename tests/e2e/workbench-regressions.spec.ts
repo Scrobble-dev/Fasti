@@ -451,6 +451,7 @@ test("direct canonical and compatibility Settings routes preserve one active sec
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const [path, name] of [
+    ["/settings/account", "Account & Sessions"],
     ["/settings", "Network"],
     ["/settings/metadata", "Metadata credentials"],
     ["/settings/providers", "Metadata credentials"],
