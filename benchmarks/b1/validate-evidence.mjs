@@ -203,6 +203,10 @@ function assert(condition, message) {
 // property name, but this still refuses to follow inherited properties
 // (e.g. "__proto__", "constructor") instead of silently returning them.
 function ownProp(object, key) {
+  // key is confirmed to be object's own property immediately above, never
+  // an inherited one such as "__proto__" -- this guard is the sole reason
+  // every other call site in this file is allowed to use it.
+  // eslint-disable-next-line security/detect-object-injection
   return Object.prototype.hasOwnProperty.call(object, key)
     ? object[key]
     : undefined;
@@ -475,6 +479,11 @@ function compileTrustedPattern(pattern, flags, label) {
     typeof pattern === "string" && SAFE_REGEX_PATTERN.test(pattern),
     `${label} regex pattern uses unsupported syntax`,
   );
+  // pattern is confirmed to match SAFE_REGEX_PATTERN immediately above --
+  // this is the sole, validated construction site for every RegExp this
+  // file builds from data.
+  // nosemgrep: javascript.dos.rule-non-literal-regexp
+  // eslint-disable-next-line security/detect-non-literal-regexp, security-node/non-literal-reg-expr
   return new RegExp(pattern, flags);
 }
 
