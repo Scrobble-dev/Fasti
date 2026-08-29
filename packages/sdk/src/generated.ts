@@ -224,6 +224,7 @@ const PRODUCTION_SCHEMAS = {
         "type": "string"
       },
       "session_timeout_minutes": {
+        "description": "5-1440 (24h) covers every normal deployment and is what this schema\ndocuments. A daemon instance with the loopback-gated\nFASTI_DEVELOPMENT_AUTO_LOGIN dev convenience active accepts a much\nlarger value (see apps/fastid/src/main.rs's\nDEVELOPMENT_UNBOUNDED_SESSION_MINUTES); the runtime bound enforced by\nCreateBrowserSessionCommand::try_new is the source of truth for what\na given instance actually accepts. schemars/utoipa's range/schema\nattributes are documentation only and are not re-checked at\ndeserialization, so this is a deliberate, narrow documented exception\nrather than a contract violation.",
         "format": "int32",
         "maximum": 1440,
         "minimum": 5,

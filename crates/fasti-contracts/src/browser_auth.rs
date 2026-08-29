@@ -11,6 +11,16 @@ pub struct CreateBrowserSessionRequest {
     #[schemars(length(min = 8, max = 128))]
     #[schema(min_length = 8, max_length = 128, format = "password")]
     pub password: String,
+    /// 5-1440 (24h) covers every normal deployment and is what this schema
+    /// documents. A daemon instance with the loopback-gated
+    /// FASTI_DEVELOPMENT_AUTO_LOGIN dev convenience active accepts a much
+    /// larger value (see apps/fastid/src/main.rs's
+    /// DEVELOPMENT_UNBOUNDED_SESSION_MINUTES); the runtime bound enforced by
+    /// CreateBrowserSessionCommand::try_new is the source of truth for what
+    /// a given instance actually accepts. schemars/utoipa's range/schema
+    /// attributes are documentation only and are not re-checked at
+    /// deserialization, so this is a deliberate, narrow documented exception
+    /// rather than a contract violation.
     #[schemars(range(min = 5, max = 1440))]
     #[schema(minimum = 5, maximum = 1440)]
     pub session_timeout_minutes: u32,
