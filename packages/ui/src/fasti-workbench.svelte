@@ -16,7 +16,6 @@
     IconUsers,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
-  import ProfileManagerModal from "./profile-manager-modal.svelte";
   import GlobalSearch from "./global-search.svelte";
   import HomeView from "./home-view.svelte";
   import ConnectionsView from "./connections-view.svelte";
@@ -46,7 +45,6 @@
     ReviewItem,
     ThemeSettings,
     TrackingDispositionUpdate,
-    UserProfile,
     WorkbenchHost,
     WorkbenchPreferences,
   } from "./types.js";
@@ -284,45 +282,12 @@
   );
   let themeDrawerOpen = $state(false);
   let authModalOpen = $state(false);
-  let profileModalOpen = $state(false);
   let userMenuOpen = $state(false);
-  let localProfiles = $state<UserProfile[]>(
-    loadPersisted("fasti_user_profiles", [
-      {
-        id: "prf_default",
-        name: "Default Profile",
-        avatarColor: "blue",
-        role: "admin",
-        isEssentialMode: false,
-        pinProtected: false,
-        lastActive: new Date().toISOString(),
-      },
-      {
-        id: "prf_kids",
-        name: "Kids Lounge",
-        avatarColor: "green",
-        role: "restricted",
-        isEssentialMode: true,
-        pinProtected: false,
-        lastActive: new Date().toISOString(),
-      },
-    ]),
-  );
-  let activeProfileId = $state<string>("prf_default");
   let mobileNavigationOpen = $state(false);
   let navigationTrigger = $state<HTMLButtonElement | undefined>();
   let showNavigationTrigger = $state<HTMLButtonElement | undefined>();
   let browserSession = $state<BrowserSession | null>(null);
   let browserSessionChecked = $state(false);
-
-  function handleSaveProfiles(profiles: UserProfile[]) {
-    localProfiles = profiles;
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("fasti_user_profiles", JSON.stringify(profiles));
-      } catch {}
-    }
-  }
 
   $effect(() => {
     try {
@@ -1308,35 +1273,6 @@
       recordActionNotice = undefined;
       recordActionProblem = undefined;
     }
-  }}
-/>
-
-<ProfileManagerModal
-  open={profileModalOpen}
-  session={browserSession}
-  profiles={localProfiles}
-  {activeProfileId}
-  onClose={() => (profileModalOpen = false)}
-  onSelectProfile={(id) => {
-    activeProfileId = id;
-    const p = localProfiles.find((p) => p.id === id);
-    if (p) {
-      recordActionNotice = `Switched to profile: ${p.name}`;
-      setTimeout(() => (recordActionNotice = ""), 3000);
-    }
-  }}
-  onCreateProfile={(newP) => {
-    const p: UserProfile = { ...newP, id: `prf_${Date.now()}` };
-    handleSaveProfiles([...localProfiles, p]);
-    activeProfileId = p.id;
-  }}
-  onUpdateProfile={(updatedP) => {
-    handleSaveProfiles(
-      localProfiles.map((p) => (p.id === updatedP.id ? updatedP : p)),
-    );
-  }}
-  onDeleteProfile={(id) => {
-    handleSaveProfiles(localProfiles.filter((p) => p.id !== id));
   }}
 />
 

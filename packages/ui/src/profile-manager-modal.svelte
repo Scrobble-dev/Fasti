@@ -576,24 +576,42 @@
                 {/if}
               </div>
 
-              <div class="d-flex justify-content-end gap-2 pt-2">
-                <button
-                  type="button"
-                  class="btn btn-outline-secondary"
-                  style="min-height: 44px;"
-                  onclick={resetForm}
-                  disabled={busy}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  style="min-height: 44px;"
-                  disabled={busy}
-                >
-                  {mode === "create" ? "Create Profile" : "Save Changes"}
-                </button>
+              <div
+                class="d-flex justify-content-between align-items-center pt-2"
+              >
+                <div>
+                  {#if mode === "edit" && editingId && onDeleteProfile}
+                    <button
+                      type="button"
+                      class="btn btn-outline-danger d-inline-flex align-items-center gap-1"
+                      style="min-height: 44px;"
+                      onclick={() => handleDelete(editingId)}
+                      disabled={busy}
+                    >
+                      <IconTrash size={16} aria-hidden="true" />
+                      <span>Delete Profile</span>
+                    </button>
+                  {/if}
+                </div>
+                <div class="d-flex gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    style="min-height: 44px;"
+                    onclick={resetForm}
+                    disabled={busy}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    class="btn btn-primary"
+                    style="min-height: 44px;"
+                    disabled={busy}
+                  >
+                    {mode === "create" ? "Create Profile" : "Save Changes"}
+                  </button>
+                </div>
               </div>
             </form>
           {:else if mode === "pin_prompt" && targetProfile}

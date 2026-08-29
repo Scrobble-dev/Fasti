@@ -221,6 +221,20 @@ function isIntegrationStatus(
   );
 }
 
+function parseIntegrationStatusResponse(
+  integrations: unknown,
+): IntegrationRuntimeStatus[] {
+  if (
+    !Array.isArray(integrations) ||
+    !integrations.every(isIntegrationStatus)
+  ) {
+    throw unavailable(
+      "Fasti integration status did not match the supported contract.",
+    );
+  }
+  return integrations as unknown as IntegrationRuntimeStatus[];
+}
+
 export async function fetchIntegrationStatus(
   endpoint: string,
   signal?: AbortSignal,
@@ -232,15 +246,7 @@ export async function fetchIntegrationStatus(
     retryPolicy: { maxAttempts: 1 },
   });
   const response = await probeClient.listIntegrations({ signal });
-  if (
-    !Array.isArray(response.integrations) ||
-    !response.integrations.every(isIntegrationStatus)
-  ) {
-    throw unavailable(
-      "Fasti integration status did not match the supported contract.",
-    );
-  }
-  return response.integrations as unknown as IntegrationRuntimeStatus[];
+  return parseIntegrationStatusResponse(response.integrations);
 }
 
 export function createWebHost(
@@ -317,15 +323,7 @@ export function createWebHost(
     },
     async listIntegrations(): Promise<IntegrationRuntimeStatus[]> {
       const response = await client.listIntegrations();
-      if (
-        !Array.isArray(response.integrations) ||
-        !response.integrations.every(isIntegrationStatus)
-      ) {
-        throw unavailable(
-          "Fasti integration status did not match the supported contract.",
-        );
-      }
-      return response.integrations as unknown as IntegrationRuntimeStatus[];
+      return parseIntegrationStatusResponse(response.integrations);
     },
     async providerCredentialStatus(): Promise<ProviderCredentialStatus[]> {
       return PROVIDERS.map((provider) => ({

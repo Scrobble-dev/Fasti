@@ -1338,22 +1338,25 @@ fn validate_production_operation_security(
     Ok(())
 }
 
-fn enrich_production_health_openapi(
+fn enrich_governed_success_operation_openapi(
     workspace_root: &Path,
     openapi: &mut Value,
     public_registry: &Value,
+    capability_id: &str,
+    path_pointer: &str,
+    example_id: &str,
 ) -> anyhow::Result<()> {
     let capability = array_at(public_registry, "/capabilities")?
         .iter()
-        .find(|capability| string_at(capability, "/id").ok() == Some("system.health"))
-        .context("public registry omits system.health")?;
+        .find(|capability| string_at(capability, "/id").ok() == Some(capability_id))
+        .with_context(|| format!("public registry omits {capability_id}"))?;
     let operation = openapi
-        .pointer_mut("/paths/~1api~1v1~1health/get")
+        .pointer_mut(path_pointer)
         .and_then(Value::as_object_mut)
-        .context("production OpenAPI omits GET /api/v1/health")?;
+        .with_context(|| format!("production OpenAPI omits operation at {path_pointer}"))?;
     operation.insert(
         "x-fasti-capability-id".to_owned(),
-        Value::String("system.health".to_owned()),
+        Value::String(capability_id.to_owned()),
     );
     operation.insert(
         "x-fasti-required-scopes".to_owned(),
@@ -1377,13 +1380,13 @@ fn enrich_production_health_openapi(
         Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
     );
     ensure!(
-        example_ids.len() == 1 && example_ids[0].as_str() == Some("system.health.success"),
-        "production health must own exactly the governed health success example"
+        example_ids.len() == 1 && example_ids[0].as_str() == Some(example_id),
+        "production {capability_id} must own exactly the governed {example_id} example"
     );
-    let example = load_governed_example(workspace_root, "system.health.success", &Value::Null)?;
+    let example = load_governed_example(workspace_root, example_id, &Value::Null)?;
     ensure!(
         example.media_type == "application/json",
-        "system.health.success must be an application/json example"
+        "{example_id} must be an application/json example"
     );
     let media = operation
         .get_mut("responses")
@@ -1393,14 +1396,29 @@ fn enrich_production_health_openapi(
         .and_then(Value::as_object_mut)
         .and_then(|content| content.get_mut("application/json"))
         .and_then(Value::as_object_mut)
-        .context("production health 200 response omits application/json")?;
+        .with_context(|| format!("production {capability_id} 200 response omits application/json"))?;
     media.insert(
         "examples".to_owned(),
         serde_json::json!({
-            "system.health.success": { "value": example.payload }
+            example_id: { "value": example.payload }
         }),
     );
     Ok(())
+}
+
+fn enrich_production_health_openapi(
+    workspace_root: &Path,
+    openapi: &mut Value,
+    public_registry: &Value,
+) -> anyhow::Result<()> {
+    enrich_governed_success_operation_openapi(
+        workspace_root,
+        openapi,
+        public_registry,
+        "system.health",
+        "/paths/~1api~1v1~1health/get",
+        "system.health.success",
+    )
 }
 
 /// Enriches GET /api/v1/integrations directly, bypassing the generic
@@ -1413,65 +1431,14 @@ fn enrich_production_integration_status_openapi(
     openapi: &mut Value,
     public_registry: &Value,
 ) -> anyhow::Result<()> {
-    let capability = array_at(public_registry, "/capabilities")?
-        .iter()
-        .find(|capability| string_at(capability, "/id").ok() == Some("integration.status"))
-        .context("public registry omits integration.status")?;
-    let operation = openapi
-        .pointer_mut("/paths/~1api~1v1~1integrations/get")
-        .and_then(Value::as_object_mut)
-        .context("production OpenAPI omits GET /api/v1/integrations")?;
-    operation.insert(
-        "x-fasti-capability-id".to_owned(),
-        Value::String("integration.status".to_owned()),
-    );
-    operation.insert(
-        "x-fasti-required-scopes".to_owned(),
-        Value::Array(array_at(capability, "/scopes")?.clone()),
-    );
-    operation.insert(
-        "x-fasti-authorization".to_owned(),
-        Value::String(string_at(capability, "/authorization")?.to_owned()),
-    );
-    operation.insert(
-        "x-fasti-problem-codes".to_owned(),
-        Value::Array(array_at(capability, "/problems")?.clone()),
-    );
-    let example_ids = array_at(capability, "/examples")?.clone();
-    operation.insert(
-        "x-fasti-example-ids".to_owned(),
-        Value::Array(example_ids.clone()),
-    );
-    operation.insert(
-        "x-fasti-runtime-availability".to_owned(),
-        Value::String(string_at(capability, "/lifecycle/runtime_availability")?.to_owned()),
-    );
-    ensure!(
-        example_ids.len() == 1 && example_ids[0].as_str() == Some("integration.status.success"),
-        "production integration status must own exactly the governed status success example"
-    );
-    let example =
-        load_governed_example(workspace_root, "integration.status.success", &Value::Null)?;
-    ensure!(
-        example.media_type == "application/json",
-        "integration.status.success must be an application/json example"
-    );
-    let media = operation
-        .get_mut("responses")
-        .and_then(Value::as_object_mut)
-        .and_then(|responses| responses.get_mut("200"))
-        .and_then(|response| response.get_mut("content"))
-        .and_then(Value::as_object_mut)
-        .and_then(|content| content.get_mut("application/json"))
-        .and_then(Value::as_object_mut)
-        .context("production integration status 200 response omits application/json")?;
-    media.insert(
-        "examples".to_owned(),
-        serde_json::json!({
-            "integration.status.success": { "value": example.payload }
-        }),
-    );
-    Ok(())
+    enrich_governed_success_operation_openapi(
+        workspace_root,
+        openapi,
+        public_registry,
+        "integration.status",
+        "/paths/~1api~1v1~1integrations/get",
+        "integration.status.success",
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
