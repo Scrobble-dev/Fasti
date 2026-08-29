@@ -3,6 +3,7 @@ packages:
   - "packages/*"
 overrides:
   "brace-expansion@5.0.8": "5.0.9"
+  "svelte-check@4.7.6>typescript": "6.0.3"
 allowBuilds:
   "@scarf/scarf": false
   libxmljs2: true
