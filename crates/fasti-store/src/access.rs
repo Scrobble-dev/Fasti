@@ -388,7 +388,17 @@ impl AccessAdministrationPort for SqliteKernel {
         let is_valid = |contents: &str| SecretMaterial::try_from_hex(contents.trim()).is_ok();
 
         let stored_hex = match read_existing() {
-            Ok(contents) if is_valid(&contents) => contents,
+            Ok(contents) if is_valid(&contents) => {
+                // A valid file can still be group- or world-readable -- from
+                // a pre-hardening version of this code, a restore, or a
+                // umask that didn't apply -- and this value authorizes
+                // /api/v1/node/initialization, so reusing it without
+                // re-hardening would let another local account read it and
+                // initialize the node. Tighten it every time it's read, not
+                // only when it's created.
+                harden_private_regular_file(&path).map_err(|_| unavailable())?;
+                contents
+            }
             // Absent, unreadable, or empty (including a file left
             // zero-length by a prior write that never reached disk before a
             // crash) -- (re)publish through a unique temporary file in the

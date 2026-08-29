@@ -2899,6 +2899,7 @@ mod tests {
         for (point, expected) in cases {
             let root = tempfile::tempdir().expect("crash-matrix data root");
             let attempt = RestoreAttemptId::new_v7();
+            // nosemgrep: rust.lang.security.current-exe.current-exe -- test-only re-exec worker (#[cfg(test)]), never compiled into a release binary
             let output = Command::new(std::env::current_exe().expect("current test binary"))
                 .args([
                     "--exact",
@@ -3005,6 +3006,7 @@ mod tests {
             drop((staging, attempt, root_handle));
 
             let retry_attempt = RestoreAttemptId::new_v7();
+            // nosemgrep: rust.lang.security.current-exe.current-exe -- test-only re-exec worker (#[cfg(test)]), never compiled into a release binary
             let output = Command::new(std::env::current_exe().expect("current test binary"))
                 .args([
                     "--exact",

@@ -15,7 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "benchmark-tauri-b1.py"
 SPEC = importlib.util.spec_from_file_location("fasti_benchmark_tauri_b1", SCRIPT)
-assert SPEC is not None and SPEC.loader is not None
+assert SPEC is not None and SPEC.loader is not None  # nosec B101 -- test-collection guard, not a runtime path
 benchmark = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(benchmark)
 

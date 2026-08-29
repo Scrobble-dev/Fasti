@@ -103,6 +103,9 @@ if (
 for (const [directory, expectedName] of expectedWorkspaces) {
   const packageRoot = join(repoRoot, directory);
   const manifestPath = join(packageRoot, "package.json");
+  // directory comes from the fixed expectedPackages map above, not external
+  // input.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
   if (manifest.name !== expectedName) {
@@ -116,6 +119,9 @@ for (const [directory, expectedName] of expectedWorkspaces) {
     continue;
   }
 
+  // script and field each iterate the fixed literal arrays declared here,
+  // not external input.
+  /* eslint-disable security/detect-object-injection */
   for (const script of ["build", "typecheck"]) {
     if (typeof manifest.scripts?.[script] !== "string") {
       failures.push(`${directory}: missing required ${script} script`);
@@ -134,6 +140,7 @@ for (const [directory, expectedName] of expectedWorkspaces) {
       );
     }
   }
+  /* eslint-enable security/detect-object-injection */
 
   if (
     manifest.module !== undefined &&
