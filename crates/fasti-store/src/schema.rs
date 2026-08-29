@@ -607,6 +607,46 @@ fn migrate_v6(connection: &Connection) -> Result<()> {
         ) STRICT, WITHOUT ROWID;
         CREATE INDEX metadata_field_overrides_record_field_idx
             ON metadata_field_overrides(workspace_id, record_id, field_key);
+
+        CREATE TRIGGER metadata_field_claims_scope_insert
+        BEFORE INSERT ON metadata_field_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata field claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_field_claims_scope_update
+        BEFORE UPDATE ON metadata_field_claims
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata field claim crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_field_overrides_scope_insert
+        BEFORE INSERT ON metadata_field_overrides
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata field override crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_field_overrides_scope_update
+        BEFORE UPDATE ON metadata_field_overrides
+        WHEN NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata field override crosses a workspace boundary');
+        END;
         "#,
     );
     for source in [

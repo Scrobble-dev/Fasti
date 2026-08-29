@@ -379,7 +379,7 @@ impl AccessAdministrationPort for SqliteKernel {
                 .read_to_string(&mut contents)?;
             Ok(contents)
         };
-        let is_valid = |contents: &str| !contents.trim().is_empty();
+        let is_valid = |contents: &str| SecretMaterial::try_from_hex(contents.trim()).is_ok();
 
         let stored_hex = match read_existing() {
             Ok(contents) if is_valid(&contents) => contents,

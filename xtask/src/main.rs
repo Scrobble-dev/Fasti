@@ -238,12 +238,18 @@ fn run_milestone(
                 "B8b requires a passing B8a manifest at {}; none exists yet",
                 b8a_manifest.display()
             );
-            evidence::verify(root, &b8a_manifest).map_err(|error| {
+            let b8a = evidence::verify(root, &b8a_manifest).map_err(|error| {
                 error.context(format!(
                     "B8b requires a passing B8a manifest at {}",
                     b8a_manifest.display()
                 ))
             })?;
+            anyhow::ensure!(
+                b8a.manifest.body == evidence::Body::B8a,
+                "the B8b prerequisite at {} must declare body B8a, not {}",
+                b8a_manifest.display(),
+                b8a.manifest.body.as_str()
+            );
             let manifest =
                 manifest.unwrap_or_else(|| root.join("target/fasti-evidence/b8b-manifest.json"));
             evidence::create_b8b_milestone_manifest(root, &manifest).map(|_| ())
