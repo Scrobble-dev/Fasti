@@ -5,16 +5,16 @@ artifacts. It does not merge them into one master schema.
 
 ## Raw resources
 
-- [Production OpenAPI 3.1](/openapi.json)
-- [Conformance OpenAPI 3.1](/openapi-conformance.json)
-- [AsyncAPI transport](/asyncapi/transport.yaml)
-- [Capability registry](/capabilities.json)
-- [Problem catalogue](/problems.json)
-- [JSON-LD context](/jsonld/context.jsonld)
-- [JSON-LD vocabulary](/jsonld/vocabulary.jsonld)
+- <a href="/openapi.json">Production OpenAPI 3.1</a>
+- <a href="/openapi-conformance.json">Conformance OpenAPI 3.1</a>
+- <a href="/asyncapi/transport.yaml">AsyncAPI transport</a>
+- <a href="/capabilities.json">Capability registry</a>
+- <a href="/problems.json">Problem catalogue</a>
+- <a href="/jsonld/context.jsonld">JSON-LD context</a>
+- <a href="/jsonld/vocabulary.jsonld">JSON-LD vocabulary</a>
 - <a href="/okf/index.md">OKF index</a>
-- [Documentation manifest](/docs-manifest.json)
-- [Release and support state](/release.json)
+- <a href="/docs-manifest.json">Documentation manifest</a>
+- <a href="/release.json">Release and support state</a>
 
 ## Ownership
 

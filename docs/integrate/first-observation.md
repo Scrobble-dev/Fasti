@@ -43,7 +43,7 @@ operations have `retry: never` in the generated TypeScript SDK.
 - A changed semantic payload with the same operation identity returns an
   idempotency conflict and does not mutate prior state.
 
-Use the raw [OpenAPI document](/openapi.json) or the generated TypeScript SDK for
+Use the raw <a href="/openapi.json">OpenAPI document</a> or the generated TypeScript SDK for
 the exact request and response schema. Do not copy a fixture request into a
 production-runtime claim.
 

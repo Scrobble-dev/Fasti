@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile, readdir, stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const root = resolve(import.meta.dirname, "..");
@@ -46,6 +46,7 @@ assert.equal(release.support_state, "unsupported");
 
 const htmlFiles = [];
 const allFiles = [];
+const internalLinks = new Set();
 async function walk(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = resolve(directory, entry.name);
@@ -71,7 +72,31 @@ for (const path of htmlFiles) {
     1,
     `${path} has an invalid canonical-link count`,
   );
+  for (const match of html.matchAll(/<a\b[^>]*\bhref="([^"]+)"/gu)) {
+    const url = new URL(match[1], "https://fasti.scrobble.dev");
+    if (url.origin === "https://fasti.scrobble.dev")
+      internalLinks.add(decodeURIComponent(url.pathname));
+  }
 }
+for (const pathname of internalLinks) {
+  const candidate = resolve(build, `.${pathname}`);
+  const target = pathname.endsWith("/")
+    ? resolve(candidate, "index.html")
+    : candidate;
+  const local = relative(build, target);
+  assert.ok(
+    local && !local.startsWith("..") && !local.startsWith("/"),
+    `unsafe built link ${pathname}`,
+  );
+  assert.ok(
+    await stat(target).catch(() => false),
+    `broken built link ${pathname}`,
+  );
+}
+assert.ok(
+  internalLinks.size >= 25,
+  "built internal-link inventory is incomplete",
+);
 const sitemap = await readFile(resolve(build, "sitemap.xml"), "utf8");
 assert.match(sitemap, /https:\/\/fasti\.scrobble\.dev\/deploy\//u);
 assert.match(

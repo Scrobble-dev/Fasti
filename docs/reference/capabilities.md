@@ -30,7 +30,7 @@ runtime capability.
 ## Public raw resource
 
 The site publishes the exact generated registry at
-[capabilities.json](/capabilities.json).
+<a href="/capabilities.json">capabilities.json</a>.
 
 ## Source and review evidence
 

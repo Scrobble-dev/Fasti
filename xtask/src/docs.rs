@@ -214,7 +214,7 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
         let detail = problem["detail"].as_str().context("problem needs detail")?;
         let code = problem["code"].as_str().context("problem needs code")?;
         let page = format!(
-            "---\ntitle: {}\nslug: {}\ndescription: {}\ncustom_edit_url: null\n---\n\n# {}\n\n`{}`\n\n{}\n\n## Safe state\n\n`{}`\n\n## Retry\n\n`{}`\n\n[Read the complete problem catalogue](/problems.json)\n",
+            "---\ntitle: {}\nslug: {}\ndescription: {}\ncustom_edit_url: null\n---\n\n# {}\n\n`{}`\n\n{}\n\n## Safe state\n\n`{}`\n\n## Retry\n\n`{}`\n\n<a href=\"/problems.json\">Read the complete problem catalogue</a>\n",
             serde_json::to_string(title)?,
             serde_json::to_string(&format!("/v1/problems/{slug}"))?,
             serde_json::to_string(detail)?,
