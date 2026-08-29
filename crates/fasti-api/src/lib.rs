@@ -332,7 +332,7 @@ mod tests {
     use super::*;
     use axum::{
         body::{to_bytes, Body},
-        http::{header, Request, StatusCode},
+        http::{header, Method, Request, StatusCode},
     };
     #[cfg(target_os = "linux")]
     use fasti_application::{
@@ -464,6 +464,29 @@ mod tests {
             !String::from_utf8_lossy(&body).contains("fasti workbench"),
             "an unmatched API path must not receive the SPA shell"
         );
+    }
+
+    #[tokio::test]
+    async fn static_fallback_rejects_non_get_methods_with_not_found_not_method_not_allowed() {
+        let static_dir = tempfile::tempdir().expect("temporary static dir");
+        std::fs::write(static_dir.path().join("index.html"), "shell").expect("write index.html");
+
+        let router = with_static_fallback(health_router(), Some(static_dir.path()));
+
+        // A route this server never registers must stay a uniform 404 for
+        // every method -- not 405, which would leak "a route matched this
+        // path" and contradict SECURITY.md's absent-route guarantee.
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v1/events")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

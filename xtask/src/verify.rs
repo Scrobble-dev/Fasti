@@ -1,7 +1,6 @@
 use anyhow::{bail, ensure, Context};
 use serde::Serialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -673,7 +672,7 @@ fn tool_version(root: &Path, gate: &CommandGate) -> anyhow::Result<String> {
 }
 
 fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::evidence::sha256_bytes(bytes)
 }
 
 fn current_ci_metadata() -> anyhow::Result<Value> {

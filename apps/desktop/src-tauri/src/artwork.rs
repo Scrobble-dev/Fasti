@@ -191,7 +191,14 @@ impl ArtworkCache {
         digest.update(provider.as_bytes());
         digest.update([0]);
         digest.update(url.as_bytes());
-        self.root.join(format!("{:x}", digest.finalize()))
+        let digest_bytes: [u8; 32] = digest.finalize().into();
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut value = String::with_capacity(64);
+        for byte in digest_bytes {
+            value.push(char::from(HEX[usize::from(byte >> 4)]));
+            value.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        self.root.join(value)
     }
 }
 
