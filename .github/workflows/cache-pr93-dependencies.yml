@@ -42,14 +42,15 @@ jobs:
           version: 11.22.0
           run_install: false
 
-      - name: Resolve pnpm store for offline verification
+      - name: Resolve and install pnpm graph
         shell: bash
         run: |
           set -euo pipefail
-          pnpm fetch --frozen-lockfile --store-dir .pnpm-store
+          pnpm install --frozen-lockfile --store-dir .pnpm-store
           npm pack pnpm@11.22.0 --pack-destination .
-          tar --zstd -cf pnpm-offline.tar.zst \
-            .pnpm-store pnpm-11.22.0.tgz
+          find . -path '*/node_modules' -type d -prune -print0 > node-modules.paths
+          tar --null --files-from=node-modules.paths --zstd -cf pnpm-installed.tar.zst
+          tar --zstd -rf pnpm-installed.tar.zst pnpm-11.22.0.tgz
 
       - name: Upload Rust dependency cache
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -60,11 +61,11 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-      - name: Upload pnpm dependency cache
+      - name: Upload installed pnpm graph
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: pr93-pnpm-offline
-          path: pnpm-offline.tar.zst
+          name: pr93-pnpm-installed
+          path: pnpm-installed.tar.zst
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
