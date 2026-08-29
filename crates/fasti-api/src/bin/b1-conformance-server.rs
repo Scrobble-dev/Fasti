@@ -24,6 +24,7 @@ const USAGE: &str = "B1 loopback-only conformance fixture (nondurable; not a pro
 /// // Start the server on the specified loopback address.
 /// // $ b1-conformance-server 127.0.0.1:8080
 /// ```
+#[tokio::main]
 async fn main() -> ExitCode {
     // nosemgrep: rust.lang.security.args.args -- args only pick the bind address, and
     // requested_invocation() below still rejects anything but 127.0.0.1; argv cannot
