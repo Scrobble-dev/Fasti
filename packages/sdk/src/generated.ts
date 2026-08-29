@@ -119,6 +119,50 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "BeginPasskeyAuthenticationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "challenge": {
+        "type": "string"
+      },
+      "rp_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "challenge",
+      "rp_id"
+    ],
+    "type": "object"
+  },
+  "BeginPasskeyRegistrationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "challenge": {
+        "type": "string"
+      },
+      "rp_id": {
+        "type": "string"
+      },
+      "rp_name": {
+        "type": "string"
+      },
+      "user_id": {
+        "type": "string"
+      },
+      "user_name": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "challenge",
+      "rp_name",
+      "rp_id",
+      "user_id",
+      "user_name"
+    ],
+    "type": "object"
+  },
   "BrowserSessionItemDto": {
     "additionalProperties": false,
     "properties": {
@@ -253,6 +297,70 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "CompletePasskeyAuthenticationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "authenticator_data": {
+        "type": "string"
+      },
+      "client_data_json": {
+        "type": "string"
+      },
+      "credential_id": {
+        "type": "string"
+      },
+      "signature": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "credential_id",
+      "client_data_json",
+      "authenticator_data",
+      "signature"
+    ],
+    "type": "object"
+  },
+  "CompletePasskeyRegistrationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "attestation_object": {
+        "type": "string"
+      },
+      "client_data_json": {
+        "type": "string"
+      },
+      "credential_id": {
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "credential_id",
+      "client_data_json",
+      "attestation_object"
+    ],
+    "type": "object"
+  },
+  "ConfirmTotpRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "maxLength": 6,
+        "minLength": 6,
+        "type": "string"
+      }
+    },
+    "required": [
+      "code"
+    ],
+    "type": "object"
+  },
   "CreateBrowserSessionRequest": {
     "additionalProperties": false,
     "properties": {
@@ -333,6 +441,21 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "DisableTotpRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "current_password": {
+        "format": "password",
+        "maxLength": 128,
+        "minLength": 8,
+        "type": "string"
+      }
+    },
+    "required": [
+      "current_password"
+    ],
+    "type": "object"
+  },
   "EnrollFirstClientRequest": {
     "additionalProperties": false,
     "description": "Bootstrap proof is body-only. It must never be placed in a URL or log.",
@@ -347,6 +470,29 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "initialization_proof"
+    ],
+    "type": "object"
+  },
+  "EnrollTotpResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "backup_codes": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "otpauth_uri": {
+        "type": "string"
+      },
+      "secret": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "secret",
+      "otpauth_uri",
+      "backup_codes"
     ],
     "type": "object"
   },
@@ -580,6 +726,21 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "users"
+    ],
+    "type": "object"
+  },
+  "ListPasskeysResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "passkeys": {
+        "items": {
+          "$ref": "#/components/schemas/PasskeyDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "passkeys"
     ],
     "type": "object"
   },
@@ -898,6 +1059,103 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "OidcConfigDto": {
+    "additionalProperties": false,
+    "properties": {
+      "client_id": {
+        "type": "string"
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "issuer_url": {
+        "type": "string"
+      },
+      "pkce_enabled": {
+        "type": "boolean"
+      },
+      "scopes": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "issuer_url",
+      "client_id",
+      "pkce_enabled",
+      "scopes",
+      "enabled"
+    ],
+    "type": "object"
+  },
+  "OidcDiscoveryRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "issuer_url": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "issuer_url"
+    ],
+    "type": "object"
+  },
+  "OidcDiscoveryResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "authorization_endpoint": {
+        "type": "string"
+      },
+      "jwks_uri": {
+        "type": "string"
+      },
+      "token_endpoint": {
+        "type": "string"
+      },
+      "userinfo_endpoint": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "authorization_endpoint",
+      "token_endpoint",
+      "jwks_uri"
+    ],
+    "type": "object"
+  },
+  "PasskeyDto": {
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "last_used_at": {
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "name": {
+        "type": "string"
+      },
+      "passkey_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "passkey_id",
+      "name",
+      "created_at"
+    ],
+    "type": "object"
+  },
   "ProblemActionDto": {
     "additionalProperties": false,
     "properties": {
@@ -1196,6 +1454,43 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "SaveOidcConfigRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "client_id": {
+        "type": "string"
+      },
+      "client_secret": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "enabled": {
+        "type": "boolean"
+      },
+      "issuer_url": {
+        "type": "string"
+      },
+      "pkce_enabled": {
+        "type": "boolean"
+      },
+      "scopes": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "issuer_url",
+      "client_id",
+      "pkce_enabled",
+      "scopes",
+      "enabled"
+    ],
+    "type": "object"
+  },
   "SetTrackingDispositionRequest": {
     "additionalProperties": false,
     "properties": {
@@ -1386,6 +1681,22 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "TotpStatusDto": {
+    "additionalProperties": false,
+    "properties": {
+      "confirmed": {
+        "type": "boolean"
+      },
+      "enabled": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "enabled",
+      "confirmed"
+    ],
+    "type": "object"
+  },
   "TrackingDispositionDto": {
     "enum": [
       "watching",
@@ -1460,6 +1771,20 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "current_password"
+    ],
+    "type": "object"
+  },
+  "VerifyTotpRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "maxLength": 16,
+        "minLength": 6,
+        "type": "string"
+      }
+    },
+    "required": [
+      "code"
     ],
     "type": "object"
   },
@@ -1735,6 +2060,17 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   listBrowserUsers: { operationId: "list_users", method: "GET", path: "/api/v1/browser/users", capabilityId: "browser.user.list", authorization: "scoped", requiredScopes: ["browser_user_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListBrowserUsersResponse" },
   updateBrowserUser: { operationId: "update_user", method: "PATCH", path: "/api/v1/browser/users/{user_id}", capabilityId: "browser.user.update", authorization: "scoped", requiredScopes: ["browser_user_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "UpdateBrowserUserRequest", responseSchema: "BrowserUserDto" },
   deleteBrowserUser: { operationId: "delete_user", method: "DELETE", path: "/api/v1/browser/users/{user_id}", capabilityId: "browser.user.delete", authorization: "scoped", requiredScopes: ["browser_user_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "DeleteBrowserUserRequest", responseSchema: null },
+  listPasskeys: { operationId: "list_passkeys", method: "GET", path: "/api/v1/browser/auth/passkeys", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListPasskeysResponse" },
+  deletePasskey: { operationId: "delete_passkey", method: "DELETE", path: "/api/v1/browser/auth/passkeys/{passkey_id}", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  beginPasskeyRegistration: { operationId: "begin_passkey_registration", method: "POST", path: "/api/v1/browser/auth/passkey/register/begin", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "BeginPasskeyRegistrationResponse" },
+  completePasskeyRegistration: { operationId: "complete_passkey_registration", method: "POST", path: "/api/v1/browser/auth/passkey/register/complete", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CompletePasskeyRegistrationRequest", responseSchema: "PasskeyDto" },
+  enrollTotpBegin: { operationId: "enroll_totp_begin", method: "POST", path: "/api/v1/browser/auth/totp/enroll/begin", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "EnrollTotpResponse" },
+  enrollTotpConfirm: { operationId: "enroll_totp_confirm", method: "POST", path: "/api/v1/browser/auth/totp/enroll/confirm", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfirmTotpRequest", responseSchema: null },
+  disableTotp: { operationId: "disable_totp", method: "DELETE", path: "/api/v1/browser/auth/totp", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "DisableTotpRequest", responseSchema: null },
+  getOidcConfig: { operationId: "get_oidc_config", method: "GET", path: "/api/v1/browser/auth/oidc/config", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "OidcConfigDto" },
+  saveOidcConfig: { operationId: "save_oidc_config", method: "PUT", path: "/api/v1/browser/auth/oidc/config", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SaveOidcConfigRequest", responseSchema: "OidcConfigDto" },
+  deleteOidcConfig: { operationId: "delete_oidc_config", method: "DELETE", path: "/api/v1/browser/auth/oidc/config", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  discoverOidc: { operationId: "discover_oidc", method: "POST", path: "/api/v1/browser/auth/oidc/discover", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "OidcDiscoveryRequest", responseSchema: "OidcDiscoveryResponse" },
 } as const;
 
 // prettier-ignore

@@ -177,7 +177,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 25] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -452,6 +452,127 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 25] = [
         request: Some("DeleteBrowserUserRequest"),
         response: None,
         retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listPasskeys",
+        operation_id: "list_passkeys",
+        method: "get",
+        path: "/api/v1/browser/auth/passkeys",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("ListPasskeysResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "deletePasskey",
+        operation_id: "delete_passkey",
+        method: "delete",
+        path: "/api/v1/browser/auth/passkeys/{passkey_id}",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "beginPasskeyRegistration",
+        operation_id: "begin_passkey_registration",
+        method: "post",
+        path: "/api/v1/browser/auth/passkey/register/begin",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("BeginPasskeyRegistrationResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "completePasskeyRegistration",
+        operation_id: "complete_passkey_registration",
+        method: "post",
+        path: "/api/v1/browser/auth/passkey/register/complete",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: Some("CompletePasskeyRegistrationRequest"),
+        response: Some("PasskeyDto"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "enrollTotpBegin",
+        operation_id: "enroll_totp_begin",
+        method: "post",
+        path: "/api/v1/browser/auth/totp/enroll/begin",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("EnrollTotpResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "enrollTotpConfirm",
+        operation_id: "enroll_totp_confirm",
+        method: "post",
+        path: "/api/v1/browser/auth/totp/enroll/confirm",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: Some("ConfirmTotpRequest"),
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "disableTotp",
+        operation_id: "disable_totp",
+        method: "delete",
+        path: "/api/v1/browser/auth/totp",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: Some("DisableTotpRequest"),
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "getOidcConfig",
+        operation_id: "get_oidc_config",
+        method: "get",
+        path: "/api/v1/browser/auth/oidc/config",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("OidcConfigDto"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "saveOidcConfig",
+        operation_id: "save_oidc_config",
+        method: "put",
+        path: "/api/v1/browser/auth/oidc/config",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: Some("SaveOidcConfigRequest"),
+        response: Some("OidcConfigDto"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "deleteOidcConfig",
+        operation_id: "delete_oidc_config",
+        method: "delete",
+        path: "/api/v1/browser/auth/oidc/config",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "discoverOidc",
+        operation_id: "discover_oidc",
+        method: "post",
+        path: "/api/v1/browser/auth/oidc/discover",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: Some("OidcDiscoveryRequest"),
+        response: Some("OidcDiscoveryResponse"),
+        retry: "safe",
     },
 ];
 
@@ -1303,7 +1424,18 @@ fn validate_production_operation_security(
         | "switch_profile"
         | "list_users"
         | "update_user"
-        | "delete_user" => {
+        | "delete_user"
+        | "list_passkeys"
+        | "delete_passkey"
+        | "begin_passkey_registration"
+        | "complete_passkey_registration"
+        | "enroll_totp_begin"
+        | "enroll_totp_confirm"
+        | "disable_totp"
+        | "get_oidc_config"
+        | "save_oidc_config"
+        | "delete_oidc_config"
+        | "discover_oidc" => {
             vec!["browser_session"]
         }
         "create_session" | "enroll_first_client" | "health_check" | "integration_status" => {

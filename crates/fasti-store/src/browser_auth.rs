@@ -6,16 +6,20 @@ use argon2::{
     password_hash::{Error as PasswordHashError, PasswordHash, SaltString},
     Argon2, PasswordHasher, PasswordVerifier,
 };
-use chrono::Duration;
+use chrono::{DateTime, Duration, Utc};
 use fasti_application::{
     authorize, AccessAdministrationPort, ApplicationResult, AuthenticateBrowserSessionQuery,
-    AuthenticatedBrowserSession, AuthorizationRequirement, BrowserAccountPort, BrowserPassword,
-    BrowserSessionSummary, BrowserUserView, BrowserUsername, CapabilityKey,
-    CreateBrowserSessionCommand, CreatedBrowserSession, DeleteBrowserUserCommand,
-    EndAllOtherBrowserSessionsCommand, EndBrowserSessionCommand, EndSpecificBrowserSessionCommand,
-    EnrollFirstClientCommand, FastiProblem, InitializeNodeCommand, ListBrowserSessionsQuery,
-    ListBrowserUsersQuery, ProblemCode, RequestAccessContext, ScopeKey,
-    SwitchBrowserSessionProfileCommand, UpdateBrowserUserCommand, Violation,
+    AuthenticatedBrowserSession, AuthorizationRequirement, BeginPasskeyRegistrationQuery,
+    BrowserAccountPort, BrowserPassword, BrowserSessionSummary, BrowserUserView, BrowserUsername,
+    CapabilityKey, CompletePasskeyRegistrationCommand, CreateBrowserSessionCommand,
+    CreatedBrowserSession, DeleteBrowserUserCommand, DeleteOidcConfigCommand, DeletePasskeyCommand,
+    DisableTotpCommand, DiscoverOidcQuery, EndAllOtherBrowserSessionsCommand,
+    EndBrowserSessionCommand, EndSpecificBrowserSessionCommand, EnrollFirstClientCommand,
+    EnrollTotpBeginCommand, EnrollTotpConfirmCommand, FastiProblem, GetOidcConfigQuery,
+    InitializeNodeCommand, ListBrowserSessionsQuery, ListBrowserUsersQuery, ListPasskeysQuery,
+    OidcConfigView, OidcDiscoveryView, PasskeyRegistrationChallengeView, PasskeySummary,
+    ProblemCode, RequestAccessContext, SaveOidcConfigCommand, ScopeKey,
+    SwitchBrowserSessionProfileCommand, TotpEnrollmentView, UpdateBrowserUserCommand, Violation,
 };
 use fasti_domain::{BrowserUserId, ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -23,6 +27,117 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 const MAX_FAILED_LOGINS: i64 = 5;
 const LOCKOUT_MINUTES: i64 = 15;
 type BrowserUserRow = (String, String, i64, i64, i64, String, String);
+
+fn to_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(s, "{:02x}", b);
+    }
+    s
+}
+
+const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+fn base32_encode(data: &[u8]) -> String {
+    let mut s = String::new();
+    let mut val = 0u32;
+    let mut valb = 0;
+    for &c in data {
+        val = (val << 8) | (u32::from(c));
+        valb += 8;
+        while valb >= 5 {
+            valb -= 5;
+            s.push(BASE32_ALPHABET[((val >> valb) & 0x1f) as usize] as char);
+        }
+    }
+    if valb > 0 {
+        s.push(BASE32_ALPHABET[((val << (5 - valb)) & 0x1f) as usize] as char);
+    }
+    s
+}
+
+fn base32_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut val = 0u32;
+    let mut valb = 0;
+    for c in s.chars() {
+        if c == '=' || c.is_whitespace() {
+            continue;
+        }
+        let c_up = c.to_ascii_uppercase();
+        let idx = BASE32_ALPHABET.iter().position(|&b| b as char == c_up)? as u32;
+        val = (val << 5) | idx;
+        valb += 5;
+        if valb >= 8 {
+            valb -= 8;
+            out.push((val >> valb) as u8);
+        }
+    }
+    Some(out)
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        let hash = Sha256::digest(key);
+        k[..32].copy_from_slice(&hash);
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut o_key_pad = [0x5cu8; 64];
+    let mut i_key_pad = [0x36u8; 64];
+    for i in 0..64 {
+        o_key_pad[i] ^= k[i];
+        i_key_pad[i] ^= k[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(i_key_pad);
+    inner.update(data);
+    let inner_hash = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(o_key_pad);
+    outer.update(inner_hash);
+    let outer_hash = outer.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&outer_hash);
+    out
+}
+
+fn compute_totp_code(secret_base32: &str, time_step: u64) -> Option<String> {
+    let secret_bytes = base32_decode(secret_base32)?;
+    let time_bytes = time_step.to_be_bytes();
+    let hash = hmac_sha256(&secret_bytes, &time_bytes);
+    let offset = (hash[31] & 0x0f) as usize;
+    let binary = ((u32::from(hash[offset] & 0x7f)) << 24)
+        | ((u32::from(hash[offset + 1])) << 16)
+        | ((u32::from(hash[offset + 2])) << 8)
+        | (u32::from(hash[offset + 3]));
+    let otp = binary % 1_000_000;
+    Some(format!("{:06}", otp))
+}
+
+fn verify_totp_code(secret_base32: &str, code: &str) -> bool {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let current_step = now / 30;
+    for step_offset in [-1i64, 0, 1] {
+        let step = match current_step.checked_add_signed(step_offset) {
+            Some(s) => s,
+            None => continue,
+        };
+        if let Some(computed) = compute_totp_code(secret_base32, step) {
+            if computed == code.trim() {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 fn problem(
     code: ProblemCode,
@@ -1219,6 +1334,550 @@ impl BrowserAccountPort for SqliteKernel {
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(deleted_self)
     }
+
+    fn list_passkeys(&self, query: ListPasskeysQuery) -> ApplicationResult<Vec<PasskeySummary>> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session) = query.into_parts();
+        let connection = self.lock_connection(capability, correlation_id)?;
+        let caller = authenticate_session(
+            &connection,
+            &AuthenticateBrowserSessionQuery::new(correlation_id, capability, session, None, false),
+        )?;
+        let mut statement = map_sql(
+            connection.prepare(
+                "SELECT passkey_id, name, created_at, last_used_at FROM user_passkeys WHERE user_id = ?1 ORDER BY created_at ASC",
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let rows = map_sql(
+            statement.query_map([caller.user().user_id().to_string()], |row| {
+                let passkey_id: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let created_at: String = row.get(2)?;
+                let last_used_at: Option<String> = row.get(3)?;
+                Ok((passkey_id, name, created_at, last_used_at))
+            }),
+            capability,
+            correlation_id,
+        )?;
+        let mut passkeys = Vec::new();
+        for item in rows {
+            let (passkey_id, name, created_at, last_used_at) =
+                map_sql(item, capability, correlation_id)?;
+            let created_at_dt = created_at
+                .parse::<DateTime<Utc>>()
+                .unwrap_or_else(|_| Utc::now());
+            let last_used_at_dt = last_used_at.and_then(|s| s.parse::<DateTime<Utc>>().ok());
+            passkeys.push(PasskeySummary::new(
+                passkey_id,
+                name,
+                created_at_dt,
+                last_used_at_dt,
+            ));
+        }
+        Ok(passkeys)
+    }
+
+    fn delete_passkey(&self, command: DeletePasskeyCommand) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session, csrf, passkey_id) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        let changed = map_sql(
+            transaction.execute(
+                "DELETE FROM user_passkeys WHERE passkey_id = ?1 AND user_id = ?2",
+                params![passkey_id, caller.user().user_id().to_string()],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(changed == 1)
+    }
+
+    fn begin_passkey_registration(
+        &self,
+        query: BeginPasskeyRegistrationQuery,
+    ) -> ApplicationResult<PasskeyRegistrationChallengeView> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session) = query.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(correlation_id, capability, session, None, false),
+        )?;
+        let mut challenge_raw = [0u8; 32];
+        getrandom::fill(&mut challenge_raw)
+            .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+        let challenge = to_hex(&challenge_raw);
+        let challenge_id = format!("chl_{}", to_hex(&challenge_raw[..8]));
+        let now = Utc::now();
+        let expires_at = (now + chrono::Duration::minutes(5)).to_rfc3339();
+        let created_at = now.to_rfc3339();
+        map_sql(
+            transaction.execute(
+                "INSERT INTO auth_ephemeral_challenges (challenge_id, user_id, challenge_bytes, purpose, expires_at, created_at) VALUES (?1, ?2, ?3, 'passkey_reg', ?4, ?5)",
+                params![
+                    challenge_id,
+                    caller.user().user_id().to_string(),
+                    challenge,
+                    expires_at,
+                    created_at
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(PasskeyRegistrationChallengeView::new(
+            challenge,
+            "Fasti".to_string(),
+            "localhost".to_string(),
+            caller.user().user_id().to_string(),
+            caller.user().username().to_string(),
+        ))
+    }
+
+    fn complete_passkey_registration(
+        &self,
+        command: CompletePasskeyRegistrationCommand,
+    ) -> ApplicationResult<PasskeySummary> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (
+            correlation_id,
+            session,
+            csrf,
+            name,
+            credential_id,
+            _client_data_json,
+            attestation_object,
+        ) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        let passkey_id = format!(
+            "psk_{}",
+            to_hex(
+                fasti_domain::RequestCorrelationId::new_v7()
+                    .uuid()
+                    .as_bytes()
+            )
+        );
+        let now = Utc::now();
+        let created_at = now.to_rfc3339();
+        map_sql(
+            transaction.execute(
+                "INSERT INTO user_passkeys (passkey_id, user_id, name, credential_id, public_key_cose, sign_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+                params![
+                    passkey_id,
+                    caller.user().user_id().to_string(),
+                    name,
+                    credential_id,
+                    attestation_object,
+                    created_at
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(PasskeySummary::new(passkey_id, name, now, None))
+    }
+
+    fn enroll_totp_begin(
+        &self,
+        command: EnrollTotpBeginCommand,
+    ) -> ApplicationResult<TotpEnrollmentView> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session, csrf) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        let mut secret_raw = [0u8; 20];
+        getrandom::fill(&mut secret_raw)
+            .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+        let secret = base32_encode(&secret_raw);
+        let user_id = caller.user().user_id().to_string();
+        let username = caller.user().username().to_string();
+        let otpauth_uri = format!(
+            "otpauth://totp/Fasti:{}?secret={}&issuer=Fasti&algorithm=SHA1&digits=6&period=30",
+            username, secret
+        );
+        let now = Utc::now().to_rfc3339();
+        map_sql(
+            transaction.execute(
+                "INSERT INTO user_totp (user_id, secret, confirmed, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?3) ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, confirmed = 0, updated_at = excluded.updated_at",
+                params![user_id, secret, now],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let mut backup_codes = Vec::new();
+        map_sql(
+            transaction.execute(
+                "DELETE FROM user_backup_codes WHERE user_id = ?1",
+                params![user_id],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        for _ in 0..10 {
+            let mut code_raw = [0u8; 4];
+            getrandom::fill(&mut code_raw)
+                .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+            let code_plain = to_hex(&code_raw);
+            use sha2::{Digest, Sha256};
+            let code_hash = to_hex(&Sha256::digest(code_plain.as_bytes()));
+            map_sql(
+                transaction.execute(
+                    "INSERT INTO user_backup_codes (code_hash, user_id, used, created_at) VALUES (?1, ?2, 0, ?3)",
+                    params![code_hash, user_id, now],
+                ),
+                capability,
+                correlation_id,
+            )?;
+            backup_codes.push(code_plain);
+        }
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(TotpEnrollmentView::new(secret, otpauth_uri, backup_codes))
+    }
+
+    fn enroll_totp_confirm(&self, command: EnrollTotpConfirmCommand) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session, csrf, code) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        let user_id = caller.user().user_id().to_string();
+        let secret: String = map_sql(
+            transaction.query_row(
+                "SELECT secret FROM user_totp WHERE user_id = ?1",
+                params![user_id],
+                |row| row.get(0),
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let valid = verify_totp_code(&secret, &code);
+        if !valid {
+            return Err(problem(
+                ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            ));
+        }
+        map_sql(
+            transaction.execute(
+                "UPDATE user_totp SET confirmed = 1, updated_at = ?1 WHERE user_id = ?2",
+                params![Utc::now().to_rfc3339(), user_id],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(true)
+    }
+
+    fn disable_totp(&self, command: DisableTotpCommand) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session, csrf, current_password) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        let user_id = caller.user().user_id().to_string();
+        let caller_hash: String = map_sql(
+            transaction.query_row(
+                "SELECT password_hash FROM browser_users WHERE user_id = ?1",
+                params![user_id],
+                |row| row.get(0),
+            ),
+            capability,
+            correlation_id,
+        )?;
+        if !verify_password(&current_password, &caller_hash, capability, correlation_id)? {
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+        }
+        map_sql(
+            transaction.execute("DELETE FROM user_totp WHERE user_id = ?1", params![user_id]),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                "DELETE FROM user_backup_codes WHERE user_id = ?1",
+                params![user_id],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(true)
+    }
+
+    fn get_oidc_config(
+        &self,
+        query: GetOidcConfigQuery,
+    ) -> ApplicationResult<Option<OidcConfigView>> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session) = query.into_parts();
+        let connection = self.lock_connection(capability, correlation_id)?;
+        let caller = authenticate_session(
+            &connection,
+            &AuthenticateBrowserSessionQuery::new(correlation_id, capability, session, None, false),
+        )?;
+        let workspace_id = caller.access().workspace_id().to_string();
+        let mut statement = map_sql(
+            connection.prepare(
+                "SELECT issuer_url, client_id, pkce_enabled, scopes, enabled FROM oidc_provider_configs WHERE workspace_id = ?1",
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let mut rows = map_sql(
+            statement.query_map(params![workspace_id], |row| {
+                let issuer_url: String = row.get(0)?;
+                let client_id: String = row.get(1)?;
+                let pkce_enabled: i64 = row.get(2)?;
+                let scopes_json: String = row.get(3)?;
+                let enabled: i64 = row.get(4)?;
+                Ok((
+                    issuer_url,
+                    client_id,
+                    pkce_enabled == 1,
+                    scopes_json,
+                    enabled == 1,
+                ))
+            }),
+            capability,
+            correlation_id,
+        )?;
+        if let Some(item) = rows.next() {
+            let (issuer_url, client_id, pkce_enabled, scopes_json, enabled) =
+                map_sql(item, capability, correlation_id)?;
+            let scopes: Vec<String> = serde_json::from_str(&scopes_json).unwrap_or_else(|_| {
+                vec![
+                    "openid".to_string(),
+                    "profile".to_string(),
+                    "email".to_string(),
+                ]
+            });
+            Ok(Some(OidcConfigView::new(
+                issuer_url,
+                client_id,
+                pkce_enabled,
+                scopes,
+                enabled,
+            )))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn save_oidc_config(
+        &self,
+        command: SaveOidcConfigCommand,
+    ) -> ApplicationResult<OidcConfigView> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (
+            correlation_id,
+            session,
+            csrf,
+            issuer_url,
+            client_id,
+            client_secret,
+            pkce_enabled,
+            scopes,
+            enabled,
+        ) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        if !caller.user().is_admin() {
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+        }
+        let workspace_id = caller.access().workspace_id().to_string();
+        let scopes_json = serde_json::to_string(&scopes)
+            .unwrap_or_else(|_| "[\"openid\",\"profile\",\"email\"]".to_string());
+        let secret_digest = client_secret.as_deref().map(|s| {
+            use sha2::{Digest, Sha256};
+            to_hex(&Sha256::digest(s.as_bytes()))
+        });
+        let now = Utc::now().to_rfc3339();
+        map_sql(
+            transaction.execute(
+                r#"
+                INSERT INTO oidc_provider_configs (workspace_id, issuer_url, client_id, client_secret_digest, pkce_enabled, scopes, enabled, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                ON CONFLICT(workspace_id) DO UPDATE SET
+                    issuer_url = excluded.issuer_url,
+                    client_id = excluded.client_id,
+                    client_secret_digest = COALESCE(excluded.client_secret_digest, oidc_provider_configs.client_secret_digest),
+                    pkce_enabled = excluded.pkce_enabled,
+                    scopes = excluded.scopes,
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    workspace_id,
+                    issuer_url,
+                    client_id,
+                    secret_digest,
+                    if pkce_enabled { 1 } else { 0 },
+                    scopes_json,
+                    if enabled { 1 } else { 0 },
+                    now
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(OidcConfigView::new(
+            issuer_url,
+            client_id,
+            pkce_enabled,
+            scopes,
+            enabled,
+        ))
+    }
+
+    fn delete_oidc_config(&self, command: DeleteOidcConfigCommand) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session, csrf) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session,
+                Some(csrf),
+                true,
+            ),
+        )?;
+        if !caller.user().is_admin() {
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+        }
+        let workspace_id = caller.access().workspace_id().to_string();
+        let changed = map_sql(
+            transaction.execute(
+                "DELETE FROM oidc_provider_configs WHERE workspace_id = ?1",
+                params![workspace_id],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(changed == 1)
+    }
+
+    fn discover_oidc(&self, query: DiscoverOidcQuery) -> ApplicationResult<OidcDiscoveryView> {
+        let (correlation_id, issuer_url) = query.into_parts();
+        let base = issuer_url.trim_end_matches('/');
+        if !base.starts_with("http://") && !base.starts_with("https://") {
+            return Err(problem(
+                ProblemCode::ValidationFailed,
+                CapabilityKey::ReadBrowserSession,
+                correlation_id,
+            ));
+        }
+        Ok(OidcDiscoveryView::new(
+            format!("{}/oauth2/v1/authorize", base),
+            format!("{}/oauth2/v1/token", base),
+            Some(format!("{}/oauth2/v1/userinfo", base)),
+            format!("{}/oauth2/v1/keys", base),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -1875,6 +2534,7 @@ mod tests {
                     BrowserUsername::try_new("testadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
                     43200,
+                    86400,
                 )
                 .expect("30 day session"),
             )
@@ -1887,6 +2547,7 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("testadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
+                    86400,
                     86400,
                 )
                 .expect("60 day session"),

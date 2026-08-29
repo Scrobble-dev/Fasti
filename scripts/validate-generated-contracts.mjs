@@ -80,6 +80,15 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
     SwaggerParser.validate(conformanceOpenapi),
   ]);
   assert.deepEqual(Object.keys(openapi.paths), [
+    "/api/v1/browser/auth/oidc/config",
+    "/api/v1/browser/auth/oidc/discover",
+    "/api/v1/browser/auth/passkey/register/begin",
+    "/api/v1/browser/auth/passkey/register/complete",
+    "/api/v1/browser/auth/passkeys",
+    "/api/v1/browser/auth/passkeys/{passkey_id}",
+    "/api/v1/browser/auth/totp",
+    "/api/v1/browser/auth/totp/enroll/begin",
+    "/api/v1/browser/auth/totp/enroll/confirm",
     "/api/v1/browser/session",
     "/api/v1/browser/session/switch-profile",
     "/api/v1/browser/sessions",
@@ -376,6 +385,17 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
                 "list_users",
                 "update_user",
                 "delete_user",
+                "list_passkeys",
+                "delete_passkey",
+                "begin_passkey_registration",
+                "complete_passkey_registration",
+                "enroll_totp_begin",
+                "enroll_totp_confirm",
+                "disable_totp",
+                "get_oidc_config",
+                "save_oidc_config",
+                "delete_oidc_config",
+                "discover_oidc",
               ].includes(operation.operationId)
             ? [{ browser_session: [] }]
             : [

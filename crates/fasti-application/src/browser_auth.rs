@@ -682,6 +682,641 @@ impl SwitchBrowserSessionProfileCommand {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasskeySummary {
+    passkey_id: String,
+    name: String,
+    created_at: DateTime<Utc>,
+    last_used_at: Option<DateTime<Utc>>,
+}
+
+impl PasskeySummary {
+    pub fn new(
+        passkey_id: String,
+        name: String,
+        created_at: DateTime<Utc>,
+        last_used_at: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            passkey_id,
+            name,
+            created_at,
+            last_used_at,
+        }
+    }
+    pub fn passkey_id(&self) -> &str {
+        &self.passkey_id
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub const fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+    pub const fn last_used_at(&self) -> Option<DateTime<Utc>> {
+        self.last_used_at
+    }
+}
+
+pub struct ListPasskeysQuery {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+}
+
+impl ListPasskeysQuery {
+    pub const fn new(correlation_id: RequestCorrelationId, session: SecretMaterial) -> Self {
+        Self {
+            correlation_id,
+            session,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial) {
+        (self.correlation_id, self.session)
+    }
+}
+
+pub struct DeletePasskeyCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    passkey_id: String,
+}
+
+impl DeletePasskeyCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        passkey_id: String,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            passkey_id,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn passkey_id(&self) -> &str {
+        &self.passkey_id
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial, String) {
+        (
+            self.correlation_id,
+            self.session,
+            self.csrf,
+            self.passkey_id,
+        )
+    }
+}
+
+pub struct BeginPasskeyRegistrationQuery {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+}
+
+impl BeginPasskeyRegistrationQuery {
+    pub const fn new(correlation_id: RequestCorrelationId, session: SecretMaterial) -> Self {
+        Self {
+            correlation_id,
+            session,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial) {
+        (self.correlation_id, self.session)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasskeyRegistrationChallengeView {
+    challenge: String,
+    rp_name: String,
+    rp_id: String,
+    user_id: String,
+    user_name: String,
+}
+
+impl PasskeyRegistrationChallengeView {
+    pub fn new(
+        challenge: String,
+        rp_name: String,
+        rp_id: String,
+        user_id: String,
+        user_name: String,
+    ) -> Self {
+        Self {
+            challenge,
+            rp_name,
+            rp_id,
+            user_id,
+            user_name,
+        }
+    }
+    pub fn challenge(&self) -> &str {
+        &self.challenge
+    }
+    pub fn rp_name(&self) -> &str {
+        &self.rp_name
+    }
+    pub fn rp_id(&self) -> &str {
+        &self.rp_id
+    }
+    pub fn user_id(&self) -> &str {
+        &self.user_id
+    }
+    pub fn user_name(&self) -> &str {
+        &self.user_name
+    }
+}
+
+pub struct CompletePasskeyRegistrationCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    name: String,
+    credential_id: String,
+    client_data_json: String,
+    attestation_object: String,
+}
+
+impl CompletePasskeyRegistrationCommand {
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        name: String,
+        credential_id: String,
+        client_data_json: String,
+        attestation_object: String,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            name,
+            credential_id,
+            client_data_json,
+            attestation_object,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn credential_id(&self) -> &str {
+        &self.credential_id
+    }
+    pub fn client_data_json(&self) -> &str {
+        &self.client_data_json
+    }
+    pub fn attestation_object(&self) -> &str {
+        &self.attestation_object
+    }
+    pub fn into_parts(
+        self,
+    ) -> (
+        RequestCorrelationId,
+        SecretMaterial,
+        SecretMaterial,
+        String,
+        String,
+        String,
+        String,
+    ) {
+        (
+            self.correlation_id,
+            self.session,
+            self.csrf,
+            self.name,
+            self.credential_id,
+            self.client_data_json,
+            self.attestation_object,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TotpEnrollmentView {
+    secret: String,
+    otpauth_uri: String,
+    backup_codes: Vec<String>,
+}
+
+impl TotpEnrollmentView {
+    pub fn new(secret: String, otpauth_uri: String, backup_codes: Vec<String>) -> Self {
+        Self {
+            secret,
+            otpauth_uri,
+            backup_codes,
+        }
+    }
+    pub fn secret(&self) -> &str {
+        &self.secret
+    }
+    pub fn otpauth_uri(&self) -> &str {
+        &self.otpauth_uri
+    }
+    pub fn backup_codes(&self) -> &[String] {
+        &self.backup_codes
+    }
+}
+
+pub struct EnrollTotpBeginCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+}
+
+impl EnrollTotpBeginCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial) {
+        (self.correlation_id, self.session, self.csrf)
+    }
+}
+
+pub struct EnrollTotpConfirmCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    code: String,
+}
+
+impl EnrollTotpConfirmCommand {
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        code: String,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            code,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial, String) {
+        (self.correlation_id, self.session, self.csrf, self.code)
+    }
+}
+
+pub struct DisableTotpCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    current_password: BrowserPassword,
+}
+
+impl DisableTotpCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        current_password: BrowserPassword,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            current_password,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub const fn current_password(&self) -> &BrowserPassword {
+        &self.current_password
+    }
+    pub fn into_parts(
+        self,
+    ) -> (
+        RequestCorrelationId,
+        SecretMaterial,
+        SecretMaterial,
+        BrowserPassword,
+    ) {
+        (
+            self.correlation_id,
+            self.session,
+            self.csrf,
+            self.current_password,
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OidcConfigView {
+    issuer_url: String,
+    client_id: String,
+    pkce_enabled: bool,
+    scopes: Vec<String>,
+    enabled: bool,
+}
+
+impl OidcConfigView {
+    pub fn new(
+        issuer_url: String,
+        client_id: String,
+        pkce_enabled: bool,
+        scopes: Vec<String>,
+        enabled: bool,
+    ) -> Self {
+        Self {
+            issuer_url,
+            client_id,
+            pkce_enabled,
+            scopes,
+            enabled,
+        }
+    }
+    pub fn issuer_url(&self) -> &str {
+        &self.issuer_url
+    }
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+    pub const fn pkce_enabled(&self) -> bool {
+        self.pkce_enabled
+    }
+    pub fn scopes(&self) -> &[String] {
+        &self.scopes
+    }
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+pub struct SaveOidcConfigCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    issuer_url: String,
+    client_id: String,
+    client_secret: Option<String>,
+    pkce_enabled: bool,
+    scopes: Vec<String>,
+    enabled: bool,
+}
+
+impl SaveOidcConfigCommand {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        issuer_url: String,
+        client_id: String,
+        client_secret: Option<String>,
+        pkce_enabled: bool,
+        scopes: Vec<String>,
+        enabled: bool,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            issuer_url,
+            client_id,
+            client_secret,
+            pkce_enabled,
+            scopes,
+            enabled,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn issuer_url(&self) -> &str {
+        &self.issuer_url
+    }
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+    pub fn client_secret(&self) -> Option<&str> {
+        self.client_secret.as_deref()
+    }
+    pub const fn pkce_enabled(&self) -> bool {
+        self.pkce_enabled
+    }
+    pub fn scopes(&self) -> &[String] {
+        &self.scopes
+    }
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
+    #[allow(clippy::type_complexity)]
+    pub fn into_parts(
+        self,
+    ) -> (
+        RequestCorrelationId,
+        SecretMaterial,
+        SecretMaterial,
+        String,
+        String,
+        Option<String>,
+        bool,
+        Vec<String>,
+        bool,
+    ) {
+        (
+            self.correlation_id,
+            self.session,
+            self.csrf,
+            self.issuer_url,
+            self.client_id,
+            self.client_secret,
+            self.pkce_enabled,
+            self.scopes,
+            self.enabled,
+        )
+    }
+}
+
+pub struct GetOidcConfigQuery {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+}
+
+impl GetOidcConfigQuery {
+    pub const fn new(correlation_id: RequestCorrelationId, session: SecretMaterial) -> Self {
+        Self {
+            correlation_id,
+            session,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial) {
+        (self.correlation_id, self.session)
+    }
+}
+
+pub struct DeleteOidcConfigCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+}
+
+impl DeleteOidcConfigCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial) {
+        (self.correlation_id, self.session, self.csrf)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OidcDiscoveryView {
+    authorization_endpoint: String,
+    token_endpoint: String,
+    userinfo_endpoint: Option<String>,
+    jwks_uri: String,
+}
+
+impl OidcDiscoveryView {
+    pub fn new(
+        authorization_endpoint: String,
+        token_endpoint: String,
+        userinfo_endpoint: Option<String>,
+        jwks_uri: String,
+    ) -> Self {
+        Self {
+            authorization_endpoint,
+            token_endpoint,
+            userinfo_endpoint,
+            jwks_uri,
+        }
+    }
+    pub fn authorization_endpoint(&self) -> &str {
+        &self.authorization_endpoint
+    }
+    pub fn token_endpoint(&self) -> &str {
+        &self.token_endpoint
+    }
+    pub fn userinfo_endpoint(&self) -> Option<&str> {
+        self.userinfo_endpoint.as_deref()
+    }
+    pub fn jwks_uri(&self) -> &str {
+        &self.jwks_uri
+    }
+}
+
+pub struct DiscoverOidcQuery {
+    correlation_id: RequestCorrelationId,
+    issuer_url: String,
+}
+
+impl DiscoverOidcQuery {
+    pub fn new(correlation_id: RequestCorrelationId, issuer_url: String) -> Self {
+        Self {
+            correlation_id,
+            issuer_url,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub fn issuer_url(&self) -> &str {
+        &self.issuer_url
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, String) {
+        (self.correlation_id, self.issuer_url)
+    }
+}
+
 pub trait BrowserAccountPort: Send + Sync {
     /// Seeds the one-time development browser account if it does not exist
     /// yet. Returns `true` when this call actually created it, `false` when
@@ -725,6 +1360,36 @@ pub trait BrowserAccountPort: Send + Sync {
         command: UpdateBrowserUserCommand,
     ) -> ApplicationResult<BrowserUserView>;
     fn delete_browser_user(&self, command: DeleteBrowserUserCommand) -> ApplicationResult<bool>;
+
+    // Passkeys (WebAuthn)
+    fn list_passkeys(&self, query: ListPasskeysQuery) -> ApplicationResult<Vec<PasskeySummary>>;
+    fn delete_passkey(&self, command: DeletePasskeyCommand) -> ApplicationResult<bool>;
+    fn begin_passkey_registration(
+        &self,
+        query: BeginPasskeyRegistrationQuery,
+    ) -> ApplicationResult<PasskeyRegistrationChallengeView>;
+    fn complete_passkey_registration(
+        &self,
+        command: CompletePasskeyRegistrationCommand,
+    ) -> ApplicationResult<PasskeySummary>;
+
+    // Authenticator 2FA (RFC 6238 TOTP)
+    fn enroll_totp_begin(
+        &self,
+        command: EnrollTotpBeginCommand,
+    ) -> ApplicationResult<TotpEnrollmentView>;
+    fn enroll_totp_confirm(&self, command: EnrollTotpConfirmCommand) -> ApplicationResult<bool>;
+    fn disable_totp(&self, command: DisableTotpCommand) -> ApplicationResult<bool>;
+
+    // OpenID Connect (OIDC) SSO
+    fn get_oidc_config(
+        &self,
+        query: GetOidcConfigQuery,
+    ) -> ApplicationResult<Option<OidcConfigView>>;
+    fn save_oidc_config(&self, command: SaveOidcConfigCommand)
+        -> ApplicationResult<OidcConfigView>;
+    fn delete_oidc_config(&self, command: DeleteOidcConfigCommand) -> ApplicationResult<bool>;
+    fn discover_oidc(&self, query: DiscoverOidcQuery) -> ApplicationResult<OidcDiscoveryView>;
 }
 
 #[cfg(test)]

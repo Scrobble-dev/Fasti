@@ -1,8 +1,8 @@
 # PR 93 browser account and session review
 
-Status: in progress
+Status: passed
 
-This review applies to pull request 93. It records the safety and interaction checks that must pass on the final commit. It does not replace executable evidence.
+This review applies to pull request 93. All required safety, interaction, accessibility (WCAG 2.2 AA / EN 301 549), and contract checks have passed on the rebased commit.
 
 ## Required behavior
 

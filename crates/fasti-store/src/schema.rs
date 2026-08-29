@@ -795,6 +795,57 @@ fn migrate_v8(connection: &Connection) -> Result<()> {
             seeded_at TEXT NOT NULL
         ) STRICT;
 
+        CREATE TABLE user_passkeys (
+            passkey_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES browser_users(user_id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            credential_id TEXT NOT NULL UNIQUE,
+            public_key_cose TEXT NOT NULL,
+            sign_count INTEGER NOT NULL DEFAULT 0,
+            aaguid TEXT,
+            created_at TEXT NOT NULL,
+            last_used_at TEXT
+        ) STRICT;
+        CREATE INDEX user_passkeys_user_idx ON user_passkeys(user_id);
+
+        CREATE TABLE user_totp (
+            user_id TEXT PRIMARY KEY REFERENCES browser_users(user_id) ON DELETE CASCADE,
+            secret TEXT NOT NULL,
+            confirmed INTEGER NOT NULL DEFAULT 0 CHECK (confirmed IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE user_backup_codes (
+            code_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES browser_users(user_id) ON DELETE CASCADE,
+            used INTEGER NOT NULL DEFAULT 0 CHECK (used IN (0, 1)),
+            created_at TEXT NOT NULL,
+            used_at TEXT
+        ) STRICT;
+        CREATE INDEX user_backup_codes_user_idx ON user_backup_codes(user_id);
+
+        CREATE TABLE oidc_provider_configs (
+            workspace_id TEXT PRIMARY KEY REFERENCES workspaces(workspace_id) ON DELETE CASCADE,
+            issuer_url TEXT NOT NULL,
+            client_id TEXT NOT NULL,
+            client_secret_digest TEXT,
+            pkce_enabled INTEGER NOT NULL DEFAULT 1 CHECK (pkce_enabled IN (0, 1)),
+            scopes TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE auth_ephemeral_challenges (
+            challenge_id TEXT PRIMARY KEY,
+            user_id TEXT REFERENCES browser_users(user_id) ON DELETE CASCADE,
+            challenge_bytes TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        ) STRICT;
+
         "#,
     )?;
     for scope in V8_NODE_OWNER_SCOPE_BACKFILL {
@@ -2207,6 +2258,11 @@ mod tests {
                 "browser_auth_bootstrap".to_owned(),
                 "browser_sessions".to_owned(),
                 "browser_users".to_owned(),
+                "auth_ephemeral_challenges".to_owned(),
+                "oidc_provider_configs".to_owned(),
+                "user_backup_codes".to_owned(),
+                "user_passkeys".to_owned(),
+                "user_totp".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

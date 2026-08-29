@@ -53,6 +53,50 @@
         ],
         "type": "object"
       },
+      "BeginPasskeyAuthenticationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "rp_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge",
+          "rp_id"
+        ],
+        "type": "object"
+      },
+      "BeginPasskeyRegistrationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "challenge": {
+            "type": "string"
+          },
+          "rp_id": {
+            "type": "string"
+          },
+          "rp_name": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "user_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge",
+          "rp_name",
+          "rp_id",
+          "user_id",
+          "user_name"
+        ],
+        "type": "object"
+      },
       "BrowserSessionItemDto": {
         "additionalProperties": false,
         "properties": {
@@ -187,6 +231,70 @@
         ],
         "type": "object"
       },
+      "CompletePasskeyAuthenticationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "authenticator_data": {
+            "type": "string"
+          },
+          "client_data_json": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential_id",
+          "client_data_json",
+          "authenticator_data",
+          "signature"
+        ],
+        "type": "object"
+      },
+      "CompletePasskeyRegistrationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "attestation_object": {
+            "type": "string"
+          },
+          "client_data_json": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "credential_id",
+          "client_data_json",
+          "attestation_object"
+        ],
+        "type": "object"
+      },
+      "ConfirmTotpRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 6,
+            "minLength": 6,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "CreateBrowserSessionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -267,6 +375,21 @@
         ],
         "type": "object"
       },
+      "DisableTotpRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "current_password": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password"
+        ],
+        "type": "object"
+      },
       "EnrollFirstClientRequest": {
         "additionalProperties": false,
         "description": "Bootstrap proof is body-only. It must never be placed in a URL or log.",
@@ -281,6 +404,29 @@
         },
         "required": [
           "initialization_proof"
+        ],
+        "type": "object"
+      },
+      "EnrollTotpResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "backup_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "otpauth_uri": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret",
+          "otpauth_uri",
+          "backup_codes"
         ],
         "type": "object"
       },
@@ -514,6 +660,21 @@
         },
         "required": [
           "users"
+        ],
+        "type": "object"
+      },
+      "ListPasskeysResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "passkeys": {
+            "items": {
+              "$ref": "#/components/schemas/PasskeyDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "passkeys"
         ],
         "type": "object"
       },
@@ -832,6 +993,103 @@
         ],
         "type": "object"
       },
+      "OidcConfigDto": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "pkce_enabled": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issuer_url",
+          "client_id",
+          "pkce_enabled",
+          "scopes",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "OidcDiscoveryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "issuer_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issuer_url"
+        ],
+        "type": "object"
+      },
+      "OidcDiscoveryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authorization_endpoint": {
+            "type": "string"
+          },
+          "jwks_uri": {
+            "type": "string"
+          },
+          "token_endpoint": {
+            "type": "string"
+          },
+          "userinfo_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "authorization_endpoint",
+          "token_endpoint",
+          "jwks_uri"
+        ],
+        "type": "object"
+      },
+      "PasskeyDto": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_used_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "passkey_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "passkey_id",
+          "name",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "ProblemActionDto": {
         "additionalProperties": false,
         "properties": {
@@ -1130,6 +1388,43 @@
         ],
         "type": "object"
       },
+      "SaveOidcConfigRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "issuer_url": {
+            "type": "string"
+          },
+          "pkce_enabled": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issuer_url",
+          "client_id",
+          "pkce_enabled",
+          "scopes",
+          "enabled"
+        ],
+        "type": "object"
+      },
       "SetTrackingDispositionRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1320,6 +1615,22 @@
         ],
         "type": "object"
       },
+      "TotpStatusDto": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmed": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled",
+          "confirmed"
+        ],
+        "type": "object"
+      },
       "TrackingDispositionDto": {
         "enum": [
           "watching",
@@ -1397,6 +1708,20 @@
         ],
         "type": "object"
       },
+      "VerifyTotpRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 16,
+            "minLength": 6,
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
       "ViolationDto": {
         "additionalProperties": false,
         "properties": {
@@ -1462,6 +1787,871 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/browser/auth/oidc/config": {
+      "delete": {
+        "operationId": "delete_oidc_config",
+        "responses": {
+          "204": {
+            "description": "OIDC SSO configuration removed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden for non-administrators or invalid CSRF proof"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "get_oidc_config",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcConfigDto"
+                }
+              }
+            },
+            "description": "OIDC SSO configuration"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Session lacks authorization"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "put": {
+        "operationId": "save_oidc_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveOidcConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcConfigDto"
+                }
+              }
+            },
+            "description": "OIDC SSO configuration saved"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Forbidden for non-administrators or invalid CSRF proof"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/oidc/discover": {
+      "post": {
+        "operationId": "discover_oidc",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcDiscoveryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcDiscoveryResponse"
+                }
+              }
+            },
+            "description": "Discovered OIDC IdP endpoints"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Session lacks authorization"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/passkey/register/begin": {
+      "post": {
+        "operationId": "begin_passkey_registration",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BeginPasskeyRegistrationResponse"
+                }
+              }
+            },
+            "description": "WebAuthn challenge generated"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Session lacks authorization"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/passkey/register/complete": {
+      "post": {
+        "operationId": "complete_passkey_registration",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompletePasskeyRegistrationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyDto"
+                }
+              }
+            },
+            "description": "Passkey registered"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/passkeys": {
+      "get": {
+        "operationId": "list_passkeys",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListPasskeysResponse"
+                }
+              }
+            },
+            "description": "List of registered passkeys"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Session lacks authorization"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/passkeys/{passkey_id}": {
+      "delete": {
+        "operationId": "delete_passkey",
+        "parameters": [
+          {
+            "description": "Identifier of the passkey to delete",
+            "in": "path",
+            "name": "passkey_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Passkey deleted"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/totp": {
+      "delete": {
+        "operationId": "disable_totp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisableTotpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "TOTP 2FA disabled"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Password verification failed or CSRF proof is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/totp/enroll/begin": {
+      "post": {
+        "operationId": "enroll_totp_begin",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollTotpResponse"
+                }
+              }
+            },
+            "description": "TOTP enrollment begun with secret, otpauth URI, and backup codes"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/auth/totp/enroll/confirm": {
+      "post": {
+        "operationId": "enroll_totp_confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmTotpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "TOTP enrollment confirmed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/browser/session": {
       "delete": {
         "operationId": "end_session",
