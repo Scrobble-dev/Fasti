@@ -10,10 +10,8 @@
     IconEyeOff,
     IconFileDownload,
     IconKey,
-    IconLock,
     IconPlus,
     IconRefresh,
-    IconShieldCheck,
     IconTags,
     IconTrash,
     IconUser,
@@ -22,7 +20,6 @@
   import NetworkSettings from "./network-settings.svelte";
   import { hostProblemText } from "./host-problem.js";
   import type {
-    BrowserSession,
     CustomFieldDefinition,
     CustomMediaTypeDefinition,
     MediaKind,
@@ -37,8 +34,6 @@
   interface Props {
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
-    session?: BrowserSession | null;
-    onOpenAuthModal?: () => void;
     canAccessProfileData?: boolean;
     profileDataIdentity?: string;
     activeTab?:
@@ -72,8 +67,6 @@
   let {
     host,
     workbenchPreferences,
-    session = null,
-    onOpenAuthModal,
     canAccessProfileData = true,
     profileDataIdentity = "trusted-host",
     activeTab = "network",
@@ -117,271 +110,6 @@
   let testResults = $state<
     Record<string, { ok: boolean; message: string } | undefined>
   >({});
-
-  // Passkeys State
-  let passkeys = $state<
-    Array<{
-      passkey_id: string;
-      name: string;
-      created_at: string;
-      last_used_at: string | null;
-    }>
-  >([]);
-  let passkeysLoading = $state(false);
-  let passkeyNotice = $state<string>();
-  let passkeyProblem = $state<string>();
-
-  // TOTP 2FA State
-  let totpModalOpen = $state(false);
-  let totpEnrollData = $state<{
-    secret: string;
-    otpauth_uri: string;
-    backup_codes: string[];
-  } | null>(null);
-  let totpVerificationCode = $state("");
-  let totpActive = $state(false);
-  let totpProblem = $state<string>();
-  let totpNotice = $state<string>();
-
-  // OIDC SSO State
-  let oidcModalOpen = $state(false);
-  let oidcConfig = $state({
-    issuer_url: "https://accounts.google.com",
-    client_id: "",
-    client_secret: "",
-    pkce_enabled: true,
-    scopes: ["openid", "profile", "email"],
-    enabled: true,
-  });
-  let oidcDiscoveryResult = $state<{
-    authorization_endpoint: string;
-    token_endpoint: string;
-    jwks_uri: string;
-  } | null>(null);
-  let oidcTesting = $state(false);
-  let oidcNotice = $state<string>();
-  let oidcProblem = $state<string>();
-
-  function getCsrfToken(): string | null {
-    if (typeof document === "undefined") return null;
-    const match = document.cookie.match(/(?:^|;\s*)fasti_csrf=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : null;
-  }
-
-  async function loadPasskeys() {
-    if (!session) return;
-    passkeysLoading = true;
-    passkeyProblem = undefined;
-    try {
-      const res = await fetch("/api/v1/browser/auth/passkeys", {
-        credentials: "same-origin",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        passkeys = data.passkeys || [];
-      }
-    } catch {
-      passkeyProblem = "Failed to load passkeys.";
-    } finally {
-      passkeysLoading = false;
-    }
-  }
-
-  async function registerPasskey() {
-    if (!session) return;
-    passkeyProblem = undefined;
-    passkeyNotice = undefined;
-    try {
-      const beginRes = await fetch(
-        "/api/v1/browser/auth/passkey/register/begin",
-        {
-          method: "POST",
-          credentials: "same-origin",
-        },
-      );
-      if (!beginRes.ok) throw new Error("Failed to initialize registration");
-      const challengeData = await beginRes.json();
-
-      let credentialId = "cred_" + Date.now();
-      let attestationObj = "attest_" + Date.now();
-      if (
-        typeof window !== "undefined" &&
-        window.navigator?.credentials?.create
-      ) {
-        try {
-          const cred = (await window.navigator.credentials.create({
-            publicKey: {
-              challenge: new TextEncoder().encode(challengeData.challenge),
-              rp: {
-                name: challengeData.rp_name || "Fasti",
-                id: window.location.hostname,
-              },
-              user: {
-                id: new TextEncoder().encode(challengeData.user_id),
-                name: challengeData.user_name,
-                displayName: challengeData.user_name,
-              },
-              pubKeyCredParams: [
-                { alg: -7, type: "public-key" },
-                { alg: -257, type: "public-key" },
-              ],
-              timeout: 60000,
-              authenticatorSelection: { userVerification: "preferred" },
-            },
-          })) as PublicKeyCredential | null;
-          if (cred) {
-            credentialId = cred.id;
-          }
-        } catch {
-          // fallback to client-generated key token
-        }
-      }
-
-      const csrf = getCsrfToken();
-      const completeRes = await fetch(
-        "/api/v1/browser/auth/passkey/register/complete",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(csrf ? { "X-Fasti-CSRF": csrf } : {}),
-          },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            name: "Security Key (" + new Date().toLocaleDateString() + ")",
-            credential_id: credentialId,
-            client_data_json: "{}",
-            attestation_object: attestationObj,
-          }),
-        },
-      );
-      if (!completeRes.ok) throw new Error("Failed to save passkey");
-      passkeyNotice = "Passkey registered successfully.";
-      void loadPasskeys();
-    } catch {
-      passkeyProblem = "Passkey registration was cancelled or failed.";
-    }
-  }
-
-  async function deletePasskey(passkeyId: string) {
-    const csrf = getCsrfToken();
-    try {
-      const res = await fetch(
-        `/api/v1/browser/auth/passkeys/${encodeURIComponent(passkeyId)}`,
-        {
-          method: "DELETE",
-          headers: csrf ? { "X-Fasti-CSRF": csrf } : {},
-          credentials: "same-origin",
-        },
-      );
-      if (res.ok) {
-        passkeys = passkeys.filter((p) => p.passkey_id !== passkeyId);
-        passkeyNotice = "Passkey removed.";
-      }
-    } catch {
-      passkeyProblem = "Failed to remove passkey.";
-    }
-  }
-
-  async function beginTotpEnroll() {
-    totpProblem = undefined;
-    totpNotice = undefined;
-    const csrf = getCsrfToken();
-    try {
-      const res = await fetch("/api/v1/browser/auth/totp/enroll/begin", {
-        method: "POST",
-        headers: csrf ? { "X-Fasti-CSRF": csrf } : {},
-        credentials: "same-origin",
-      });
-      if (!res.ok) throw new Error("Failed to begin enrollment");
-      totpEnrollData = await res.json();
-      totpModalOpen = true;
-    } catch {
-      totpProblem = "Could not initialize 2FA enrollment.";
-    }
-  }
-
-  async function confirmTotpEnroll() {
-    if (!totpVerificationCode || totpVerificationCode.length !== 6) {
-      totpProblem = "Please enter a valid 6-digit code.";
-      return;
-    }
-    const csrf = getCsrfToken();
-    try {
-      const res = await fetch("/api/v1/browser/auth/totp/enroll/confirm", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(csrf ? { "X-Fasti-CSRF": csrf } : {}),
-        },
-        credentials: "same-origin",
-        body: JSON.stringify({ code: totpVerificationCode }),
-      });
-      if (!res.ok) throw new Error("Invalid code");
-      totpActive = true;
-      totpModalOpen = false;
-      totpNotice = "Authenticator 2FA successfully enabled.";
-    } catch {
-      totpProblem =
-        "Invalid verification code. Please check your authenticator app.";
-    }
-  }
-
-  async function loadOidcConfig() {
-    if (!session) return;
-    try {
-      const res = await fetch("/api/v1/browser/auth/oidc/config", {
-        credentials: "same-origin",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data) {
-          oidcConfig = { ...oidcConfig, ...data, client_secret: "" };
-        }
-      }
-    } catch {}
-  }
-
-  async function testOidcDiscovery() {
-    oidcTesting = true;
-    oidcProblem = undefined;
-    try {
-      const res = await fetch("/api/v1/browser/auth/oidc/discover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ issuer_url: oidcConfig.issuer_url }),
-      });
-      if (!res.ok) throw new Error("Discovery failed");
-      oidcDiscoveryResult = await res.json();
-      oidcNotice = "Endpoints discovered successfully.";
-    } catch {
-      oidcProblem = "Could not discover OpenID Connect endpoints.";
-    } finally {
-      oidcTesting = false;
-    }
-  }
-
-  async function saveOidc() {
-    const csrf = getCsrfToken();
-    oidcProblem = undefined;
-    try {
-      const res = await fetch("/api/v1/browser/auth/oidc/config", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          ...(csrf ? { "X-Fasti-CSRF": csrf } : {}),
-        },
-        credentials: "same-origin",
-        body: JSON.stringify(oidcConfig),
-      });
-      if (!res.ok) throw new Error("Failed to save configuration");
-      oidcNotice = "OIDC configuration saved.";
-      oidcModalOpen = false;
-    } catch {
-      oidcProblem = "Could not save OIDC configuration.";
-    }
-  }
 
   function providerCategory(provider: string): {
     label: string;
@@ -1056,7 +784,7 @@
           onchange={(event) =>
             switchTab(event.currentTarget.value as typeof active)}
         >
-          <option value="account">Account & Sessions</option>
+          <option value="account">Account and security</option>
           <option value="network">Network</option>
           <option value="providers">Metadata credentials</option>
           <option value="preferences">Preferences & Metadata</option>
@@ -1073,7 +801,7 @@
           class:active={active === "account"}
           aria-current={active === "account" ? "page" : undefined}
           onclick={(event) => followTabLink(event, "account")}
-          ><IconUser size={16} aria-hidden="true" /> Account & Sessions</a
+          ><IconUser size={16} aria-hidden="true" /> Account and security</a
         >
         <a
           href="/settings"
@@ -1127,552 +855,149 @@
 
     <div class="settings-panel">
       {#if active === "account"}
-        <section class="card mb-3" aria-labelledby="account-settings-title">
+        <section
+          class="card mb-3"
+          aria-labelledby="account-security-title"
+          data-testid="account-security-task-map"
+        >
           <div class="card-header">
             <div>
-              <h2 id="account-settings-title" class="card-title h3 mb-1">
-                Account & Sessions
+              <h2 id="account-security-title" class="card-title h3 mb-1">
+                Account and security
               </h2>
               <p class="card-subtitle text-secondary mb-0">
-                Manage browser session access and authentication configuration.
+                Use this permanent task map to review account protection and
+                access.
               </p>
             </div>
           </div>
           <div class="card-body">
-            <div class="account-tab-panel">
-              <div class="card card-sm mb-3">
-                <div class="card-body">
-                  <div
-                    class="account-hero-card d-flex align-items-center justify-content-between"
+            <div
+              class="alert alert-warning"
+              role="status"
+              data-testid="account-access-unavailable"
+            >
+              <div>
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                  <strong>Unavailable</strong>
+                  <span class="badge bg-warning-lt text-dark"
+                    >PR C1 required</span
                   >
-                    <div class="d-flex align-items-center gap-3">
-                      <div
-                        class="avatar bg-primary-lt text-primary avatar-lg rounded-circle"
-                        aria-hidden="true"
-                      >
-                        {session?.user.username
-                          ? session.user.username.charAt(0).toUpperCase()
-                          : "A"}
-                      </div>
-                      <div class="account-details">
-                        <div class="d-flex align-items-center gap-2 mb-1">
-                          <h3 class="h3 mb-0">
-                            {session?.user.username ?? "Anonymous Operator"}
-                          </h3>
-                          {#if session?.user.is_admin}
-                            <span class="badge bg-purple-lt text-purple"
-                              >Administrator</span
-                            >
-                          {/if}
-                        </div>
-                        <p class="text-secondary small mb-0">
-                          {session
-                            ? "Authenticated browser session"
-                            : "Unauthenticated local operator"}
-                        </p>
-                      </div>
-                    </div>
-                    {#if onOpenAuthModal}
-                      <button
-                        type="button"
-                        class="btn btn-outline-primary"
-                        onclick={onOpenAuthModal}
-                      >
-                        {session ? "Manage account" : "Sign in"}
-                      </button>
-                    {/if}
-                  </div>
                 </div>
+                <p class="mb-2">
+                  Browser sign-in, authentication methods, and session inventory
+                  depend on PR C1: TrailBase identity bootstrap and production
+                  browser sessions.
+                </p>
+                <p class="mb-0">
+                  Continue local work that does not need an account. Operators
+                  must complete and merge PR C1 before enabling these controls.
+                </p>
               </div>
+            </div>
 
-              <!-- Passkeys (WebAuthn) -->
-              <div class="card card-sm mb-3">
+            <div class="list-group" aria-label="Account and security tasks">
+              <div class="list-group-item">
                 <div
-                  class="card-header d-flex align-items-center justify-content-between"
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
                 >
                   <div>
-                    <h3 class="card-title h4 mb-0">Passkeys (WebAuthn)</h3>
-                    <p class="card-subtitle text-secondary mb-0">
-                      Hardware security keys, Touch ID, Face ID, and Windows
-                      Hello authenticators.
+                    <h3 class="h4 mb-1">Sign-in methods</h3>
+                    <p class="text-secondary mb-0">
+                      Password, TOTP, passkeys, and recovery codes.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-primary"
-                    onclick={registerPasskey}
-                    disabled={!session || passkeysLoading}
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
                   >
-                    <IconPlus size={14} aria-hidden="true" /> Add passkey
-                  </button>
-                </div>
-                <div class="card-body">
-                  {#if passkeyNotice}
-                    <div
-                      class="alert alert-success alert-dismissible mb-3"
-                      role="alert"
-                    >
-                      {passkeyNotice}
-                    </div>
-                  {/if}
-                  {#if passkeyProblem}
-                    <div
-                      class="alert alert-danger alert-dismissible mb-3"
-                      role="alert"
-                    >
-                      {passkeyProblem}
-                    </div>
-                  {/if}
-
-                  {#if passkeys.length > 0}
-                    <div class="table-responsive">
-                      <table class="table table-vcenter card-table">
-                        <thead>
-                          <tr>
-                            <th>Name</th>
-                            <th>Created</th>
-                            <th>Last used</th>
-                            <th class="w-1"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {#each passkeys as passkey (passkey.passkey_id)}
-                            <tr>
-                              <td>
-                                <div class="d-flex align-items-center gap-2">
-                                  <IconKey
-                                    size={16}
-                                    class="text-secondary"
-                                    aria-hidden="true"
-                                  />
-                                  <span class="font-weight-medium"
-                                    >{passkey.name}</span
-                                  >
-                                </div>
-                              </td>
-                              <td class="text-secondary small"
-                                >{new Date(
-                                  passkey.created_at,
-                                ).toLocaleDateString()}</td
-                              >
-                              <td class="text-secondary small">
-                                {passkey.last_used_at
-                                  ? new Date(
-                                      passkey.last_used_at,
-                                    ).toLocaleDateString()
-                                  : "Never"}
-                              </td>
-                              <td>
-                                <button
-                                  type="button"
-                                  class="btn btn-icon btn-ghost-danger btn-sm"
-                                  title="Remove passkey"
-                                  aria-label="Remove passkey"
-                                  onclick={() =>
-                                    deletePasskey(passkey.passkey_id)}
-                                >
-                                  <IconTrash size={16} aria-hidden="true" />
-                                </button>
-                              </td>
-                            </tr>
-                          {/each}
-                        </tbody>
-                      </table>
-                    </div>
-                  {:else}
-                    <div class="text-secondary small py-2">
-                      No security keys or platform passkeys registered for this
-                      account.
-                    </div>
-                  {/if}
                 </div>
               </div>
-
-              <!-- Authenticator 2FA (TOTP) -->
-              <div class="card card-sm mb-3">
+              <div class="list-group-item">
                 <div
-                  class="card-header d-flex align-items-center justify-content-between"
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
                 >
                   <div>
-                    <h3 class="card-title h4 mb-0">Authenticator 2FA (TOTP)</h3>
-                    <p class="card-subtitle text-secondary mb-0">
-                      RFC 6238 time-based one-time passwords via Google
-                      Authenticator, 1Password, or Bitwarden.
+                    <h3 class="h4 mb-1">Browser sessions</h3>
+                    <p class="text-secondary mb-0">
+                      Review current access, expiry, and revocation after PR C1.
                     </p>
                   </div>
-                  {#if totpActive}
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-outline-danger"
-                      onclick={() => {
-                        const password = prompt(
-                          "Enter your password to disable 2FA:",
-                        );
-                        if (password) {
-                          const csrf = getCsrfToken();
-                          fetch("/api/v1/browser/auth/totp", {
-                            method: "DELETE",
-                            headers: {
-                              "Content-Type": "application/json",
-                              ...(csrf ? { "X-Fasti-CSRF": csrf } : {}),
-                            },
-                            credentials: "same-origin",
-                            body: JSON.stringify({
-                              current_password: password,
-                            }),
-                          }).then((res) => {
-                            if (res.ok) {
-                              totpActive = false;
-                              totpNotice = "2FA disabled.";
-                            }
-                          });
-                        }
-                      }}
-                    >
-                      Disable 2FA
-                    </button>
-                  {:else}
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-outline-primary"
-                      onclick={beginTotpEnroll}
-                      disabled={!session}
-                    >
-                      <IconShieldCheck size={14} aria-hidden="true" /> Configure 2FA
-                    </button>
-                  {/if}
-                </div>
-                <div class="card-body">
-                  {#if totpNotice}
-                    <div class="alert alert-success mb-2" role="alert">
-                      {totpNotice}
-                    </div>
-                  {/if}
-                  <div
-                    class="d-flex align-items-center justify-content-between"
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
                   >
-                    <div>
-                      <strong>Status:</strong>
-                      {#if totpActive}
-                        <span class="badge bg-success-lt text-success ms-2"
-                          >Active & Protected</span
-                        >
-                      {:else}
-                        <span class="badge bg-secondary-lt text-secondary ms-2"
-                          >Not configured</span
-                        >
-                      {/if}
-                    </div>
-                    <span class="text-secondary small"
-                      >HMAC-SHA256 &middot; 30s step &middot; 6 digits</span
-                    >
-                  </div>
                 </div>
               </div>
-
-              <!-- OIDC / Single Sign-On (SSO) -->
-              <div class="card card-sm mb-3">
+              <div class="list-group-item">
                 <div
-                  class="card-header d-flex align-items-center justify-content-between"
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
                 >
                   <div>
-                    <h3 class="card-title h4 mb-0">
-                      OpenID Connect (OIDC / SSO)
-                    </h3>
-                    <p class="card-subtitle text-secondary mb-0">
-                      Federated Single Sign-On with Google Workspace, Okta,
-                      Authentik, or Keycloak.
+                    <h3 class="h4 mb-1">Devices and clients</h3>
+                    <p class="text-secondary mb-0">
+                      Paired devices, registered clients, and personal access
+                      tokens.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    class="btn btn-sm btn-outline-primary"
-                    onclick={() => {
-                      void loadOidcConfig();
-                      oidcModalOpen = true;
-                    }}
-                    disabled={!session?.user.is_admin}
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
                   >
-                    Configure SSO
-                  </button>
-                </div>
-                <div class="card-body">
-                  {#if oidcNotice}
-                    <div class="alert alert-success mb-2" role="alert">
-                      {oidcNotice}
-                    </div>
-                  {/if}
-                  <div class="row g-2">
-                    <div class="col-md-6">
-                      <div class="text-secondary small">Configured Issuer:</div>
-                      <div class="font-monospace text-truncate">
-                        {oidcConfig.issuer_url || "None"}
-                      </div>
-                    </div>
-                    <div class="col-md-6">
-                      <div class="text-secondary small">Client ID:</div>
-                      <div class="font-monospace text-truncate">
-                        {oidcConfig.client_id || "None"}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
-
-              <!-- TOTP Enrollment Modal -->
-              {#if totpModalOpen && totpEnrollData}
+              <div class="list-group-item">
                 <div
-                  class="modal modal-blur d-block"
-                  style="background-color: rgba(0, 0, 0, 0.5);"
-                  tabindex="-1"
-                  role="dialog"
-                  aria-labelledby="totp-modal-title"
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
                 >
-                  <div
-                    class="modal-dialog modal-dialog-centered"
-                    role="document"
-                  >
-                    <div class="modal-content">
-                      <div class="modal-header">
-                        <h3 id="totp-modal-title" class="modal-title h3">
-                          Set up Authenticator 2FA
-                        </h3>
-                        <button
-                          type="button"
-                          class="btn-close"
-                          aria-label="Close modal"
-                          onclick={() => (totpModalOpen = false)}
-                        ></button>
-                      </div>
-                      <div class="modal-body">
-                        {#if totpProblem}
-                          <div class="alert alert-danger mb-3" role="alert">
-                            {totpProblem}
-                          </div>
-                        {/if}
-                        <p class="text-secondary small mb-3">
-                          1. Add this key to your authenticator application
-                          (Google Authenticator, Bitwarden, 1Password):
-                        </p>
-                        <div class="bg-light p-2 rounded mb-3 text-center">
-                          <code
-                            class="user-select-all font-monospace h4 mb-0 d-block"
-                            >{totpEnrollData.secret}</code
-                          >
-                        </div>
-
-                        <p class="text-secondary small mb-2">
-                          2. Save these single-use emergency backup recovery
-                          codes in a secure place:
-                        </p>
-                        <div
-                          class="bg-light p-2 rounded mb-3"
-                          style="max-height: 100px; overflow-y: auto;"
-                        >
-                          <div class="row g-1">
-                            {#each totpEnrollData.backup_codes as code}
-                              <div
-                                class="col-6 font-monospace small text-center"
-                              >
-                                {code}
-                              </div>
-                            {/each}
-                          </div>
-                        </div>
-
-                        <div class="mb-3">
-                          <label
-                            for="totp-verification-input"
-                            class="form-label"
-                          >
-                            3. Enter the 6-digit code from your app:
-                          </label>
-                          <input
-                            id="totp-verification-input"
-                            type="text"
-                            class="form-control font-monospace text-center fs-2"
-                            maxlength="6"
-                            placeholder="000000"
-                            autocomplete="one-time-code"
-                            value={totpVerificationCode}
-                            oninput={(e) =>
-                              (totpVerificationCode =
-                                e.currentTarget.value.trim())}
-                          />
-                        </div>
-                      </div>
-                      <div class="modal-footer">
-                        <button
-                          type="button"
-                          class="btn btn-link link-secondary"
-                          onclick={() => (totpModalOpen = false)}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-primary"
-                          onclick={confirmTotpEnroll}
-                          disabled={totpVerificationCode.length !== 6}
-                        >
-                          Verify & Activate
-                        </button>
-                      </div>
-                    </div>
+                  <div>
+                    <h3 class="h4 mb-1">External identity providers</h3>
+                    <p class="text-secondary mb-0">
+                      Generic OpenID Connect and named Authentik support.
+                    </p>
                   </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
                 </div>
-              {/if}
-
-              <!-- OIDC Configuration Modal -->
-              {#if oidcModalOpen}
+              </div>
+              <div class="list-group-item">
                 <div
-                  class="modal modal-blur d-block"
-                  style="background-color: rgba(0, 0, 0, 0.5);"
-                  tabindex="-1"
-                  role="dialog"
-                  aria-labelledby="oidc-modal-title"
+                  class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
                 >
-                  <div
-                    class="modal-dialog modal-dialog-centered modal-lg"
-                    role="document"
-                  >
-                    <div class="modal-content">
-                      <div class="modal-header">
-                        <h3 id="oidc-modal-title" class="modal-title h3">
-                          OpenID Connect (OIDC) SSO Settings
-                        </h3>
-                        <button
-                          type="button"
-                          class="btn-close"
-                          aria-label="Close modal"
-                          onclick={() => (oidcModalOpen = false)}
-                        ></button>
-                      </div>
-                      <div class="modal-body">
-                        {#if oidcProblem}
-                          <div class="alert alert-danger mb-3" role="alert">
-                            {oidcProblem}
-                          </div>
-                        {/if}
-                        <div class="mb-3">
-                          <label for="oidc-issuer-input" class="form-label"
-                            >Issuer URL</label
-                          >
-                          <div class="input-group">
-                            <input
-                              id="oidc-issuer-input"
-                              type="url"
-                              class="form-control font-monospace"
-                              placeholder="https://accounts.google.com"
-                              value={oidcConfig.issuer_url}
-                              oninput={(e) =>
-                                (oidcConfig.issuer_url = e.currentTarget.value)}
-                            />
-                            <button
-                              type="button"
-                              class="btn btn-outline-secondary"
-                              onclick={testOidcDiscovery}
-                              disabled={oidcTesting || !oidcConfig.issuer_url}
-                            >
-                              {oidcTesting ? "Discovering…" : "Test Discovery"}
-                            </button>
-                          </div>
-                        </div>
-
-                        {#if oidcDiscoveryResult}
-                          <div class="card card-sm mb-3 bg-light">
-                            <div class="card-body">
-                              <div class="small fw-bold text-success mb-1">
-                                Endpoints Discovered:
-                              </div>
-                              <div class="font-monospace small text-truncate">
-                                Auth: {oidcDiscoveryResult.authorization_endpoint}
-                              </div>
-                              <div class="font-monospace small text-truncate">
-                                Token: {oidcDiscoveryResult.token_endpoint}
-                              </div>
-                              <div class="font-monospace small text-truncate">
-                                JWKS: {oidcDiscoveryResult.jwks_uri}
-                              </div>
-                            </div>
-                          </div>
-                        {/if}
-
-                        <div class="row g-2 mb-3">
-                          <div class="col-md-6">
-                            <label for="oidc-client-id-input" class="form-label"
-                              >Client ID</label
-                            >
-                            <input
-                              id="oidc-client-id-input"
-                              type="text"
-                              class="form-control font-monospace"
-                              placeholder="fasti-client"
-                              value={oidcConfig.client_id}
-                              oninput={(e) =>
-                                (oidcConfig.client_id = e.currentTarget.value)}
-                            />
-                          </div>
-                          <div class="col-md-6">
-                            <label
-                              for="oidc-client-secret-input"
-                              class="form-label"
-                              >Client Secret (optional for PKCE)</label
-                            >
-                            <input
-                              id="oidc-client-secret-input"
-                              type="password"
-                              class="form-control font-monospace"
-                              placeholder="••••••••"
-                              value={oidcConfig.client_secret}
-                              oninput={(e) =>
-                                (oidcConfig.client_secret =
-                                  e.currentTarget.value)}
-                            />
-                          </div>
-                        </div>
-
-                        <div class="form-check form-switch mb-3">
-                          <input
-                            class="form-check-input"
-                            type="checkbox"
-                            id="oidc-pkce-switch"
-                            checked={oidcConfig.pkce_enabled}
-                            onchange={(e) =>
-                              (oidcConfig.pkce_enabled =
-                                e.currentTarget.checked)}
-                          />
-                          <label
-                            class="form-check-label"
-                            for="oidc-pkce-switch"
-                          >
-                            Enable PKCE (Proof Key for Code Exchange -
-                            Recommended)
-                          </label>
-                        </div>
-                      </div>
-                      <div class="modal-footer">
-                        <button
-                          type="button"
-                          class="btn btn-link link-secondary"
-                          onclick={() => (oidcModalOpen = false)}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-primary"
-                          onclick={saveOidc}
-                          disabled={!oidcConfig.issuer_url ||
-                            !oidcConfig.client_id}
-                        >
-                          Save Configuration
-                        </button>
-                      </div>
-                    </div>
+                  <div>
+                    <h3 class="h4 mb-1">Security policy</h3>
+                    <p class="text-secondary mb-0">
+                      Session duration, recent authentication, and access
+                      invalidation.
+                    </p>
                   </div>
+                  <span class="badge bg-secondary-lt text-dark"
+                    >Unavailable</span
+                  >
                 </div>
-              {/if}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="card card-sm"
+          aria-labelledby="first-run-setup-title"
+          data-testid="first-run-guided-setup"
+        >
+          <div class="card-body">
+            <div
+              class="d-flex flex-column flex-sm-row align-items-start justify-content-sm-between gap-2 gap-sm-3"
+            >
+              <div>
+                <h2 id="first-run-setup-title" class="h3 mb-1">
+                  First-run guided setup
+                </h2>
+                <p class="text-secondary mb-0">
+                  This remains a separate first-run flow. After PR C1, it will
+                  guide initial account, recovery, and external identity setup.
+                  It does not replace the permanent task map above.
+                </p>
+              </div>
+              <span class="badge bg-blue-lt text-dark">Separate flow</span>
             </div>
           </div>
         </section>

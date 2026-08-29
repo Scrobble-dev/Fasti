@@ -33,7 +33,6 @@
   import { projectRecordSummary } from "./record-projection.js";
   import type {
     ActiveNavSection,
-    BrowserSession,
     CreateRecordResult,
     MediaRecord,
     ProviderCredentialStatus,
@@ -283,8 +282,6 @@
   let mobileNavigationOpen = $state(false);
   let navigationTrigger = $state<HTMLButtonElement | undefined>();
   let showNavigationTrigger = $state<HTMLButtonElement | undefined>();
-  let browserSession = $state<BrowserSession | null>(null);
-  let browserSessionChecked = $state(false);
 
   $effect(() => {
     try {
@@ -688,14 +685,11 @@
   }
 
   function resetClientEndpoint(): void {
-    browserSession = null;
-    browserSessionChecked = false;
     mediaRecords = [];
     recordsLoaded = false;
     recordsProblem = undefined;
     recordActionNotice = undefined;
     recordActionProblem = undefined;
-    void refreshBrowserSession();
   }
 
   function retryRecords(): void {
@@ -753,11 +747,7 @@
       reviewsLoaded = true;
       void loadReviews();
     }
-    if (
-      (!host.currentBrowserSession ||
-        (browserSessionChecked && browserSession !== null)) &&
-      !recordsLoaded
-    ) {
+    if (!recordsLoaded) {
       recordsLoaded = true;
       void loadRecords();
     }
@@ -778,22 +768,6 @@
     return () => document.body.classList.remove("fasti-navigation-open");
   });
 
-  async function refreshBrowserSession(): Promise<void> {
-    if (!host.currentBrowserSession) {
-      browserSessionChecked = true;
-      return;
-    }
-    browserSessionChecked = false;
-    try {
-      browserSession = await host.currentBrowserSession();
-    } catch {
-      browserSession = null;
-      recordsProblem = "Sign in to load records from this Fasti service.";
-    } finally {
-      browserSessionChecked = true;
-    }
-  }
-
   onMount(() => {
     activeSection = sectionFromPath();
     const sync = () => (activeSection = sectionFromPath());
@@ -812,7 +786,6 @@
     syncViewport();
     media.addEventListener("change", syncViewport);
     document.addEventListener("keydown", closeNavigationOnEscape);
-    void refreshBrowserSession();
     return () => {
       window.removeEventListener("popstate", sync);
       media.removeEventListener("change", syncViewport);
@@ -846,20 +819,12 @@
         <strong class="record-access-title">Records are unavailable</strong>
         <p>{recordsProblem}</p>
       </div>
-      {#if host.currentBrowserSession && !browserSession}
-        <button
-          type="button"
-          class="btn btn-primary"
-          onclick={() => (authModalOpen = true)}>Sign in</button
-        >
-      {:else}
-        <button
-          id="retry-records"
-          type="button"
-          class="btn btn-primary"
-          onclick={retryRecords}>Retry records</button
-        >
-      {/if}
+      <button
+        id="retry-records"
+        type="button"
+        class="btn btn-primary"
+        onclick={retryRecords}>Retry records</button
+      >
     </section>
   {/if}
 {/snippet}
@@ -959,12 +924,8 @@
           type="button"
           class="icon-btn"
           onclick={() => (authModalOpen = true)}
-          title={browserSession
-            ? `Account: ${browserSession.user.username}`
-            : "Account access"}
-          aria-label={browserSession
-            ? `Manage account ${browserSession.user.username}`
-            : "Open account access"}
+          title="Account access"
+          aria-label="Open account access"
         >
           <IconUserCircle size={18} />
         </button>
@@ -988,13 +949,8 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
-          session={browserSession}
-          onOpenAuthModal={() => (authModalOpen = true)}
-          canAccessProfileData={!host.currentBrowserSession ||
-            (browserSessionChecked && browserSession !== null)}
-          profileDataIdentity={host.currentBrowserSession
-            ? (browserSession?.user.user_id ?? "signed-out")
-            : "trusted-host"}
+          canAccessProfileData={true}
+          profileDataIdentity="trusted-host"
           activeTab={settingsTab}
           onTabChange={(tab: SettingsTab) => {
             settingsTab = tab;
@@ -1230,18 +1186,11 @@
 
 <AuthModal
   show={authModalOpen}
-  {host}
-  session={browserSession}
   onClose={() => (authModalOpen = false)}
-  onSessionChange={(session) => {
-    browserSession = session;
-    if (!session) {
-      mediaRecords = [];
-      recordsLoaded = false;
-      recordsProblem = undefined;
-      recordActionNotice = undefined;
-      recordActionProblem = undefined;
-    }
+  onOpenAccountSecurity={() => {
+    authModalOpen = false;
+    settingsTab = "account";
+    select("settings");
   }}
 />
 

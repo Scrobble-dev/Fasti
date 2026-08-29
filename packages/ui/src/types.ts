@@ -268,52 +268,6 @@ export interface ProviderSelection {
   readonly kind: string;
 }
 
-export interface BrowserUser {
-  readonly user_id: string;
-  readonly username: string;
-  readonly is_admin: boolean;
-  readonly is_test_account: boolean;
-  readonly active: boolean;
-  readonly created_at: string;
-  readonly updated_at: string;
-}
-
-export interface BrowserSession {
-  readonly user: BrowserUser;
-  readonly expires_at: string;
-}
-
-export interface BrowserUserUpdate {
-  readonly current_password: string;
-  readonly username?: string;
-  readonly password?: string;
-  readonly active?: boolean;
-}
-
-export interface BrowserSessionItem {
-  readonly sessionId: string;
-  readonly createdAt: string;
-  readonly expiresAt: string;
-  readonly lastSeenAt: string;
-  readonly location: string;
-  readonly deviceType: string;
-  readonly isCurrent: boolean;
-}
-
-export interface WebAuthnPasskey {
-  readonly credentialId: string;
-  readonly name: string;
-  readonly createdAt: string;
-  readonly lastUsedAt?: string;
-}
-
-export interface MfaStatus {
-  readonly passkeysEnabled: boolean;
-  readonly totpEnabled: boolean;
-  readonly recoveryCodesRemaining: number;
-  readonly passkeys: WebAuthnPasskey[];
-}
-
 export type NuvioCollectionsDocument = ReadonlyArray<Record<string, unknown>>;
 
 export interface NuvioCollectionsState {
@@ -374,23 +328,6 @@ export interface WorkbenchHost {
     document: NuvioCollectionsDocument,
   ): Promise<NuvioCollectionsState>;
   clearNuvioCollections?(): Promise<NuvioCollectionsState>;
-  createBrowserSession?(
-    username: string,
-    password: string,
-    sessionTimeoutMinutes: number,
-  ): Promise<BrowserSession>;
-  currentBrowserSession?(): Promise<BrowserSession>;
-  endBrowserSession?(): Promise<void>;
-  listActiveSessions?(): Promise<BrowserSessionItem[]>;
-  endSpecificSession?(sessionId: string): Promise<void>;
-  endOtherSessions?(): Promise<void>;
-  switchProfile?(profileId: string): Promise<BrowserSession>;
-  listBrowserUsers?(): Promise<BrowserUser[]>;
-  updateBrowserUser?(
-    userId: string,
-    input: BrowserUserUpdate,
-  ): Promise<BrowserUser>;
-  deleteBrowserUser?(userId: string, currentPassword: string): Promise<void>;
   listIntegrations?(): Promise<IntegrationRuntimeStatus[]>;
 }
 

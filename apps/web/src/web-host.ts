@@ -2,10 +2,6 @@ import { connectionEndpoint, FastiClient } from "@fasti/sdk";
 import type {
   AttachIdentifierInput,
   AttachIdentifierResult,
-  BrowserSession,
-  BrowserSessionItem,
-  BrowserUser,
-  BrowserUserUpdate,
   CreateRecordResult,
   EndpointConnectionStatus,
   IntegrationRuntimeStatus,
@@ -195,15 +191,6 @@ function loadNetworkConfiguration(defaultApiUrl: string): NetworkConfiguration {
   }
 }
 
-function csrfToken(): string {
-  if (typeof document === "undefined") return "";
-  const values = document.cookie
-    .split(";")
-    .map((part) => part.trim().split("="))
-    .filter(([name]) => name === "fasti_csrf");
-  return values.length === 1 ? (values[0][1] ?? "") : "";
-}
-
 function isIntegrationStatus(
   value: unknown,
 ): value is IntegrationRuntimeStatus {
@@ -255,8 +242,6 @@ export function createWebHost(
   const createClient = (baseUrl: string): FastiClient =>
     new FastiClient({
       baseUrl,
-      useBrowserSession: true,
-      csrfToken,
     });
   let network = loadNetworkConfiguration(defaultApiUrl);
   let client = createClient(network.connection.service_url.value);
@@ -414,72 +399,6 @@ export function createWebHost(
 
     async clearNuvioCollections(): Promise<NuvioCollectionsState> {
       return client.clearNuvioCollections();
-    },
-
-    async createBrowserSession(
-      username: string,
-      password: string,
-      sessionTimeoutMinutes: number,
-    ): Promise<BrowserSession> {
-      return client.createBrowserSession({
-        username,
-        password,
-        session_timeout_minutes: sessionTimeoutMinutes,
-      });
-    },
-
-    async currentBrowserSession(): Promise<BrowserSession> {
-      return client.readBrowserSession();
-    },
-
-    async endBrowserSession(): Promise<void> {
-      await client.endBrowserSession();
-    },
-
-    async listActiveSessions(): Promise<BrowserSessionItem[]> {
-      const response = await client.listBrowserSessions();
-      return (response.sessions || []).map((s) => ({
-        sessionId: s.session_id,
-        createdAt: s.created_at,
-        expiresAt: s.expires_at,
-        lastSeenAt: s.last_seen_at,
-        location: s.location,
-        deviceType: s.device_type,
-        isCurrent: Boolean(s.is_current),
-      }));
-    },
-
-    async endSpecificSession(sessionId: string): Promise<void> {
-      await client.endSpecificBrowserSession(sessionId);
-    },
-
-    async endOtherSessions(): Promise<void> {
-      await client.endAllOtherBrowserSessions();
-    },
-
-    async switchProfile(profileId: string): Promise<BrowserSession> {
-      return client.switchBrowserSessionProfile({ profile_id: profileId });
-    },
-
-    async listBrowserUsers(): Promise<BrowserUser[]> {
-      const response = await client.listBrowserUsers();
-      return [...response.users];
-    },
-
-    async updateBrowserUser(
-      userId: string,
-      input: BrowserUserUpdate,
-    ): Promise<BrowserUser> {
-      return client.updateBrowserUser(userId, input);
-    },
-
-    async deleteBrowserUser(
-      userId: string,
-      currentPassword: string,
-    ): Promise<void> {
-      await client.deleteBrowserUser(userId, {
-        current_password: currentPassword,
-      });
     },
   };
 }
