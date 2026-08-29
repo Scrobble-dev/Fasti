@@ -140,9 +140,14 @@ second Fasti authentication implementation.
 | --- | --- | --- |
 | Fast Rust and web iteration | `./scripts/dev.sh` | Default contributor path. Native daemon and Vite; no mandatory sidecar. |
 | Trusted desktop review | `FASTI_DATA_ROOT=/private/path ./scripts/dev.sh --desktop` | One Tauri host with the embedded local kernel. |
-| Daemon/CLI container proof | `docker build .` | Produces the runtime-equivalent default image. No web build. |
+| Daemon/CLI container proof | `docker build .` | Produces the runtime-equivalent default image. Docker requires BuildKit; Podman/Buildah must keep unused-stage pruning enabled. |
 | One-container product review | `docker build --target local -t fasti:local .` | Adds the pre-built Workbench to `fastid`; remains review-only until release gates pass. |
 | Identity issuer spike | Explicit opt-in profile | Starts TrailBase beside Fasti with a separate data directory and clear health state. Never required for the normal loop. |
+
+Docker's deprecated legacy builder is not supported. The Dockerfile contains a
+modern-builder feature gate, so CI and local builds fail instead of silently
+executing the unrelated web stage. Docker Engine 23 and later use BuildKit by
+default. Current Podman/Buildah also skip unused stages by default.
 
 The normal edit loop stays native. Containers prove packaging and give users a
 one-command review path. They are not a substitute for incremental compilation
