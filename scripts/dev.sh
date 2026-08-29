@@ -5,6 +5,7 @@
 #   ./scripts/dev.sh             # Start the native daemon (+ web, if present)
 #   ./scripts/dev.sh --podman    # Start Fasti in a scoped Podman container
 #   ./scripts/dev.sh --docker    # Start Fasti in a scoped Docker container
+#   ./scripts/dev.sh --desktop   # Start the trusted Desktop review host
 #   ./scripts/dev.sh --status    # Check this worktree's daemon and API health
 #   ./scripts/dev.sh --stop      # Stop this worktree's daemon or container
 #   ./scripts/dev.sh --open      # Open the web UI, or the API health check
@@ -26,6 +27,8 @@ _resolve_data_root() {
   esac
 }
 
+FASTI_DATA_ROOT_EXPLICIT=1
+[[ -n "${FASTI_DATA_ROOT:-}" ]] || FASTI_DATA_ROOT_EXPLICIT=0
 DATADIR="$(_resolve_data_root "${FASTI_DATA_ROOT:-.dev-data}")"
 RUNDIR="$PROJECT_ROOT/.dev-run"
 FASTI_PORT="${FASTI_PORT:-8420}"
@@ -697,6 +700,25 @@ _start_native() {
   wait "$daemon_pid"
 }
 
+_start_desktop() {
+  local manifest="$PROJECT_ROOT/apps/desktop/src-tauri/Cargo.toml"
+  if (( ! FASTI_DATA_ROOT_EXPLICIT )); then
+    echo "Desktop mode requires an explicit private FASTI_DATA_ROOT." >&2
+    return 1
+  fi
+  if [[ ! -f "$manifest" || ! -f "$PROJECT_ROOT/apps/web/package.json" ]]; then
+    echo "Desktop sources are not present in this worktree." >&2
+    return 1
+  fi
+
+  (umask 077; mkdir -p "$DATADIR")
+  [[ -n "${PKG_CONFIG:-}" || ! -x /usr/bin/pkg-config ]] || export PKG_CONFIG=/usr/bin/pkg-config
+  pnpm --dir "$PROJECT_ROOT" run build
+  FASTI_DATA_ROOT="$DATADIR" cargo run --locked \
+    --manifest-path "$manifest" \
+    --bin fasti-desktop
+}
+
 _self_test() {
   # Nested self-invocations ("$0" --status) must not inherit this shell's
   # already-resolved FASTI_API_URL/FASTI_PUBLIC_URL -- each assertion sets
@@ -710,11 +732,15 @@ _self_test() {
   local exec_pid=""
   local exec_ready=""
   local leader_file=""
+  local desktop_calls=""
+  local old_datadir="$DATADIR"
+  local old_data_root_explicit="$FASTI_DATA_ROOT_EXPLICIT"
   RUNDIR="$(mktemp -d)"
   leader_file="$RUNDIR/leader"
   exec_ready="$RUNDIR/exec-ready"
   exec_go="$RUNDIR/exec-go"
-  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go"; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
+  desktop_calls="$RUNDIR/desktop-calls"
+  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go" "$RUNDIR/desktop-calls"; rmdir "$RUNDIR/desktop-data" 2>/dev/null || true; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
   # The values expand in the child shell.
   # shellcheck disable=SC2016
   setsid --fork --wait bash -c 'printf "%s\n" "$$" > "$1"; trap "" TERM; sleep 30 & wait' _ "$leader_file" 2>/dev/null &
@@ -838,6 +864,22 @@ _self_test() {
   fi
   [[ "$(_resolve_data_root .custom-data)" == "$PROJECT_ROOT/.custom-data" ]]
   [[ "$(_resolve_data_root /tmp/fasti-custom-data)" == "/tmp/fasti-custom-data" ]]
+  FASTI_DATA_ROOT_EXPLICIT=0
+  if _start_desktop >/dev/null 2>&1; then
+    echo "self-test accepted inferred Desktop data root" >&2
+    return 1
+  fi
+  pnpm() { printf 'pnpm:%s\n' "$*" >> "$desktop_calls"; }
+  cargo() { printf 'cargo:%s|data:%s\n' "$*" "$FASTI_DATA_ROOT" >> "$desktop_calls"; }
+  FASTI_DATA_ROOT_EXPLICIT=1
+  DATADIR="$RUNDIR/desktop-data"
+  _start_desktop
+  unset -f pnpm cargo
+  mapfile -t desktop_invocations < "$desktop_calls"
+  [[ "${desktop_invocations[0]}" == "pnpm:--dir $PROJECT_ROOT run build" ]]
+  [[ "${desktop_invocations[1]}" == "cargo:run --locked --manifest-path $PROJECT_ROOT/apps/desktop/src-tauri/Cargo.toml --bin fasti-desktop|data:$DATADIR" ]]
+  DATADIR="$old_datadir"
+  FASTI_DATA_ROOT_EXPLICIT="$old_data_root_explicit"
   _validate_open_target 'https://fasti.internal/path?view=settings'
   if _validate_open_target 'https://userinfo-marker@fasti.internal/path' >/dev/null 2>&1; then
     echo "self-test accepted browser target credentials" >&2
@@ -855,6 +897,9 @@ _self_test() {
   local help_output
   help_output="$(bash "$0" --help)"
   [[ "$help_output" == *"Fasti Local Development Launcher"* ]]
+  [[ "$help_output" == *"--desktop"* ]]
+  rmdir "$RUNDIR/desktop-data"
+  rm -f "$desktop_calls"
   rm -f "$leader_file" "$exec_ready" "$exec_go"
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
@@ -879,6 +924,7 @@ Commands / Options:
   --podman              Start Fasti in a scoped Podman container
   --docker              Start Fasti in a scoped Docker container
   --container           Start Fasti in a container using the configured runtime
+  --desktop, desktop    Build and run the trusted Desktop review host in the foreground
   --self-test           Run dev launcher verification and invariant self-tests
   --help, -h, help      Print this help message
 
@@ -888,7 +934,7 @@ Environment Variables:
   FASTI_PORT_FALLBACK       Port conflict strategy: auto | fail (default: fail)
   FASTI_CONTAINER_RUNTIME   Container runtime: podman | docker (default: podman)
   FASTI_IMAGE               Container image name (default: fasti:b0)
-  FASTI_DATA_ROOT           Data storage path (default: .dev-data)
+  FASTI_DATA_ROOT           Data storage path (default: .dev-data; required explicitly for --desktop)
   FASTI_PUBLIC_URL          Public reverse-proxy HTTPS URL (optional)
 
 Examples:
@@ -899,6 +945,7 @@ Examples:
   fasti update            # Pull latest dev and rebuild workspace
   fasti status            # Check running services and health probe
   fasti stop              # Cleanly stop all Fasti background processes
+  FASTI_DATA_ROOT=/private/path fasti desktop
 EOF
 }
 
@@ -911,6 +958,7 @@ case "${1:-}" in
   --podman) FASTI_CONTAINER_RUNTIME=podman; _start_container ;;
   --docker) FASTI_CONTAINER_RUNTIME=docker; _start_container ;;
   --container|container) _start_container ;;
+  --desktop|desktop) _start_desktop ;;
   --self-test|self-test|selftest) _self_test ;;
   --start|start) _start_native ;;
   "") _start_native ;;

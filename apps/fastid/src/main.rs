@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8420";
 const DEFAULT_PORT_FALLBACK: &str = "fail";
@@ -341,6 +341,12 @@ async fn main() -> Result<()> {
             integration_transport_allowed(requested, tls_terminated),
             "non-loopback FASTI_INTEGRATION_LISTEN requires FASTI_INTEGRATION_TLS_TERMINATED=true and a trusted TLS reverse proxy"
         );
+        if !requested.ip().is_loopback() {
+            anyhow::ensure!(
+                remote_proxy_is_trusted()?,
+                "a non-loopback integration listener requires FASTI_REMOTE_TRUSTED_PROXY=true"
+            );
+        }
         let (integration_listener, used_integration_fallback) =
             bind_listener(requested, PortFallback::Fail).await?;
         debug_assert!(!used_integration_fallback);
@@ -363,18 +369,18 @@ async fn main() -> Result<()> {
         Some(task) => {
             let abort_handle = task.abort_handle();
             tokio::select! {
-                result = axum::serve(listener, app) => {
-                    abort_handle.abort();
-                    result?;
-                }
-                joined = task => {
-                    match joined {
-                        Ok(Ok(())) => error!("Fasti isolated integration listener exited unexpectedly"),
-                        Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
-                        Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
-                    }
-                }
-            }
+                            result = axum::serve(listener, app) => {
+                                abort_handle.abort();
+                                result?;
+                            }
+                            joined = task => {
+                                match joined {
+            Ok(Ok(())) => return Err(anyhow::anyhow!("Fasti isolated integration listener exited unexpectedly")),
+                                    Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
+                                    Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
+                                }
+                            }
+                        }
         }
         None => axum::serve(listener, app).await?,
     }

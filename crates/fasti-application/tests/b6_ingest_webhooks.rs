@@ -160,9 +160,13 @@ fn jellyfin_webhook_playback_stop_commits_and_preserves_identifiers() {
     assert_eq!(cmd.target_grain(), Some(Grain::Episode));
     assert_eq!(
         cmd.identity_clues().len(),
-        3,
-        "tmdb, imdb, and tvdb must all reach the command"
+        2,
+        "IMDb and TVDB remain; a series-level TMDB ID must not become an Episode coordinate"
     );
+    assert!(cmd
+        .identity_clues()
+        .iter()
+        .all(|claim| claim.namespace() != "tmdb.tv"));
 
     let outcome = fixture.authorize_and_accept(cmd).expect("accepts");
     assert!(matches!(outcome, AcceptObservationOutcome::Committed(_)));

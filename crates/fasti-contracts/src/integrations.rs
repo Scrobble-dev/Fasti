@@ -42,11 +42,11 @@ pub struct IntegrationObservationRequest {
     /// Provider IDs for the observed item. Keys are lower-case provider names
     /// such as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`.
     #[serde(default)]
-    #[schemars(length(max = 16))]
+    #[schemars(length(max = 16), extend("maxProperties" = 16))]
     pub provider_ids: BTreeMap<String, String>,
     /// Provider IDs for the parent series when `item_type` is `episode`.
     #[serde(default)]
-    #[schemars(length(max = 16))]
+    #[schemars(length(max = 16), extend("maxProperties" = 16))]
     pub series_provider_ids: BTreeMap<String, String>,
     /// Safe source binding clues. They are recorded as evidence and can also be
     /// checked by a configured adapter before mutation.

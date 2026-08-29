@@ -46,6 +46,20 @@ Direct `fastid` does not provide CORS. Node listener, public URL, provider, and
 credential settings remain disabled in the browser because they require the
 trusted host.
 
+### Trusted Desktop review host
+
+Use a separate private data root to run the trusted Desktop review host:
+
+```bash
+FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
+```
+
+This command builds the static Workbench and starts the Tauri app in the
+foreground. The app embeds its local kernel. It does not start `fastid` or Vite.
+Close the window or press `Ctrl-C` to stop it. `--status` and `--stop` continue
+to manage only the daemon, web harness, and scoped container. Desktop remains an
+unpackaged review candidate.
+
 Other commands:
 
 ```bash
@@ -54,6 +68,7 @@ Other commands:
 ./scripts/dev.sh --open      # open the web UI, or the API health check
 ./scripts/dev.sh --podman    # run fastid in a scoped Podman container instead
 ./scripts/dev.sh --docker    # same, using Docker
+./scripts/dev.sh --desktop   # run the trusted Desktop review host in foreground
 ./scripts/dev.sh --self-test # verify the launcher's own process handling
 ```
 
@@ -65,7 +80,7 @@ the fallback), `FASTI_PUBLIC_URL` (show a separate reverse-proxy origin), and
 `FASTI_DEV_SCOPE` (name this worktree's container so multiple worktrees can
 run containers side by side).
 
-## QA
+## Browser and daemon QA
 
 Check the daemon by hand, using the URL `./scripts/dev.sh` printed (or
 `./scripts/dev.sh --status` to see it again) -- fastid may be on a fallback
@@ -90,6 +105,24 @@ cargo xtask test pr
 See [Definition of Done](definition-of-done.md) for the B1 conformance
 fixture and the Playwright/axe gates that apply once a change touches those
 surfaces.
+
+## Desktop QA
+
+The mocked Tauri Playwright journeys prove UI behavior and IPC payload shape.
+They do not prove a packaged Desktop runtime. For source-run acceptance, use an
+isolated `FASTI_DATA_ROOT`, launch `--desktop`, and verify these facts:
+
+- the Fasti window renders and closes cleanly;
+- the launcher did not start `fastid` or Vite;
+- browser mode still rejects provider secrets and provider execution;
+- the trusted host accepts a configured provider search and creates one Record
+  through `track_provider_candidate`;
+- the success status shows the exact returned Fasti Record ID.
+
+Do not record a token, credential field, provider request header, or data-root
+content in screenshots or logs. A real provider acceptance requires an
+operator-owned credential. Mocked IPC is not that evidence. Packaged Orca,
+NVDA, and VoiceOver checks remain open release gates.
 
 ## Update
 

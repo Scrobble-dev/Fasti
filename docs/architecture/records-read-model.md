@@ -23,6 +23,17 @@ Both tables carry `workspace_id` directly (matching `external_identifiers`'s con
 
 The trusted Desktop adapter is the current production caller. Google Books supplies book title, description, publication year, and thumbnail claims. TMDB supplies movie or TV title, original title, overview, release year, and poster claims. Search responses are only choices: the host fetches the exact provider ID again before it constructs claims or opens the transaction.
 
+`fasti-application::provider_identity_mapping` owns the integration coordinate once. Google Books volumes use `googlebooks.volume` at `Edition` grain. TMDB movies use `tmdb.movie` at `Film` grain, and TMDB shows use `tmdb.tv` at `Series` grain. Credential and wire provider IDs remain `google-books` and `tmdb`; they are not identifier namespaces. Plex, Jellyfin, Nuvio fixtures, and the Desktop adapter must reuse the application mapping and must not coerce unsupported grains into `tmdb.tv`.
+
+The immutable provider-coordinate repair runs within schema v9 and repairs the
+wrong coordinates written by earlier Desktop builds. It updates matching
+Google Books Records and provider claims, splits generic TMDB identifiers and
+claims by grain, and retains the legacy namespace definitions for historical
+imports. The repair is atomic. An incompatible canonical namespace, malformed
+provider value, coordinate collision, claim collision, mismatched Record grain,
+or mixed-grain Google Books Record aborts without changing the database or its
+schema version.
+
 When the exact item contains a poster, the Desktop host downloads it through a
 separate `metadata.artwork` policy grant before the metadata write. It retains
 the remote URL as provider evidence, but the Desktop read projection adds an
@@ -47,9 +58,22 @@ The canonical field keys are owned once in `fasti-domain::metadata`; provider ad
 
 `apps/desktop/src-tauri/src/records.rs` exposes `list_records`, `create_provider_record`, and `apply_provider_metadata`, following the same authenticated local-kernel pattern as the other Desktop commands. `track_provider_candidate` and `apply_provider_metadata` first perform the authorized provider read in `providers.rs`, cache validated artwork when present, then call these local operations. They make no daemon HTTP round-trip.
 
+Discover creates a Record only through `track_provider_candidate`. The existing
+`CreateRecordView.record_id` result returns to the candidate row and remains
+visible after success. The UI does not fall back to separate `create_record`,
+`register_namespace`, and `attach_identifier` calls because that sequence is not
+the provider operation's atomic boundary and can report a partial result.
+Repeating `track_provider_candidate` with the same provider coordinate returns
+the existing Record and reapplies the verified claims in the same immediate
+transaction. This makes a retry after a lost response safe without using UI
+state as the idempotency boundary.
+`provider:kind:provider_id` identifies transient search candidates, including
+TMDB movie and show IDs that share the same number. It is not canonical Record
+identity.
+
 `crates/fasti-api/src/records.rs` exposes the same query as `GET /api/v1/records`, bearer-authenticated the same way as every other production-runtime route. This is the surface the browser-hosted web app uses -- the Tauri command above is desktop-only and never reachable from a browser tab.
 
-The wire `RecordSummary` view carries `grain: Grain` unchanged -- `Grain` is identity granularity (Work/Series/Release/Season/Episode/Film/...), distinct from the frontend's display-oriented `MediaKind` (movie/show/anime/book/...). `record-projection.ts` owns that presentation mapping and keeps provider identifiers separate from Fasti Record IDs.
+The wire `RecordSummary` view carries `grain: Grain` unchanged -- `Grain` is identity granularity (Work/Series/Release/Edition/Season/Episode/Film/...), distinct from the frontend's display-oriented `MediaKind` (movie/show/anime/book/...). `record-projection.ts` owns that presentation mapping and keeps provider identifiers separate from Fasti Record IDs. The detail view maps canonical namespaces back to the unchanged wire provider IDs only when it prepares a trusted-host refresh request.
 
 No public metadata mutation route or `get_record` detail command exists. The Workbench reloads the bounded list after a trusted-host mutation. Add a single-record query only when the list contract becomes measurably insufficient.
 
