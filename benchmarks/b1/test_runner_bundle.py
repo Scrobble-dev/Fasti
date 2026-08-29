@@ -6,7 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 -- every subprocess.run call in this test file uses a fully literal argv (e.g. ["git", "init", "-q"]), no shell.
 import stat
 import tempfile
 import unittest
