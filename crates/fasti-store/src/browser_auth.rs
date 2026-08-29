@@ -1158,7 +1158,8 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("testadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
-                    60,fasti_application::MAX_SESSION_MINUTES,
+                    60,
+                    fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command"),
             )
@@ -1201,7 +1202,8 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("editedadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
-                    60,fasti_application::MAX_SESSION_MINUTES,
+                    60,
+                    fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command"),
             )
@@ -1232,7 +1234,8 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("editedadmin").expect("username"),
                     BrowserPassword::try_new("editedadmin").expect("password"),
-                    60,fasti_application::MAX_SESSION_MINUTES,
+                    60,
+                    fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command"),
             )
@@ -1313,7 +1316,8 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("editedadmin").expect("username"),
                     BrowserPassword::try_new("editedadmin").expect("password"),
-                    60,fasti_application::MAX_SESSION_MINUTES,
+                    60,
+                    fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command")
             )
@@ -1324,7 +1328,8 @@ mod tests {
                     fasti_domain::RequestCorrelationId::new_v7(),
                     BrowserUsername::try_new("testadmin").expect("username"),
                     BrowserPassword::try_new("testadmin").expect("password"),
-                    60,fasti_application::MAX_SESSION_MINUTES,
+                    60,
+                    fasti_application::MAX_SESSION_MINUTES,
                 )
                 .expect("command")
             )
