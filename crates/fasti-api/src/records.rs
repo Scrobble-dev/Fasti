@@ -119,12 +119,8 @@ pub(crate) async fn create_record(
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.create_record(CreateRecordCommand::new(correlation_id, access, grain))
     })
     .await?;
@@ -177,12 +173,8 @@ pub(crate) async fn attach_identifier(
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.attach_identifier(AttachIdentifierCommand::new(
             correlation_id,
             access,
@@ -223,12 +215,8 @@ pub(crate) async fn list_records(
 
     let kernel = state.kernel;
     let records = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.list_records(ListRecordsQuery::new(correlation_id, access))
     })
     .await?;
@@ -331,12 +319,8 @@ pub(crate) async fn register_namespace(
 
     let kernel = state.kernel;
     let outcome = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
             correlation_id,
             access,

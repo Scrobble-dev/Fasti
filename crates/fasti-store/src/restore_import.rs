@@ -3218,7 +3218,7 @@ mod tests {
                 "googlebooks.volume".to_owned(),
                 "edition".to_owned(),
                 "googlebooks.volume".to_owned(),
-                9,
+                SCHEMA_VERSION,
             )
         );
 

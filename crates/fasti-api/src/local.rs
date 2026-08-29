@@ -219,10 +219,7 @@ where
         .map_err(application_problem)
 }
 
-pub(crate) fn router(
-    kernel: Arc<dyn LocalKernel>,
-    include_bootstrap: bool,
-) -> Router {
+pub(crate) fn router(kernel: Arc<dyn LocalKernel>, include_bootstrap: bool) -> Router {
     let state = LocalApiState { kernel };
     let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))

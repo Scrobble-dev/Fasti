@@ -491,6 +491,9 @@ impl ProblemCode {
             | Self::IdentityConflict
             | Self::IntegrityFailed
             | Self::RecordNotFound
+            | Self::BrowserSessionExpired
+            | Self::BrowserSessionRevoked
+            | Self::SessionPolicyChanged
             | Self::StorageUnavailable => ContractState::Finalized,
             _ => match self.introduced_in() {
                 CapabilityBody::B0 | CapabilityBody::B1 => ContractState::Finalized,
@@ -964,6 +967,15 @@ mod tests {
             ProblemCode::StorageUnavailable,
         ] {
             assert_eq!(code.introduced_in(), CapabilityBody::B2);
+            assert_eq!(code.contract_state(), ContractState::Finalized);
+        }
+
+        for code in [
+            ProblemCode::BrowserSessionExpired,
+            ProblemCode::BrowserSessionRevoked,
+            ProblemCode::SessionPolicyChanged,
+        ] {
+            assert_eq!(code.introduced_in(), CapabilityBody::C1);
             assert_eq!(code.contract_state(), ContractState::Finalized);
         }
 

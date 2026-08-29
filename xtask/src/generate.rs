@@ -177,7 +177,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 15] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -341,237 +341,6 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 36] = [
         authenticated: true,
         request: None,
         response: Some("NuvioCollectionsStateDto"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "createBrowserSession",
-        operation_id: "create_session",
-        method: "post",
-        path: "/api/v1/browser/session",
-        capability_id: "browser.session.create",
-        authenticated: false,
-        request: Some("CreateBrowserSessionRequest"),
-        response: Some("BrowserSessionResponse"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "readBrowserSession",
-        operation_id: "read_session",
-        method: "get",
-        path: "/api/v1/browser/session",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("BrowserSessionResponse"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "endBrowserSession",
-        operation_id: "end_session",
-        method: "delete",
-        path: "/api/v1/browser/session",
-        capability_id: "browser.session.end",
-        authenticated: true,
-        request: None,
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "listBrowserSessions",
-        operation_id: "list_sessions",
-        method: "get",
-        path: "/api/v1/browser/sessions",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("ListBrowserSessionsResponse"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "endSpecificBrowserSession",
-        operation_id: "end_specific_session",
-        method: "delete",
-        path: "/api/v1/browser/sessions/{session_id}",
-        capability_id: "browser.session.end",
-        authenticated: true,
-        request: None,
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "endAllOtherBrowserSessions",
-        operation_id: "end_other_sessions",
-        method: "delete",
-        path: "/api/v1/browser/sessions",
-        capability_id: "browser.session.end",
-        authenticated: true,
-        request: None,
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "switchBrowserSessionProfile",
-        operation_id: "switch_profile",
-        method: "post",
-        path: "/api/v1/browser/session/switch-profile",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: Some("SwitchProfileRequest"),
-        response: Some("BrowserSessionResponse"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "listBrowserUsers",
-        operation_id: "list_users",
-        method: "get",
-        path: "/api/v1/browser/users",
-        capability_id: "browser.user.list",
-        authenticated: true,
-        request: None,
-        response: Some("ListBrowserUsersResponse"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "updateBrowserUser",
-        operation_id: "update_user",
-        method: "patch",
-        path: "/api/v1/browser/users/{user_id}",
-        capability_id: "browser.user.update",
-        authenticated: true,
-        request: Some("UpdateBrowserUserRequest"),
-        response: Some("BrowserUserDto"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "deleteBrowserUser",
-        operation_id: "delete_user",
-        method: "delete",
-        path: "/api/v1/browser/users/{user_id}",
-        capability_id: "browser.user.delete",
-        authenticated: true,
-        request: Some("DeleteBrowserUserRequest"),
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "listPasskeys",
-        operation_id: "list_passkeys",
-        method: "get",
-        path: "/api/v1/browser/auth/passkeys",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("ListPasskeysResponse"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "deletePasskey",
-        operation_id: "delete_passkey",
-        method: "delete",
-        path: "/api/v1/browser/auth/passkeys/{passkey_id}",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "beginPasskeyRegistration",
-        operation_id: "begin_passkey_registration",
-        method: "post",
-        path: "/api/v1/browser/auth/passkey/register/begin",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("BeginPasskeyRegistrationResponse"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "completePasskeyRegistration",
-        operation_id: "complete_passkey_registration",
-        method: "post",
-        path: "/api/v1/browser/auth/passkey/register/complete",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: Some("CompletePasskeyRegistrationRequest"),
-        response: Some("PasskeyDto"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "enrollTotpBegin",
-        operation_id: "enroll_totp_begin",
-        method: "post",
-        path: "/api/v1/browser/auth/totp/enroll/begin",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("EnrollTotpResponse"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "enrollTotpConfirm",
-        operation_id: "enroll_totp_confirm",
-        method: "post",
-        path: "/api/v1/browser/auth/totp/enroll/confirm",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: Some("ConfirmTotpRequest"),
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "disableTotp",
-        operation_id: "disable_totp",
-        method: "delete",
-        path: "/api/v1/browser/auth/totp",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: Some("DisableTotpRequest"),
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "getOidcConfig",
-        operation_id: "get_oidc_config",
-        method: "get",
-        path: "/api/v1/browser/auth/oidc/config",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: Some("OidcConfigDto"),
-        retry: "safe",
-    },
-    ConformanceOperation {
-        alias: "saveOidcConfig",
-        operation_id: "save_oidc_config",
-        method: "put",
-        path: "/api/v1/browser/auth/oidc/config",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: Some("SaveOidcConfigRequest"),
-        response: Some("OidcConfigDto"),
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "deleteOidcConfig",
-        operation_id: "delete_oidc_config",
-        method: "delete",
-        path: "/api/v1/browser/auth/oidc/config",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: None,
-        response: None,
-        retry: "never",
-    },
-    ConformanceOperation {
-        alias: "discoverOidc",
-        operation_id: "discover_oidc",
-        method: "post",
-        path: "/api/v1/browser/auth/oidc/discover",
-        capability_id: "browser.session.read",
-        authenticated: true,
-        request: Some("OidcDiscoveryRequest"),
-        response: Some("OidcDiscoveryResponse"),
         retry: "safe",
     },
 ];
@@ -1227,7 +996,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilitySurfaceDispositionDto/properties/body",
-            vec!["b0", "b1", "b2", "b3"],
+            vec!["b0", "b1", "b2", "b3", "c1"],
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/relationship",
@@ -1235,7 +1004,7 @@ fn enrich_discovery_collection_schema(
         ),
         (
             "/components/schemas/CapabilityUatDto/properties/owner_body",
-            vec!["b1", "b2", "b3"],
+            vec!["b1", "b2", "b3", "c1"],
         ),
     ] {
         openapi
@@ -1386,13 +1155,6 @@ fn validate_production_security_schemes(openapi: &Value) -> anyhow::Result<()> {
             "production security scheme {name} must be HTTP bearer"
         );
     }
-    let browser = value_at(openapi, "/components/securitySchemes/browser_session")?;
-    ensure!(
-        string_at(browser, "/type")? == "apiKey"
-            && string_at(browser, "/in")? == "cookie"
-            && string_at(browser, "/name")? == "fasti_session",
-        "production browser_session security scheme must use the fasti_session cookie"
-    );
     Ok(())
 }
 
@@ -1413,34 +1175,10 @@ fn validate_production_operation_security(
         | "set_tracking_disposition"
         | "get_nuvio_collections"
         | "replace_nuvio_collections"
-        | "clear_nuvio_collections" => vec!["credential_bearer", "browser_session"],
+        | "clear_nuvio_collections" => vec!["credential_bearer"],
         "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
         | "plex_webhook" => vec!["credential_bearer"],
-        "read_session"
-        | "end_session"
-        | "list_sessions"
-        | "end_specific_session"
-        | "end_other_sessions"
-        | "switch_profile"
-        | "list_users"
-        | "update_user"
-        | "delete_user"
-        | "list_passkeys"
-        | "delete_passkey"
-        | "begin_passkey_registration"
-        | "complete_passkey_registration"
-        | "enroll_totp_begin"
-        | "enroll_totp_confirm"
-        | "disable_totp"
-        | "get_oidc_config"
-        | "save_oidc_config"
-        | "delete_oidc_config"
-        | "discover_oidc" => {
-            vec!["browser_session"]
-        }
-        "create_session" | "enroll_first_client" | "health_check" | "integration_status" => {
-            Vec::new()
-        }
+        "enroll_first_client" | "health_check" | "integration_status" => Vec::new(),
         other => anyhow::bail!("unknown production operation {other}"),
     };
     if expected.is_empty() {
@@ -2424,15 +2162,6 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "SetTrackingDispositionRequest",
         "TrackingDispositionStateDto",
         "ListTrackingDispositionsResponse",
-        "CreateBrowserSessionRequest",
-        "BrowserUserDto",
-        "BrowserSessionResponse",
-        "BrowserSessionItemDto",
-        "ListBrowserSessionsResponse",
-        "SwitchProfileRequest",
-        "ListBrowserUsersResponse",
-        "UpdateBrowserUserRequest",
-        "DeleteBrowserUserRequest",
         "NuvioCollectionsStateDto",
     ] {
         let schema = schemas
@@ -2573,20 +2302,6 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "parseListTrackingDispositionsResponse",
             "ListTrackingDispositionsResponse",
         ),
-        (
-            "parseCreateBrowserSessionRequest",
-            "CreateBrowserSessionRequest",
-        ),
-        ("parseBrowserUserDto", "BrowserUserDto"),
-        ("parseBrowserSessionResponse", "BrowserSessionResponse"),
-        (
-            "parseListBrowserSessionsResponse",
-            "ListBrowserSessionsResponse",
-        ),
-        ("parseSwitchProfileRequest", "SwitchProfileRequest"),
-        ("parseListBrowserUsersResponse", "ListBrowserUsersResponse"),
-        ("parseUpdateBrowserUserRequest", "UpdateBrowserUserRequest"),
-        ("parseDeleteBrowserUserRequest", "DeleteBrowserUserRequest"),
         (
             "parseNuvioCollectionsDocumentDto",
             "NuvioCollectionsDocumentDto",

@@ -280,10 +280,15 @@ surface_profiles:
       }
     ui: { state: required, binding: "ui:{capability_id}" }
 
-  b2_browser_auth:
+  c1_browser_session_foundation:
     domain_application:
       { state: required, binding: "application:{application_key}" }
-    http_openapi: { state: required, binding: "openapi:{capability_id}" }
+    http_openapi:
+      {
+        state: later_body,
+        body: c1,
+        reason: Browser session HTTP routes require the TrailBase-backed C1 runtime.,
+      }
     sse_asyncapi:
       {
         state: not_applicable,
@@ -292,12 +297,13 @@ surface_profiles:
     cli:
       {
         state: not_applicable,
-        reason: Browser accounts are administered through the first-party web surface.,
+        reason: Browser sessions are administered through the first-party web surface.,
       }
     json_schema:
       {
-        state: required,
-        binding: "schema:production-openapi-operation:{capability_id}",
+        state: later_body,
+        body: c1,
+        reason: Browser session request and response schemas require the C1 runtime contract.,
       }
     json_ld:
       {
@@ -305,15 +311,25 @@ surface_profiles:
         reason: Private browser authentication state is not linked data.,
       }
     okf: { state: required, binding: "okf:capability-catalog" }
-    sdk: { state: required, binding: "sdk:{capability_id}" }
+    sdk:
+      {
+        state: later_body,
+        body: c1,
+        reason: Browser session SDK methods require the C1 HTTP contract.,
+      }
     knowledge: { state: required, binding: "knowledge:problem-catalog" }
     package_smoke:
       {
         state: later_body,
-        body: b3,
-        reason: The authenticated HTTP contract is proven by API integration tests in B2.,
+        body: c1,
+        reason: The authenticated HTTP contract requires the C1 runtime.,
       }
-    ui: { state: required, binding: "ui:{capability_id}" }
+    ui:
+      {
+        state: later_body,
+        body: c1,
+        reason: PR A keeps the Account and security controls visibly unavailable until C1.,
+      }
 
   later_b2:
     domain_application:
@@ -549,20 +565,20 @@ capabilities:
   - application_key: create_browser_session
     id: browser.session.create
     bounded_context: browser.authentication
-    contract_body: b2
-    runtime_body: b2
+    contract_body: c1
+    runtime_body: c1
     authorization: unauthenticated
     lifecycle:
       {
-        introduced_in: b2,
+        introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: implemented,
+        runtime_availability: later_body,
       }
-    surface_profile: b2_browser_auth
+    surface_profile: c1_browser_session_foundation
     scopes: []
     problems:
       [
-        authentication_failed,
+        capability_unavailable,
         integrity_failed,
         malformed_json,
         payload_too_large,
@@ -576,111 +592,215 @@ capabilities:
   - application_key: read_browser_session
     id: browser.session.read
     bounded_context: browser.authentication
-    contract_body: b2
-    runtime_body: b2
-    authorization: scoped
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
     lifecycle:
       {
-        introduced_in: b2,
+        introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: implemented,
+        runtime_availability: later_body,
       }
-    surface_profile: b2_browser_auth
+    surface_profile: c1_browser_session_foundation
     scopes: []
     problems:
-      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+      ]
     examples: []
     uat: []
 
   - application_key: end_browser_session
     id: browser.session.end
     bounded_context: browser.authentication
-    contract_body: b2
-    runtime_body: b2
-    authorization: scoped
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
     lifecycle:
       {
-        introduced_in: b2,
+        introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: implemented,
+        runtime_availability: later_body,
       }
-    surface_profile: b2_browser_auth
+    surface_profile: c1_browser_session_foundation
     scopes: []
     problems:
-      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
-    examples: []
-    uat: []
-
-  - application_key: list_browser_users
-    id: browser.user.list
-    bounded_context: browser.authentication
-    contract_body: b2
-    runtime_body: b2
-    authorization: scoped
-    lifecycle:
-      {
-        introduced_in: b2,
-        contract_state: finalized,
-        runtime_availability: implemented,
-      }
-    surface_profile: b2_browser_auth
-    scopes: [browser_user_manage]
-    problems:
-      [authentication_failed, forbidden, integrity_failed, storage_unavailable]
-    examples: []
-    uat: []
-
-  - application_key: update_browser_user
-    id: browser.user.update
-    bounded_context: browser.authentication
-    contract_body: b2
-    runtime_body: b2
-    authorization: scoped
-    lifecycle:
-      {
-        introduced_in: b2,
-        contract_state: finalized,
-        runtime_availability: implemented,
-      }
-    surface_profile: b2_browser_auth
-    scopes: [browser_user_manage]
-    problems:
       [
-        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
         forbidden,
         integrity_failed,
-        malformed_json,
-        payload_too_large,
+        session_policy_changed,
         storage_unavailable,
-        unsupported_media_type,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: list_browser_sessions
+    id: browser.sessions.list
+    bounded_context: browser.authentication
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: later_body,
+      }
+    surface_profile: c1_browser_session_foundation
+    scopes: []
+    problems:
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: revoke_browser_session
+    id: browser.session.revoke
+    bounded_context: browser.authentication
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: later_body,
+      }
+    surface_profile: c1_browser_session_foundation
+    scopes: []
+    problems:
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
         validation_failed,
       ]
     examples: []
     uat: []
 
-  - application_key: delete_browser_user
-    id: browser.user.delete
+  - application_key: revoke_other_browser_sessions
+    id: browser.sessions.revoke_others
     bounded_context: browser.authentication
-    contract_body: b2
-    runtime_body: b2
-    authorization: scoped
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
     lifecycle:
       {
-        introduced_in: b2,
+        introduced_in: c1,
         contract_state: finalized,
-        runtime_availability: implemented,
+        runtime_availability: later_body,
       }
-    surface_profile: b2_browser_auth
-    scopes: [browser_user_manage]
+    surface_profile: c1_browser_session_foundation
+    scopes: []
     problems:
       [
-        authentication_failed,
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
         forbidden,
         integrity_failed,
-        malformed_json,
-        payload_too_large,
+        session_policy_changed,
         storage_unavailable,
-        unsupported_media_type,
+        validation_failed,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: revoke_all_browser_sessions
+    id: browser.sessions.revoke_all
+    bounded_context: browser.authentication
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: later_body,
+      }
+    surface_profile: c1_browser_session_foundation
+    scopes: []
+    problems:
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: rotate_browser_session
+    id: browser.session.rotate
+    bounded_context: browser.authentication
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: later_body,
+      }
+    surface_profile: c1_browser_session_foundation
+    scopes: []
+    problems:
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
+      ]
+    examples: []
+    uat: []
+
+  - application_key: select_browser_session_profile
+    id: browser.session.profile.select
+    bounded_context: browser.authentication
+    contract_body: c1
+    runtime_body: c1
+    authorization: browser_session
+    lifecycle:
+      {
+        introduced_in: c1,
+        contract_state: finalized,
+        runtime_availability: later_body,
+      }
+    surface_profile: c1_browser_session_foundation
+    scopes: []
+    problems:
+      [
+        browser_session_expired,
+        browser_session_revoked,
+        capability_unavailable,
+        forbidden,
+        integrity_failed,
+        session_policy_changed,
+        storage_unavailable,
         validation_failed,
       ]
     examples: []

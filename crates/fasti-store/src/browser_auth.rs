@@ -1289,7 +1289,8 @@ mod tests {
         }
         let wins = threads
             .into_iter()
-            .filter(|thread| thread.join().expect("thread"))
+            .map(|thread| thread.join().expect("thread"))
+            .filter(|won| *won)
             .count();
         assert_eq!(wins, 1);
 

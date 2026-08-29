@@ -57,12 +57,8 @@ pub(crate) async fn list_tracking_dispositions(
     let authentication = request_authentication(&headers, capability, correlation_id)?;
     let kernel = state.kernel;
     let page = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel
             .list_tracking_dispositions(ListTrackingDispositionsQuery::new(correlation_id, access))
     })
@@ -123,12 +119,8 @@ pub(crate) async fn set_tracking_disposition(
     let requested = requested_disposition(request.disposition);
     let kernel = state.kernel;
     let state = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.set_tracking_disposition(SetTrackingDispositionCommand::new(
             correlation_id,
             access,

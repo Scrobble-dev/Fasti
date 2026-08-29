@@ -63,12 +63,8 @@ pub(crate) async fn get_nuvio_collections(
     let authentication = request_authentication(&headers, capability, correlation_id)?;
     let kernel = state.kernel;
     let document = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.get_nuvio_collections(GetNuvioCollectionsQuery::new(correlation_id, access))
     })
     .await?;
@@ -109,12 +105,8 @@ pub(crate) async fn replace_nuvio_collections(
         .map_err(|error| invalid_document(correlation_id, error))?;
     let kernel = state.kernel;
     let document = run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.replace_nuvio_collections(ReplaceNuvioCollectionsCommand::new(
             correlation_id,
             access,
@@ -148,12 +140,8 @@ pub(crate) async fn clear_nuvio_collections(
     let authentication = request_authentication(&headers, capability, correlation_id)?;
     let kernel = state.kernel;
     run_kernel(capability, correlation_id, move || {
-        let access = authenticate_request(
-            kernel.as_ref(),
-            authentication,
-            capability,
-            correlation_id,
-        )?;
+        let access =
+            authenticate_request(kernel.as_ref(), authentication, capability, correlation_id)?;
         kernel.clear_nuvio_collections(ClearNuvioCollectionsCommand::new(correlation_id, access))
     })
     .await?;

@@ -845,7 +845,6 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::CorrectionWrite => "correction_write",
         ScopeKey::WorkspaceExport => "workspace_export",
         ScopeKey::WorkspaceVerify => "workspace_verify",
-        ScopeKey::BrowserUserManage => "browser_user_manage",
     }
 }
 

@@ -542,18 +542,14 @@ mod tests {
     #[tokio::test]
     async fn documented_health_route_is_mounted() {
         let (root, kernel) = test_kernel();
-        let response = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        )
-        .oneshot(
-            Request::get("/api/v1/health")
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("router response");
+        let response = api_router(kernel, test_bind_addr(), root.path())
+            .oneshot(
+                Request::get("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
 
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -562,11 +558,7 @@ mod tests {
     #[tokio::test]
     async fn nuvio_collections_replace_get_and_clear_use_the_authenticated_profile() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
         let credential = enroll_admin(&app, root.path()).await.credential;
         let document = r#"[{"id":"collection","title":"Collection","folders":[{"id":"folder","title":"Folder","sources":[{"provider":"tmdb","tmdbSourceType":"discover","mediaType":"movie","filters":{"voteCountGte":10,"vote_count.gte":10},"id":"source"}]}]}]"#;
 
@@ -720,16 +712,11 @@ mod tests {
         }
     }
 
-
     #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn node_initialization_refuses_a_missing_or_wrong_bootstrap_secret() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
 
         let missing_header = app
             .clone()
@@ -782,22 +769,14 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_secret_survives_a_router_rebuild_and_has_owner_only_permissions() {
         let (root, kernel) = test_kernel();
-        let _first_router = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-        );
+        let _first_router = api_router(kernel.clone(), test_bind_addr(), root.path());
         let first_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after first priming");
 
         // Simulates a daemon restart against the same data root: a second
         // api_router build must not regenerate (and thereby invalidate) the
         // secret a legitimate client may have already read.
-        let _second_router = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        );
+        let _second_router = api_router(kernel, test_bind_addr(), root.path());
         let second_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after second priming");
         assert_eq!(first_read, second_read);
@@ -821,11 +800,7 @@ mod tests {
     #[tokio::test]
     async fn durable_bootstrap_issues_one_credential_and_closes_initialization() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
         let bootstrap_secret = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after api_router primes it");
 
@@ -933,11 +908,7 @@ mod tests {
     #[tokio::test]
     async fn observation_requires_bearer_and_replays_one_source_event_exactly_once() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -1024,11 +995,7 @@ mod tests {
     #[tokio::test]
     async fn partial_progress_is_rejected_without_creating_false_history() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
         let credential = enroll_admin(&app, root.path()).await.credential;
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
@@ -1114,18 +1081,14 @@ mod tests {
     #[tokio::test]
     async fn event_submission_alias_is_absent() {
         let (root, kernel) = test_kernel();
-        let response = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        )
-        .oneshot(
-            Request::post("/api/v1/events")
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("router response");
+        let response = api_router(kernel, test_bind_addr(), root.path())
+            .oneshot(
+                Request::post("/api/v1/events")
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -1142,20 +1105,16 @@ mod tests {
             ("POST", "/api/v1/credential-revocations"),
             ("PUT", "/api/v1/listener-configuration"),
         ] {
-            let response = api_router(
-                kernel.clone(),
-                test_bind_addr(),
-                root.path(),
-            )
-            .oneshot(
-                Request::builder()
-                    .method(method)
-                    .uri(path)
-                    .body(Body::empty())
-                    .expect("valid request"),
-            )
-            .await
-            .expect("router response");
+            let response = api_router(kernel.clone(), test_bind_addr(), root.path())
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("valid request"),
+                )
+                .await
+                .expect("router response");
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
         }
     }
@@ -1164,11 +1123,7 @@ mod tests {
     #[tokio::test]
     async fn records_require_bearer_and_support_create_list_attach_and_namespace_registration() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel.clone(),
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
 
         let unauthorized = app
             .clone()
@@ -1312,11 +1267,7 @@ mod tests {
     #[tokio::test]
     async fn profile_tracking_disposition_is_authenticated_set_list_and_unset() {
         let (root, kernel) = test_kernel();
-        let app = api_router(
-            kernel,
-            test_bind_addr(),
-            root.path(),
-        );
+        let app = api_router(kernel, test_bind_addr(), root.path());
         let unauthorized = app
             .clone()
             .oneshot(

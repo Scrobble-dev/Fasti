@@ -311,11 +311,8 @@ pub(crate) async fn submit_observation(
     let Json(request) = request.map_err(|rejection| {
         json_rejection(CapabilityKey::AcceptObservation, correlation_id, rejection)
     })?;
-    let authentication = request_authentication(
-        &headers,
-        CapabilityKey::AcceptObservation,
-        correlation_id,
-    )?;
+    let authentication =
+        request_authentication(&headers, CapabilityKey::AcceptObservation, correlation_id)?;
     let evidence_bytes = serde_json::to_vec(&request).map_err(|_| {
         application_problem(Box::new(FastiProblem::integrity_failed(
             CapabilityKey::AcceptObservation,

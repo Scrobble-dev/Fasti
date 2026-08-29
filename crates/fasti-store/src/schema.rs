@@ -1627,7 +1627,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 9);
+        assert_eq!(version, SCHEMA_VERSION);
 
         let mut statement = connection
             .prepare(
@@ -1770,7 +1770,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 9);
+        assert_eq!(version, SCHEMA_VERSION);
         let legacy: String = connection
             .query_row(
                 "SELECT namespace FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
@@ -1803,7 +1803,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("rollback state");
-        assert_eq!(state, (9, "tmdb".to_owned(), 1));
+        assert_eq!(state, (SCHEMA_VERSION, "tmdb".to_owned(), 1));
     }
 
     #[test]
@@ -1834,7 +1834,12 @@ mod tests {
             .expect("rollback state");
         assert_eq!(
             state,
-            (9, "chapter".to_owned(), "google-books".to_owned(), 0)
+            (
+                SCHEMA_VERSION,
+                "chapter".to_owned(),
+                "google-books".to_owned(),
+                0
+            )
         );
     }
 
@@ -1860,7 +1865,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .expect("rollback state");
-        assert_eq!(state, (9, "tmdb".to_owned(), 2, 0));
+        assert_eq!(state, (SCHEMA_VERSION, "tmdb".to_owned(), 2, 0));
     }
 
     #[test]
@@ -1882,7 +1887,7 @@ mod tests {
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .expect("schema version");
-            assert_eq!(version, 9);
+            assert_eq!(version, SCHEMA_VERSION);
             let legacy: (String, String) = connection
                 .query_row(
                     "SELECT namespace, value FROM external_identifiers WHERE external_identifier_id = 'xid_movie'",
@@ -1926,7 +1931,12 @@ mod tests {
             .expect("legacy state preserved");
         assert_eq!(
             state,
-            (9, "series".to_owned(), "tmdb".to_owned(), "film".to_owned())
+            (
+                SCHEMA_VERSION,
+                "series".to_owned(),
+                "tmdb".to_owned(),
+                "film".to_owned()
+            )
         );
         let canonical_definitions: i64 = connection
             .query_row(
@@ -1998,50 +2008,6 @@ mod tests {
             .collect();
         expected.sort_unstable();
         assert_eq!(scopes, expected);
-    }
-
-    #[test]
-    fn browser_users_cannot_cross_workspace_client_and_profile_ownership() {
-        let connection = migrated_connection();
-        connection
-            .execute_batch(
-                r#"
-                INSERT INTO workspaces(workspace_id, created_at)
-                    VALUES ('wsp_browser_a', '2026-08-24T00:00:00Z');
-                INSERT INTO workspaces(workspace_id, created_at)
-                    VALUES ('wsp_browser_b', '2026-08-24T00:00:00Z');
-                INSERT INTO profiles(profile_id, workspace_id, created_at)
-                    VALUES ('prf_browser_a', 'wsp_browser_a', '2026-08-24T00:00:00Z');
-                INSERT INTO profiles(profile_id, workspace_id, created_at)
-                    VALUES ('prf_browser_b', 'wsp_browser_b', '2026-08-24T00:00:00Z');
-                INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at)
-                    VALUES ('cli_browser_a', 'wsp_browser_a', 'active', 1, '2026-08-24T00:00:00Z');
-                "#,
-            )
-            .expect("seed browser ownership graph");
-        let insert_user = |user_id: &str, profile_id: &str| {
-            connection.execute(
-                r#"
-                INSERT INTO browser_users(
-                    user_id, username, password_hash, client_id, profile_id,
-                    is_admin, is_test_account, active, created_at, updated_at
-                ) VALUES (?1, ?1, 'hash', 'cli_browser_a', ?2, 1, 1, 1, ?3, ?3)
-                "#,
-                params![user_id, profile_id, CREATED_AT],
-            )
-        };
-
-        assert!(insert_user("usr_cross", "prf_browser_b").is_err());
-        assert_eq!(
-            insert_user("usr_same", "prf_browser_a").expect("same workspace"),
-            1
-        );
-        assert!(connection
-            .execute(
-                "UPDATE browser_users SET profile_id = 'prf_browser_b' WHERE user_id = 'usr_same'",
-                [],
-            )
-            .is_err());
     }
 
     /// Seed the minimum row set that a real version-one database would hold.
