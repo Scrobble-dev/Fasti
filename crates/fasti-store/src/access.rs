@@ -388,7 +388,17 @@ impl AccessAdministrationPort for SqliteKernel {
         let is_valid = |contents: &str| SecretMaterial::try_from_hex(contents.trim()).is_ok();
 
         let stored_hex = match read_existing() {
-            Ok(contents) if is_valid(&contents) => contents,
+            Ok(contents) if is_valid(&contents) => {
+                // A valid file can still be group- or world-readable -- from
+                // a pre-hardening version of this code, a restore, or a
+                // umask that didn't apply -- and this value authorizes
+                // /api/v1/node/initialization, so reusing it without
+                // re-hardening would let another local account read it and
+                // initialize the node. Tighten it every time it's read, not
+                // only when it's created.
+                harden_private_regular_file(&path).map_err(|_| unavailable())?;
+                contents
+            }
             // Absent, unreadable, or empty (including a file left
             // zero-length by a prior write that never reached disk before a
             // crash) -- (re)publish through a unique temporary file in the
@@ -2614,6 +2624,36 @@ mod tests {
             .expect("second bootstrap secret");
 
         assert_eq!(first.expose_hex(), second.expose_hex());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ensure_bootstrap_secret_hardens_an_existing_valid_file_before_reuse() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("temporary data root");
+        let path = root.path().join("bootstrap.secret");
+        let hex = SecretMaterial::from_bytes([9_u8; 32]).expose_hex();
+        std::fs::write(&path, &hex).expect("seed a valid but loosely-permissioned secret file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("relax permissions to simulate a pre-hardening file");
+
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("existing valid secret is accepted");
+        assert_eq!(secret.expose_hex(), hex);
+
+        let mode = std::fs::metadata(&path)
+            .expect("bootstrap secret metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "an existing valid secret must be hardened to owner-only before reuse, \
+             not left at whatever permissions it already had"
+        );
     }
 
     #[test]

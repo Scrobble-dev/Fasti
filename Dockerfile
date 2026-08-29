@@ -1,6 +1,10 @@
 # Multi-architecture Docker Official Image index digests resolved on 2026-08-22.
 # The tags remain readable; the digests make the build inputs immutable.
 FROM rust:1.97-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS rust-builder
+# The default target relies on unused-stage pruning. This executable feature
+# gate rejects Docker's deprecated legacy builder. Docker BuildKit and current
+# Podman/Buildah support RUN mounts and skip unrelated stages.
+RUN --mount=type=tmpfs,target=/tmp/fasti-modern-builder true
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 
@@ -37,18 +41,14 @@ CMD ["/usr/local/bin/fastid"]
 
 # ---------------------------------------------------------------------------
 # Optional "local" target: fastid plus the pre-built web UI, so one container
-# is the whole product with no separate reverse proxy. NOT part of the
-# default build (`docker build .` still produces exactly the image above --
-# CI's existing `docker build --tag fasti:b0 .` and release.yml's multi-arch
-# build are unaffected). Build with:
+# is the whole product with no separate reverse proxy. Build it explicitly:
 #   docker build --target local --tag fasti:local .
 # apps/web is B4 review-only (see docs/dev-loop.md) -- this target exists so
 # anyone can run it easily, it does not change that status.
 # ---------------------------------------------------------------------------
-# Not digest-pinned like the stages above (those were resolved by hand on
-# 2026-08-22). .github/dependabot.yml now tracks the docker ecosystem, so
-# Dependabot will propose pinning this on its normal weekly cadence.
-FROM node:22-alpine AS web-builder
+# Docker Official Image index digest resolved on 2026-08-29. Dependabot tracks
+# the Docker ecosystem and can update the readable tag and digest together.
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS web-builder
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -67,3 +67,7 @@ RUN pnpm --filter @fasti/tokens --filter @fasti/sdk --filter @fasti/ui --filter 
 FROM runtime AS local
 COPY --from=web-builder --chown=fasti:fasti /app/apps/web/dist /srv/fasti-web
 ENV FASTI_STATIC_DIR=/srv/fasti-web
+
+# Keep the daemon-and-CLI image as the default output. A supported modern
+# builder skips the unrelated web stages and never includes their files.
+FROM runtime AS default

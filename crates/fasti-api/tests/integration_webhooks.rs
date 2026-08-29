@@ -7,7 +7,7 @@ use axum::{
 };
 use fasti_api::{api_router, integration_router};
 use fasti_contracts::{
-    ClientEnrollmentResponse, NodeInitializationResponse, SubmitObservationResponse,
+    ClientEnrollmentResponse, NodeInitializationResponse, ProblemDetails, SubmitObservationResponse,
 };
 use fasti_store::SqliteKernel;
 use std::path::Path;
@@ -213,6 +213,63 @@ async fn template_webhook_rejects_partial_progress_without_history_mutation() {
     )
     .expect("commit receipt");
     assert_eq!(completed.disposition, "committed");
+}
+
+#[tokio::test]
+async fn template_webhook_rejects_provider_ids_exceeding_the_combined_limit() {
+    // provider_ids and series_provider_ids are each bounded to 16 entries at
+    // the contract boundary, but normalize_template_request additionally
+    // caps their combined total at 16 -- a request with 9 and 8 entries
+    // (17 combined) is schema-valid per field yet must still be rejected.
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
+    let mut event = template_event("fixture-session:combined-limit:1", true, "Episode title");
+    event["provider_ids"] = serde_json::Value::Object(
+        (0..9)
+            .map(|index| (format!("provider{index}"), format!("id-{index}").into()))
+            .collect(),
+    );
+    event["series_provider_ids"] = serde_json::Value::Object(
+        (0..8)
+            .map(|index| {
+                (
+                    format!("series-provider{index}"),
+                    format!("id-{index}").into(),
+                )
+            })
+            .collect(),
+    );
+
+    let response = integrations
+        .oneshot(
+            bearer(
+                Request::post("/api/v1/integrations/jellyfin/webhook"),
+                &credential,
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(event.to_string()))
+            .expect("request"),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let problem: ProblemDetails = serde_json::from_slice(
+        &to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .expect("bounded body"),
+    )
+    .expect("problem response");
+    assert_eq!(problem.code, "invalid_observation");
+    assert_eq!(problem.violations.len(), 1);
+    assert_eq!(problem.violations[0].pointer, "/provider_ids");
+    assert_eq!(
+        problem.violations[0].reason,
+        "too many provider identifiers were supplied"
+    );
+    assert_eq!(
+        problem.violations[0].expected,
+        "at most 16 item and series identifiers combined"
+    );
 }
 
 #[tokio::test]

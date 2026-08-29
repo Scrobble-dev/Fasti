@@ -99,8 +99,22 @@ def run_checked(
     timeout: float = 30,
     input_text: str | None = None,
 ) -> str:
-    """Run a command and return stdout, raising CaptureError on failure."""
-    result = subprocess.run(
+    """
+    Execute a command and return its trimmed standard output.
+
+    Parameters:
+    	args (list[str]): Command and arguments to execute without a shell.
+    	cwd (Path): Working directory for the command.
+    	timeout (float): Maximum execution time in seconds.
+    	input_text (str | None): Optional text supplied to standard input.
+
+    Returns:
+    	str: Trimmed standard output.
+
+    Raises:
+    	CaptureError: If the command exits with a nonzero status.
+    """
+    result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- argv is a list (no shell); the inherited/derived environment configures the child process (as env=), it is never interpolated into a shell string.
         args,
         cwd=cwd,
         input=input_text,
@@ -116,13 +130,46 @@ def run_checked(
 
 
 def require_command(name: str) -> None:
-    """Verify that a required command exists in PATH, raising CaptureError if not."""
+    """
+    Require a command to be available on the system.
+
+    Parameters:
+    	name (str): Name of the command to locate
+
+    Raises:
+    	CaptureError: If the command is unavailable
+    """
     if shutil.which(name) is None:
         raise CaptureError(f"required command is unavailable: {name}")
 
 
+def resolved_command(name: str) -> str:
+    """
+    Resolve a required command to its executable path.
+    
+    Returns:
+        str: The resolved executable path.
+    
+    Raises:
+        CaptureError: If the command is unavailable.
+    """
+    path = shutil.which(name)
+    if path is None:
+        raise CaptureError(f"required command is unavailable: {name}")
+    return path
+
+
 def sha256_regular_file(path: Path, label: str) -> tuple[str, int]:
-    """Hash one retained regular file through a no-follow descriptor."""
+    """
+    Hash a retained regular file and verify that it remains unchanged during reading.
+    
+    Parameters:
+    	path (Path): File to hash.
+    	label (str): Label used in verification error messages.
+    
+    Returns:
+    	tuple[str, int]: The SHA-256 digest and the file size in bytes.
+    """
 
     if not isinstance(getattr(os, "O_NOFOLLOW", None), int):
         raise CaptureError(f"{label} verification requires O_NOFOLLOW support")
@@ -801,10 +848,18 @@ def validate_profile_requirements(
 
 
 def detect_systemd_virtualization() -> str:
-    """Detect virtualization status using systemd-detect-virt."""
+    """
+    Determine whether the system is running under virtualization.
+
+    Returns:
+    	str: The virtualization type, or ``"none"`` when no virtualization is detected.
+
+    Raises:
+    	CaptureError: If virtualization status cannot be established.
+    """
     require_command("systemd-detect-virt")
-    result = subprocess.run(
-        ["systemd-detect-virt"],
+    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
+        [resolved_command("systemd-detect-virt")],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -1790,7 +1845,20 @@ def run_native_once(
     run_number: int,
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Execute a single native scenario run and return measurements."""
+    """
+    Run a native benchmark scenario in an isolated network namespace and collect its metrics.
+
+    Parameters:
+    	scenario_id (str): Native scenario identifier.
+    	run_number (int): Repetition number recorded in the metrics.
+    	args (argparse.Namespace): Benchmark timing, sampling, and executable configuration.
+
+    Returns:
+    	tuple[dict[str, Any], list[str]]: Collected metrics and the executed command as text.
+
+    Raises:
+    	CaptureError: If the scenario is unknown, network isolation is violated, the native service is unhealthy, or the process fails to reach the required state.
+    """
     with tempfile.TemporaryDirectory(prefix=f"fasti-b1-{scenario_id}-") as temp_name:
         temp = Path(temp_name)
         ready = temp / "ready"
@@ -1861,7 +1929,7 @@ exit 92
 
         started_at_ns = time.monotonic_ns()
         with log.open("wb") as log_handle:
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                 command,
                 cwd=ROOT,
                 stdout=log_handle,
@@ -1926,8 +1994,15 @@ def docker_container_pid(name: str, timeout: float) -> int:
 
 
 def docker_running(name: str) -> bool:
-    """Check if a Docker container is currently running."""
-    result = subprocess.run(
+    """Determine whether a Docker container is currently running.
+
+    Parameters:
+        name (str): The container name or identifier to inspect.
+
+    Returns:
+        bool: `true` if the container is running, `false` otherwise.
+    """
+    result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["docker", "inspect", "--format", "{{.State.Running}}", name],
         cwd=ROOT,
         text=True,
@@ -1938,8 +2013,19 @@ def docker_running(name: str) -> bool:
 
 
 def docker_logs(name: str) -> str:
-    """Retrieve container logs from Docker."""
-    result = subprocess.run(
+    """
+    Read the combined standard output and standard error logs for a Docker container.
+
+    Parameters:
+        name (str): Docker container name.
+
+    Returns:
+        str: Combined container logs.
+
+    Raises:
+        CaptureError: If Docker cannot read the container logs.
+    """
+    result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["docker", "logs", name],
         cwd=ROOT,
         text=True,
@@ -1993,7 +2079,17 @@ def run_oci_once(
     run_number: int,
     args: argparse.Namespace,
 ) -> tuple[dict[str, Any], list[str], int | None]:
-    """Execute a single OCI container scenario run and return measurements."""
+    """
+    Run one OCI benchmark scenario and collect its metrics, commands, and CLI exit status.
+
+    Parameters:
+        scenario_id (str): OCI scenario identifier.
+        run_number (int): Repetition number for the benchmark run.
+        args (argparse.Namespace): Benchmark configuration and timing settings.
+
+    Returns:
+        tuple[dict[str, Any], list[str], int | None]: Collected metrics, executed command descriptions, and the guarded CLI exit code when applicable.
+    """
     suffix = uuid.uuid4().hex[:10]
     name = f"fasti-b1-{scenario_id.replace('_', '-')}-{os.getpid()}-{run_number}-{suffix}"
     commands: list[str] = []
@@ -2073,7 +2169,7 @@ exec /bin/sleep 3600
                 commands.append(command_text(health_command))
                 payload = None
                 while time.monotonic() < deadline:
-                    probe = subprocess.run(
+                    probe = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                         health_command,
                         cwd=ROOT,
                         text=True,
@@ -2177,7 +2273,7 @@ exec /bin/sleep 3600
         }
         return metrics, commands, observed_exit
     finally:
-        subprocess.run(
+        subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
             ["docker", "rm", "--force", name],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
@@ -2679,7 +2775,19 @@ def saved_oci_layer_bytes(
 def artifact_sizes(
     args: argparse.Namespace, context: dict[str, Any]
 ) -> tuple[dict[str, Any], list[str], dict[str, Any]]:
-    """Measure sizes of all build artifacts including binaries, OCI image, and contracts."""
+    """
+    Measure native and OCI binary sizes and publish compressed OCI and contract artifacts.
+
+    Parameters:
+    	args (argparse.Namespace): Benchmark arguments, including the output directory,
+    		immutable image, and native binary path.
+    	context (dict[str, Any]): Capture context containing OCI image identity and source
+    		provenance required to validate generated artifacts.
+
+    Returns:
+    	tuple[dict[str, Any], list[str], dict[str, Any]]: Artifact size and hash metadata,
+    	the commands used to produce the measurements, and retained artifact references.
+    """
     binary_size_command = [
         "docker",
         "run",
@@ -2729,17 +2837,28 @@ def artifact_sizes(
         def gzip_pipeline(
             source_command: list[str], destination: Path, *, source_cwd: Path = ROOT
         ) -> None:
-            """Execute a command and gzip its output to the destination file."""
+            """
+            Compresses a source command's standard output into a gzip file.
+
+            Parameters:
+                source_command (list[str]): Command and arguments whose output is compressed.
+                destination (Path): Path of the gzip output file.
+                source_cwd (Path): Working directory for both processes.
+
+            Raises:
+                CaptureError: If the source or compression process fails or lacks the required output pipe.
+            """
             with destination.open("wb") as output:
-                source = subprocess.Popen(
+                source = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                     source_command,
                     cwd=source_cwd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                 )
-                assert source.stdout is not None
-                compressor = subprocess.Popen(
-                    ["gzip", "-n", "-9"],
+                if source.stdout is None:
+                    raise CaptureError("gzip pipeline: source process has no stdout pipe")
+                compressor = subprocess.Popen(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
+                    [resolved_command("gzip"), "-n", "-9"],
                     cwd=source_cwd,
                     stdin=source.stdout,
                     stdout=output,
@@ -2848,7 +2967,20 @@ def artifact_budget_verdicts(sizes: dict[str, Any]) -> list[dict[str, Any]]:
 def extract_native_fastid(
     args: argparse.Namespace, context: dict[str, Any], destination: Path
 ) -> list[str]:
-    """Extract native fastid binary from immutable OCI image."""
+    """
+    Extracts the native `fastid` executable from the immutable OCI image.
+
+    Parameters:
+    	args (argparse.Namespace): Capture arguments updated with the extracted binary path.
+    	context (dict[str, Any]): Capture context updated with the binary's SHA-256 digest.
+    	destination (Path): Path where the extracted executable is stored.
+
+    Returns:
+    	list[str]: Docker commands used to create the temporary container and copy the executable.
+
+    Raises:
+    	CaptureError: If Docker does not return a container ID or the extracted executable is missing or not executable.
+    """
     name = f"fasti-b1-native-artifact-{os.getpid()}-{uuid.uuid4().hex[:10]}"
     create_command = [
         "docker",
@@ -2873,7 +3005,7 @@ def extract_native_fastid(
             raise CaptureError("Docker returned no container ID for native artifact extraction")
         run_checked(copy_command)
     finally:
-        subprocess.run(
+        subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
             ["docker", "rm", "--force", name],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,

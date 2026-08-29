@@ -54,14 +54,14 @@ if ! wait_for_health "$bare_port" >/dev/null; then
   exit 1
 fi
 
-bare_ui_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${bare_port}/")"
+bare_ui_status="$(curl --silent --connect-timeout 5 --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${bare_port}/")"
 if [[ "$bare_ui_status" != "200" ]]; then
   echo "Bare local image did not serve the web UI at / (got $bare_ui_status)" >&2
   exit 1
 fi
 
 bare_init_status="$(
-  curl --silent --output /dev/null --write-out '%{http_code}' \
+  curl --silent --connect-timeout 5 --max-time 10 --output /dev/null --write-out '%{http_code}' \
     --request POST --header 'content-type: application/json' --data '{}' \
     "http://127.0.0.1:${bare_port}/api/v1/node/initialization"
 )"
@@ -91,20 +91,20 @@ if ! wait_for_health "$durable_port" >/dev/null; then
   exit 1
 fi
 
-durable_ui_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${durable_port}/")"
+durable_ui_status="$(curl --silent --connect-timeout 5 --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${durable_port}/")"
 if [[ "$durable_ui_status" != "200" ]]; then
   echo "Configured local image did not serve the web UI at / (got $durable_ui_status)" >&2
   exit 1
 fi
 
-spa_route_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${durable_port}/status")"
+spa_route_status="$(curl --silent --connect-timeout 5 --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${durable_port}/status")"
 if [[ "$spa_route_status" != "200" ]]; then
   echo "Client-side route /status did not fall back to index.html (got $spa_route_status)" >&2
   exit 1
 fi
 
 durable_init_status="$(
-  curl --silent --output /dev/null --write-out '%{http_code}' \
+  curl --silent --connect-timeout 5 --max-time 10 --output /dev/null --write-out '%{http_code}' \
     --request POST --header 'content-type: application/json' --data '{}' \
     "http://127.0.0.1:${durable_port}/api/v1/node/initialization"
 )"
@@ -113,7 +113,7 @@ if [[ "$durable_init_status" != "403" ]]; then
   exit 1
 fi
 
-api_still_wins_status="$(curl --silent --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${durable_port}/api/v1/health")"
+api_still_wins_status="$(curl --silent --connect-timeout 5 --max-time 10 --output /dev/null --write-out '%{http_code}' "http://127.0.0.1:${durable_port}/api/v1/health")"
 if [[ "$api_still_wins_status" != "200" ]]; then
   echo "The real API route did not take precedence over the static fallback (got $api_still_wins_status)" >&2
   exit 1

@@ -902,6 +902,11 @@ pub(crate) fn verify_b8a_prerequisite(root: &Path) -> anyhow::Result<VerifiedMan
         b8a_manifest_path.display(),
         b8a.manifest.body.as_str()
     );
+    ensure!(
+        b8a.manifest.summary.status == ResultStatus::Pass,
+        "the B8b prerequisite at {} must have passing evidence",
+        b8a_manifest_path.display()
+    );
     Ok(b8a)
 }
 
@@ -6116,6 +6121,37 @@ mod tests {
         let error = verify_b8a_prerequisite(root.path())
             .expect_err("a non-B8a body must be rejected as the B8b prerequisite");
         assert!(error.to_string().contains("must declare body B8a"));
+    }
+
+    #[test]
+    fn b8a_prerequisite_rejects_a_structurally_valid_manifest_with_a_failed_summary() {
+        // verify_envelope only checks that summary counters are recomputed
+        // correctly from the evidence entries' own statuses -- it accepts a
+        // self-consistent Fail summary just as readily as a self-consistent
+        // Pass one. Without this check, a B8b manifest could claim a passing
+        // B8a prerequisite that actually recorded failed evidence.
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let manifest_path = write_b8a_manifest(root.path());
+        let mut envelope: EvidenceEnvelope =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest"))
+                .expect("parse manifest");
+        envelope.manifest.evidence[0].status = ResultStatus::Fail;
+        envelope.manifest.summary.pass = 0;
+        envelope.manifest.summary.fail = 1;
+        envelope.manifest.summary.status = ResultStatus::Fail;
+        envelope.manifest_sha256 = sha256_bytes(
+            &serde_json_canonicalizer::to_vec(&envelope.manifest).expect("canonical manifest"),
+        );
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&envelope).expect("serialize envelope"),
+        )
+        .expect("rewrite envelope");
+
+        let error = verify_b8a_prerequisite(root.path())
+            .expect_err("a failed B8a summary must be rejected as the B8b prerequisite");
+        assert!(error.to_string().contains("must have passing evidence"));
     }
 
     fn initialize_git(root: &Path) {

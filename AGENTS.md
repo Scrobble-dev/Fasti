@@ -40,10 +40,11 @@ Provider identifiers are evidence, not canonical identity.
 - Contracts project the same meaning into APIs, events, schemas, SDKs, and docs.
 - Adapters must not redefine business rules.
 - Reuse existing ownership before creating new abstractions.
+- Before adding a framework, service, database, queue, or authentication library, read [`docs/architecture/adr-0005-framework-and-auth-adoption.md`](docs/architecture/adr-0005-framework-and-auth-adoption.md). Loco is a developer-experience reference, not a Fasti runtime dependency. TrailBase is only an optional identity-issuer spike. It cannot own Fasti state, scopes, grants, or object authorization. A different decision requires an updated ADR, migration and rollback proof, and the applicable repository guard change in the same pull request.
 - Keep provider integrations modular.
 - Keep wire provider IDs separate from external identifier namespaces. Reuse
   `fasti_application::provider_identity_mapping` for Google Books and TMDB
-  coordinates in every adapter; do not add adapter-local TMDB grain fallbacks.
+  coordinates in every adapter; do not add adapter-local TMDB identifier fallbacks.
 - Route governed outbound access through application policy. Provider declarations are maximum grants; operator allow lists only narrow them, and denies win.
 
 ## Contract changes

@@ -3,6 +3,11 @@
 # Ref: https://docs.codacy.com/repositories-configure/codacy-configuration-file/
 
 engines:
+  agentlinter:
+    exclude_paths:
+      # security@scrobble.dev is the intentional, required public reporting
+      # contact in our security policy -- not a PII leak.
+      - "SECURITY.md"
   duplication:
     exclude_paths:
       - "contracts/generated/**"
