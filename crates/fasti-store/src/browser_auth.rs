@@ -714,7 +714,7 @@ impl BrowserAccountPort for SqliteKernel {
             let short_id = if digest.len() >= 16 {
                 format!("sess_{}", &digest[..12])
             } else {
-                format!("sess_{}", &digest)
+                format!("sess_{}", digest)
             };
             summaries.push(BrowserSessionSummary::new(
                 short_id,
