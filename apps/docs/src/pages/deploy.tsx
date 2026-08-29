@@ -20,8 +20,12 @@ export default function Deploy(): React.JSX.Element {
   const plan = useMemo(() => createDeploymentPlan(input), [input]);
   const command = renderPosixCommand(plan);
   async function copy(): Promise<void> {
-    await navigator.clipboard.writeText(command);
-    setCopyStatus("Command copied.");
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopyStatus("Command copied.");
+    } catch {
+      setCopyStatus("Copy failed. Select and copy the command.");
+    }
   }
   return (
     <Layout
