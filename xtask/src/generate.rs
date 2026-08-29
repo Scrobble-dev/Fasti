@@ -3,7 +3,6 @@ use fasti_application::{CapabilityKey, ProblemCode, ProblemParamPolicy, Workspac
 use fasti_contracts::{ChecksummedWorkspaceManifestDto, HealthResponse, ProblemDetails};
 use schemars::{generate::SchemaSettings, JsonSchema};
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::fs;
@@ -676,7 +675,7 @@ fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .pointer_mut("/manifest/streams")
         .and_then(Value::as_array_mut)
         .context("archive-v1 example omits streams")?;
-    let empty_digest = format!("sha256:{:x}", Sha256::digest([]));
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
     for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V1.len()..]
         .iter()
         .map(|entity| entity.as_str())
@@ -693,7 +692,10 @@ fn portability_v2_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .context("archive-v1 example omits manifest")?;
     let canonical = serde_json_canonicalizer::to_vec(manifest)
         .context("archive-v2 example manifest is not canonicalizable")?;
-    example["manifest_digest"] = Value::String(format!("sha256:{:x}", Sha256::digest(canonical)));
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
     Ok(example)
 }
 
