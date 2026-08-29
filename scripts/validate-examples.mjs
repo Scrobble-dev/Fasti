@@ -544,6 +544,9 @@ export async function validateExamples(root = repositoryRoot) {
     if (id === "integration.status.success") {
       assertValid(integrationStatus, value, id, ajv);
       assert.deepEqual(
+        // id is derived from a filename in the repository-local example
+        // directory, not external input.
+        // eslint-disable-next-line security/detect-object-injection
         httpOperations.get(owner.id).operation.responses["200"].content[
           "application/json"
         ].examples[id].value,

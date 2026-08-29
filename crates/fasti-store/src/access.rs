@@ -2626,6 +2626,36 @@ mod tests {
         assert_eq!(first.expose_hex(), second.expose_hex());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn ensure_bootstrap_secret_hardens_an_existing_valid_file_before_reuse() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("temporary data root");
+        let path = root.path().join("bootstrap.secret");
+        let hex = SecretMaterial::from_bytes([9_u8; 32]).expose_hex();
+        std::fs::write(&path, &hex).expect("seed a valid but loosely-permissioned secret file");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("relax permissions to simulate a pre-hardening file");
+
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let secret = kernel
+            .ensure_bootstrap_secret()
+            .expect("existing valid secret is accepted");
+        assert_eq!(secret.expose_hex(), hex);
+
+        let mode = std::fs::metadata(&path)
+            .expect("bootstrap secret metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "an existing valid secret must be hardened to owner-only before reuse, \
+             not left at whatever permissions it already had"
+        );
+    }
+
     #[test]
     fn concurrent_bootstrap_secret_publishers_agree_on_one_value() {
         // `SqliteKernel::open` takes an exclusive OS-level lock on the data

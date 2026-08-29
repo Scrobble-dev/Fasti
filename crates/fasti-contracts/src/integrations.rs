@@ -40,11 +40,18 @@ pub struct IntegrationObservationRequest {
     pub position_seconds: Option<u64>,
     pub duration_seconds: Option<u64>,
     /// Provider IDs for the observed item. Keys are lower-case provider names
-    /// such as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`.
+    /// such as `imdb`, `tmdb`, `tvdb`, `musicbrainz`, or `jellyfin`. Bounded
+    /// to 16 here per-field, but `normalize_template_request` additionally
+    /// rejects `provider_ids` and `series_provider_ids` combined exceeding
+    /// 16 (a bounded-work guard, not expressible as a JSON Schema constraint
+    /// across two sibling properties) -- a request with both maps near this
+    /// per-field limit can be schema-valid and still receive a runtime 422.
     #[serde(default)]
     #[schemars(length(max = 16), extend("maxProperties" = 16))]
     pub provider_ids: BTreeMap<String, String>,
-    /// Provider IDs for the parent series when `item_type` is `episode`.
+    /// Provider IDs for the parent series when `item_type` is `episode`. See
+    /// `provider_ids`'s doc comment for the combined-with-`provider_ids`
+    /// runtime bound this per-field schema limit doesn't capture.
     #[serde(default)]
     #[schemars(length(max = 16), extend("maxProperties" = 16))]
     pub series_provider_ids: BTreeMap<String, String>,
