@@ -71,7 +71,7 @@ PY
 check "canonical sampler enforces timed CPU and memory" 0 \
   env FASTI_ENVELOPE_TEST_WARMUP_SECONDS=1 FASTI_ENVELOPE_TEST_MEASUREMENT_SECONDS=5 \
   bash "$envelope" --target idle --profile canonical-idle -- \
-  bash -c '[[ "$MALLOC_ARENA_MAX" == 2 && "$TOKIO_WORKER_THREADS" == 2 && "$FASTI_IDLE_SETTLE_SECONDS" == 36 ]] && sleep 8'
+  bash -c '[[ "$MALLOC_ARENA_MAX" == 2 && "$TOKIO_WORKER_THREADS" == 2 && "$FASTI_IDLE_SETTLE_SECONDS" == 36 ]] && sleep "$FASTI_IDLE_SETTLE_SECONDS"'
 
 # The kernel must kill a workload that exceeds the enforced ceiling. This is the
 # property the whole gate rests on. Allocating well past the ceiling proves the
