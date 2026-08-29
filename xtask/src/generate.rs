@@ -1396,7 +1396,9 @@ fn enrich_governed_success_operation_openapi(
         .and_then(Value::as_object_mut)
         .and_then(|content| content.get_mut("application/json"))
         .and_then(Value::as_object_mut)
-        .with_context(|| format!("production {capability_id} 200 response omits application/json"))?;
+        .with_context(|| {
+            format!("production {capability_id} 200 response omits application/json")
+        })?;
     media.insert(
         "examples".to_owned(),
         serde_json::json!({
