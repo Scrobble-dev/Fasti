@@ -489,7 +489,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-
     #[test]
     fn openapi_is_3_1_and_documents_the_real_routes() {
         let document = openapi();
