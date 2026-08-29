@@ -9,6 +9,9 @@ publish.workspace = true
 description = "HTTP REST API routes, handlers, and JSON contracts for Fasti"
 
 [dependencies]
+url = { workspace = true }
+openidconnect = { workspace = true }
+serde = { workspace = true }
 axum = { workspace = true }
 chrono = { workspace = true }
 fasti-application = { workspace = true }
