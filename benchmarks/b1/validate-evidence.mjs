@@ -482,9 +482,8 @@ function compileTrustedPattern(pattern, flags, label) {
   // pattern is confirmed to match SAFE_REGEX_PATTERN immediately above --
   // this is the sole, validated construction site for every RegExp this
   // file builds from data.
-  // nosemgrep: javascript.dos.rule-non-literal-regexp
   // eslint-disable-next-line security/detect-non-literal-regexp, security-node/non-literal-reg-expr
-  return new RegExp(pattern, flags);
+  return new RegExp(pattern, flags); // nosemgrep
 }
 
 function deriveHardwareProfile(runner) {

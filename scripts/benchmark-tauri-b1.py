@@ -57,7 +57,7 @@ def command_text(parts: list[str | Path]) -> str:
 
 
 def run_checked(parts: list[str | Path], *, timeout: float = 1200) -> str:
-    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
+    result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         [str(part) for part in parts],
         cwd=ROOT,
         text=True,
@@ -592,14 +592,14 @@ def cgroup_usage(path: Path) -> tuple[int, int, int]:
 def stop_scope(
     unit: str, process: subprocess.Popen[bytes], cgroup_path: Path | None
 ) -> None:
-    subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
+    subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["systemctl", "--user", "kill", "--signal=TERM", "--kill-whom=all", unit],
         cwd=ROOT,
         text=True,
         capture_output=True,
         check=False,
     )
-    subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
+    subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["systemctl", "--user", "stop", unit],
         cwd=ROOT,
         text=True,
@@ -610,7 +610,7 @@ def stop_scope(
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
+            subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
                 ["systemctl", "--user", "kill", "--signal=KILL", "--kill-whom=all", unit],
                 cwd=ROOT,
                 text=True,
@@ -619,7 +619,7 @@ def stop_scope(
             )
             process.kill()
             process.wait(timeout=5)
-    state = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
+    state = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
         ["systemctl", "--user", "is-active", unit],
         cwd=ROOT,
         text=True,
@@ -663,7 +663,7 @@ def capture_once(
         ]
         started = time.monotonic()
         with tempfile.TemporaryFile() as diagnostic_file:
-            process = subprocess.Popen(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- argv is a list (no shell); the inherited/derived environment configures the child process (as env=), it is never interpolated into a shell string.
+            process = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit,python.lang.security.audit.dangerous-subprocess-use-tainted-env-args -- argv is a list (no shell); the inherited/derived environment configures the child process (as env=), it is never interpolated into a shell string.
                 run_command,
                 cwd=ROOT,
                 env=environment,
