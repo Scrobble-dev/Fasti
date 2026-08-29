@@ -2814,6 +2814,17 @@
   </div>
 </div>
 
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape") {
+      if (passkeyModalOpen) passkeyModalOpen = false;
+      if (totpModalOpen) totpModalOpen = false;
+      if (oidcModalOpen) oidcModalOpen = false;
+      if (profileModalOpen) profileModalOpen = false;
+    }
+  }}
+/>
+
 <!-- Passkey Registration Modal -->
 {#if passkeyModalOpen}
   <div

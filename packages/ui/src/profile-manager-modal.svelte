@@ -168,10 +168,7 @@
     if (!targetProfile) return;
     if (targetProfile.pinHash) {
       const enteredHash = await sha256Hex(enteredPin);
-      if (
-        enteredHash !== targetProfile.pinHash &&
-        enteredPin !== targetProfile.pinHash
-      ) {
+      if (enteredHash !== targetProfile.pinHash) {
         errorMessage = "Invalid 4-digit PIN code. Please try again.";
         return;
       }
@@ -254,6 +251,12 @@
     return found?.hex || "#206bc4";
   }
 </script>
+
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape" && open) onClose();
+  }}
+/>
 
 {#if open}
   <div
