@@ -11,7 +11,9 @@
     IconSettings,
     IconShieldCheck,
     IconLogout,
+    IconUser,
     IconUserCircle,
+    IconUsers,
   } from "@tabler/icons-svelte";
   import AuthModal from "./auth-modal.svelte";
   import GlobalSearch from "./global-search.svelte";
@@ -117,6 +119,7 @@
   }
 
   type SettingsTab =
+    | "account"
     | "network"
     | "providers"
     | "preferences"
@@ -127,6 +130,7 @@
   let settingsTab = $state<SettingsTab>("network");
 
   function settingsTabFromPath(path: string): SettingsTab {
+    if (path === "/settings/account") return "account";
     if (path === "/settings/metadata" || path === "/settings/providers")
       return "providers";
     if (path === "/settings/preferences") return "preferences";
@@ -147,6 +151,8 @@
 
   function pathForSettingsTab(tab: SettingsTab): string {
     switch (tab) {
+      case "account":
+        return "/settings/account";
       case "providers":
         return "/settings/metadata";
       case "preferences":
@@ -276,6 +282,7 @@
   );
   let themeDrawerOpen = $state(false);
   let authModalOpen = $state(false);
+  let userMenuOpen = $state(false);
   let mobileNavigationOpen = $state(false);
   let navigationTrigger = $state<HTMLButtonElement | undefined>();
   let showNavigationTrigger = $state<HTMLButtonElement | undefined>();
@@ -951,19 +958,44 @@
           <IconPalette size={18} />
         </button>
 
-        <button
-          type="button"
-          class="icon-btn"
-          onclick={() => (authModalOpen = true)}
-          title={browserSession
-            ? `Account: ${browserSession.user.username}`
-            : "Account access"}
-          aria-label={browserSession
-            ? `Manage account ${browserSession.user.username}`
-            : "Open account access"}
-        >
-          <IconUserCircle size={18} />
-        </button>
+        {#if browserSession}
+          <div class="nav-item dropdown position-relative">
+            <button
+              type="button"
+              class="icon-btn nav-link d-flex lh-1 text-reset p-0 border-0 bg-transparent align-items-center gap-2"
+              onclick={() => (authModalOpen = true)}
+              title={`Account: ${browserSession.user.username}`}
+              aria-label={`Manage account ${browserSession.user.username}`}
+              style="min-height: 44px;"
+            >
+              <span
+                class="avatar avatar-sm bg-primary-lt text-primary fw-bold rounded-circle"
+              >
+                {browserSession.user.username.charAt(0).toUpperCase()}
+              </span>
+              <div class="d-none d-xl-block ps-1 text-start">
+                <div class="fw-semibold">{browserSession.user.username}</div>
+                <div class="small text-muted" style="font-size: 0.75rem;">
+                  {browserSession.user.is_admin
+                    ? "Administrator"
+                    : "Standard User"}
+                </div>
+              </div>
+            </button>
+          </div>
+        {:else}
+          <button
+            type="button"
+            class="icon-btn btn btn-outline-primary btn-sm d-flex align-items-center gap-1"
+            style="min-height: 44px;"
+            onclick={() => (authModalOpen = true)}
+            title="Account access"
+            aria-label="Open account access"
+          >
+            <IconUserCircle size={18} />
+            <span>Sign In</span>
+          </button>
+        {/if}
       </div>
     </header>
 
@@ -984,6 +1016,7 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          session={browserSession}
           canAccessProfileData={!host.currentBrowserSession ||
             (browserSessionChecked && browserSession !== null)}
           profileDataIdentity={host.currentBrowserSession
@@ -998,6 +1031,10 @@
                 window.history.pushState(null, "", newPath);
               }
             }
+          }}
+          onSessionChange={(s) => {
+            browserSession = s;
+            if (!s) resetClientEndpoint();
           }}
           onClientEndpointChanged={resetClientEndpoint}
           onProviderCredentialsChanged={invalidateDiscoverProviders}
@@ -1227,7 +1264,7 @@
   {host}
   session={browserSession}
   onClose={() => (authModalOpen = false)}
-  onSessionChange={(session) => {
+  onSessionChange={(session: BrowserSession | null) => {
     browserSession = session;
     if (!session) {
       mediaRecords = [];

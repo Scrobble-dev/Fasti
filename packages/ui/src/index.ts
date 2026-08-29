@@ -21,6 +21,7 @@ export { default as ConnectionsView } from "./connections-view.svelte";
 // the host capability boundary and must not return as a second product path.
 export { default as RuntimeSettingsView } from "./runtime-settings-view.svelte";
 export { default as AuthModal } from "./auth-modal.svelte";
+export { default as ProfileManagerModal } from "./profile-manager-modal.svelte";
 export { default as FastiWorkbench } from "./fasti-workbench.svelte";
 export { projectRecordSummary } from "./record-projection.js";
 
