@@ -128,7 +128,8 @@
   async function refreshAccountData(): Promise<void> {
     const tasks: Promise<void>[] = [];
     if (host.listActiveSessions) tasks.push(loadSessions());
-    if (session?.user.is_admin && host.listBrowserUsers) tasks.push(loadUsers());
+    if (session?.user.is_admin && host.listBrowserUsers)
+      tasks.push(loadUsers());
     await Promise.all(tasks);
   }
 
@@ -336,9 +337,12 @@
   <section class="card modal-card">
     <header class="card-header modal-header">
       <div>
-        <h2 id="auth-modal-title" class="card-title">Account access & security</h2>
+        <h2 id="auth-modal-title" class="card-title">
+          Account access & security
+        </h2>
         <p class="text-secondary mb-0">
-          Manage browser sessions and account access. Media profiles and other authentication methods stay separate.
+          Manage browser sessions and account access. Media profiles and other
+          authentication methods stay separate.
         </p>
       </div>
       <button
@@ -398,7 +402,9 @@
             />
           </div>
           <div>
-            <label class="form-label" for="auth-session-timeout">Session duration</label>
+            <label class="form-label" for="auth-session-timeout"
+              >Session duration</label
+            >
             <select
               id="auth-session-timeout"
               class="form-select"
@@ -427,14 +433,18 @@
           {/if}
         </form>
       {:else}
-        <section class="session-summary" aria-labelledby="current-session-title">
+        <section
+          class="session-summary"
+          aria-labelledby="current-session-title"
+        >
           <IconUserShield size={24} aria-hidden="true" />
           <div>
             <h3 id="current-session-title" class="h4 mb-1">
               {session.user.username}
             </h3>
             <p class="text-secondary mb-1">
-              {session.user.is_admin ? "Administrator" : "User"}{session.user.is_test_account
+              {session.user.is_admin ? "Administrator" : "User"}{session.user
+                .is_test_account
                 ? " · test account"
                 : ""}
             </p>
@@ -455,9 +465,13 @@
         <section class="section-block" aria-labelledby="future-security-title">
           <div class="section-heading">
             <div>
-              <h3 id="future-security-title" class="h3 mb-1">Additional account options</h3>
+              <h3 id="future-security-title" class="h3 mb-1">
+                Additional account options
+              </h3>
               <p class="text-secondary mb-0">
-                These options stay visible so the intended account model is clear. They do not accept or store security data until the server capability exists.
+                These options stay visible so the intended account model is
+                clear. They do not accept or store security data until the
+                server capability exists.
               </p>
             </div>
             <IconShieldCheck size={22} aria-hidden="true" />
@@ -470,7 +484,9 @@
                 <div>
                   <strong>Media profiles</strong>
                   <p class="text-secondary mb-0">
-                    Not available in this build. Profile creation, selection, permissions, and PIN verification need server-owned capabilities.
+                    Not available in this build. Profile creation, selection,
+                    permissions, and PIN verification need server-owned
+                    capabilities.
                   </p>
                 </div>
                 <span class="badge bg-secondary-lt">Not available</span>
@@ -482,7 +498,8 @@
                 <div>
                   <strong>Passkey</strong>
                   <p class="text-secondary mb-0">
-                    Not available in this build. WebAuthn enrollment must be verified and stored by the server.
+                    Not available in this build. WebAuthn enrollment must be
+                    verified and stored by the server.
                   </p>
                 </div>
                 <span class="badge bg-secondary-lt">Not available</span>
@@ -494,7 +511,8 @@
                 <div>
                   <strong>Authenticator app</strong>
                   <p class="text-secondary mb-0">
-                    Not available in this build. Fasti does not generate or verify TOTP secrets in the browser.
+                    Not available in this build. Fasti does not generate or
+                    verify TOTP secrets in the browser.
                   </p>
                 </div>
                 <span class="badge bg-secondary-lt">Not available</span>
@@ -506,7 +524,9 @@
                 <div>
                   <strong>OIDC / SSO</strong>
                   <p class="text-secondary mb-0">
-                    Not available in this build. Provider discovery, client secrets, and token exchange require a server-owned configuration path.
+                    Not available in this build. Provider discovery, client
+                    secrets, and token exchange require a server-owned
+                    configuration path.
                   </p>
                 </div>
                 <span class="badge bg-secondary-lt">Not available</span>
@@ -521,7 +541,8 @@
               <div>
                 <h3 id="sessions-title" class="h3 mb-1">Active sessions</h3>
                 <p class="text-secondary mb-0">
-                  Review when each browser session was used. End a session that you do not recognize.
+                  Review when each browser session was used. End a session that
+                  you do not recognize.
                 </p>
               </div>
               <button
@@ -536,7 +557,9 @@
             </div>
 
             {#if sessions.length === 0}
-              <div class="empty-state">No active session inventory is available.</div>
+              <div class="empty-state">
+                No active session inventory is available.
+              </div>
             {:else}
               <ul class="session-list">
                 {#each sessions as item (item.sessionId)}
@@ -547,9 +570,15 @@
                       </div>
                       <div class="session-details">
                         <div class="session-title-row">
-                          <strong>{item.isCurrent ? "Current session" : "Browser session"}</strong>
+                          <strong
+                            >{item.isCurrent
+                              ? "Current session"
+                              : "Browser session"}</strong
+                          >
                           {#if item.isCurrent}
-                            <span class="badge bg-green-lt text-green">Current</span>
+                            <span class="badge bg-green-lt text-green"
+                              >Current</span
+                            >
                           {/if}
                         </div>
                         <dl>
@@ -609,7 +638,9 @@
               {#if sessions.some((item) => !item.isCurrent) && host.endOtherSessions}
                 <div class="danger-zone">
                   {#if confirmEndOthers}
-                    <p class="mb-2">End every other browser session for this account?</p>
+                    <p class="mb-2">
+                      End every other browser session for this account?
+                    </p>
                     <div class="button-row">
                       <button
                         type="button"
@@ -648,8 +679,12 @@
           <section class="section-block" aria-labelledby="browser-users-title">
             <div class="section-heading">
               <div>
-                <h3 id="browser-users-title" class="h3 mb-1">Browser accounts</h3>
-                <p class="text-secondary mb-0">Browser accounts are not media profiles.</p>
+                <h3 id="browser-users-title" class="h3 mb-1">
+                  Browser accounts
+                </h3>
+                <p class="text-secondary mb-0">
+                  Browser accounts are not media profiles.
+                </p>
               </div>
               <button
                 type="button"
@@ -669,14 +704,19 @@
                 {#each users as user (user.user_id)}
                   <li class="card card-sm">
                     <div class="card-body account-card-body">
-                      <div class="avatar bg-primary-lt text-primary" aria-hidden="true">
+                      <div
+                        class="avatar bg-primary-lt text-primary"
+                        aria-hidden="true"
+                      >
                         {user.username.charAt(0).toUpperCase()}
                       </div>
                       <div class="account-details">
                         <div class="session-title-row">
                           <strong>{user.username}</strong>
                           {#if user.user_id === session.user.user_id}
-                            <span class="badge bg-green-lt text-green">Signed in</span>
+                            <span class="badge bg-green-lt text-green"
+                              >Signed in</span
+                            >
                           {/if}
                         </div>
                         <span class="text-secondary">
@@ -741,11 +781,17 @@
               />
             </div>
             <label class="form-check form-switch action-check">
-              <input class="form-check-input" type="checkbox" bind:checked={editActive} />
+              <input
+                class="form-check-input"
+                type="checkbox"
+                bind:checked={editActive}
+              />
               <span class="form-check-label">Account is enabled</span>
             </label>
             <div>
-              <label class="form-label" for="current-password">Your current password</label>
+              <label class="form-label" for="current-password"
+                >Your current password</label
+              >
               <input
                 id="current-password"
                 class="form-control"
@@ -756,7 +802,9 @@
                 bind:value={currentPassword}
                 required
               />
-              <div class="form-hint">Required to save changes or delete this account.</div>
+              <div class="form-hint">
+                Required to save changes or delete this account.
+              </div>
             </div>
             <button
               type="submit"
@@ -910,7 +958,11 @@
     height: 2.5rem;
     place-items: center;
     border-radius: 50%;
-    background: color-mix(in srgb, var(--fasti-action-primary) 12%, transparent);
+    background: color-mix(
+      in srgb,
+      var(--fasti-action-primary) 12%,
+      transparent
+    );
     color: var(--fasti-action-primary);
   }
 
@@ -949,7 +1001,8 @@
   }
 
   .danger-zone {
-    border: 1px solid color-mix(in srgb, var(--fasti-state-error) 35%, transparent);
+    border: 1px solid
+      color-mix(in srgb, var(--fasti-state-error) 35%, transparent);
   }
 
   .empty-state {
