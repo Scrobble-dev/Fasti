@@ -1,0 +1,35 @@
+name: Export pinned Rust toolchain
+
+on:
+  push:
+    branches:
+      - automation/rust-toolchain-export-20260829
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download and verify the exact CI toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://static.rust-lang.org/dist"
+          archive="rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz"
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output "$archive" "$base/$archive"
+          curl --fail --location --retry 5 --retry-all-errors \
+            --output "$archive.sha256" "$base/$archive.sha256"
+          sha256sum --check "$archive.sha256"
+      - name: Upload verified standalone toolchain
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-1.97.1-x86_64-unknown-linux-gnu
+          path: |
+            rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz
+            rust-1.97.1-x86_64-unknown-linux-gnu.tar.xz.sha256
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
