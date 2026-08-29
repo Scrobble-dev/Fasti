@@ -27,6 +27,10 @@ const MAX_RECORDS_JSON_BODY_BYTES: usize = 8 * 1024;
 pub(crate) struct LocalApiState {
     pub(crate) kernel: Arc<dyn LocalKernel>,
     pub(crate) secure_cookies: bool,
+    /// Ceiling passed to `CreateBrowserSessionCommand::try_new`. Always
+    /// [`fasti_application::MAX_SESSION_MINUTES`] except when the loopback-gated
+    /// `FASTI_DEVELOPMENT_AUTO_LOGIN` dev convenience raises it.
+    pub(crate) max_session_minutes: u32,
 }
 
 pub(crate) enum RequestAuthentication {
@@ -304,10 +308,12 @@ pub(crate) fn router(
     kernel: Arc<dyn LocalKernel>,
     include_bootstrap: bool,
     secure_cookies: bool,
+    max_session_minutes: u32,
 ) -> Router {
     let state = LocalApiState {
         kernel,
         secure_cookies,
+        max_session_minutes,
     };
     let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))

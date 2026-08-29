@@ -42,6 +42,7 @@ function recordResponse(
         },
       },
     ],
+    truncated: false,
   };
 }
 

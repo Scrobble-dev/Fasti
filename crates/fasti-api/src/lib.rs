@@ -1,6 +1,12 @@
 //! Fasti HTTP REST API definitions and router construction.
 
-use axum::{routing::get, Json, Router};
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
 use fasti_application::LocalKernel;
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
 use std::net::SocketAddr;
@@ -182,6 +188,9 @@ pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
     let state = local::LocalApiState {
         kernel,
         secure_cookies: false,
+        // Unused: this router never mounts local::router()'s browser session
+        // endpoints, only the isolated webhook adapters.
+        max_session_minutes: fasti_application::MAX_SESSION_MINUTES,
     };
     health_router().merge(integrations::router().with_state(state))
 }
@@ -210,6 +219,7 @@ pub fn api_router(
     kernel: Arc<dyn LocalKernel>,
     local_exposure_addr: SocketAddr,
     data_root: &Path,
+    max_session_minutes: u32,
 ) -> Router {
     assert!(
         local_exposure_addr.ip().is_loopback(),
@@ -229,9 +239,10 @@ pub fn api_router(
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
         secure_cookies: false,
+        max_session_minutes,
     };
     health_router()
-        .merge(local::router(kernel, true, false))
+        .merge(local::router(kernel, true, false, max_session_minutes))
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -241,6 +252,7 @@ pub fn remote_api_router(
     kernel: Arc<dyn LocalKernel>,
     bind_addr: SocketAddr,
     data_root: &Path,
+    max_session_minutes: u32,
 ) -> Router {
     assert!(
         !bind_addr.ip().is_loopback(),
@@ -253,9 +265,10 @@ pub fn remote_api_router(
     let integration_state = local::LocalApiState {
         kernel: Arc::clone(&kernel),
         secure_cookies: true,
+        max_session_minutes,
     };
     health_router()
-        .merge(local::router(kernel, false, true))
+        .merge(local::router(kernel, false, true, max_session_minutes))
         .merge(integrations::router().with_state(integration_state))
 }
 
@@ -276,22 +289,41 @@ pub fn with_static_fallback(router: Router, static_dir: Option<&Path>) -> Router
     // response status to 404, which is right for a custom error page but
     // wrong for SPA client-side routing: `/status` is a real page in the
     // app, so it must come back 200 with index.html for the SPA's own
-    // router to take over.
+    // router to take over. That SPA behavior must not extend to `/api/*`,
+    // though: an unmatched API path (a typo, a removed endpoint) would
+    // otherwise silently come back 200 with the HTML shell instead of a 404,
+    // which every API client -- browser fetch, SDK, curl -- expects to see.
     let index_html = static_dir.join("index.html");
     let serve_dir = ServeDir::new(static_dir).fallback(ServeFile::new(index_html));
-    router.fallback_service(serve_dir)
+    router.fallback_service(tower::service_fn(move |request: Request| {
+        let serve_dir = serve_dir.clone();
+        async move {
+            if request.uri().path().starts_with("/api/") {
+                return Ok::<Response, std::convert::Infallible>(
+                    StatusCode::NOT_FOUND.into_response(),
+                );
+            }
+            let response = tower::ServiceExt::oneshot(serve_dir, request)
+                .await
+                .into_response();
+            Ok(response)
+        }
+    }))
 }
 
-/// Seeds the one-time development account. The durable marker prevents this
-/// call from recreating an account after it is renamed or deleted.
+/// Seeds the one-time development account with the given credential. The
+/// durable marker prevents this call from recreating an account after it is
+/// renamed or deleted. Returns `true` when this call actually created the
+/// account (the caller should surface `password` to the operator then), or
+/// `false` when an account already existed (`password` was not used).
 pub fn ensure_development_test_account(
     kernel: &dyn LocalKernel,
-) -> fasti_application::ApplicationResult<()> {
+    password: fasti_application::BrowserPassword,
+) -> fasti_application::ApplicationResult<bool> {
     kernel.ensure_development_browser_user(
         fasti_application::BrowserUsername::try_new("testadmin")
             .expect("development username is valid"),
-        fasti_application::BrowserPassword::try_new("testadmin")
-            .expect("development password is valid"),
+        password,
     )
 }
 
@@ -402,6 +434,36 @@ mod tests {
             .await
             .expect("body");
         assert_eq!(body, "console.log(1)".as_bytes());
+    }
+
+    #[tokio::test]
+    async fn static_fallback_leaves_unmatched_api_paths_as_a_plain_404() {
+        let static_dir = tempfile::tempdir().expect("temporary static dir");
+        std::fs::write(
+            static_dir.path().join("index.html"),
+            "<html>fasti workbench</html>",
+        )
+        .expect("write index.html");
+
+        // A path under /api/* that no route matches must not fall back to
+        // the SPA shell with a 200 -- every API client expects a 404 there,
+        // not an HTML document.
+        let response = with_static_fallback(health_router(), Some(static_dir.path()))
+            .oneshot(
+                Request::get("/api/v1/not-a-real-route")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert!(
+            !String::from_utf8_lossy(&body).contains("fasti workbench"),
+            "an unmatched API path must not receive the SPA shell"
+        );
     }
 
     #[test]
@@ -525,14 +587,19 @@ mod tests {
     #[tokio::test]
     async fn documented_health_route_is_mounted() {
         let (root, kernel) = test_kernel();
-        let response = api_router(kernel, test_bind_addr(), root.path())
-            .oneshot(
-                Request::get("/api/v1/health")
-                    .body(Body::empty())
-                    .expect("valid request"),
-            )
-            .await
-            .expect("router response");
+        let response = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        )
+        .oneshot(
+            Request::get("/api/v1/health")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("router response");
 
         assert_eq!(response.status(), StatusCode::OK);
     }
@@ -541,7 +608,12 @@ mod tests {
     #[tokio::test]
     async fn nuvio_collections_replace_get_and_clear_use_the_authenticated_profile() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let credential = enroll_admin(&app, root.path()).await.credential;
         let document = r#"[{"id":"collection","title":"Collection","folders":[{"id":"folder","title":"Folder","sources":[{"provider":"tmdb","tmdbSourceType":"discover","mediaType":"movie","filters":{"voteCountGte":10,"vote_count.gte":10},"id":"source"}]}]}]"#;
 
@@ -694,8 +766,17 @@ mod tests {
     #[tokio::test]
     async fn development_browser_account_signs_in_edits_and_retains_the_last_administrator() {
         let (root, kernel) = test_kernel();
-        ensure_development_test_account(kernel.as_ref()).expect("seed test account");
-        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        ensure_development_test_account(
+            kernel.as_ref(),
+            fasti_application::BrowserPassword::try_new("testadmin").expect("test password"),
+        )
+        .expect("seed test account");
+        let app = api_router(
+            kernel.clone(),
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
 
         let login = app
             .clone()
@@ -854,11 +935,16 @@ mod tests {
     #[tokio::test]
     async fn remote_router_omits_bootstrap_and_sets_secure_session_cookies() {
         let (root, kernel) = test_kernel();
-        ensure_development_test_account(kernel.as_ref()).expect("seed test account");
+        ensure_development_test_account(
+            kernel.as_ref(),
+            fasti_application::BrowserPassword::try_new("testadmin").expect("test password"),
+        )
+        .expect("seed test account");
         let app = remote_api_router(
             kernel,
             "0.0.0.0:8420".parse().expect("remote bind address"),
             root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
         );
 
         let bootstrap = app
@@ -898,7 +984,12 @@ mod tests {
     #[tokio::test]
     async fn node_initialization_refuses_a_missing_or_wrong_bootstrap_secret() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
 
         let missing_header = app
             .clone()
@@ -951,14 +1042,24 @@ mod tests {
     #[tokio::test]
     async fn bootstrap_secret_survives_a_router_rebuild_and_has_owner_only_permissions() {
         let (root, kernel) = test_kernel();
-        let _first_router = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let _first_router = api_router(
+            kernel.clone(),
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let first_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after first priming");
 
         // Simulates a daemon restart against the same data root: a second
         // api_router build must not regenerate (and thereby invalidate) the
         // secret a legitimate client may have already read.
-        let _second_router = api_router(kernel, test_bind_addr(), root.path());
+        let _second_router = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let second_read = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after second priming");
         assert_eq!(first_read, second_read);
@@ -982,7 +1083,12 @@ mod tests {
     #[tokio::test]
     async fn durable_bootstrap_issues_one_credential_and_closes_initialization() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let app = api_router(
+            kernel.clone(),
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let bootstrap_secret = std::fs::read_to_string(root.path().join("bootstrap.secret"))
             .expect("bootstrap secret readable after api_router primes it");
 
@@ -1090,7 +1196,12 @@ mod tests {
     #[tokio::test]
     async fn observation_requires_bearer_and_replays_one_source_event_exactly_once() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let app = api_router(
+            kernel.clone(),
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
             "source": "nuvio",
@@ -1177,7 +1288,12 @@ mod tests {
     #[tokio::test]
     async fn partial_progress_is_rejected_without_creating_false_history() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let credential = enroll_admin(&app, root.path()).await.credential;
         let request = serde_json::json!({
             "kind": "consumption_occurrence",
@@ -1263,14 +1379,19 @@ mod tests {
     #[tokio::test]
     async fn event_submission_alias_is_absent() {
         let (root, kernel) = test_kernel();
-        let response = api_router(kernel, test_bind_addr(), root.path())
-            .oneshot(
-                Request::post("/api/v1/events")
-                    .body(Body::empty())
-                    .expect("valid request"),
-            )
-            .await
-            .expect("router response");
+        let response = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        )
+        .oneshot(
+            Request::post("/api/v1/events")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("router response");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -1287,16 +1408,21 @@ mod tests {
             ("POST", "/api/v1/credential-revocations"),
             ("PUT", "/api/v1/listener-configuration"),
         ] {
-            let response = api_router(kernel.clone(), test_bind_addr(), root.path())
-                .oneshot(
-                    Request::builder()
-                        .method(method)
-                        .uri(path)
-                        .body(Body::empty())
-                        .expect("valid request"),
-                )
-                .await
-                .expect("router response");
+            let response = api_router(
+                kernel.clone(),
+                test_bind_addr(),
+                root.path(),
+                fasti_application::MAX_SESSION_MINUTES,
+            )
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("valid request"),
+            )
+            .await
+            .expect("router response");
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
         }
     }
@@ -1305,7 +1431,12 @@ mod tests {
     #[tokio::test]
     async fn records_require_bearer_and_support_create_list_attach_and_namespace_registration() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel.clone(), test_bind_addr(), root.path());
+        let app = api_router(
+            kernel.clone(),
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
 
         let unauthorized = app
             .clone()
@@ -1449,7 +1580,12 @@ mod tests {
     #[tokio::test]
     async fn profile_tracking_disposition_is_authenticated_set_list_and_unset() {
         let (root, kernel) = test_kernel();
-        let app = api_router(kernel, test_bind_addr(), root.path());
+        let app = api_router(
+            kernel,
+            test_bind_addr(),
+            root.path(),
+            fasti_application::MAX_SESSION_MINUTES,
+        );
         let unauthorized = app
             .clone()
             .oneshot(

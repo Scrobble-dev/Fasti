@@ -240,6 +240,58 @@ fn development_test_account_enabled(remote_listener: bool) -> Result<bool> {
     )
 }
 
+/// A session lifetime long enough that it never expires in practice (100
+/// years), used only when `FASTI_DEVELOPMENT_AUTO_LOGIN` is set. Matches the
+/// "Don't expire" option `packages/ui/src/auth-modal.svelte` offers.
+const DEVELOPMENT_UNBOUNDED_SESSION_MINUTES: u32 = 100 * 365 * 24 * 60;
+
+fn parse_development_auto_login(
+    value: Option<String>,
+    development_test_account_enabled: bool,
+    remote_listener: bool,
+) -> Result<bool> {
+    let enabled = parse_boolean("FASTI_DEVELOPMENT_AUTO_LOGIN", value, false)?;
+    anyhow::ensure!(
+        !enabled || !remote_listener,
+        "FASTI_DEVELOPMENT_AUTO_LOGIN is allowed only on a loopback durable listener"
+    );
+    anyhow::ensure!(
+        !enabled || development_test_account_enabled,
+        "FASTI_DEVELOPMENT_AUTO_LOGIN requires FASTI_DEVELOPMENT_TEST_ACCOUNT=true"
+    );
+    Ok(enabled)
+}
+
+/// The maximum browser session lifetime this daemon instance accepts.
+/// [`fasti_application::MAX_SESSION_MINUTES`] unless the loopback-gated
+/// development auto-login convenience is active.
+fn max_session_minutes(
+    development_test_account_enabled: bool,
+    remote_listener: bool,
+) -> Result<u32> {
+    let auto_login = parse_development_auto_login(
+        env::var("FASTI_DEVELOPMENT_AUTO_LOGIN").ok(),
+        development_test_account_enabled,
+        remote_listener,
+    )?;
+    Ok(if auto_login {
+        DEVELOPMENT_UNBOUNDED_SESSION_MINUTES
+    } else {
+        fasti_application::MAX_SESSION_MINUTES
+    })
+}
+
+/// Generates a fresh random password for the one-time development browser
+/// account, instead of a hardcoded, guessable value. Only ever used the one
+/// time the account doesn't already exist (see `ensure_development_browser_user`'s
+/// durable marker), so a new random value each process start never locks
+/// anyone out of an already-seeded account.
+fn generate_development_password() -> Result<String> {
+    let mut bytes = [0_u8; 24];
+    getrandom::fill(&mut bytes).context("failed to generate a development account password")?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn require_https_public_url() -> Result<()> {
     let value = env::var("FASTI_PUBLIC_URL")
         .context("FASTI_PUBLIC_URL is required for a remote durable listener")?;
@@ -288,19 +340,46 @@ async fn main() -> Result<()> {
             }
             let seed_development_account = development_test_account_enabled(remote_listener)?;
             if seed_development_account {
-                ensure_development_test_account(kernel.as_ref()).map_err(|problem| {
+                let password = generate_development_password()?;
+                let created = ensure_development_test_account(
+                    kernel.as_ref(),
+                    fasti_application::BrowserPassword::try_new(password.clone())
+                        .expect("generated development password is within bounds"),
+                )
+                .map_err(|problem| {
                     anyhow::anyhow!(
                         "failed to seed the one-time development browser account: {}",
                         problem.message()
                     )
                 })?;
+                if created {
+                    // The password itself is never passed to `info!` --
+                    // tracing fields can fan out to persistent, aggregated
+                    // log destinations with broader access and retention
+                    // than a console. `println!` below is the one sanctioned
+                    // disclosure channel for this one-time value.
+                    info!(
+                        username = "testadmin",
+                        "Fasti seeded the one-time development browser account; the password was printed to stdout, not logged"
+                    );
+                    // Printed directly, not just logged: tracing_subscriber's
+                    // default filter hides `info!` unless RUST_LOG is set,
+                    // which would otherwise make this one-time password
+                    // invisible in every deployment that doesn't set it
+                    // (this repo's own systemd/podman quadlet units don't).
+                    println!(
+                        "Fasti seeded the one-time development browser account.\n  username: testadmin\n  password: {password}\nRecord this now -- it is not stored or shown again."
+                    );
+                }
             }
+            let max_session_minutes =
+                max_session_minutes(seed_development_account, remote_listener)?;
             if remote_listener {
                 info!(
                     "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
                     addr, data_root
                 );
-                remote_api_router(kernel.clone(), addr, data_root)
+                remote_api_router(kernel.clone(), addr, data_root, max_session_minutes)
             } else {
                 info!(
                     "Fasti durable local listener starting on http://{} with data root {:?}",
@@ -310,6 +389,7 @@ async fn main() -> Result<()> {
                     kernel.clone(),
                     local_api_addr.expect("configured durable local routes require local exposure"),
                     data_root,
+                    max_session_minutes,
                 )
             }
         }
@@ -508,6 +588,17 @@ mod tests {
         );
         assert!(parse_development_test_account(Some("true".to_owned()), true).is_err());
         assert!(parse_development_test_account(Some("yes".to_owned()), false).is_err());
+    }
+
+    #[test]
+    fn development_auto_login_requires_the_test_account_and_loopback() {
+        assert!(!parse_development_auto_login(None, true, false).expect("default off"));
+        assert!(
+            parse_development_auto_login(Some("true".to_owned()), true, false)
+                .expect("explicit loopback auto-login with the test account enabled")
+        );
+        assert!(parse_development_auto_login(Some("true".to_owned()), true, true).is_err());
+        assert!(parse_development_auto_login(Some("true".to_owned()), false, false).is_err());
     }
 
     #[test]

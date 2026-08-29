@@ -39,6 +39,7 @@ pub(crate) fn write_field_claim(
                 fetched_at, expires_at, created_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
             ON CONFLICT(record_id, field_key, source, fetched_at) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 value = excluded.value,
                 locale = excluded.locale,
                 expires_at = excluded.expires_at,
@@ -215,6 +216,7 @@ pub(crate) fn write_field_override(
                 workspace_id, record_id, field_key, value, created_at
             ) VALUES (?1, ?2, ?3, ?4, ?5)
             ON CONFLICT(record_id, field_key) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 value = excluded.value,
                 created_at = excluded.created_at
             "#,
@@ -430,7 +432,8 @@ mod tests {
                 RequestCorrelationId::new_v7(),
                 node.access,
             ))
-            .expect("list records");
+            .expect("list records")
+            .into_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record_id(), outcome.record_id());
         assert_eq!(records[0].title().value(), Some("A real provider title"));
@@ -462,6 +465,7 @@ mod tests {
                 node.access,
             ))
             .expect("list records")
+            .into_records()
             .is_empty());
     }
 
@@ -501,7 +505,8 @@ mod tests {
                 RequestCorrelationId::new_v7(),
                 node.access,
             ))
-            .expect("list records");
+            .expect("list records")
+            .into_records();
         assert_eq!(records[0].title().value(), Some("Dune"));
         assert_eq!(records[0].identifiers().len(), 1);
         assert_eq!(records[0].identifiers()[0].value(), "438631");
@@ -553,6 +558,106 @@ mod tests {
         )
         .expect("load claims");
         assert_eq!(claims, vec![claim]);
+
+        let loaded_override = load_field_override(
+            &connection,
+            node.access.workspace_id(),
+            record_id,
+            &key,
+            capability,
+            correlation_id,
+        )
+        .expect("load override")
+        .expect("override present");
+        assert_eq!(loaded_override, override_);
+    }
+
+    #[test]
+    fn upsert_conflict_rejects_a_caller_supplied_workspace_that_does_not_own_the_record() {
+        let node = TestNode::new();
+        let record_id = a_record(&node);
+        let key = field_key("core.title");
+        let capability = CapabilityKey::ListRecords;
+        let correlation_id = RequestCorrelationId::new_v7();
+        let foreign_workspace = WorkspaceId::new_v7();
+
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        // A real workspace row, not just an arbitrary id: otherwise the
+        // attack write fails on the workspace_id foreign key before ever
+        // reaching the scope-guard trigger, and the test would pass even if
+        // that trigger regressed.
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                rusqlite::params![foreign_workspace.to_string(), timestamp(now())],
+            )
+            .expect("seed foreign workspace");
+        let claim = FieldClaim::try_new(ns("tmdb"), "Original title", None, received(100), None)
+            .expect("valid claim");
+        write_field_claim(
+            &connection,
+            node.access.workspace_id(),
+            record_id,
+            &key,
+            &claim,
+            capability,
+            correlation_id,
+        )
+        .expect("write claim under the owning workspace");
+
+        // Same (record_id, field_key, source, fetched_at) conflict key, but a
+        // workspace_id that doesn't own record_id -- must hit the ON CONFLICT
+        // path and be rejected by the scope-guard trigger, not silently
+        // overwrite the owning workspace's row.
+        let attack = FieldClaim::try_new(ns("tmdb"), "Hijacked title", None, received(100), None)
+            .expect("valid claim");
+        let result = write_field_claim(
+            &connection,
+            foreign_workspace,
+            record_id,
+            &key,
+            &attack,
+            capability,
+            correlation_id,
+        );
+        assert!(result.is_err());
+
+        let claims = load_field_claims(
+            &connection,
+            node.access.workspace_id(),
+            record_id,
+            &key,
+            capability,
+            correlation_id,
+        )
+        .expect("load claims");
+        assert_eq!(claims, vec![claim]);
+
+        let override_ =
+            FieldOverride::try_new("Original override", received(100)).expect("valid override");
+        write_field_override(
+            &connection,
+            node.access.workspace_id(),
+            record_id,
+            &key,
+            &override_,
+            capability,
+            correlation_id,
+        )
+        .expect("write override under the owning workspace");
+
+        let attack_override =
+            FieldOverride::try_new("Hijacked override", received(200)).expect("valid override");
+        let result = write_field_override(
+            &connection,
+            foreign_workspace,
+            record_id,
+            &key,
+            &attack_override,
+            capability,
+            correlation_id,
+        );
+        assert!(result.is_err());
 
         let loaded_override = load_field_override(
             &connection,

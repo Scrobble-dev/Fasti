@@ -273,7 +273,7 @@ test("the development browser user can sign in and edit but cannot delete the la
   await page.route(/\/api\/v1\/records$/, (route) =>
     route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ records: [] }),
+      body: JSON.stringify({ records: [], truncated: false }),
     }),
   );
 
@@ -396,6 +396,7 @@ test("global search and configured record actions use durable tracking state", a
             },
           },
         ],
+        truncated: false,
       }),
     }),
   );

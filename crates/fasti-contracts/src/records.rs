@@ -120,4 +120,8 @@ pub struct RecordSummaryDto {
 #[serde(deny_unknown_fields)]
 pub struct ListRecordsResponse {
     pub records: Vec<RecordSummaryDto>,
+    /// `true` when more active Records exist in this workspace beyond the
+    /// bounded page returned here (see `ListTrackingDispositionsResponse`
+    /// for the same pattern on a sibling listing capability).
+    pub truncated: bool,
 }

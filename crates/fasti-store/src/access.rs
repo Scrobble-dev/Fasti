@@ -362,6 +362,12 @@ impl AccessAdministrationPort for SqliteKernel {
     fn ensure_bootstrap_secret(&self) -> ApplicationResult<SecretMaterial> {
         let capability = CapabilityKey::InitializeNode;
         let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
+        // Serializes the whole read-validate-recover sequence below: without
+        // it, two concurrent callers can each observe the same malformed
+        // file, and the loser can delete a secret the winner just published
+        // and republish a different one, leaving them disagreeing about the
+        // secret's value.
+        let _bootstrap_secret_guard = self.lock_bootstrap_secret(capability, correlation_id)?;
         let path = self.data_root().join("bootstrap.secret");
         let unavailable = || {
             Box::new(FastiProblem::storage_unavailable(
@@ -2654,6 +2660,56 @@ mod tests {
                 persisted.trim(),
                 "every concurrent caller must return the value that was actually persisted, \
                  never a value only it generated but lost the publish race for"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrent_recovery_from_a_pre_existing_malformed_secret_agrees_on_one_value() {
+        // Same threat model as concurrent_bootstrap_secret_publishers_agree_on_one_value,
+        // but starting from a malformed (not missing) file, so every caller
+        // enters the "invalid -> remove stale -> republish" recovery branch
+        // together, instead of the plain "no file yet" branch. Without
+        // bootstrap_secret serializing this sequence, a caller whose
+        // validity check ran before a sibling's publish can go on to delete
+        // that sibling's freshly-published valid secret and republish a
+        // different one, leaving callers disagreeing about which secret is
+        // actually persisted.
+        let root = tempfile::tempdir().expect("temporary data root");
+        std::fs::write(root.path().join("bootstrap.secret"), b"not-a-valid-secret")
+            .expect("seed a malformed secret file");
+        let kernel = SqliteKernel::open(root.path()).expect("SQLite kernel");
+        let barrier = Barrier::new(8);
+
+        let results: Vec<String> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    let kernel = &kernel;
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        kernel
+                            .ensure_bootstrap_secret()
+                            .expect("bootstrap secret")
+                            .expose_hex()
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("publisher thread panicked"))
+                .collect()
+        });
+
+        let persisted = std::fs::read_to_string(root.path().join("bootstrap.secret"))
+            .expect("bootstrap secret file readable after concurrent recovery");
+        for result in &results {
+            assert_eq!(
+                result,
+                persisted.trim(),
+                "every concurrent caller recovering from the same malformed file must return \
+                 the value that was actually persisted, never a value only it generated but \
+                 lost the recovery race for"
             );
         }
     }
