@@ -2827,7 +2827,6 @@
     if (e.key === "Escape") {
       if (passkeyModalOpen) passkeyModalOpen = false;
       if (totpModalOpen) totpModalOpen = false;
-      if (oidcModalOpen) oidcModalOpen = false;
       if (profileModalOpen) profileModalOpen = false;
     }
   }}
