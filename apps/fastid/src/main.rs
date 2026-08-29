@@ -353,10 +353,14 @@ async fn main() -> Result<()> {
                     )
                 })?;
                 if created {
+                    // The password itself is never passed to `info!` --
+                    // tracing fields can fan out to persistent, aggregated
+                    // log destinations with broader access and retention
+                    // than a console. `println!` below is the one sanctioned
+                    // disclosure channel for this one-time value.
                     info!(
                         username = "testadmin",
-                        password = %password,
-                        "Fasti seeded the one-time development browser account; record this password now, it is not stored or shown again"
+                        "Fasti seeded the one-time development browser account; the password was printed to stdout, not logged"
                     );
                     // Printed directly, not just logged: tracing_subscriber's
                     // default filter hides `info!` unless RUST_LOG is set,

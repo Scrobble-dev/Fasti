@@ -19,8 +19,15 @@
 
   // Matches apps/fastid/src/main.rs's DEVELOPMENT_UNBOUNDED_SESSION_MINUTES.
   // Only accepted by the server when FASTI_DEVELOPMENT_AUTO_LOGIN is set on a
-  // loopback durable listener; rejected (422) otherwise.
+  // loopback durable listener; rejected (422) otherwise. The UI has no
+  // capability signal for that server-side env var, so it approximates the
+  // same "loopback" half of the gate from the page's own origin -- hides the
+  // option on every non-loopback (i.e. non-dev) deployment, at the cost of
+  // still showing it on a loopback host that hasn't actually set the flag.
   const DEVELOPMENT_UNBOUNDED_SESSION_MINUTES = 100 * 365 * 24 * 60;
+  const isLoopbackHost =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
   let { show, host, session, onClose, onSessionChange }: Props = $props();
   let dialog: HTMLDialogElement | undefined;
@@ -314,9 +321,11 @@
               <option value={60}>1 hour</option>
               <option value={480}>8 hours</option>
               <option value={1440}>24 hours</option>
-              <option value={DEVELOPMENT_UNBOUNDED_SESSION_MINUTES}
-                >Don't expire (dev only)</option
-              >
+              {#if isLoopbackHost}
+                <option value={DEVELOPMENT_UNBOUNDED_SESSION_MINUTES}
+                  >Don't expire (dev only)</option
+                >
+              {/if}
             </select>
           </div>
           <button

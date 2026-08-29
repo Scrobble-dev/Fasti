@@ -867,21 +867,30 @@ pub(crate) fn verify_b8b_milestone(root: &Path, manifest_path: &Path) -> anyhow:
 /// )?;
 /// # Ok::<(), anyhow::Error>(())
 /// ```
-fn verify_b8b_manifest_requirements(
-    root: &Path,
-    manifest: &EvidenceManifest,
-) -> anyhow::Result<()> {
-    // Enforced here, not only by the `test milestone --body B8b` CLI wrapper,
-    // so any caller reaching this function (including a bare
-    // `cargo xtask evidence verify <path>`) stays fail-closed on the same
-    // prerequisite.
+/// Verifies the B8a manifest that gates every B8b milestone/verification
+/// entry point, and returns it once confirmed.
+///
+/// `verify()` dispatches to a body-specific closure policy, and B8a's own
+/// policy is intentionally unimplemented (see `BodyArg::B8a` in
+/// `xtask/src/main.rs`: B8a milestone evidence formalization is out of
+/// scope). Calling `verify()` on a B8a manifest would therefore reject it,
+/// valid or not, before a `Body::B8a` check ever ran. `verify_envelope()`
+/// checks structural/cryptographic validity (schema, digest, source
+/// binding, evidence inventory) without requiring a body policy, which is
+/// exactly what a B8b caller needs from its B8a prerequisite.
+///
+/// # Errors
+///
+/// Returns an error if the B8a manifest is missing, fails envelope
+/// verification, or does not declare body B8a.
+pub(crate) fn verify_b8a_prerequisite(root: &Path) -> anyhow::Result<VerifiedManifest> {
     let b8a_manifest_path = root.join("target/fasti-evidence/b8a-manifest.json");
     ensure!(
         b8a_manifest_path.is_file(),
         "B8b requires a passing B8a manifest at {}; none exists yet",
         b8a_manifest_path.display()
     );
-    let b8a = verify(root, &b8a_manifest_path).with_context(|| {
+    let b8a = verify_envelope(root, &b8a_manifest_path).with_context(|| {
         format!(
             "B8b requires a passing B8a manifest at {}",
             b8a_manifest_path.display()
@@ -893,6 +902,18 @@ fn verify_b8b_manifest_requirements(
         b8a_manifest_path.display(),
         b8a.manifest.body.as_str()
     );
+    Ok(b8a)
+}
+
+fn verify_b8b_manifest_requirements(
+    root: &Path,
+    manifest: &EvidenceManifest,
+) -> anyhow::Result<()> {
+    // Enforced here, not only by the `test milestone --body B8b` CLI wrapper,
+    // so any caller reaching this function (including a bare
+    // `cargo xtask evidence verify <path>`) stays fail-closed on the same
+    // prerequisite.
+    verify_b8a_prerequisite(root)?;
     ensure!(
         manifest.command == "cargo xtask test milestone --body B8b",
         "B8b evidence manifest must bind the exact milestone command"
@@ -5982,6 +6003,107 @@ mod tests {
 
         let error = verify(root.path(), &manifest_path).expect_err("partial B1 must fail");
         assert!(error.to_string().contains("requires exactly one passing"));
+    }
+
+    fn write_b8a_manifest(root: &Path) -> PathBuf {
+        // Ignored so writing the manifest itself under target/fasti-evidence/
+        // below doesn't dirty the tree that current_source_binding just
+        // recorded as clean.
+        fs::write(root.join(".gitignore"), b"/target/\n").expect("write gitignore");
+        let status = Command::new("git")
+            .args(["add", ".gitignore"])
+            .current_dir(root)
+            .status()
+            .expect("stage gitignore");
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "--quiet", "-m", "ignore target"])
+            .current_dir(root)
+            .status()
+            .expect("commit gitignore");
+        assert!(status.success());
+
+        fs::create_dir(root.join("evidence")).expect("create evidence root");
+        fs::write(root.join("evidence/artifact.bin"), b"artifact").expect("write artifact");
+        let status = Command::new("git")
+            .args(["add", "evidence/artifact.bin"])
+            .current_dir(root)
+            .status()
+            .expect("stage artifact");
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "--quiet", "-m", "bind artifact"])
+            .current_dir(root)
+            .status()
+            .expect("commit artifact");
+        assert!(status.success());
+
+        let mut envelope = manifest(EvidenceEntry {
+            id: "only-artifact".to_owned(),
+            kind: EvidenceKind::BuiltArtifact,
+            path: PathBuf::from("evidence/artifact.bin"),
+            sha256: sha256_bytes(b"artifact"),
+            status: ResultStatus::Pass,
+        });
+        // B8a has no closure policy (create_b8a_milestone_manifest doesn't
+        // exist yet -- see BodyArg::B8a), so only the envelope shape below
+        // needs to be self-consistent, not a real B8a milestone's command.
+        envelope.manifest.body = Body::B8a;
+        envelope.manifest.source = current_source_binding(root).expect("source binding");
+        envelope.manifest.evidence_roots = vec![PathBuf::from("evidence")];
+        envelope.manifest.qa.evidence_id = "only-artifact".to_owned();
+        envelope.manifest_sha256 = sha256_bytes(
+            &serde_json_canonicalizer::to_vec(&envelope.manifest).expect("canonical manifest"),
+        );
+        let manifest_dir = root.join("target/fasti-evidence");
+        fs::create_dir_all(&manifest_dir).expect("create manifest dir");
+        let manifest_path = manifest_dir.join("b8a-manifest.json");
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&envelope).expect("serialize envelope"),
+        )
+        .expect("write envelope");
+        manifest_path
+    }
+
+    #[test]
+    fn b8a_prerequisite_accepts_a_structurally_valid_b8a_manifest() {
+        // Regression test: verify_b8a_prerequisite must check the B8a
+        // manifest's envelope only (schema, digest, source binding, evidence
+        // inventory), not dispatch through verify()'s body-specific closure
+        // policy table -- B8a's own policy is intentionally unimplemented,
+        // so routing a valid B8a manifest through verify() always rejected
+        // it with "has no implemented body-specific closure policy" before
+        // this fix, no matter how well-formed the manifest was.
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        write_b8a_manifest(root.path());
+
+        let verified = verify_b8a_prerequisite(root.path()).expect("valid B8a manifest accepted");
+        assert_eq!(verified.manifest.body, Body::B8a);
+    }
+
+    #[test]
+    fn b8a_prerequisite_rejects_a_manifest_declaring_the_wrong_body() {
+        let root = tempfile::tempdir().expect("temporary workspace");
+        initialize_git(root.path());
+        let manifest_path = write_b8a_manifest(root.path());
+        let mut envelope: EvidenceEnvelope =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest"))
+                .expect("parse manifest");
+        envelope.manifest.body = Body::B1;
+        envelope.manifest_sha256 = sha256_bytes(
+            &serde_json_canonicalizer::to_vec(&envelope.manifest).expect("canonical manifest"),
+        );
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&envelope).expect("serialize envelope"),
+        )
+        .expect("rewrite envelope");
+
+        let error = verify_b8a_prerequisite(root.path())
+            .expect_err("a non-B8a body must be rejected as the B8b prerequisite");
+        assert!(error.to_string().contains("must declare body B8a"));
     }
 
     fn initialize_git(root: &Path) {

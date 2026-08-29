@@ -385,6 +385,13 @@ fn emby_request(
             "Movie, Episode, Audio, or Series",
         )
     })?;
+    // Known gap, not fixed here: this identity has no per-user component, so
+    // two different Emby accounts on the same server completing the same
+    // item within one workspace synthesize the same lexeme and collide into
+    // one occurrence. Emby's webhook plugin payload shape for the acting
+    // user's id isn't confirmed enough here to add without risking a wrong
+    // field guess (unlike `ingest.rs`'s desktop-side JellyfinWebhookPayload,
+    // which already fails closed on a missing UserId for this exact reason).
     let item_id = emby_string(value, &["/Item/Id"]);
     let mut identifiers = Vec::new();
     if let Some(item_id) = item_id {
@@ -424,7 +431,8 @@ fn emby_request(
         ));
     }
 
-    let observed_at = emby_string(value, &["/UtcTimestamp", "/Timestamp"])
+    let explicit_observed_at = emby_string(value, &["/UtcTimestamp", "/Timestamp"]);
+    let observed_at = explicit_observed_at
         .map(str::to_owned)
         .unwrap_or_else(|| Utc::now().to_rfc3339());
     // Keyed on stable fields (item, event kind, completion time), not the
@@ -432,11 +440,17 @@ fn emby_request(
     // event (whitespace, field reordering, an added optional field) must not
     // change the identity, or a legitimate retry looks like a brand new
     // occurrence and 409 idempotency_conflict ("changed evidence, same
-    // identity") becomes unreachable. Falls back to the raw digest only when
-    // Item/Id is absent, since there's no other stable identity to key on.
-    let event_lexeme = match item_id {
-        Some(item_id) => format!("emby:{item_id}:{normalized_event}:{observed_at}"),
-        None => String::from_utf8_lossy(raw).into_owned(),
+    // identity") becomes unreachable. Falls back to the raw digest when
+    // Item/Id or an explicit timestamp is absent: `observed_at` would
+    // otherwise fall back to Utc::now() above, which -- like the documented
+    // Plex observed_at gap -- differs on every retry of the exact same
+    // delivery and would turn a legitimate replay into a fabricated new
+    // occurrence.
+    let event_lexeme = match (item_id, explicit_observed_at) {
+        (Some(item_id), Some(explicit_observed_at)) => {
+            format!("emby:{item_id}:{normalized_event}:{explicit_observed_at}")
+        }
+        _ => String::from_utf8_lossy(raw).into_owned(),
     };
     let digest_identity = derive_deterministic_operation_id(&event_lexeme).to_string();
     let title = emby_string(value, &["/Item/Name"]).map(str::to_owned);
@@ -658,6 +672,13 @@ fn plex_request(
         .and_then(|seconds| Utc.timestamp_opt(seconds, 0).single())
         .map(|value| value.to_rfc3339());
     let server_uuid = value.pointer("/Server/uuid").and_then(Value::as_str);
+    // Known gap, not fixed here: this identity has no per-account component,
+    // so two different Plex accounts on the same server scrobbling the same
+    // item concurrently within one workspace synthesize the same lexeme and
+    // collide into one occurrence. `/Account/id` is present in Plex's
+    // webhook payload but wasn't confirmed stable/present across every event
+    // type this adapter accepts here, so it's flagged rather than added
+    // without that verification.
     // Keyed on stable fields (item, server, view time), not the raw payload
     // part bytes: byte-level noise in a re-delivery of the same real event
     // must not change the identity, or a legitimate retry looks like a
@@ -944,6 +965,36 @@ mod event_identity_tests {
         assert_eq!(ra.duration_seconds, rb.duration_seconds);
         assert_eq!(ra.target_grain, rb.target_grain);
         assert_eq!(claim_tuples(&ra.identifiers), claim_tuples(&rb.identifiers));
+    }
+
+    /// When Emby omits both UtcTimestamp and Timestamp, `emby_request` has no
+    /// stable source timestamp and must not key identity on `Utc::now()`
+    /// (which would differ on every retry of the exact same delivery and
+    /// turn a legitimate replay into a fabricated new occurrence -- the same
+    /// class of bug documented for Plex below). It should fall back to the
+    /// raw body bytes instead, exactly like the Item/Id-missing case.
+    #[test]
+    fn emby_identity_falls_back_to_raw_bytes_when_no_explicit_timestamp_is_present() {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let payload: Value = serde_json::from_str(
+            r#"{
+                "Event": "playback.stop",
+                "PlayedToCompletion": true,
+                "Item": {"Id": "emby-item-9", "Type": "Movie", "Name": "Fixture movie"}
+            }"#,
+        )
+        .expect("fixture without an explicit timestamp");
+        let raw = b"identical-raw-bytes";
+
+        let first = emby_request(&payload, raw, correlation_id)
+            .unwrap_or_else(|_| panic!("fixture is otherwise valid"));
+        let second = emby_request(&payload, raw, correlation_id)
+            .unwrap_or_else(|_| panic!("fixture is otherwise valid"));
+        assert_eq!(
+            first.source_event_id, second.source_event_id,
+            "identical raw bytes must derive the same identity regardless of \
+             wall-clock time between the two calls"
+        );
     }
 
     /// Same as above for Plex, whose identity now derives from ratingKey,
