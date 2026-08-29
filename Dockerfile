@@ -1,6 +1,6 @@
 # Multi-architecture Docker Official Image index digests resolved on 2026-08-22.
 # The tags remain readable; the digests make the build inputs immutable.
-FROM rust:1.97-alpine@sha256:3c38f3f82c2f3d73da3b38e18d279393a04cb43ddded0e35088a8c3324d40900 AS rust-builder
+FROM rust:1.98-alpine@sha256:a10e64dd139b7387337c7fbe8aca31b959b57b2fd4c8ae20a02cf1d6ea424dce AS rust-builder
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY contracts/ ./contracts/
 
 RUN cargo build --locked --release --bin fastid --bin fasti
 
-FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
 ARG FASTI_SOURCE_COMMIT=""
 ARG FASTI_SOURCE_TREE=""
 ARG FASTI_CONTRACT_REF=""
@@ -48,7 +48,7 @@ CMD ["/usr/local/bin/fastid"]
 # Not digest-pinned like the stages above (those were resolved by hand on
 # 2026-08-22). .github/dependabot.yml now tracks the docker ecosystem, so
 # Dependabot will propose pinning this on its normal weekly cadence.
-FROM node:22-alpine AS web-builder
+FROM node:26-alpine AS web-builder
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
