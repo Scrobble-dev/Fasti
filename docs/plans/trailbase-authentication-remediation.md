@@ -45,7 +45,7 @@ Do not use a prior assistant response as source evidence. Do not invent an API, 
 | Item                 | Evidence                                                                                              | State                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | Remote PR #93 head   | `2605819740cd49f4002ee533be0e0b7180828c55`                                                            | `OBSERVED`                                             |
-| Local Gate 11 head   | `fbfdb954c3a478f9b68ecddd30a70b66b896b8ba`; tree `9db75d4ad8a033a9a6c76ee437061ff25f109197`           | `OBSERVED`; not pushed                                 |
+| Local Gate 11 implementation content | `99c10c068110bacb8a98bcbf487ccd34c0d03f2e`; tree `beefcdea2e1148a4e87646510d72c31470831fc0` | `OBSERVED`; not pushed |
 | Live `origin/dev`    | `d035933bd2b804f23db1a5402ee564eba7ce5b0c`                                                            | `OBSERVED`                                             |
 | Merge base           | `0d1c729389a281afe0e4e8557fb30708f4c5d33d`                                                            | `OBSERVED`                                             |
 | Divergence           | PR has 42 unique commits; `dev` has 5                                                                 | `OBSERVED`                                             |
@@ -80,6 +80,22 @@ Recorded: 2026-08-29
 | PR state                                 | Open draft; `CONFLICTING` / `DIRTY`; base `dev`                                                                                                                                                                                                        | `OBSERVED` after draft conversion |
 | Exact-head checks                        | 19 successful checks on the current PR head; no check proves reconciliation with current `dev`                                                                                                                                                         | `OBSERVED`                        |
 | Delivery boundary                        | Implement PR A in this isolated worktree. Use later isolated worktrees only after dependency and file ownership freeze.                                                                                                                                | `IN_PROGRESS`                     |
+
+PR A implementation review checkpoint, before this plan-only update:
+
+| Area | Exact local evidence | State |
+| --- | --- | --- |
+| Truth reset | Fake password, passkey, TOTP, recovery-code, OIDC, development-account, and browser-session HTTP surfaces removed; representative routes return 404 | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| DDD session core | `AuthSubject` and `FastiBrowserSession` invariants in `fasti-domain`; commands and ports in `fasti-application`; digest-only secrets and transactions in `fasti-store` | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| Authorization | Session grants are explicitly subject-owned; creation and every authentication recheck workspace, grant, and owning-client state | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| Browser mutation boundary | Origin, Host, and CSRF proof required by dormant mutation commands; missing and mismatch negative tests pass | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| Session policy | Idle, absolute, remembered, and bounded last-seen behavior implemented with no default; zero, subsecond, and invalid ordering fail before storage | `COMPLETE_WITH_LOCAL_EVIDENCE`; exact production values remain `C1-POLICY` |
+| Migration and rollback | Populated v9 forward migration, injected atomic failure and retry, restart, closed-copy v9 rollback, and unrelated-row preservation pass | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| Developer reset | `--reset-access` reports Access-only reset unavailable without mutation; separately confirmed `--full-dev-root` retains a recoverable backup and rebuilds through normal daemon migration and public probes | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| Gate 10 A+C | Permanent Account and security task map plus separate first-run guided setup; no actionable fake authentication controls | `COMPLETE_WITH_LOCAL_EVIDENCE` |
+| UI QA | Full Playwright UI suite: 82 passed after theme-matrix timeout repair; Tabler, axe, forced-colors, reduced-motion, keyboard, and 320-1920 px coverage retained | `COMPLETE_WITH_LOCAL_EVIDENCE`; rerun required on final exact head |
+| Reviews | Independent session-security and contract/UI reviews completed; every P1/P2 finding has an implemented correction | `FIXED_PENDING_EXACT_HEAD_REVIEW` |
+| Delivery | Local only. No push, remote review-thread resolution, CI, merge, or verified `dev` evidence yet. | `PENDING` |
 
 Current file ownership:
 
@@ -1059,7 +1075,7 @@ The planning reviews run sequentially. Evidence research can run in parallel. Im
 | 8 Security and Ponytail  | Threats, negative controls, licence, minimum complete design, no duplicate systems                    | `COMPLETE_WITH_EVIDENCE` — CSO 9/10 and Ponytail clear 2026-08-29                                                                   |
 | 9 Final plan             | Review findings reconciled; unresolved items explicit                                                 | `APPROVED` — current user update 2026-08-29; Authentik correction integrated                                                        |
 | 10 Design execution      | Tabler-first mockups and design review pass                                                           | `APPROVED` — named user approval `Gate 10 A+C` on 2026-08-29; A is steady state, C is first run, and B is a reusable detail pattern |
-| 11 Implementation        | PR A through H independently green and merged                                                         | `PENDING`                                                                                                                           |
+| 11 Implementation        | PR A through H independently green and merged                                                         | `IN_PROGRESS`; PR A local exact-head review and delivery remain open                                                                |
 
 ## 15. Dependency-ordered multi-PR programme
 
@@ -1514,7 +1530,15 @@ Incident playbooks share these steps: declare and correlate the incident; stop o
 - Restore migrations v8 and v9 to the exact definitions already on `origin/dev`. Never edit a migration present on `dev`. Add the next forward migration for retained final Access tables. Remove PR-only authentication tables through branch reconciliation, not a false historical schema version. Do not retain them for compatibility.
 - Preserve unrelated Fasti data and developer roots through explicit backup/reset choices.
 - Establish final fresh schema and deterministic development reset.
-- Add one proposed `./scripts/dev.sh --reset-access` action. It stops only this worktree's supervised Fasti and TrailBase processes, resolves and prints both exact development roots, refuses a non-development, outside-worktree, symlink-escaped, active, or ambiguous root, requires explicit confirmation, preserves unrelated roots and Chronicle data unless the operator separately selects a full dev-root reset, and rebuilds through normal forward migrations and public/service APIs. It never edits SQLite or TrailBase tables. This is an unreleased-MVP developer reset, not a compatibility path.
+- PR A adds `./scripts/dev.sh --reset-access`. It validates and prints the
+  exact worktree-local Fasti root, states that the TrailBase root is unavailable,
+  and refuses an Access-only mutation because PR A mounts no public reset
+  service. The separate `--full-dev-root` argument requires exact confirmation,
+  stops only this worktree's supervised processes, refuses a non-development,
+  outside-worktree, symlink-escaped, active, or ambiguous root, retains the old
+  root as a recoverable backup, and rebuilds through normal forward migrations
+  and public service probes. It never edits SQLite or TrailBase tables. This is
+  an unreleased-MVP developer reset, not a compatibility path.
 - Test fresh, each supported development root, restart, concurrency, and rollback from a copy.
 - TrailBase and Fasti keep separate roots and migrations.
 - A coordinated `BackupEpoch` is the consistency boundary. Reject new Fasti authentication, linking, membership, grant, credential, token, and session mutations; drain active mutations; checkpoint Fasti SQLite; stop TrailBase; then capture the full TrailBase depot and optional encrypted vault. Chronicle ingestion may continue only when its state cannot change a manifest-bound Access invariant.
