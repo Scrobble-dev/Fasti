@@ -762,9 +762,28 @@ impl BrowserAccountPort for SqliteKernel {
                 correlation_id,
             ));
         }
+        let count: i64 = map_sql(
+            transaction.query_row(
+                "SELECT count(*) FROM browser_sessions WHERE user_id = ?1 AND (session_digest = ?2 OR session_digest LIKE ?2 || '%')",
+                params![user_id, target_prefix],
+                |row| row.get(0),
+            ),
+            capability,
+            correlation_id,
+        )?;
+        if count == 0 {
+            return Ok(false);
+        }
+        if count > 1 && target_prefix.len() < 64 {
+            return Err(problem(
+                ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            ));
+        }
         let changed = map_sql(
             transaction.execute(
-                "DELETE FROM browser_sessions WHERE user_id = ?1 AND session_digest LIKE ?2 || '%'",
+                "DELETE FROM browser_sessions WHERE user_id = ?1 AND (session_digest = ?2 OR (length(?2) >= 8 AND session_digest LIKE ?2 || '%'))",
                 params![user_id, target_prefix],
             ),
             capability,
@@ -836,10 +855,6 @@ impl BrowserAccountPort for SqliteKernel {
         let client_id = caller.access().client_id().to_string();
         let target_profile_str = target_profile_id.to_string();
 
-        if !caller.user().is_admin() && caller.access().profile_id() != target_profile_id {
-            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
-        }
-
         let profile_exists: bool = map_sql(
             transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = ?1 AND workspace_id = ?2)",
@@ -866,6 +881,13 @@ impl BrowserAccountPort for SqliteKernel {
             capability,
             correlation_id,
         )?;
+
+        if !caller.user().is_admin()
+            && !grant_exists
+            && caller.access().profile_id() != target_profile_id
+        {
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+        }
         let grant_id = if !grant_exists {
             if !caller.user().is_admin() {
                 return Err(problem(ProblemCode::Forbidden, capability, correlation_id));

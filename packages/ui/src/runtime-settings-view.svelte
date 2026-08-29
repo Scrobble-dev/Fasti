@@ -862,7 +862,18 @@
     if (typeof window === "undefined") return fallback;
     try {
       const saved = localStorage.getItem(key);
-      if (saved) return JSON.parse(saved) as T;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(fallback)) {
+          return (Array.isArray(parsed) ? parsed : fallback) as T;
+        }
+        if (typeof fallback === "object" && fallback !== null) {
+          return (
+            typeof parsed === "object" && parsed !== null ? parsed : fallback
+          ) as T;
+        }
+        return parsed as T;
+      }
     } catch {}
     return fallback;
   }
@@ -935,42 +946,42 @@
     passkeyBusy = true;
     passkeyError = "";
     try {
-      if (
-        typeof window !== "undefined" &&
-        window.PublicKeyCredential &&
-        navigator.credentials?.create
-      ) {
-        const challenge = new Uint8Array(32);
-        window.crypto.getRandomValues(challenge);
-        const userId = new Uint8Array(16);
-        window.crypto.getRandomValues(userId);
-        try {
-          await navigator.credentials.create({
-            publicKey: {
-              challenge,
-              rp: {
-                name: "Fasti Media Chronicle",
-                id: window.location.hostname || "localhost",
-              },
-              user: {
-                id: userId,
-                name: session?.user.username || "fasti-user",
-                displayName: session?.user.username || "Fasti User",
-              },
-              pubKeyCredParams: [
-                { type: "public-key", alg: -7 },
-                { type: "public-key", alg: -257 },
-              ],
-              authenticatorSelection: {
-                userVerification: "preferred",
-                residentKey: "preferred",
-              },
-              timeout: 60000,
-            },
-          });
-        } catch (credErr) {
-          console.warn("WebAuthn ceremony note:", credErr);
-        }
+      if (!window.PublicKeyCredential || !navigator.credentials?.create) {
+        throw new Error(
+          "WebAuthn / Passkeys are not supported in this browser environment.",
+        );
+      }
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const userId = new Uint8Array(16);
+      window.crypto.getRandomValues(userId);
+      const cred = await navigator.credentials.create({
+        publicKey: {
+          challenge,
+          rp: {
+            name: "Fasti Media Chronicle",
+            id: window.location.hostname || "localhost",
+          },
+          user: {
+            id: userId,
+            name: session?.user.username || "fasti-user",
+            displayName: session?.user.username || "Fasti User",
+          },
+          pubKeyCredParams: [
+            { type: "public-key", alg: -7 },
+            { type: "public-key", alg: -257 },
+          ],
+          authenticatorSelection: {
+            userVerification: "preferred",
+            residentKey: "preferred",
+          },
+          timeout: 60000,
+        },
+      });
+      if (!cred) {
+        throw new Error(
+          "WebAuthn ceremony was cancelled or no credential was generated.",
+        );
       }
       const newKey: RegisteredPasskey = {
         id: `pk_${Date.now()}`,
@@ -1128,10 +1139,7 @@
           class="list-group-item list-group-item-action"
           class:active={active === "account"}
           aria-current={active === "account" ? "page" : undefined}
-          onclick={(event) => {
-            followTabLink(event, "account");
-            void loadAccountData();
-          }}
+          onclick={(event) => followTabLink(event, "account")}
           ><IconUserShield size={16} aria-hidden="true" /> Account & Sessions</a
         >
         <a
@@ -2922,34 +2930,7 @@
             class="text-center p-3 bg-white rounded border mb-3 mx-auto"
             style="width: 180px; height: 180px; display: grid; place-items: center;"
           >
-            <svg
-              width="150"
-              height="150"
-              viewBox="0 0 100 100"
-              fill="currentColor"
-            >
-              <rect x="0" y="0" width="30" height="30" fill="#000" />
-              <rect x="5" y="5" width="20" height="20" fill="#fff" />
-              <rect x="10" y="10" width="10" height="10" fill="#000" />
-              <rect x="70" y="0" width="30" height="30" fill="#000" />
-              <rect x="75" y="5" width="20" height="20" fill="#fff" />
-              <rect x="80" y="10" width="10" height="10" fill="#000" />
-              <rect x="0" y="70" width="30" height="30" fill="#000" />
-              <rect x="5" y="75" width="20" height="20" fill="#fff" />
-              <rect x="10" y="80" width="10" height="10" fill="#000" />
-              <rect x="35" y="10" width="10" height="10" fill="#000" />
-              <rect x="50" y="10" width="10" height="10" fill="#000" />
-              <rect x="35" y="25" width="25" height="10" fill="#000" />
-              <rect x="10" y="35" width="10" height="25" fill="#000" />
-              <rect x="25" y="40" width="15" height="15" fill="#000" />
-              <rect x="45" y="45" width="10" height="10" fill="#000" />
-              <rect x="60" y="35" width="15" height="10" fill="#000" />
-              <rect x="80" y="40" width="10" height="20" fill="#000" />
-              <rect x="35" y="65" width="10" height="25" fill="#000" />
-              <rect x="50" y="60" width="25" height="10" fill="#000" />
-              <rect x="55" y="75" width="15" height="15" fill="#000" />
-              <rect x="75" y="75" width="15" height="15" fill="#000" />
-            </svg>
+            <IconQrcode size={130} class="text-dark" aria-hidden="true" />
           </div>
 
           <div class="mb-3 text-center">

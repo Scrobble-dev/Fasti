@@ -143,6 +143,13 @@
     }
   }
 
+  async function sha256Hex(text: string): Promise<string> {
+    const buffer = new TextEncoder().encode(text);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
   async function activateProfile(id: string, pin?: string): Promise<void> {
     busy = true;
     errorMessage = "";
@@ -159,12 +166,15 @@
 
   async function submitPin(): Promise<void> {
     if (!targetProfile) return;
-    if (
-      targetProfile.pinHash &&
-      enteredPin !== targetProfile.pinHash &&
-      enteredPin !== targetProfile.pinHash
-      errorMessage = "Invalid 4-digit PIN code. Please try again.";
-      return;
+    if (targetProfile.pinHash) {
+      const enteredHash = await sha256Hex(enteredPin);
+      if (
+        enteredHash !== targetProfile.pinHash &&
+        enteredPin !== targetProfile.pinHash
+      ) {
+        errorMessage = "Invalid 4-digit PIN code. Please try again.";
+        return;
+      }
     }
     await activateProfile(targetProfile.id, enteredPin);
   }
@@ -174,7 +184,7 @@
       errorMessage = "Profile name is required.";
       return;
     }
-    if (formPinProtected && formPin.length !== 4) {
+    if (formPinProtected && formPin.length > 0 && formPin.length !== 4) {
       errorMessage = "PIN must be exactly 4 digits.";
       return;
     }
@@ -182,6 +192,9 @@
     busy = true;
     errorMessage = "";
     try {
+      const hashedPin =
+        formPinProtected && formPin ? await sha256Hex(formPin) : undefined;
+
       if (mode === "create" && onCreateProfile) {
         await onCreateProfile({
           name: formName.trim(),
@@ -189,7 +202,7 @@
           avatarColor: formAvatarColor,
           isEssentialMode: formEssentialMode,
           pinProtected: formPinProtected,
-          pinHash: formPinProtected ? formPin : undefined,
+          pinHash: hashedPin,
           lastActive: new Date().toISOString(),
         });
         noticeMessage = `Profile "${formName}" created successfully.`;
@@ -202,7 +215,11 @@
           avatarColor: formAvatarColor,
           isEssentialMode: formEssentialMode,
           pinProtected: formPinProtected,
-          pinHash: formPinProtected ? formPin || undefined : undefined,
+          pinHash:
+            hashedPin ??
+            (formPinProtected
+              ? profiles.find((p) => p.id === editingId)?.pinHash
+              : undefined),
           lastActive: new Date().toISOString(),
         });
         noticeMessage = `Profile "${formName}" updated.`;
@@ -231,6 +248,11 @@
       busy = false;
     }
   }
+
+  function getAvatarBg(colorId?: string): string {
+    const found = AVATAR_COLORS.find((c) => c.id === colorId);
+    return found?.hex || "#206bc4";
+  }
 </script>
 
 {#if open}
@@ -240,6 +262,9 @@
     role="dialog"
     aria-modal="true"
     aria-labelledby="profile-manager-title"
+    onkeydown={(e) => {
+      if (e.key === "Escape") onClose();
+    }}
   >
     <div
       class="modal-backdrop fade show"
@@ -475,11 +500,15 @@
                         class="color-circle-btn {formAvatarColor === c.id
                           ? 'active'
                           : ''}"
-                        style="background-color: {c.hex};"
                         title={c.label}
                         aria-label={`Select ${c.label} color`}
                         onclick={() => (formAvatarColor = c.id)}
-                      ></button>
+                      >
+                        <span
+                          class="color-circle-inner"
+                          style="background-color: {c.hex};"
+                        ></span>
+                      </button>
                     {/each}
                   </div>
                 </div>
@@ -537,71 +566,61 @@
                       placeholder="••••"
                       bind:value={formPin}
                     />
+                    <small class="form-hint">
+                      Required whenever switching into this profile.
+                    </small>
                   </div>
                 {/if}
               </div>
 
-              <div
-                class="d-flex justify-content-between align-items-center mt-4"
-              >
-                {#if mode === "edit" && onDeleteProfile && editingId !== activeProfileId}
-                  <button
-                    type="button"
-                    class="btn btn-outline-danger d-flex align-items-center gap-1"
-                    style="min-height: 44px;"
-                    onclick={() => void handleDelete(editingId)}
-                    disabled={busy}
-                  >
-                    <IconTrash size={16} aria-hidden="true" />
-                    Delete Profile
-                  </button>
-                {:else}
-                  <div></div>
-                {/if}
-
-                <div class="d-flex gap-2">
-                  <button
-                    type="button"
-                    class="btn btn-outline-secondary"
-                    style="min-height: 44px;"
-                    onclick={resetForm}
-                    disabled={busy}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    class="btn btn-primary"
-                    style="min-height: 44px;"
-                    disabled={busy}
-                  >
-                    {mode === "create" ? "Create Profile" : "Save Changes"}
-                  </button>
-                </div>
+              <div class="d-flex justify-content-end gap-2 pt-2">
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary"
+                  style="min-height: 44px;"
+                  onclick={resetForm}
+                  disabled={busy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  style="min-height: 44px;"
+                  disabled={busy}
+                >
+                  {mode === "create" ? "Create Profile" : "Save Changes"}
+                </button>
               </div>
             </form>
-          {:else if mode === "pin_prompt"}
+          {:else if mode === "pin_prompt" && targetProfile}
+            <!-- PIN Code Unlock Screen -->
             <div class="text-center py-3">
-              <span
-                class="avatar avatar-lg bg-dark text-white rounded-circle mb-3"
+              <div
+                class="avatar avatar-lg rounded-circle mx-auto mb-3 text-white fw-bold"
+                style="background-color: {getAvatarBg(
+                  targetProfile.avatarColor,
+                )}; width: 64px; height: 64px; font-size: 1.5rem;"
               >
-                <IconLock size={28} aria-hidden="true" />
-              </span>
-              <h3>Enter PIN for {targetProfile?.name}</h3>
-              <p class="text-muted small mb-4">
-                This profile is protected with a 4-digit security passcode.
+                {targetProfile.name.charAt(0).toUpperCase()}
+              </div>
+              <h4>Enter PIN for {targetProfile.name}</h4>
+              <p class="small text-muted mb-4">
+                This profile is protected with a 4-digit passcode.
               </p>
 
               <div class="d-flex justify-content-center mb-4">
                 <input
                   type="password"
-                  class="form-control text-center fs-2"
-                  style="max-width: 180px; letter-spacing: 0.4em; font-family: monospace;"
+                  class="form-control text-center fs-2 font-monospace"
+                  style="max-width: 180px; letter-spacing: 0.5em;"
                   maxlength="4"
                   placeholder="••••"
                   bind:value={enteredPin}
                   onkeydown={(e) => {
-                    if (e.key === "Enter") void submitPin();
+                    if (e.key === "Enter" && enteredPin.length === 4) {
+                      submitPin();
+                    }
                   }}
                 />
               </div>
@@ -643,19 +662,39 @@
     transform: translateY(-2px);
   }
   .color-circle-btn {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+  .color-circle-inner {
     width: 28px;
     height: 28px;
     border-radius: 50%;
     border: 2px solid transparent;
-    cursor: pointer;
-    padding: 0;
     transition: transform 0.1s ease;
   }
-  .color-circle-btn:hover {
+  .color-circle-btn:hover .color-circle-inner {
     transform: scale(1.15);
   }
-  .color-circle-btn.active {
+  .color-circle-btn.active .color-circle-inner {
     border-color: var(--tblr-primary, #206bc4);
     box-shadow: 0 0 0 2px rgba(32, 107, 196, 0.35);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .profile-card,
+    .color-circle-inner {
+      transition: none;
+    }
+    .profile-card:hover,
+    .color-circle-btn:hover .color-circle-inner {
+      transform: none;
+    }
   }
 </style>
