@@ -572,7 +572,7 @@ dependencies = [
  "fasti-api",
  "fasti-application",
  "fasti-store",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "tokio",
  "tracing",
  "tracing-subscriber",
