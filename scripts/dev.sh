@@ -40,10 +40,6 @@ FASTI_IMAGE="${FASTI_IMAGE:-fasti:b0}"
 FASTI_PORT_FALLBACK="${FASTI_PORT_FALLBACK:-fail}"
 FASTI_CONTAINER_RUNTIME="${FASTI_CONTAINER_RUNTIME:-podman}"
 FASTI_PUBLIC_URL="${FASTI_PUBLIC_URL:-}"
-# dev.sh always runs loopback-only, so the daemon's own loopback-only guard
-# on this flag is already satisfied -- default it on so the one-time
-# testadmin dev account actually gets seeded. Set to false to opt out.
-FASTI_DEVELOPMENT_TEST_ACCOUNT="${FASTI_DEVELOPMENT_TEST_ACCOUNT:-true}"
 BOUND_ADDR_FILE="$RUNDIR/bound-addr"
 FASTI_API_URL_EXPLICIT=1
 if [[ -z "${FASTI_API_URL:-}" ]]; then
@@ -546,7 +542,6 @@ _run_container() {
     -v "$DATADIR:/data:Z" \
     -e FASTI_DATA_ROOT=/data \
     -e FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
-    -e FASTI_DEVELOPMENT_TEST_ACCOUNT="$FASTI_DEVELOPMENT_TEST_ACCOUNT" \
     "$FASTI_IMAGE"
 }
 
@@ -643,7 +638,6 @@ _start_native() {
   export FASTI_LISTEN FASTI_API_URL FASTI_PORT_FALLBACK
   export FASTI_BOUND_ADDR_FILE="$BOUND_ADDR_FILE"
   export FASTI_DATA_ROOT="$DATADIR"
-  export FASTI_DEVELOPMENT_TEST_ACCOUNT
 
   "${NATIVE_SCOPE_RUNNER[@]}" "$PROJECT_ROOT/target/debug/fastid" > "$LOGDIR/fastid.log" 2>&1 &
   local daemon_pid=$!

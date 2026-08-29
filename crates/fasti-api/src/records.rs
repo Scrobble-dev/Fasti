@@ -89,7 +89,7 @@ fn resolved_field_dto(field: &ResolvedField) -> ResolvedFieldDto {
     post,
     path = "/api/v1/records",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     request_body = CreateRecordRequest,
     responses(
         (status = 200, description = "The new record's identity", body = CreateRecordResponse),
@@ -113,7 +113,7 @@ pub(crate) async fn create_record(
     let capability = CapabilityKey::CreateRecord;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let grain = Grain::from_str(&request.grain)
         .map_err(|_| invalid_identifier_input(capability, correlation_id))?;
 
@@ -124,7 +124,6 @@ pub(crate) async fn create_record(
             authentication,
             capability,
             correlation_id,
-            true,
         )?;
         kernel.create_record(CreateRecordCommand::new(correlation_id, access, grain))
     })
@@ -140,7 +139,7 @@ pub(crate) async fn create_record(
     post,
     path = "/api/v1/records/identifiers",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     request_body = AttachIdentifierRequest,
     responses(
         (status = 200, description = "The attached (or already-present) identifier claim", body = AttachIdentifierResponse),
@@ -166,7 +165,7 @@ pub(crate) async fn attach_identifier(
     let capability = CapabilityKey::AttachIdentifier;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let record_id = request
         .record_id
         .parse()
@@ -183,7 +182,6 @@ pub(crate) async fn attach_identifier(
             authentication,
             capability,
             correlation_id,
-            true,
         )?;
         kernel.attach_identifier(AttachIdentifierCommand::new(
             correlation_id,
@@ -205,7 +203,7 @@ pub(crate) async fn attach_identifier(
     get,
     path = "/api/v1/records",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     responses(
         (status = 200, description = "Records visible to this credential's workspace", body = ListRecordsResponse),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
@@ -221,7 +219,7 @@ pub(crate) async fn list_records(
 ) -> HttpResult<ListRecordsResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListRecords;
-    let authentication = request_authentication(&headers, capability, correlation_id, false)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
 
     let kernel = state.kernel;
     let records = run_kernel(capability, correlation_id, move || {
@@ -230,7 +228,6 @@ pub(crate) async fn list_records(
             authentication,
             capability,
             correlation_id,
-            false,
         )?;
         kernel.list_records(ListRecordsQuery::new(correlation_id, access))
     })
@@ -281,7 +278,7 @@ pub(crate) async fn list_records(
     post,
     path = "/api/v1/namespaces",
     tag = "records",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     request_body = RegisterNamespaceRequest,
     responses(
         (status = 200, description = "The registered (or already-present) namespace", body = RegisterNamespaceResponse),
@@ -305,7 +302,7 @@ pub(crate) async fn register_namespace(
     let capability = CapabilityKey::RegisterNamespace;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
 
     let mut grains = Vec::with_capacity(request.grains.len());
     for grain in &request.grains {
@@ -339,7 +336,6 @@ pub(crate) async fn register_namespace(
             authentication,
             capability,
             correlation_id,
-            true,
         )?;
         kernel.register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
             correlation_id,

@@ -21,7 +21,6 @@ async fn routers() -> (tempfile::TempDir, Router, Router) {
         kernel.clone(),
         "127.0.0.1:8420".parse().expect("loopback"),
         root.path(),
-        fasti_application::MAX_SESSION_MINUTES,
     );
     let integrations = integration_router(kernel);
     (root, local, integrations)

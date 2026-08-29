@@ -38,7 +38,7 @@ fn requested_disposition(disposition: TrackingDispositionUpdateDto) -> Option<Tr
     get,
     path = "/api/v1/profile/record-tracking-dispositions",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     responses(
         (status = 200, description = "The authenticated profile's explicit record tracking dispositions", body = ListTrackingDispositionsResponse),
         (status = 401, description = "Credential or browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
@@ -54,7 +54,7 @@ pub(crate) async fn list_tracking_dispositions(
 ) -> HttpResult<ListTrackingDispositionsResponse> {
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ListTrackingDispositions;
-    let authentication = request_authentication(&headers, capability, correlation_id, false)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let kernel = state.kernel;
     let page = run_kernel(capability, correlation_id, move || {
         let access = authenticate_request(
@@ -62,7 +62,6 @@ pub(crate) async fn list_tracking_dispositions(
             authentication,
             capability,
             correlation_id,
-            false,
         )?;
         kernel
             .list_tracking_dispositions(ListTrackingDispositionsQuery::new(correlation_id, access))
@@ -87,7 +86,7 @@ pub(crate) async fn list_tracking_dispositions(
     put,
     path = "/api/v1/profile/record-tracking-dispositions/{record_id}",
     tag = "profile",
-    security(("credential_bearer" = []), ("browser_session" = [])),
+    security(("credential_bearer" = [])),
     params(("record_id" = String, Path, description = "Fasti Record identifier")),
     request_body = SetTrackingDispositionRequest,
     responses(
@@ -114,7 +113,7 @@ pub(crate) async fn set_tracking_disposition(
     let capability = CapabilityKey::SetTrackingDisposition;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
-    let authentication = request_authentication(&headers, capability, correlation_id, true)?;
+    let authentication = request_authentication(&headers, capability, correlation_id)?;
     let record_id = record_id.parse::<RecordId>().map_err(|_| {
         application_problem(Box::new(FastiProblem::record_not_found(
             capability,
@@ -129,7 +128,6 @@ pub(crate) async fn set_tracking_disposition(
             authentication,
             capability,
             correlation_id,
-            true,
         )?;
         kernel.set_tracking_disposition(SetTrackingDispositionCommand::new(
             correlation_id,

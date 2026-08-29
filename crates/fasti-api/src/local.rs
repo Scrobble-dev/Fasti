@@ -6,9 +6,8 @@ use axum::{
     Json, Router,
 };
 use fasti_application::{
-    ApplicationResult, AuthenticateBrowserSessionQuery, AuthenticateCredentialQuery, CapabilityKey,
-    EnrollFirstClientCommand, FastiProblem, InitializeNodeCommand, LocalKernel,
-    RequestAccessContext, SecretMaterial,
+    ApplicationResult, AuthenticateCredentialQuery, CapabilityKey, EnrollFirstClientCommand,
+    FastiProblem, InitializeNodeCommand, LocalKernel, RequestAccessContext, SecretMaterial,
 };
 use fasti_contracts::{
     ClientEnrollmentResponse, CredentialSchemeDto, EnrollFirstClientRequest, InitializeNodeRequest,
@@ -26,19 +25,10 @@ const MAX_RECORDS_JSON_BODY_BYTES: usize = 8 * 1024;
 #[derive(Clone)]
 pub(crate) struct LocalApiState {
     pub(crate) kernel: Arc<dyn LocalKernel>,
-    pub(crate) secure_cookies: bool,
-    /// Ceiling passed to `CreateBrowserSessionCommand::try_new`. Always
-    /// [`fasti_application::MAX_SESSION_MINUTES`] except when the loopback-gated
-    /// `FASTI_DEVELOPMENT_AUTO_LOGIN` dev convenience raises it.
-    pub(crate) max_session_minutes: u32,
 }
 
 pub(crate) enum RequestAuthentication {
     Bearer(SecretMaterial),
-    Browser {
-        session: SecretMaterial,
-        csrf: Option<SecretMaterial>,
-    },
 }
 
 type HttpResult<T> = Result<Json<T>, HttpProblem>;
@@ -101,77 +91,12 @@ pub(crate) fn bearer_secret(
         )))
     })
 }
-pub(crate) fn cookie_secret(
-    headers: &HeaderMap,
-    name: &str,
-    capability: CapabilityKey,
-    correlation_id: RequestCorrelationId,
-) -> Result<SecretMaterial, HttpProblem> {
-    let mut values = headers
-        .get_all(header::COOKIE)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(';'))
-        .filter_map(|part| part.trim().split_once('='))
-        .filter_map(|(key, value)| (key == name).then_some(value));
-    let value = values
-        .next()
-        .filter(|_| values.next().is_none())
-        .ok_or_else(|| {
-            application_problem(Box::new(FastiProblem::authentication_failed(
-                capability,
-                correlation_id,
-            )))
-        })?;
-    SecretMaterial::try_from_hex(value).map_err(|_| {
-        application_problem(Box::new(FastiProblem::authentication_failed(
-            capability,
-            correlation_id,
-        )))
-    })
-}
-
-fn csrf_secret(
-    headers: &HeaderMap,
-    capability: CapabilityKey,
-    correlation_id: RequestCorrelationId,
-) -> Result<SecretMaterial, HttpProblem> {
-    let cookie = cookie_secret(headers, "fasti_csrf", capability, correlation_id)?;
-    let header = headers
-        .get("x-fasti-csrf")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| SecretMaterial::try_from_hex(value).ok())
-        .ok_or_else(|| {
-            application_problem(Box::new(FastiProblem::forbidden(
-                capability,
-                correlation_id,
-            )))
-        })?;
-    if !cookie.constant_time_eq(&header) {
-        return Err(application_problem(Box::new(FastiProblem::forbidden(
-            capability,
-            correlation_id,
-        ))));
-    }
-    Ok(header)
-}
-
 pub(crate) fn request_authentication(
     headers: &HeaderMap,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
-    mutation: bool,
 ) -> Result<RequestAuthentication, HttpProblem> {
-    if headers.contains_key(header::AUTHORIZATION) {
-        return bearer_secret(headers, capability, correlation_id)
-            .map(RequestAuthentication::Bearer);
-    }
-    Ok(RequestAuthentication::Browser {
-        session: cookie_secret(headers, "fasti_session", capability, correlation_id)?,
-        csrf: mutation
-            .then(|| csrf_secret(headers, capability, correlation_id))
-            .transpose()?,
-    })
+    bearer_secret(headers, capability, correlation_id).map(RequestAuthentication::Bearer)
 }
 
 pub(crate) fn authenticate_request(
@@ -179,21 +104,11 @@ pub(crate) fn authenticate_request(
     authentication: RequestAuthentication,
     capability: CapabilityKey,
     correlation_id: RequestCorrelationId,
-    mutation: bool,
 ) -> ApplicationResult<RequestAccessContext> {
     match authentication {
         RequestAuthentication::Bearer(secret) => kernel.authenticate_credential(
             AuthenticateCredentialQuery::new(correlation_id, capability, secret),
         ),
-        RequestAuthentication::Browser { session, csrf } => kernel
-            .authenticate_browser_session(AuthenticateBrowserSessionQuery::new(
-                correlation_id,
-                capability,
-                session,
-                csrf,
-                mutation,
-            ))
-            .map(|authenticated| *authenticated.access()),
     }
 }
 
@@ -307,14 +222,8 @@ where
 pub(crate) fn router(
     kernel: Arc<dyn LocalKernel>,
     include_bootstrap: bool,
-    secure_cookies: bool,
-    max_session_minutes: u32,
 ) -> Router {
-    let state = LocalApiState {
-        kernel,
-        secure_cookies,
-        max_session_minutes,
-    };
+    let state = LocalApiState { kernel };
     let bootstrap = Router::new()
         .route("/api/v1/node/initialization", post(initialize_node))
         .route("/api/v1/client-enrollments", post(enroll_first_client))
@@ -329,7 +238,6 @@ pub(crate) fn router(
         .layer(DefaultBodyLimit::max(MAX_NUVIO_COLLECTIONS_JSON_BODY_BYTES));
 
     let routes = Router::new()
-        .merge(crate::browser_auth::router())
         .merge(observation)
         .merge(records)
         .merge(profile_state)
