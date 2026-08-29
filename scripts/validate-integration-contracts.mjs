@@ -74,6 +74,12 @@ export async function validateIntegrationContracts(root = repositoryRoot) {
       openapi.paths[address]?.post,
       `${address} is missing from generated OpenAPI`,
     );
+    const operationName = `receive${channel[0].toUpperCase()}${channel.slice(1)}`;
+    assert.equal(
+      value.operations[operationName]?.channel?.$ref,
+      `#/channels/${channel}`,
+      `${operationName} must reference the ${channel} channel, not a swapped one`,
+    );
     /* eslint-enable security/detect-object-injection */
   }
   assert.ok(

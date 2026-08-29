@@ -44,7 +44,7 @@ Provider identifiers are evidence, not canonical identity.
 - Keep provider integrations modular.
 - Keep wire provider IDs separate from external identifier namespaces. Reuse
   `fasti_application::provider_identity_mapping` for Google Books and TMDB
-  coordinates in every adapter; do not add adapter-local TMDB grain fallbacks.
+  coordinates in every adapter; do not add adapter-local TMDB identifier fallbacks.
 - Route governed outbound access through application policy. Provider declarations are maximum grants; operator allow lists only narrow them, and denies win.
 
 ## Contract changes
