@@ -44,11 +44,12 @@ Do not use a prior assistant response as source evidence. Do not invent an API, 
 
 | Item | Evidence | State |
 | --- | --- | --- |
-| PR #93 head | `2605819740cd49f4002ee533be0e0b7180828c55` | `OBSERVED` |
+| Remote PR #93 head | `2605819740cd49f4002ee533be0e0b7180828c55` | `OBSERVED` |
+| Local Gate 11 head | `fbfdb954c3a478f9b68ecddd30a70b66b896b8ba`; tree `9db75d4ad8a033a9a6c76ee437061ff25f109197` | `OBSERVED`; not pushed |
 | Live `origin/dev` | `d035933bd2b804f23db1a5402ee564eba7ce5b0c` | `OBSERVED` |
 | Merge base | `0d1c729389a281afe0e4e8557fb30708f4c5d33d` | `OBSERVED` |
 | Divergence | PR has 42 unique commits; `dev` has 5 | `OBSERVED` |
-| Mergeability | Open, non-draft, `CONFLICTING` / `DIRTY` | `OBSERVED` |
+| Mergeability | Open draft; remote head remains `CONFLICTING` / `DIRTY` until the reconciled implementation is pushed | `OBSERVED` |
 | Existing checks | All 19 reported checks pass on the exact PR head; none covers reconciliation with current `dev` | `OBSERVED`; reconciliation unproven |
 | Review threads | 46 total; 29 unresolved: 21 current and 8 outdated | `OBSERVED` |
 | Safe worktree | `/home/ryan/code/fasti/.claude/worktrees/fasti-port-conflict-f3c778` | `OBSERVED` |
@@ -71,9 +72,11 @@ Recorded: 2026-08-29
 | Item | Exact evidence | State |
 | --- | --- | --- |
 | Approved design | `approved.json`; every recorded artifact SHA-256 matched the current file | `VERIFIED` |
-| PR #93 head | `2605819740cd49f4002ee533be0e0b7180828c55`; tree `b787bc5da5f5c2c80cdd0833596b3d9a0274874f` | `OBSERVED` |
+| Remote PR #93 head before reconciliation | `2605819740cd49f4002ee533be0e0b7180828c55`; tree `b787bc5da5f5c2c80cdd0833596b3d9a0274874f` | `OBSERVED` |
+| Local implementation head | `fbfdb954c3a478f9b68ecddd30a70b66b896b8ba`; tree `9db75d4ad8a033a9a6c76ee437061ff25f109197` | `OBSERVED`; not pushed |
 | Current `origin/dev` | `d035933bd2b804f23db1a5402ee564eba7ce5b0c` | `OBSERVED` |
 | Merge base and divergence | `0d1c729389a281afe0e4e8557fb30708f4c5d33d`; 5 `dev` commits and 42 PR commits | `OBSERVED` |
+| Reconciliation | Merge commit `fbfdb954c3a478f9b68ecddd30a70b66b896b8ba` has parents `3c45c2bdfd1d9092e25bbe9ae7db6e350014b93b` and `d035933bd2b804f23db1a5402ee564eba7ce5b0c`; the only content conflict was `.codacy.yml`, resolved by retaining both engine policies | `COMPLETE_WITH_LOCAL_EVIDENCE` |
 | PR state | Open draft; `CONFLICTING` / `DIRTY`; base `dev` | `OBSERVED` after draft conversion |
 | Exact-head checks | 19 successful checks on the current PR head; no check proves reconciliation with current `dev` | `OBSERVED` |
 | Delivery boundary | Implement PR A in this isolated worktree. Use later isolated worktrees only after dependency and file ownership freeze. | `IN_PROGRESS` |
@@ -82,7 +85,7 @@ Current file ownership:
 
 | Owner | Paths or state | Rule |
 | --- | --- | --- |
-| Commander | This plan, Git and GitHub state, integration, conflict resolution, package sequencing, and exact-head evidence | Sole writer until current `dev` reconciliation completes. |
+| Commander | This plan, Git and GitHub state, integration, PR A package sequencing, and exact-head evidence | Sole writer in the PR #93 worktree until the PR A gap audit fixes file ownership. |
 | `pr93_live_inventory` | GitHub and PR evidence | Read-only. |
 | `pr93_slice_gap_audit` | PR #93 source and requirement audit | Read-only. |
 | `fasti_handoff_evidence` | Handoffs and historical context | Read-only. |
