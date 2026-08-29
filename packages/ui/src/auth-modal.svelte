@@ -60,6 +60,8 @@
       dialog.showModal();
     } else if (!show && dialog.open) {
       dialog.close();
+      problem = "";
+      notice = "";
     }
   });
 
@@ -103,7 +105,7 @@
         (violation) => violation.code === "last_active_administrator_required",
       )
     ) {
-      return "Keep at least one active administrator account.";
+      return "This is the only active administrator. Keep the account active.";
     }
     return error instanceof Error
       ? error.message
@@ -146,8 +148,8 @@
     if (!host.listActiveSessions) return;
     try {
       sessions = await host.listActiveSessions();
-    } catch (error) {
-      problem = messageFor(error);
+    } catch {
+      sessions = [];
     }
   }
 
@@ -334,513 +336,541 @@
     if (event.target === event.currentTarget) onClose();
   }}
 >
-  <section class="card modal-card">
-    <header class="card-header modal-header">
-      <div>
-        <h2 id="auth-modal-title" class="card-title">
-          Account access & security
-        </h2>
-        <p class="text-secondary mb-0">
-          Manage browser sessions and account access. Media profiles and other
-          authentication methods stay separate.
-        </p>
-      </div>
-      <button
-        type="button"
-        class="btn btn-icon btn-ghost-secondary"
-        onclick={onClose}
-        aria-label="Close account dialog"
-      >
-        <IconX size={18} aria-hidden="true" />
-      </button>
-    </header>
-
-    <div class="card-body modal-body">
-      {#if notice}
-        <div class="alert alert-success" role="status">{notice}</div>
-      {/if}
-      {#if problem}
-        <div id="auth-problem" class="alert alert-danger" role="alert">
-          {problem}
+  {#if show}
+    <section class="card modal-card">
+      <header class="card-header modal-header">
+        <div>
+          <h2 id="auth-modal-title" class="card-title">
+            Account access & security
+          </h2>
+          <p class="text-secondary mb-0">
+            Manage browser sessions and account access. Media profiles and other
+            authentication methods stay separate.
+          </p>
         </div>
-      {/if}
-
-      {#if !session}
-        <form class="form-stack" onsubmit={signIn}>
-          <div>
-            <label class="form-label" for="auth-username">Username</label>
-            <input
-              id="auth-username"
-              class="form-control"
-              type="text"
-              autocomplete="username"
-              minlength="3"
-              maxlength="64"
-              pattern={usernamePattern}
-              aria-invalid={signInInvalid}
-              aria-describedby={signInInvalid ? "auth-problem" : undefined}
-              bind:value={username}
-              oninput={() => (signInInvalid = false)}
-              autofocus
-              required
-            />
-          </div>
-          <div>
-            <label class="form-label" for="auth-password">Password</label>
-            <input
-              id="auth-password"
-              class="form-control"
-              type="password"
-              autocomplete="current-password"
-              minlength="8"
-              maxlength="128"
-              aria-invalid={signInInvalid}
-              aria-describedby={signInInvalid ? "auth-problem" : undefined}
-              bind:value={password}
-              oninput={() => (signInInvalid = false)}
-              required
-            />
-          </div>
-          <div>
-            <label class="form-label" for="auth-session-timeout"
-              >Session duration</label
-            >
-            <select
-              id="auth-session-timeout"
-              class="form-select"
-              bind:value={sessionTimeoutMinutes}
-            >
-              <option value={15}>15 minutes</option>
-              <option value={60}>1 hour</option>
-              <option value={480}>8 hours</option>
-              <option value={1440}>24 hours</option>
-              <option value={43200}>30 days</option>
-              <option value={86400}>60 days</option>
-            </select>
-          </div>
-          <button
-            type="submit"
-            class="btn btn-primary action-button"
-            disabled={busy || !host.createBrowserSession}
-          >
-            <IconLogin size={18} aria-hidden="true" />
-            {busy ? "Signing in…" : "Sign in"}
-          </button>
-          {#if !host.createBrowserSession}
-            <p class="text-secondary mb-0">
-              This host does not provide browser account sessions.
-            </p>
-          {/if}
-        </form>
-      {:else}
-        <section
-          class="session-summary"
-          aria-labelledby="current-session-title"
+        <button
+          type="button"
+          class="btn btn-icon btn-ghost-secondary"
+          onclick={onClose}
+          aria-label="Close account dialog"
         >
-          <IconUserShield size={24} aria-hidden="true" />
-          <div>
-            <h3 id="current-session-title" class="h4 mb-1">
-              {session.user.username}
-            </h3>
-            <p class="text-secondary mb-1">
-              {session.user.is_admin ? "Administrator" : "User"}{session.user
-                .is_test_account
-                ? " · test account"
-                : ""}
-            </p>
-            <p class="text-secondary mb-0">
-              Expires {formatDate(session.expires_at)}
-            </p>
+          <IconX size={18} aria-hidden="true" />
+        </button>
+      </header>
+
+      <div class="card-body modal-body">
+        {#if notice}
+          <div class="alert alert-success" role="status">{notice}</div>
+        {/if}
+        {#if problem}
+          <div id="auth-problem" class="alert alert-danger" role="alert">
+            {problem}
           </div>
-          <button
-            type="button"
-            class="btn btn-outline-secondary action-button"
-            onclick={signOut}
-            disabled={busy}
-          >
-            <IconLogout size={17} aria-hidden="true" /> Sign out
-          </button>
-        </section>
-
-        <section class="section-block" aria-labelledby="future-security-title">
-          <div class="section-heading">
-            <div>
-              <h3 id="future-security-title" class="h3 mb-1">
-                Additional account options
-              </h3>
-              <p class="text-secondary mb-0">
-                These options stay visible so the intended account model is
-                clear. They do not accept or store security data until the
-                server capability exists.
-              </p>
-            </div>
-            <IconShieldCheck size={22} aria-hidden="true" />
-          </div>
-
-          <ul class="future-method-list">
-            <li class="card card-sm">
-              <div class="card-body future-method">
-                <IconUsers size={20} aria-hidden="true" />
-                <div>
-                  <strong>Media profiles</strong>
-                  <p class="text-secondary mb-0">
-                    Not available in this build. Profile creation, selection,
-                    permissions, and PIN verification need server-owned
-                    capabilities.
-                  </p>
-                </div>
-                <span class="badge bg-secondary-lt">Not available</span>
-              </div>
-            </li>
-            <li class="card card-sm">
-              <div class="card-body future-method">
-                <IconKey size={20} aria-hidden="true" />
-                <div>
-                  <strong>Passkey</strong>
-                  <p class="text-secondary mb-0">
-                    Not available in this build. WebAuthn enrollment must be
-                    verified and stored by the server.
-                  </p>
-                </div>
-                <span class="badge bg-secondary-lt">Not available</span>
-              </div>
-            </li>
-            <li class="card card-sm">
-              <div class="card-body future-method">
-                <IconLock size={20} aria-hidden="true" />
-                <div>
-                  <strong>Authenticator app</strong>
-                  <p class="text-secondary mb-0">
-                    Not available in this build. Fasti does not generate or
-                    verify TOTP secrets in the browser.
-                  </p>
-                </div>
-                <span class="badge bg-secondary-lt">Not available</span>
-              </div>
-            </li>
-            <li class="card card-sm">
-              <div class="card-body future-method">
-                <IconShieldCheck size={20} aria-hidden="true" />
-                <div>
-                  <strong>OIDC / SSO</strong>
-                  <p class="text-secondary mb-0">
-                    Not available in this build. Provider discovery, client
-                    secrets, and token exchange require a server-owned
-                    configuration path.
-                  </p>
-                </div>
-                <span class="badge bg-secondary-lt">Not available</span>
-              </div>
-            </li>
-          </ul>
-        </section>
-
-        {#if host.listActiveSessions}
-          <section class="section-block" aria-labelledby="sessions-title">
-            <div class="section-heading">
-              <div>
-                <h3 id="sessions-title" class="h3 mb-1">Active sessions</h3>
-                <p class="text-secondary mb-0">
-                  Review when each browser session was used. End a session that
-                  you do not recognize.
-                </p>
-              </div>
-              <button
-                type="button"
-                class="btn btn-outline-secondary btn-icon"
-                onclick={loadSessions}
-                disabled={busy}
-                aria-label="Refresh active sessions"
-              >
-                <IconRefresh size={17} aria-hidden="true" />
-              </button>
-            </div>
-
-            {#if sessions.length === 0}
-              <div class="empty-state">
-                No active session inventory is available.
-              </div>
-            {:else}
-              <ul class="session-list">
-                {#each sessions as item (item.sessionId)}
-                  <li class="card card-sm session-card">
-                    <div class="card-body session-card-body">
-                      <div class="session-icon" aria-hidden="true">
-                        <IconDeviceDesktop size={20} />
-                      </div>
-                      <div class="session-details">
-                        <div class="session-title-row">
-                          <strong
-                            >{item.isCurrent
-                              ? "Current session"
-                              : "Browser session"}</strong
-                          >
-                          {#if item.isCurrent}
-                            <span class="badge bg-green-lt text-green"
-                              >Current</span
-                            >
-                          {/if}
-                        </div>
-                        <dl>
-                          <div>
-                            <dt>Last activity</dt>
-                            <dd>{formatDate(item.lastSeenAt)}</dd>
-                          </div>
-                          <div>
-                            <dt>Created</dt>
-                            <dd>{formatDate(item.createdAt)}</dd>
-                          </div>
-                          <div>
-                            <dt>Expires</dt>
-                            <dd>{formatDate(item.expiresAt)}</dd>
-                          </div>
-                        </dl>
-                      </div>
-                      {#if !item.isCurrent && host.endSpecificSession}
-                        <div class="session-actions">
-                          {#if pendingSessionId === item.sessionId}
-                            <p class="text-secondary mb-2">End this session?</p>
-                            <div class="button-row">
-                              <button
-                                type="button"
-                                class="btn btn-danger action-button"
-                                onclick={() => endSession(item.sessionId)}
-                                disabled={busy}
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                type="button"
-                                class="btn btn-ghost-secondary action-button"
-                                onclick={() => (pendingSessionId = null)}
-                                disabled={busy}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          {:else}
-                            <button
-                              type="button"
-                              class="btn btn-outline-danger action-button"
-                              onclick={() => endSession(item.sessionId)}
-                              disabled={busy}
-                            >
-                              <IconTrash size={16} aria-hidden="true" /> End session
-                            </button>
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
-                  </li>
-                {/each}
-              </ul>
-
-              {#if sessions.some((item) => !item.isCurrent) && host.endOtherSessions}
-                <div class="danger-zone">
-                  {#if confirmEndOthers}
-                    <p class="mb-2">
-                      End every other browser session for this account?
-                    </p>
-                    <div class="button-row">
-                      <button
-                        type="button"
-                        class="btn btn-danger action-button"
-                        onclick={endOtherSessions}
-                        disabled={busy}
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        class="btn btn-ghost-secondary action-button"
-                        onclick={() => (confirmEndOthers = false)}
-                        disabled={busy}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  {:else}
-                    <button
-                      type="button"
-                      class="btn btn-outline-danger action-button"
-                      onclick={endOtherSessions}
-                      disabled={busy}
-                    >
-                      <IconTrash size={16} aria-hidden="true" /> End all other sessions
-                    </button>
-                  {/if}
-                </div>
-              {/if}
-            {/if}
-          </section>
         {/if}
 
-        {#if session.user.is_admin && host.listBrowserUsers}
-          <section class="section-block" aria-labelledby="browser-users-title">
-            <div class="section-heading">
-              <div>
-                <h3 id="browser-users-title" class="h3 mb-1">
-                  Browser accounts
-                </h3>
-                <p class="text-secondary mb-0">
-                  Browser accounts are not media profiles.
-                </p>
-              </div>
-              <button
-                type="button"
-                class="btn btn-outline-secondary btn-icon"
-                onclick={loadUsers}
-                disabled={busy}
-                aria-label="Refresh browser accounts"
-              >
-                <IconRefresh size={17} aria-hidden="true" />
-              </button>
-            </div>
-
-            {#if users.length === 0}
-              <div class="empty-state">No browser accounts are available.</div>
-            {:else}
-              <ul class="account-list">
-                {#each users as user (user.user_id)}
-                  <li class="card card-sm">
-                    <div class="card-body account-card-body">
-                      <div
-                        class="avatar bg-primary-lt text-primary"
-                        aria-hidden="true"
-                      >
-                        {user.username.charAt(0).toUpperCase()}
-                      </div>
-                      <div class="account-details">
-                        <div class="session-title-row">
-                          <strong>{user.username}</strong>
-                          {#if user.user_id === session.user.user_id}
-                            <span class="badge bg-green-lt text-green"
-                              >Signed in</span
-                            >
-                          {/if}
-                        </div>
-                        <span class="text-secondary">
-                          {user.is_admin ? "Administrator" : "User"} · {user.active
-                            ? "Enabled"
-                            : "Disabled"}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        class="btn btn-outline-secondary action-button"
-                        onclick={() => beginEdit(user)}
-                        disabled={busy}
-                      >
-                        <IconPencil size={16} aria-hidden="true" /> Edit
-                      </button>
-                    </div>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
-          </section>
-        {/if}
-
-        {#if selectedUser}
-          <form class="section-block form-stack" onsubmit={saveUser}>
-            <div class="section-heading">
-              <h3 class="h3 mb-0">Edit {selectedUser.username}</h3>
-              <button
-                type="button"
-                class="btn btn-ghost-secondary action-button"
-                onclick={() => (selectedUserId = null)}
-              >
-                Cancel
-              </button>
-            </div>
+        {#if !session}
+          <form class="form-stack" onsubmit={signIn}>
             <div>
-              <label class="form-label" for="edit-username">Username</label>
+              <label class="form-label" for="auth-username">Username</label>
               <input
-                id="edit-username"
+                id="auth-username"
                 class="form-control"
                 type="text"
                 autocomplete="username"
                 minlength="3"
                 maxlength="64"
                 pattern={usernamePattern}
-                bind:value={editUsername}
+                aria-invalid={signInInvalid}
+                aria-describedby={signInInvalid ? "auth-problem" : undefined}
+                bind:value={username}
+                oninput={() => (signInInvalid = false)}
                 required
               />
             </div>
             <div>
-              <label class="form-label" for="edit-password">New password</label>
+              <label class="form-label" for="auth-password">Password</label>
               <input
-                id="edit-password"
-                class="form-control"
-                type="password"
-                autocomplete="new-password"
-                minlength="8"
-                maxlength="128"
-                bind:value={editPassword}
-                placeholder="Leave empty to keep the current password"
-              />
-            </div>
-            <label class="form-check form-switch action-check">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                bind:checked={editActive}
-              />
-              <span class="form-check-label">Account is enabled</span>
-            </label>
-            <div>
-              <label class="form-label" for="current-password"
-                >Your current password</label
-              >
-              <input
-                id="current-password"
+                id="auth-password"
                 class="form-control"
                 type="password"
                 autocomplete="current-password"
                 minlength="8"
                 maxlength="128"
-                bind:value={currentPassword}
+                aria-invalid={signInInvalid}
+                aria-describedby={signInInvalid ? "auth-problem" : undefined}
+                bind:value={password}
+                oninput={() => (signInInvalid = false)}
                 required
               />
-              <div class="form-hint">
-                Required to save changes or delete this account.
-              </div>
+            </div>
+            <div>
+              <label class="form-label" for="auth-session-timeout"
+                >Session duration</label
+              >
+              <select
+                id="auth-session-timeout"
+                class="form-select"
+                bind:value={sessionTimeoutMinutes}
+              >
+                <option value={15}>15 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={480}>8 hours</option>
+                <option value={1440}>24 hours</option>
+                <option value={43200}>30 days</option>
+                <option value={86400}>60 days</option>
+              </select>
             </div>
             <button
               type="submit"
               class="btn btn-primary action-button"
-              disabled={busy || !host.updateBrowserUser}
+              disabled={busy || !host.createBrowserSession}
             >
-              Save changes
+              <IconLogin size={18} aria-hidden="true" />
+              {busy ? "Signing in…" : "Sign in"}
             </button>
-            <div class="danger-zone">
-              <label class="form-check action-check">
+            {#if !host.createBrowserSession}
+              <p class="text-secondary mb-0">
+                This host does not provide browser account sessions.
+              </p>
+            {/if}
+          </form>
+        {:else}
+          <section
+            class="session-summary"
+            aria-labelledby="current-session-title"
+          >
+            <IconUserShield size={24} aria-hidden="true" />
+            <div>
+              <h3 id="current-session-title" class="h4 mb-1">
+                {session.user.username}
+              </h3>
+              <p class="text-secondary mb-1">
+                {session.user.is_admin ? "Administrator" : "User"}{session.user
+                  .is_test_account
+                  ? " · test account"
+                  : ""}
+              </p>
+              <p class="text-secondary mb-0">
+                Expires {formatDate(session.expires_at)}
+              </p>
+            </div>
+            <button
+              type="button"
+              class="btn btn-outline-secondary action-button"
+              onclick={signOut}
+              disabled={busy}
+            >
+              <IconLogout size={17} aria-hidden="true" /> Sign out
+            </button>
+          </section>
+
+          <section
+            class="section-block"
+            aria-labelledby="future-security-title"
+          >
+            <div class="section-heading">
+              <div>
+                <h3 id="future-security-title" class="h3 mb-1">
+                  Additional account options
+                </h3>
+                <p class="text-secondary mb-0">
+                  These options stay visible so the intended account model is
+                  clear. They do not accept or store security data until the
+                  server capability exists.
+                </p>
+              </div>
+              <IconShieldCheck size={22} aria-hidden="true" />
+            </div>
+
+            <div class="future-method-list">
+              <div class="card card-sm">
+                <div class="card-body future-method">
+                  <IconUsers size={20} aria-hidden="true" />
+                  <div>
+                    <strong>Media profiles</strong>
+                    <p class="text-secondary mb-0">
+                      Not available in this build. Profile creation, selection,
+                      permissions, and PIN verification need server-owned
+                      capabilities.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary text-white"
+                    >Not available</span
+                  >
+                </div>
+              </div>
+              <div class="card card-sm">
+                <div class="card-body future-method">
+                  <IconKey size={20} aria-hidden="true" />
+                  <div>
+                    <strong>Passkey</strong>
+                    <p class="text-secondary mb-0">
+                      Not available in this build. WebAuthn enrollment must be
+                      verified and stored by the server.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary text-white"
+                    >Not available</span
+                  >
+                </div>
+              </div>
+              <div class="card card-sm">
+                <div class="card-body future-method">
+                  <IconLock size={20} aria-hidden="true" />
+                  <div>
+                    <strong>Authenticator app</strong>
+                    <p class="text-secondary mb-0">
+                      Not available in this build. Fasti does not generate or
+                      verify TOTP secrets in the browser.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary text-white"
+                    >Not available</span
+                  >
+                </div>
+              </div>
+              <div class="card card-sm">
+                <div class="card-body future-method">
+                  <IconShieldCheck size={20} aria-hidden="true" />
+                  <div>
+                    <strong>OIDC / SSO</strong>
+                    <p class="text-secondary mb-0">
+                      Not available in this build. Provider discovery, client
+                      secrets, and token exchange require a server-owned
+                      configuration path.
+                    </p>
+                  </div>
+                  <span class="badge bg-secondary text-white"
+                    >Not available</span
+                  >
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {#if host.listActiveSessions}
+            <section class="section-block" aria-labelledby="sessions-title">
+              <div class="section-heading">
+                <div>
+                  <h3 id="sessions-title" class="h3 mb-1">Active sessions</h3>
+                  <p class="text-secondary mb-0">
+                    Review when each browser session was used. End a session
+                    that you do not recognize.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary btn-icon"
+                  onclick={loadSessions}
+                  disabled={busy}
+                  aria-label="Refresh active sessions"
+                >
+                  <IconRefresh size={17} aria-hidden="true" />
+                </button>
+              </div>
+
+              {#if sessions.length === 0}
+                <div class="empty-state">
+                  No active session inventory is available.
+                </div>
+              {:else}
+                <ul class="session-list">
+                  {#each sessions as item (item.sessionId)}
+                    <li class="card card-sm session-card">
+                      <div class="card-body session-card-body">
+                        <div class="session-icon" aria-hidden="true">
+                          <IconDeviceDesktop size={20} />
+                        </div>
+                        <div class="session-details">
+                          <div class="session-title-row">
+                            <strong
+                              >{item.isCurrent
+                                ? "Current session"
+                                : "Browser session"}</strong
+                            >
+                            {#if item.isCurrent}
+                              <span class="badge bg-green-lt text-dark fw-bold"
+                                >Current</span
+                              >
+                            {/if}
+                          </div>
+                          <dl>
+                            <div>
+                              <dt>Last activity</dt>
+                              <dd>{formatDate(item.lastSeenAt)}</dd>
+                            </div>
+                            <div>
+                              <dt>Created</dt>
+                              <dd>{formatDate(item.createdAt)}</dd>
+                            </div>
+                            <div>
+                              <dt>Expires</dt>
+                              <dd>{formatDate(item.expiresAt)}</dd>
+                            </div>
+                          </dl>
+                        </div>
+                        {#if !item.isCurrent && host.endSpecificSession}
+                          <div class="session-actions">
+                            {#if pendingSessionId === item.sessionId}
+                              <p class="text-secondary mb-2">
+                                End this session?
+                              </p>
+                              <div class="button-row">
+                                <button
+                                  type="button"
+                                  class="btn btn-outline-danger action-button"
+                                  onclick={() => endSession(item.sessionId)}
+                                  disabled={busy}
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  type="button"
+                                  class="btn btn-ghost-secondary action-button"
+                                  onclick={() => (pendingSessionId = null)}
+                                  disabled={busy}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            {:else}
+                              <button
+                                type="button"
+                                class="btn btn-outline-danger action-button"
+                                onclick={() => endSession(item.sessionId)}
+                                disabled={busy}
+                              >
+                                <IconTrash size={16} aria-hidden="true" /> End session
+                              </button>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+
+                {#if sessions.some((item) => !item.isCurrent) && host.endOtherSessions}
+                  <div class="danger-zone">
+                    {#if confirmEndOthers}
+                      <p class="mb-2">
+                        End every other browser session for this account?
+                      </p>
+                      <div class="button-row">
+                        <button
+                          type="button"
+                          class="btn btn-outline-danger action-button"
+                          onclick={endOtherSessions}
+                          disabled={busy}
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost-secondary action-button"
+                          onclick={() => (confirmEndOthers = false)}
+                          disabled={busy}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    {:else}
+                      <button
+                        type="button"
+                        class="btn btn-outline-danger action-button"
+                        onclick={endOtherSessions}
+                        disabled={busy}
+                      >
+                        <IconTrash size={16} aria-hidden="true" /> End all other sessions
+                      </button>
+                    {/if}
+                  </div>
+                {/if}
+              {/if}
+            </section>
+          {/if}
+
+          {#if session.user.is_admin && host.listBrowserUsers}
+            <section
+              class="section-block"
+              aria-labelledby="browser-users-title"
+            >
+              <div class="section-heading">
+                <div>
+                  <h3 id="browser-users-title" class="h3 mb-1">
+                    Browser accounts
+                  </h3>
+                  <p class="text-secondary mb-0">
+                    Browser accounts are not media profiles.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary btn-icon"
+                  onclick={loadUsers}
+                  disabled={busy}
+                  aria-label="Refresh browser accounts"
+                >
+                  <IconRefresh size={17} aria-hidden="true" />
+                </button>
+              </div>
+
+              {#if users.length === 0}
+                <div class="empty-state">
+                  No browser accounts are available.
+                </div>
+              {:else}
+                <ul class="account-list">
+                  {#each users as user (user.user_id)}
+                    <li class="card card-sm">
+                      <div class="card-body account-card-body">
+                        <div
+                          class="avatar bg-primary-lt text-primary"
+                          aria-hidden="true"
+                        >
+                          {user.username.charAt(0).toUpperCase()}
+                        </div>
+                        <div class="account-details">
+                          <div class="session-title-row">
+                            <strong>{user.username}</strong>
+                            {#if user.user_id === session.user.user_id}
+                              <span class="badge bg-green-lt text-dark fw-bold"
+                                >Signed in</span
+                              >
+                            {/if}
+                          </div>
+                          <div class="user-meta-row">
+                            <span class="role-pill"
+                              >{user.is_admin ? "Administrator" : "User"}</span
+                            >
+                            <span class="status-meta"
+                              >{user.active
+                                ? "Enabled"
+                                : "Disabled"}{user.is_test_account
+                                ? " · test"
+                                : ""}</span
+                            >
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          class="btn btn-outline-secondary action-button"
+                          onclick={() => beginEdit(user)}
+                          disabled={busy}
+                        >
+                          <IconPencil size={16} aria-hidden="true" /> Edit
+                        </button>
+                      </div>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </section>
+          {/if}
+
+          {#if selectedUser}
+            <form class="section-block form-stack" onsubmit={saveUser}>
+              <div class="section-heading">
+                <h3 class="h3 mb-0">Edit {selectedUser.username}</h3>
+                <button
+                  type="button"
+                  class="btn btn-ghost-secondary action-button"
+                  onclick={() => (selectedUserId = null)}
+                >
+                  Cancel
+                </button>
+              </div>
+              <div>
+                <label class="form-label" for="edit-username">Username</label>
+                <input
+                  id="edit-username"
+                  class="form-control"
+                  type="text"
+                  autocomplete="username"
+                  minlength="3"
+                  maxlength="64"
+                  pattern={usernamePattern}
+                  bind:value={editUsername}
+                  required
+                />
+              </div>
+              <div>
+                <label class="form-label" for="edit-password"
+                  >New password</label
+                >
+                <input
+                  id="edit-password"
+                  class="form-control"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="8"
+                  maxlength="128"
+                  bind:value={editPassword}
+                  placeholder="Leave empty to keep the current password"
+                />
+              </div>
+              <label class="form-check form-switch action-check">
                 <input
                   class="form-check-input"
                   type="checkbox"
-                  bind:checked={confirmDeleteUser}
+                  bind:checked={editActive}
                 />
-                <span class="form-check-label">
-                  I understand that account deletion cannot be undone.
-                </span>
+                <span class="form-check-label">Account is enabled</span>
               </label>
+              <div>
+                <label class="form-label" for="current-password"
+                  >Your current password</label
+                >
+                <input
+                  id="current-password"
+                  class="form-control"
+                  type="password"
+                  autocomplete="current-password"
+                  minlength="8"
+                  maxlength="128"
+                  bind:value={currentPassword}
+                  required
+                />
+                <div class="form-hint">
+                  Required to save changes or delete this account.
+                </div>
+              </div>
               <button
-                type="button"
-                class="btn btn-danger action-button"
-                onclick={deleteUser}
-                disabled={busy ||
-                  !confirmDeleteUser ||
-                  !currentPassword ||
-                  !host.deleteBrowserUser}
+                type="submit"
+                class="btn btn-primary action-button"
+                disabled={busy || !host.updateBrowserUser}
               >
-                <IconTrash size={17} aria-hidden="true" /> Delete account
+                Save changes
               </button>
-            </div>
-          </form>
+              <div class="danger-zone">
+                <label class="form-check action-check">
+                  <input
+                    class="form-check-input"
+                    type="checkbox"
+                    bind:checked={confirmDeleteUser}
+                  />
+                  <span class="form-check-label">
+                    I understand that account deletion cannot be undone.
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  class="btn btn-danger text-white action-button"
+                  onclick={deleteUser}
+                  disabled={busy ||
+                    !confirmDeleteUser ||
+                    !currentPassword ||
+                    !host.deleteBrowserUser}
+                >
+                  <IconTrash size={17} aria-hidden="true" /> Delete user
+                </button>
+              </div>
+            </form>
+          {/if}
         {/if}
-      {/if}
-    </div>
-  </section>
+      </div>
+    </section>
+  {/if}
 </dialog>
 
 <style>
@@ -1066,5 +1096,16 @@
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
     }
+  }
+
+  :global(.btn-danger) {
+    background-color: var(--fasti-brand-mark, #8b2e2a) !important;
+    border-color: var(--fasti-brand-mark, #8b2e2a) !important;
+    color: #ffffff !important;
+  }
+  :global(.btn-danger:hover:not(:disabled)) {
+    background-color: #722421 !important;
+    border-color: #722421 !important;
+    color: #ffffff !important;
   }
 </style>

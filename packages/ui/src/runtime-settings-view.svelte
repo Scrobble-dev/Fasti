@@ -10,15 +10,19 @@
     IconEyeOff,
     IconFileDownload,
     IconKey,
+    IconLock,
     IconPlus,
     IconRefresh,
+    IconShieldCheck,
     IconTags,
     IconTrash,
+    IconUser,
     IconWorld,
   } from "@tabler/icons-svelte";
   import NetworkSettings from "./network-settings.svelte";
   import { hostProblemText } from "./host-problem.js";
   import type {
+    BrowserSession,
     CustomFieldDefinition,
     CustomMediaTypeDefinition,
     MediaKind,
@@ -33,9 +37,12 @@
   interface Props {
     host: WorkbenchHost;
     workbenchPreferences: WorkbenchPreferences;
+    session?: BrowserSession | null;
+    onOpenAuthModal?: () => void;
     canAccessProfileData?: boolean;
     profileDataIdentity?: string;
     activeTab?:
+      | "account"
       | "network"
       | "providers"
       | "preferences"
@@ -44,6 +51,7 @@
       | "system";
     onTabChange?: (
       tab:
+        | "account"
         | "network"
         | "providers"
         | "preferences"
@@ -64,6 +72,8 @@
   let {
     host,
     workbenchPreferences,
+    session = null,
+    onOpenAuthModal,
     canAccessProfileData = true,
     profileDataIdentity = "trusted-host",
     activeTab = "network",
@@ -75,6 +85,7 @@
   }: Props = $props();
 
   let active:
+    | "account"
     | "network"
     | "providers"
     | "preferences"
@@ -780,6 +791,7 @@
           onchange={(event) =>
             switchTab(event.currentTarget.value as typeof active)}
         >
+          <option value="account">Account & Sessions</option>
           <option value="network">Network</option>
           <option value="providers">Metadata credentials</option>
           <option value="preferences">Preferences & Metadata</option>
@@ -790,6 +802,14 @@
       </div>
 
       <nav class="settings-nav list-group" aria-label="Settings sections">
+        <a
+          href="/settings/account"
+          class="list-group-item list-group-item-action"
+          class:active={active === "account"}
+          aria-current={active === "account" ? "page" : undefined}
+          onclick={(event) => followTabLink(event, "account")}
+          ><IconUser size={16} aria-hidden="true" /> Account & Sessions</a
+        >
         <a
           href="/settings"
           class="list-group-item list-group-item-action"
@@ -841,7 +861,126 @@
     </div>
 
     <div class="settings-panel">
-      {#if active === "network"}
+      {#if active === "account"}
+        <section class="card mb-3" aria-labelledby="account-settings-title">
+          <div class="card-header">
+            <div>
+              <h2 id="account-settings-title" class="card-title h3 mb-1">
+                Account & Sessions
+              </h2>
+              <p class="card-subtitle text-secondary mb-0">
+                Manage browser session access and authentication configuration.
+              </p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="account-tab-panel">
+              <div class="card card-sm mb-3">
+                <div class="card-body">
+                  <div
+                    class="account-hero-card d-flex align-items-center justify-content-between"
+                  >
+                    <div class="d-flex align-items-center gap-3">
+                      <div
+                        class="avatar bg-primary-lt text-primary avatar-lg rounded-circle"
+                        aria-hidden="true"
+                      >
+                        {session?.user.username
+                          ? session.user.username.charAt(0).toUpperCase()
+                          : "A"}
+                      </div>
+                      <div class="account-details">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                          <h3 class="h3 mb-0">
+                            {session?.user.username ?? "Anonymous Operator"}
+                          </h3>
+                          {#if session?.user.is_admin}
+                            <span class="badge bg-purple-lt text-purple"
+                              >Administrator</span
+                            >
+                          {/if}
+                        </div>
+                        <p class="text-secondary small mb-0">
+                          {session
+                            ? "Authenticated browser session"
+                            : "Unauthenticated local operator"}
+                        </p>
+                      </div>
+                    </div>
+                    {#if onOpenAuthModal}
+                      <button
+                        type="button"
+                        class="btn btn-outline-primary"
+                        onclick={onOpenAuthModal}
+                      >
+                        {session ? "Manage account" : "Sign in"}
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Additional Authentication Methods -->
+              <div class="card card-sm">
+                <div class="card-header">
+                  <h3 class="card-title h4 mb-0">Authentication methods</h3>
+                </div>
+                <div class="card-body">
+                  <div class="future-method-list d-grid gap-2">
+                    <div class="card card-sm">
+                      <div
+                        class="card-body d-flex align-items-center justify-content-between"
+                      >
+                        <div>
+                          <strong>Passkey (WebAuthn)</strong>
+                          <p class="text-secondary small mb-0">
+                            Hardware security keys and platform authenticators.
+                          </p>
+                        </div>
+                        <span class="badge bg-secondary text-white"
+                          >Not available</span
+                        >
+                      </div>
+                    </div>
+                    <div class="card card-sm">
+                      <div
+                        class="card-body d-flex align-items-center justify-content-between"
+                      >
+                        <div>
+                          <strong>Authenticator app (TOTP)</strong>
+                          <p class="text-secondary small mb-0">
+                            Time-based one-time password two-factor
+                            authentication.
+                          </p>
+                        </div>
+                        <span class="badge bg-secondary text-white"
+                          >Not available</span
+                        >
+                      </div>
+                    </div>
+                    <div class="card card-sm">
+                      <div
+                        class="card-body d-flex align-items-center justify-content-between"
+                      >
+                        <div>
+                          <strong>OIDC / SSO</strong>
+                          <p class="text-secondary small mb-0">
+                            Enterprise Single Sign-On and OpenID Connect
+                            identity providers.
+                          </p>
+                        </div>
+                        <span class="badge bg-secondary text-white"
+                          >Not available</span
+                        >
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      {:else if active === "network"}
         <NetworkSettings
           scope={host.networkConfigurationScope}
           configuration={network}

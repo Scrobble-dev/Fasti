@@ -116,7 +116,8 @@
     };
   }
 
-  type SettingsTab =
+  export type SettingsTab =
+    | "account"
     | "network"
     | "providers"
     | "preferences"
@@ -127,6 +128,7 @@
   let settingsTab = $state<SettingsTab>("network");
 
   function settingsTabFromPath(path: string): SettingsTab {
+    if (path === "/settings/account") return "account";
     if (path === "/settings/metadata" || path === "/settings/providers")
       return "providers";
     if (path === "/settings/preferences") return "preferences";
@@ -147,6 +149,8 @@
 
   function pathForSettingsTab(tab: SettingsTab): string {
     switch (tab) {
+      case "account":
+        return "/settings/account";
       case "providers":
         return "/settings/metadata";
       case "preferences":
@@ -984,6 +988,8 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          session={browserSession}
+          onOpenAuthModal={() => (authModalOpen = true)}
           canAccessProfileData={!host.currentBrowserSession ||
             (browserSessionChecked && browserSession !== null)}
           profileDataIdentity={host.currentBrowserSession
