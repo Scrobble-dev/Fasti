@@ -7,7 +7,7 @@ use fasti_store::SqliteKernel;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process;
@@ -370,6 +370,13 @@ async fn main() -> Result<()> {
                     println!(
                         "Fasti seeded the one-time development browser account.\n  username: testadmin\n  password: {password}\nRecord this now -- it is not stored or shown again."
                     );
+                    // Rust's stdout is fully block-buffered whenever it isn't
+                    // a live TTY -- true of every real deployment (systemd,
+                    // podman) and this repo's own dev.sh, which redirects it
+                    // to a log file. Without an explicit flush, this one-time
+                    // password sits in the buffer for as long as this
+                    // long-running server keeps running, i.e. indefinitely.
+                    let _ = std::io::stdout().flush();
                 }
             }
             let max_session_minutes =
