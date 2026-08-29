@@ -60,8 +60,18 @@ const config: Config = {
           position: "left",
         },
         { to: "/status/", label: "Status", position: "left" },
-        { to: "/deploy/", label: "Deployment planner", position: "left" },
-        { to: "/search/", label: "Search", position: "right" },
+        {
+          href: "pathname:///deploy/",
+          label: "Deployment planner",
+          position: "left",
+          target: "_self",
+        },
+        {
+          href: "pathname:///search/",
+          label: "Search",
+          position: "right",
+          target: "_self",
+        },
         {
           href: "https://github.com/Scrobble-dev/Fasti",
           label: "Repository",
