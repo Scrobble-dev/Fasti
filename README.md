@@ -215,9 +215,15 @@ The scoped launcher supplies its private data root in native and container modes
 FASTI_PORT=19420 ./scripts/dev.sh
 FASTI_PORT=19420 ./scripts/dev.sh --podman
 FASTI_PORT=19420 ./scripts/dev.sh --docker
+FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
 ./scripts/dev.sh --status
 ./scripts/dev.sh --stop
 ```
+
+Desktop mode builds the static Workbench and runs the trusted Tauri review host
+with its embedded local kernel. It does not start `fastid` or Vite. It runs in
+the foreground and is still an unpackaged review candidate, not a supported
+release.
 
 `FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and probe URL. `FASTI_PUBLIC_URL` records a separate reverse-proxy origin and can omit the port when HTTPS uses port 443. Port collisions fail closed by default; set `FASTI_PORT_FALLBACK=auto` to allow safe loopback recovery. Native mode requires a user cgroup v2 scope. Native and container modes read the 192 MiB ceiling from the governed performance budget and disable swap. The canonical benchmark remains the owner of the separate 64 MiB idle measurement. Container mode uses the documented `fasti:b0` image and publishes only to host loopback; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
 

@@ -527,6 +527,7 @@ test("provider credential removal requires confirmation", async ({ page }) => {
   await remove.click();
   await expect(page.getByRole("status")).toContainText("Credential removed");
   expect(await page.evaluate(() => window.__DELETE_CALLS__?.())).toBe(1);
+  await expect(page.getByLabel("Google Books API key")).toBeFocused();
 });
 
 test("review resolution accepts one mutation while pending", async ({

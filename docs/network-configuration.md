@@ -154,6 +154,16 @@ The daemon and container launcher therefore remain the only owners of
 `FASTI_LISTEN`, `FASTI_PORT`, `FASTI_PORT_FALLBACK`, and bound-address
 publication. Settings does not present an unconsumed listener control.
 
+The prepared source launcher preserves that boundary:
+
+```bash
+FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
+```
+
+It builds the static Workbench and runs the Tauri host in the foreground. It
+does not start the daemon or Vite. The data root is mandatory and is resolved
+before it reaches the Desktop process.
+
 Desktop builds still require an explicit, non-empty `FASTI_DATA_ROOT`. Android
 uses an explicit `FASTI_DATA_ROOT` when the launch environment supplies one;
 otherwise it uses the app's sandbox data directory. The explicit override wins.
@@ -189,6 +199,23 @@ after outbound access is authorized. It sends Google Books keys in the
 sensitive `X-Goog-Api-Key` header and TMDB tokens in the sensitive
 `Authorization: Bearer` header.
 
+Settings accepts a Google Books API key or a TMDB API Read Access Token. It does
+not describe a TMDB API key because the adapter does not accept one. A rejected
+credential remains masked in the active field so it can be corrected; it is not
+copied to the URL, page text, browser storage, logs, or screenshots. The field
+clears after successful storage. Revealed input returns to password mode before
+and after every save attempt. Credential operations are single-flight.
+
+**Test search** performs an ordinary, non-mutating provider search with a fixed
+query. It can consume provider quota. There is no separate credential-test IPC.
+It remains available for a configured environment-managed credential even
+though Save and Remove remain unavailable for that read-only source.
+Discover uses only the trusted host's atomic `track_provider_candidate`
+operation to create a Record. The UI treats `provider:kind:provider_id` as the
+temporary candidate identity, then displays the exact returned Fasti Record ID.
+Repeating that operation with the same provider coordinate returns the existing
+Record and refreshes its verified claims atomically.
+
 Search returns at most ten neutral candidates. Selecting a candidate does not
 trust the earlier search body: the host performs a bounded `metadata.read` for
 the exact provider ID. If that exact response contains artwork, the host then
@@ -212,6 +239,12 @@ selected identifier and appends claims without rewriting earlier provider
 evidence. Provider failure leaves existing identity and Chronicle state
 unchanged. The browser does not receive credentials or execute provider
 requests.
+
+Wire provider IDs and identifier namespaces are distinct. Google Books uses
+wire ID `google-books` and coordinate `googlebooks.volume` at `Edition` grain.
+TMDB uses wire ID `tmdb`, with `tmdb.movie` at `Film` grain and `tmdb.tv` at
+`Series` grain. The shared application mapping owns these values for Desktop
+creation and ingest. Unsupported grains do not receive a guessed TMDB claim.
 
 TMDB's [API FAQ](https://developer.themoviedb.org/docs/faq) requires attribution
 for applications that use its API. The Workbench

@@ -17,10 +17,10 @@
 use fasti_application::{
     conformance::{B1ConformanceFixture, FixtureEnrollment},
     derive_deterministic_evidence_digest, derive_deterministic_operation_id,
-    nuvio_heartbeat_lexeme, AcceptObservationCommand, AcceptObservationOutcome,
-    AcceptObservationReceipt, ApplicationResult, CapabilityKey, FastiProblem, NuvioDrainOutcome,
-    NuvioOutbox, NuvioPlaybackSession, ObservationAcceptancePort, ProblemCode, ReplayReceiptQuery,
-    RequestAccessContext,
+    nuvio_heartbeat_lexeme, provider_identity_mapping_for_grain, AcceptObservationCommand,
+    AcceptObservationOutcome, AcceptObservationReceipt, ApplicationResult, CapabilityKey,
+    FastiProblem, NuvioDrainOutcome, NuvioOutbox, NuvioPlaybackSession, ObservationAcceptancePort,
+    ProblemCode, ReplayReceiptQuery, RequestAccessContext, TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ClaimedTrust, EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt,
@@ -47,7 +47,9 @@ fn sample_occurred_at(time_str: &str) -> OccurredAt {
 }
 
 fn sample_tmdb_claim(id: &str) -> ExternalIdentifierClaim {
-    ExternalIdentifierClaim::try_new("tmdb.movie", Grain::Film, id)
+    provider_identity_mapping_for_grain(TMDB_PROVIDER_ID, Grain::Film)
+        .expect("TMDB film mapping")
+        .identifier(id)
         .expect("valid external identifier")
 }
 
