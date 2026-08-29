@@ -787,7 +787,7 @@ def validate_profile_requirements(
 
 def detect_systemd_virtualization() -> str:
     require_command("systemd-detect-virt")
-    result = subprocess.run(  # nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
+    result = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
         [resolved_command("systemd-detect-virt")],
         cwd=ROOT,
         text=True,
@@ -2673,7 +2673,7 @@ def artifact_sizes(
                 )
                 if source.stdout is None:
                     raise CaptureError("gzip pipeline: source process has no stdout pipe")
-                compressor = subprocess.Popen(  # nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
+                compressor = subprocess.Popen(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
                     [resolved_command("gzip"), "-n", "-9"],
                     cwd=source_cwd,
                     stdin=source.stdout,

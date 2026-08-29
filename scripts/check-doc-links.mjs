@@ -11,6 +11,9 @@ const repoRootReal = realpathSync(repoRoot);
 // the real filesystem. Call this only after existsSync() has confirmed the
 // lexically-contained path exists.
 function isReallyContained(lexicallyContainedPath) {
+  // Every caller passes a path that existsSync() has just confirmed exists
+  // and that lexical containment has already checked immediately before.
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
   const real = realpathSync(lexicallyContainedPath);
   return real === repoRootReal || real.startsWith(repoRootReal + sep);
 }
