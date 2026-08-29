@@ -92,7 +92,9 @@ for (const file of markdownFiles) {
 
   /* eslint-enable security/detect-non-literal-fs-filename */
   if (!isReallyContained(absoluteFile)) {
-    failures.push(`${file}: tracked file resolves outside the repository via a symlink`);
+    failures.push(
+      `${file}: tracked file resolves outside the repository via a symlink`,
+    );
     continue;
   }
   // eslint-disable-next-line security/detect-non-literal-fs-filename
