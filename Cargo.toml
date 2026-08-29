@@ -53,6 +53,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2.0"
 anyhow = "1.0"
+base64 = "0.22.1"
+chacha20poly1305 = "0.10.1"
+hmac = "0.12.1"
+openidconnect = { version = "=4.0.1", default-features = false, features = ["reqwest", "rustls-tls", "timing-resistant-secret-traits"] }
+sha1 = "0.10.7"
+url = "2.5.7"
+webauthn-rs = { version = "=0.5.5", features = ["danger-allow-state-serialisation"] }
+zeroize = { version = "1.8.1", features = ["zeroize_derive"] }
 argon2 = "0.5.3"
 serde-saphyr = "1.0.1"
 proptest = "1.6"
