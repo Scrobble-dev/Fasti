@@ -348,7 +348,7 @@ async fn main() -> Result<()> {
                 }
                 joined = task => {
                     match joined {
-                        Ok(Ok(())) => error!("Fasti isolated integration listener exited unexpectedly"),
+Ok(Ok(())) => return Err(anyhow::anyhow!("Fasti isolated integration listener exited unexpectedly")),
                         Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
                         Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
                     }
