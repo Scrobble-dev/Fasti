@@ -690,6 +690,29 @@ impl ListRecordsQuery {
     }
 }
 
+/// A bounded page of [`RecordSummary`] rows. Mirrors
+/// `TrackingDispositionListView`'s shape in `profile_state.rs`: a fixed
+/// per-request cap enforced at the store layer, with `truncated` telling the
+/// caller whether more rows exist beyond that cap.
+pub struct RecordListView {
+    records: Vec<RecordSummary>,
+    truncated: bool,
+}
+
+impl RecordListView {
+    pub fn new(records: Vec<RecordSummary>, truncated: bool) -> Self {
+        Self { records, truncated }
+    }
+
+    pub fn into_records(self) -> Vec<RecordSummary> {
+        self.records
+    }
+
+    pub const fn truncated(&self) -> bool {
+        self.truncated
+    }
+}
+
 /// The most recent Chronicle activity touching a Record, when any exists.
 ///
 /// A Record with no Occurrence yet (created directly, or only ever the
@@ -856,7 +879,7 @@ pub trait IdentityPort: Send + Sync {
         command: AttachIdentifierCommand,
     ) -> ApplicationResult<AttachIdentifierOutcome>;
 
-    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<Vec<RecordSummary>>;
+    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<RecordListView>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

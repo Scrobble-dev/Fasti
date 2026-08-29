@@ -537,10 +537,15 @@ const PRODUCTION_SCHEMAS = {
           "$ref": "#/components/schemas/RecordSummaryDto"
         },
         "type": "array"
+      },
+      "truncated": {
+        "description": "`true` when more active Records exist in this workspace beyond the\nbounded page returned here (see `ListTrackingDispositionsResponse`\nfor the same pattern on a sibling listing capability).",
+        "type": "boolean"
       }
     },
     "required": [
-      "records"
+      "records",
+      "truncated"
     ],
     "type": "object"
   },
@@ -1535,6 +1540,7 @@ export interface RecordSummaryDto {
 
 export interface ListRecordsResponse {
   readonly records: ReadonlyArray<RecordSummaryDto>;
+  readonly truncated: boolean;
 }
 
 export interface AttachIdentifierRequest {

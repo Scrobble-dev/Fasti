@@ -3,7 +3,7 @@ use crate::metadata::{load_field_claims, load_field_override};
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
     CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ListRecordsQuery,
-    ProblemCode, RecordActivity, RecordIdentifier, RecordSummary,
+    ProblemCode, RecordActivity, RecordIdentifier, RecordListView, RecordSummary,
     RegisterNamespaceDefinitionCommand, RegisterNamespaceDefinitionOutcome,
 };
 use fasti_domain::{
@@ -180,7 +180,7 @@ impl IdentityPort for SqliteKernel {
         Ok(outcome)
     }
 
-    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<Vec<RecordSummary>> {
+    fn list_records(&self, query: ListRecordsQuery) -> ApplicationResult<RecordListView> {
         let capability = CapabilityKey::ListRecords;
         let correlation_id = query.correlation_id();
         let mut connection = self.lock_connection(capability, correlation_id)?;
@@ -205,9 +205,10 @@ impl IdentityPort for SqliteKernel {
             correlation_id,
         )?;
         let rows = map_sql(
-            statement.query_map(params![workspace_id.to_string(), MAX_RECORDS_PAGE], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            }),
+            statement.query_map(
+                params![workspace_id.to_string(), MAX_RECORDS_PAGE + 1],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            ),
             capability,
             correlation_id,
         )?;
@@ -224,6 +225,9 @@ impl IdentityPort for SqliteKernel {
         }
         drop(statement);
 
+        let truncated = records.len() > MAX_RECORDS_PAGE as usize;
+        records.truncate(MAX_RECORDS_PAGE as usize);
+
         let mut summaries = Vec::with_capacity(records.len());
         for (record_id, grain) in records {
             summaries.push(load_record_summary(
@@ -236,7 +240,7 @@ impl IdentityPort for SqliteKernel {
             )?);
         }
         map_sql(transaction.commit(), capability, correlation_id)?;
-        Ok(summaries)
+        Ok(RecordListView::new(summaries, truncated))
     }
 }
 
@@ -839,6 +843,35 @@ mod tests {
                 node.access,
             ))
             .expect("list records")
+            .into_records()
+    }
+
+    #[test]
+    fn record_page_reports_truncation() {
+        let node = TestNode::new();
+        let mut connection =
+            rusqlite::Connection::open(node.kernel.database_path()).expect("open test database");
+        let transaction = connection.transaction().expect("start seed transaction");
+        for _ in 0..=MAX_RECORDS_PAGE {
+            let record_id = RecordId::new_v7();
+            transaction
+                .execute(
+                    "INSERT INTO records(record_id, workspace_id, grain, status, created_at) VALUES (?1, ?2, 'film', 'active', '2026-08-28T00:00:00Z')",
+                    params![record_id.to_string(), node.access.workspace_id().to_string()],
+                )
+                .expect("seed record");
+        }
+        transaction.commit().expect("commit seed transaction");
+
+        let page = node
+            .kernel
+            .list_records(ListRecordsQuery::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+            ))
+            .expect("list records");
+        assert!(page.truncated());
+        assert_eq!(page.into_records().len(), MAX_RECORDS_PAGE as usize);
     }
 
     fn ns(value: &str) -> NamespaceKey {

@@ -422,7 +422,8 @@ mod tests {
                 RequestCorrelationId::new_v7(),
                 node.access,
             ))
-            .expect("list records");
+            .expect("list records")
+            .into_records();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].record_id(), outcome.record_id());
         assert_eq!(records[0].title().value(), Some("A real provider title"));
@@ -453,6 +454,7 @@ mod tests {
                 node.access,
             ))
             .expect("list records")
+            .into_records()
             .is_empty());
     }
 
@@ -506,7 +508,8 @@ mod tests {
                 RequestCorrelationId::new_v7(),
                 node.access,
             ))
-            .expect("list records");
+            .expect("list records")
+            .into_records();
         assert_eq!(records[0].title().value(), Some("Dune"));
         assert_eq!(records[0].identifiers().len(), 1);
         assert_eq!(records[0].identifiers()[0].value(), "438631");

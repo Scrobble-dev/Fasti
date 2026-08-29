@@ -790,6 +790,7 @@ test("generated record parser accepts required boolean fields", () => {
         latest_activity: null,
       },
     ],
+    truncated: false,
   }).records[0];
   assert.equal(record.title.is_stale, false);
   assert.equal(record.poster.is_stale, false);
