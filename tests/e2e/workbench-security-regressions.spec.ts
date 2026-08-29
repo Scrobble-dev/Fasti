@@ -772,6 +772,8 @@ test("Discover selects configured providers and refreshes explicit setup state",
   });
   await expect(completedAction).toHaveAttribute("aria-disabled", "true");
   await expect(completedAction).toBeFocused();
+  await completedAction.press("Enter");
+  await expect(showResult.getByRole("alert")).toHaveCount(0);
   await expect(showResult.getByRole("status")).toHaveText(
     "Record ID: rec_01991f588e0070008000000000000010",
   );

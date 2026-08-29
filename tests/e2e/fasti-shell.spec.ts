@@ -711,6 +711,9 @@ test("record metadata can refresh or switch through a configured provider", asyn
   await expect(
     page.getByRole("heading", { name: "Provider credits" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: "tmdb.tv" }),
+  ).toContainText("No live adapter");
   await page.getByRole("button", { name: "Retry host connection" }).click();
   await page
     .getByRole("searchbox", { name: "Search TMDB" })
@@ -721,7 +724,17 @@ test("record metadata can refresh or switch through a configured provider", asyn
   await expect(
     page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
   ).toBeVisible();
+  await page
+    .getByRole("row")
+    .filter({ hasText: "tmdb.movie" })
+    .getByRole("button", { name: "Refresh" })
+    .click();
+  await expect(page.getByText("Refreshed metadata from TMDB.")).toBeVisible();
   expect(await metadataCalls()).toEqual([
+    {
+      record_id: recordId,
+      selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
+    },
     {
       record_id: recordId,
       selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
