@@ -30,6 +30,44 @@ for path in "${retired_paths[@]}"; do
   done < <(git ls-files --cached --others --exclude-standard -- "$path")
 done
 
+if [[ ! -f docs/architecture/adr-0005-framework-and-auth-adoption.md ]]; then
+  echo "The framework and authentication adoption decision is missing" >&2
+  exit 1
+fi
+
+while IFS= read -r base_image; do
+  case "$base_image" in
+    rust-builder|runtime|web-builder|local|default) continue ;;
+  esac
+  if [[ "$base_image" != *@sha256:* ]]; then
+    echo "External Docker base image must use an immutable digest: $base_image" >&2
+    exit 1
+  fi
+done < <(awk 'toupper($1) == "FROM" { print $2 }' Dockerfile)
+
+last_docker_stage="$(
+  awk '
+    toupper($1) == "FROM" {
+      alias = ""
+      if (toupper($3) == "AS") {
+        alias = $4
+      }
+      last = $2 "|" alias
+    }
+    END { print last }
+  ' Dockerfile
+)"
+if [[ "$last_docker_stage" != "runtime|default" ]]; then
+  echo "A plain Docker build must finish at the runtime-equivalent default stage" >&2
+  exit 1
+fi
+
+if find . -name Cargo.toml -not -path './target/*' -print0 \
+  | xargs -0 grep -En "^[[:space:]]*[\"']?loco-rs[\"']?[[:space:]]*="; then
+  echo "Loco is a reference for workflow patterns, not an active Fasti runtime dependency" >&2
+  exit 1
+fi
+
 manifest_dependency_names() {
   local manifest="$1"
 

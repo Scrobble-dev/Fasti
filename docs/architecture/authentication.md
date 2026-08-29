@@ -38,6 +38,29 @@ when its backend capability, host adapter, typed problem recovery, generated
 client surface, threat review, and end-to-end tests land together. A Svelte-only
 implementation is a regression.
 
+## Identity issuer evaluation
+
+[ADR-0005](adr-0005-framework-and-auth-adoption.md) controls framework and
+identity-provider adoption.
+
+TrailBase is a candidate identity issuer. It is not an accepted replacement for
+the implemented local credentials yet. A TrailBase adapter may authenticate a
+human subject and mint short-lived access tokens. Fasti still owns workspaces,
+profiles, roles, client grants, capability scopes, object authorization, audit,
+and Chronicle state.
+
+The durable identity key is `issuer + subject`. Fasti must not store a
+TrailBase database row ID as its own user identity. Fasti must not read or write
+TrailBase tables directly. TrailBase tokens do not authorize a Fasti operation
+until the access application service checks the current local grants.
+
+Do not remove the current local account path during the evaluation. The
+TrailBase spike must prove migration, rollback, package operation, network-denied
+local access, token-expiry behavior, backup/restore boundaries, and memory limits
+before any default changes. Do not claim passkeys, multi-factor authentication,
+or TV device authorization from TrailBase unless the selected release documents
+and passes those flows.
+
 ## Contract disposition
 
 - Production bearer operations and their scopes remain owned by the capability
@@ -49,6 +72,8 @@ implementation is a regression.
   genuinely needs a non-secret authorization concept.
 - Tauri administrator and provider-secret commands are local IPC. They do not
   create an undocumented HTTP or AsyncAPI surface.
+- ADR-0005 and the TrailBase evaluation change no current route, event, schema,
+  SDK method, CLI command, or permission. OpenAPI and AsyncAPI remain unchanged.
 
 ## Compatibility reference
 
