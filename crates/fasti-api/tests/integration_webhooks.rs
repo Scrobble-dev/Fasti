@@ -248,6 +248,81 @@ async fn emby_native_completion_is_normalized_through_the_shared_boundary() {
 }
 
 #[tokio::test]
+async fn emby_identity_is_stable_across_byte_level_re_delivery_noise() {
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
+    let body = serde_json::json!({
+        "Event": "playback.stop",
+        "PlayedToCompletion": true,
+        "UtcTimestamp": "2026-08-27T12:00:00Z",
+        "Item": {
+            "Id": "emby-item-2",
+            "Type": "Movie",
+            "Name": "Fixture movie",
+            "RunTimeTicks": 72000000000_u64,
+            "ProviderIds": {"Imdb": "tt7654322", "Tmdb": "4568"}
+        },
+        "Session": {"PlayState": {"PositionTicks": 72000000000_u64}}
+    });
+    let send = |payload: serde_json::Value| {
+        bearer(
+            Request::post("/api/v1/integrations/emby/webhook"),
+            &credential,
+        )
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(payload.to_string()))
+        .expect("request")
+    };
+
+    let committed = integrations
+        .clone()
+        .oneshot(send(body.clone()))
+        .await
+        .expect("response");
+    assert_eq!(committed.status(), StatusCode::OK);
+    let committed: SubmitObservationResponse = serde_json::from_slice(
+        &to_bytes(committed.into_body(), 16 * 1024)
+            .await
+            .expect("bounded body"),
+    )
+    .expect("commit receipt");
+    assert_eq!(committed.disposition, "committed");
+
+    // Re-delivery with field reordering and unrelated whitespace -- pure
+    // byte-level noise on the same real event -- must resolve to the same
+    // identity, not commit a duplicate occurrence.
+    let mut reordered = body.clone();
+    if let Some(item) = reordered.get_mut("Item") {
+        *item = serde_json::json!({
+            "ProviderIds": {"Tmdb": "4568", "Imdb": "tt7654322"},
+            "Name": "Fixture movie",
+            "RunTimeTicks": 72000000000_u64,
+            "Id": "emby-item-2",
+            "Type": "Movie"
+        });
+    }
+    let replayed = integrations
+        .clone()
+        .oneshot(send(reordered))
+        .await
+        .expect("response");
+    assert_eq!(replayed.status(), StatusCode::OK);
+    let replayed: SubmitObservationResponse = serde_json::from_slice(
+        &to_bytes(replayed.into_body(), 16 * 1024)
+            .await
+            .expect("bounded body"),
+    )
+    .expect("replay receipt");
+    assert_eq!(replayed.disposition, "replayed");
+    assert_eq!(replayed.receipt_id, committed.receipt_id);
+
+    let mut changed = body;
+    changed["Item"]["Name"] = serde_json::json!("Changed evidence");
+    let conflict = integrations.oneshot(send(changed)).await.expect("response");
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn plex_multipart_accepts_payload_with_binary_image_without_parsing_the_image() {
     let (root, local, integrations) = routers().await;
     let credential = enroll_admin(&local, root.path()).await;
@@ -298,4 +373,87 @@ async fn plex_multipart_accepts_payload_with_binary_image_without_parsing_the_im
         .await
         .expect("response");
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+fn plex_multipart_body(boundary: &str, payload: &serde_json::Value) -> Vec<u8> {
+    let payload = payload.to_string();
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"payload\"\r\nContent-Type: application/json\r\n\r\n{payload}\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    body
+}
+
+#[tokio::test]
+async fn plex_webhook_commits_and_conflicts_on_changed_evidence() {
+    let (root, local, integrations) = routers().await;
+    let credential = enroll_admin(&local, root.path()).await;
+    let boundary = "fasti-fixture-boundary";
+    let payload = serde_json::json!({
+        "event": "media.scrobble",
+        "Server": {"uuid": "plex-server"},
+        "Metadata": {
+            "type": "movie",
+            "ratingKey": "200",
+            "title": "Fixture Plex movie",
+            "duration": 7200000_u64,
+            "viewOffset": 7200000_u64,
+            "lastViewedAt": 1787832000_i64,
+            "Guid": [{"id": "imdb://tt2222333"}]
+        }
+    });
+    let send = |payload: serde_json::Value| {
+        bearer(
+            Request::post("/api/v1/integrations/plex/webhook"),
+            &credential,
+        )
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(plex_multipart_body(boundary, &payload)))
+        .expect("request")
+    };
+
+    let committed = integrations
+        .clone()
+        .oneshot(send(payload.clone()))
+        .await
+        .expect("response");
+    assert_eq!(committed.status(), StatusCode::OK);
+    let committed: SubmitObservationResponse = serde_json::from_slice(
+        &to_bytes(committed.into_body(), 16 * 1024)
+            .await
+            .expect("bounded body"),
+    )
+    .expect("commit receipt");
+    assert_eq!(committed.disposition, "committed");
+
+    // NOT a clean replay today, even for a byte-identical re-delivery: this
+    // documents current behavior, not the ideal one. plex_request() has no
+    // provider-supplied observation timestamp to key on, so it always
+    // stamps `observed_at` with `Utc::now()` (see
+    // event_identity_tests::plex_identity_and_fields_are_stable_across_field_reordering's
+    // doc comment in src/integrations.rs). `observed_at` is part of
+    // fasti-store's idempotency semantic_digest
+    // (crates/fasti-store/src/observation.rs::semantic_digest), so it never
+    // matches between two separate deliveries regardless of identity
+    // stability, and Plex retries always land here instead of replaying.
+    // That's a real, separate gap in the Plex adapter's timestamp handling
+    // -- tracked, not fixed, alongside this identity-derivation change.
+    let redelivered = integrations
+        .clone()
+        .oneshot(send(payload.clone()))
+        .await
+        .expect("response");
+    assert_eq!(redelivered.status(), StatusCode::CONFLICT);
+
+    let mut changed = payload;
+    changed["Metadata"]["title"] = serde_json::json!("Changed evidence");
+    let conflict = integrations.oneshot(send(changed)).await.expect("response");
+    assert_eq!(conflict.status(), StatusCode::CONFLICT);
 }
