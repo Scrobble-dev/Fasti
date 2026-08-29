@@ -35,36 +35,50 @@ if [[ ! -f docs/architecture/adr-0005-framework-and-auth-adoption.md ]]; then
   exit 1
 fi
 
-while IFS= read -r base_image; do
-  case "$base_image" in
-    rust-builder|runtime|web-builder|local|default) continue ;;
-  esac
-  if [[ "$base_image" != *@sha256:* ]]; then
+docker_from_records() {
+  awk '
+    toupper($1) == "FROM" {
+      image = ""
+      alias = ""
+      for (field = 2; field <= NF; field++) {
+        if ($field ~ /^--/) {
+          continue
+        }
+        if (image == "") {
+          image = $field
+          continue
+        }
+        if (toupper($field) == "AS" && field < NF) {
+          alias = $(field + 1)
+          break
+        }
+      }
+      if (image == "") {
+        print "Dockerfile FROM instruction has no image" > "/dev/stderr"
+        exit 2
+      }
+      print image "|" alias
+    }
+  ' Dockerfile
+}
+
+declare -A docker_stage_aliases=()
+last_docker_image=""
+last_docker_alias=""
+while IFS='|' read -r base_image stage_alias; do
+  if [[ -z "${docker_stage_aliases[$base_image]+defined}" && "$base_image" != *@sha256:* ]]; then
     echo "External Docker base image must use an immutable digest: $base_image" >&2
     exit 1
   fi
-done < <(awk 'toupper($1) == "FROM" { print $2 }' Dockerfile)
+  if [[ -n "$stage_alias" ]]; then
+    docker_stage_aliases["$stage_alias"]=1
+  fi
+  last_docker_image="$base_image"
+  last_docker_alias="$stage_alias"
+done < <(docker_from_records)
 
-last_docker_stage="$(
-  awk '
-    toupper($1) == "FROM" {
-      alias = ""
-      if (toupper($3) == "AS") {
-        alias = $4
-      }
-      last = $2 "|" alias
-    }
-    END { print last }
-  ' Dockerfile
-)"
-if [[ "$last_docker_stage" != "runtime|default" ]]; then
+if [[ "$last_docker_image|$last_docker_alias" != "runtime|default" ]]; then
   echo "A plain Docker build must finish at the runtime-equivalent default stage" >&2
-  exit 1
-fi
-
-if find . -name Cargo.toml -not -path './target/*' -print0 \
-  | xargs -0 grep -En "^[[:space:]]*[\"']?loco-rs[\"']?[[:space:]]*="; then
-  echo "Loco is a reference for workflow patterns, not an active Fasti runtime dependency" >&2
   exit 1
 fi
 
@@ -127,6 +141,15 @@ manifest_dependency_names() {
     }
   ' "$manifest" | sort -u
 }
+
+while IFS= read -r -d '' manifest; do
+  while IFS= read -r dependency; do
+    if [[ "$dependency" == "loco-rs" ]]; then
+      echo "Loco is a reference for workflow patterns, not an active Fasti runtime dependency: $manifest" >&2
+      exit 1
+    fi
+  done < <(manifest_dependency_names "$manifest")
+done < <(find . -name Cargo.toml -not -path './target/*' -not -path './.git/*' -print0)
 
 assert_no_boundary_dependencies() {
   local crate="$1"
