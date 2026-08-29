@@ -66,14 +66,7 @@
   let passkeyBusy = $state(false);
   let passkeyError = $state("");
   let registeredPasskeys = $state<RegisteredPasskey[]>(
-    loadPersistedData("fasti_registered_passkeys", [
-      {
-        id: "pk_local_touchid",
-        name: "Primary Touch ID / Security Key",
-        createdAt: new Date().toISOString(),
-        lastUsedAt: new Date().toISOString(),
-      },
-    ]),
+    loadPersistedData("fasti_registered_passkeys", []),
   );
 
   // TOTP 2FA State
