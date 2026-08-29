@@ -5,7 +5,7 @@ use fasti_domain::{BrowserUserId, RequestCorrelationId};
 const MIN_PASSWORD_BYTES: usize = 8;
 const MAX_PASSWORD_BYTES: usize = 128;
 const MIN_SESSION_MINUTES: u32 = 5;
-const MAX_SESSION_MINUTES: u32 = 24 * 60;
+const MAX_SESSION_MINUTES: u32 = 86_400;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrowserAuthInputError;
@@ -468,6 +468,209 @@ impl DeleteBrowserUserCommand {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserSessionSummary {
+    session_id: String,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    last_seen_at: DateTime<Utc>,
+    location: String,
+    device_type: String,
+    is_current: bool,
+}
+
+impl BrowserSessionSummary {
+    pub fn new(
+        session_id: String,
+        created_at: DateTime<Utc>,
+        expires_at: DateTime<Utc>,
+        last_seen_at: DateTime<Utc>,
+        location: String,
+        device_type: String,
+        is_current: bool,
+    ) -> Self {
+        Self {
+            session_id,
+            created_at,
+            expires_at,
+            last_seen_at,
+            location,
+            device_type,
+            is_current,
+        }
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+    pub const fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+    pub const fn expires_at(&self) -> DateTime<Utc> {
+        self.expires_at
+    }
+    pub const fn last_seen_at(&self) -> DateTime<Utc> {
+        self.last_seen_at
+    }
+    pub fn location(&self) -> &str {
+        &self.location
+    }
+    pub fn device_type(&self) -> &str {
+        &self.device_type
+    }
+    pub const fn is_current(&self) -> bool {
+        self.is_current
+    }
+}
+
+pub struct ListBrowserSessionsQuery {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+}
+
+impl ListBrowserSessionsQuery {
+    pub const fn new(correlation_id: RequestCorrelationId, session: SecretMaterial) -> Self {
+        Self {
+            correlation_id,
+            session,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial) {
+        (self.correlation_id, self.session)
+    }
+}
+
+pub struct EndSpecificBrowserSessionCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    target_session_id: String,
+}
+
+impl EndSpecificBrowserSessionCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        target_session_id: String,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            target_session_id,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn target_session_id(&self) -> &str {
+        &self.target_session_id
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial, String) {
+        (
+            self.correlation_id,
+            self.session,
+            self.csrf,
+            self.target_session_id,
+        )
+    }
+}
+
+pub struct EndAllOtherBrowserSessionsCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+}
+
+impl EndAllOtherBrowserSessionsCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub fn into_parts(self) -> (RequestCorrelationId, SecretMaterial, SecretMaterial) {
+        (self.correlation_id, self.session, self.csrf)
+    }
+}
+
+pub struct SwitchBrowserSessionProfileCommand {
+    correlation_id: RequestCorrelationId,
+    session: SecretMaterial,
+    csrf: SecretMaterial,
+    target_profile_id: fasti_domain::ProfileId,
+}
+
+impl SwitchBrowserSessionProfileCommand {
+    pub const fn new(
+        correlation_id: RequestCorrelationId,
+        session: SecretMaterial,
+        csrf: SecretMaterial,
+        target_profile_id: fasti_domain::ProfileId,
+    ) -> Self {
+        Self {
+            correlation_id,
+            session,
+            csrf,
+            target_profile_id,
+        }
+    }
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn session(&self) -> &SecretMaterial {
+        &self.session
+    }
+    pub const fn csrf(&self) -> &SecretMaterial {
+        &self.csrf
+    }
+    pub const fn target_profile_id(&self) -> fasti_domain::ProfileId {
+        self.target_profile_id
+    }
+    pub fn into_parts(
+        self,
+    ) -> (
+        RequestCorrelationId,
+        SecretMaterial,
+        SecretMaterial,
+        fasti_domain::ProfileId,
+    ) {
+        (
+            self.correlation_id,
+            self.session,
+            self.csrf,
+            self.target_profile_id,
+        )
+    }
+}
+
 pub trait BrowserAccountPort: Send + Sync {
     fn ensure_development_browser_user(
         &self,
@@ -483,6 +686,22 @@ pub trait BrowserAccountPort: Send + Sync {
         query: AuthenticateBrowserSessionQuery,
     ) -> ApplicationResult<AuthenticatedBrowserSession>;
     fn end_browser_session(&self, command: EndBrowserSessionCommand) -> ApplicationResult<()>;
+    fn list_browser_sessions(
+        &self,
+        query: ListBrowserSessionsQuery,
+    ) -> ApplicationResult<Vec<BrowserSessionSummary>>;
+    fn end_specific_browser_session(
+        &self,
+        command: EndSpecificBrowserSessionCommand,
+    ) -> ApplicationResult<bool>;
+    fn end_all_other_browser_sessions(
+        &self,
+        command: EndAllOtherBrowserSessionsCommand,
+    ) -> ApplicationResult<u64>;
+    fn switch_browser_session_profile(
+        &self,
+        command: SwitchBrowserSessionProfileCommand,
+    ) -> ApplicationResult<AuthenticatedBrowserSession>;
     fn list_browser_users(
         &self,
         query: ListBrowserUsersQuery,

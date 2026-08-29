@@ -119,6 +119,45 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "BrowserSessionItemDto": {
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "device_type": {
+        "type": "string"
+      },
+      "expires_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "is_current": {
+        "type": "boolean"
+      },
+      "last_seen_at": {
+        "format": "date-time",
+        "type": "string"
+      },
+      "location": {
+        "type": "string"
+      },
+      "session_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "session_id",
+      "created_at",
+      "expires_at",
+      "last_seen_at",
+      "location",
+      "device_type",
+      "is_current"
+    ],
+    "type": "object"
+  },
   "BrowserSessionResponse": {
     "additionalProperties": false,
     "properties": {
@@ -225,7 +264,7 @@ const PRODUCTION_SCHEMAS = {
       },
       "session_timeout_minutes": {
         "format": "int32",
-        "maximum": 1440,
+        "maximum": 86400,
         "minimum": 5,
         "type": "integer"
       },
@@ -510,6 +549,21 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "integrations"
+    ],
+    "type": "object"
+  },
+  "ListBrowserSessionsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "sessions": {
+        "items": {
+          "$ref": "#/components/schemas/BrowserSessionItemDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "sessions"
     ],
     "type": "object"
   },
@@ -1314,6 +1368,18 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "SwitchProfileRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "profile_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile_id"
+    ],
+    "type": "object"
+  },
   "TrackingDispositionDto": {
     "enum": [
       "watching",
@@ -1598,6 +1664,24 @@ export interface BrowserSessionResponse {
   readonly user: BrowserUserDto;
 }
 
+export interface BrowserSessionItemDto {
+  readonly created_at: string;
+  readonly device_type: string;
+  readonly expires_at: string;
+  readonly is_current: boolean;
+  readonly last_seen_at: string;
+  readonly location: string;
+  readonly session_id: string;
+}
+
+export interface ListBrowserSessionsResponse {
+  readonly sessions: ReadonlyArray<BrowserSessionItemDto>;
+}
+
+export interface SwitchProfileRequest {
+  readonly profile_id: string;
+}
+
 export interface ListBrowserUsersResponse {
   readonly users: ReadonlyArray<BrowserUserDto>;
 }
@@ -1637,6 +1721,10 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   createBrowserSession: { operationId: "create_session", method: "POST", path: "/api/v1/browser/session", capabilityId: "browser.session.create", authorization: "unauthenticated", requiredScopes: [], problemCodes: ["authentication_failed","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: false, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "CreateBrowserSessionRequest", responseSchema: "BrowserSessionResponse" },
   readBrowserSession: { operationId: "read_session", method: "GET", path: "/api/v1/browser/session", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "BrowserSessionResponse" },
   endBrowserSession: { operationId: "end_session", method: "DELETE", path: "/api/v1/browser/session", capabilityId: "browser.session.end", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  listBrowserSessions: { operationId: "list_sessions", method: "GET", path: "/api/v1/browser/sessions", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListBrowserSessionsResponse" },
+  endSpecificBrowserSession: { operationId: "end_specific_session", method: "DELETE", path: "/api/v1/browser/sessions/{session_id}", capabilityId: "browser.session.end", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  endAllOtherBrowserSessions: { operationId: "end_other_sessions", method: "DELETE", path: "/api/v1/browser/sessions", capabilityId: "browser.session.end", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: null },
+  switchBrowserSessionProfile: { operationId: "switch_profile", method: "POST", path: "/api/v1/browser/session/switch-profile", capabilityId: "browser.session.read", authorization: "scoped", requiredScopes: [], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "SwitchProfileRequest", responseSchema: "BrowserSessionResponse" },
   listBrowserUsers: { operationId: "list_users", method: "GET", path: "/api/v1/browser/users", capabilityId: "browser.user.list", authorization: "scoped", requiredScopes: ["browser_user_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListBrowserUsersResponse" },
   updateBrowserUser: { operationId: "update_user", method: "PATCH", path: "/api/v1/browser/users/{user_id}", capabilityId: "browser.user.update", authorization: "scoped", requiredScopes: ["browser_user_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "UpdateBrowserUserRequest", responseSchema: "BrowserUserDto" },
   deleteBrowserUser: { operationId: "delete_user", method: "DELETE", path: "/api/v1/browser/users/{user_id}", capabilityId: "browser.user.delete", authorization: "scoped", requiredScopes: ["browser_user_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "DeleteBrowserUserRequest", responseSchema: null },
@@ -1715,6 +1803,16 @@ export function parseBrowserUserDto(value: unknown): BrowserUserDto {
 // prettier-ignore
 export function parseBrowserSessionResponse(value: unknown): BrowserSessionResponse {
   return parseProductionDto("BrowserSessionResponse", value);
+}
+
+// prettier-ignore
+export function parseListBrowserSessionsResponse(value: unknown): ListBrowserSessionsResponse {
+  return parseProductionDto("ListBrowserSessionsResponse", value);
+}
+
+// prettier-ignore
+export function parseSwitchProfileRequest(value: unknown): SwitchProfileRequest {
+  return parseProductionDto("SwitchProfileRequest", value);
 }
 
 // prettier-ignore

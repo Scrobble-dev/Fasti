@@ -90,6 +90,10 @@ impl Modify for ProductionSecurityAddon {
         browser_auth::create_session,
         browser_auth::read_session,
         browser_auth::end_session,
+        browser_auth::list_sessions,
+        browser_auth::end_specific_session,
+        browser_auth::end_other_sessions,
+        browser_auth::switch_profile,
         browser_auth::list_users,
         browser_auth::update_user,
         browser_auth::delete_user,
@@ -114,6 +118,7 @@ impl Modify for ProductionSecurityAddon {
         HealthResponse,
         fasti_contracts::AttachIdentifierRequest,
         fasti_contracts::AttachIdentifierResponse,
+        fasti_contracts::BrowserSessionItemDto,
         fasti_contracts::BrowserSessionResponse,
         fasti_contracts::BrowserUserDto,
         fasti_contracts::ClientEnrollmentResponse,
@@ -127,9 +132,11 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::IntegrationObservationRequest,
         fasti_contracts::IntegrationStatusDto,
         fasti_contracts::IntegrationStatusListResponse,
+        fasti_contracts::ListBrowserSessionsResponse,
         fasti_contracts::ListRecordsResponse,
         fasti_contracts::ListBrowserUsersResponse,
         fasti_contracts::ListTrackingDispositionsResponse,
+        fasti_contracts::SwitchProfileRequest,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::NuvioCatalogSourceDto,
         fasti_contracts::NuvioCollectionDto,
@@ -307,6 +314,9 @@ mod tests {
             "/api/v1/node/initialization",
             "/api/v1/client-enrollments",
             "/api/v1/browser/session",
+            "/api/v1/browser/session/switch-profile",
+            "/api/v1/browser/sessions",
+            "/api/v1/browser/sessions/{session_id}",
             "/api/v1/browser/users",
             "/api/v1/browser/users/{user_id}",
             "/api/v1/observations",
@@ -325,7 +335,7 @@ mod tests {
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 19);
+        assert_eq!(document.paths.paths.len(), 22);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));

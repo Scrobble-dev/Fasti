@@ -53,6 +53,45 @@
         ],
         "type": "object"
       },
+      "BrowserSessionItemDto": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "device_type": {
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "is_current": {
+            "type": "boolean"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "created_at",
+          "expires_at",
+          "last_seen_at",
+          "location",
+          "device_type",
+          "is_current"
+        ],
+        "type": "object"
+      },
       "BrowserSessionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -159,7 +198,7 @@
           },
           "session_timeout_minutes": {
             "format": "int32",
-            "maximum": 1440,
+            "maximum": 86400,
             "minimum": 5,
             "type": "integer"
           },
@@ -444,6 +483,21 @@
         },
         "required": [
           "integrations"
+        ],
+        "type": "object"
+      },
+      "ListBrowserSessionsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserSessionItemDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
         ],
         "type": "object"
       },
@@ -1248,6 +1302,18 @@
         ],
         "type": "object"
       },
+      "SwitchProfileRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id"
+        ],
+        "type": "object"
+      },
       "TrackingDispositionDto": {
         "enum": [
           "watching",
@@ -1640,6 +1706,315 @@
           "storage_unavailable",
           "unsupported_media_type",
           "validation_failed"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/session/switch-profile": {
+      "post": {
+        "operationId": "switch_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserSessionResponse"
+                }
+              }
+            },
+            "description": "Switched active profile for session"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/sessions": {
+      "delete": {
+        "operationId": "end_other_sessions",
+        "responses": {
+          "204": {
+            "description": "All other browser sessions terminated"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.end",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "get": {
+        "operationId": "list_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListBrowserSessionsResponse"
+                }
+              }
+            },
+            "description": "Active browser sessions for the current user"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Session no longer has active access"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/browser/sessions/{session_id}": {
+      "delete": {
+        "operationId": "end_specific_session",
+        "parameters": [
+          {
+            "description": "Session identifier to terminate",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Specific browser session terminated"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Browser session is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "CSRF proof is missing or invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Durable state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Local storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "browser_session": []
+          }
+        ],
+        "tags": [
+          "browser authentication"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "browser.session.end",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
         ],
         "x-fasti-required-scopes": [],
         "x-fasti-runtime-availability": "implemented"

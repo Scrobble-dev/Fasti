@@ -11,12 +11,15 @@ use axum::{
 };
 use fasti_application::{
     AuthenticateBrowserSessionQuery, BrowserPassword, BrowserUserView, BrowserUsername,
-    CapabilityKey, CreateBrowserSessionCommand, DeleteBrowserUserCommand, EndBrowserSessionCommand,
-    FastiProblem, ListBrowserUsersQuery, UpdateBrowserUserCommand, Violation,
+    CapabilityKey, CreateBrowserSessionCommand, DeleteBrowserUserCommand,
+    EndAllOtherBrowserSessionsCommand, EndBrowserSessionCommand, EndSpecificBrowserSessionCommand,
+    FastiProblem, ListBrowserSessionsQuery, ListBrowserUsersQuery,
+    SwitchBrowserSessionProfileCommand, UpdateBrowserUserCommand, Violation,
 };
 use fasti_contracts::{
-    BrowserSessionResponse, BrowserUserDto, CreateBrowserSessionRequest, DeleteBrowserUserRequest,
-    ListBrowserUsersResponse, ProblemDetails, UpdateBrowserUserRequest,
+    BrowserSessionItemDto, BrowserSessionResponse, BrowserUserDto, CreateBrowserSessionRequest,
+    DeleteBrowserUserRequest, ListBrowserSessionsResponse, ListBrowserUsersResponse,
+    ProblemDetails, SwitchProfileRequest, UpdateBrowserUserRequest,
 };
 use fasti_domain::{BrowserUserId, RequestCorrelationId};
 
@@ -409,11 +412,185 @@ pub(crate) async fn delete_user(
     Ok((headers, StatusCode::NO_CONTENT).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/v1/browser/sessions",
+    tag = "browser authentication",
+    security(("browser_session" = [])),
+    responses(
+        (status = 200, description = "Active browser sessions for the current user", body = ListBrowserSessionsResponse),
+        (status = 401, description = "Browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Session no longer has active access", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn list_sessions(
+    State(state): State<LocalApiState>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    let capability = CapabilityKey::ReadBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let session = cookie_secret(&headers, "fasti_session", capability, correlation_id)?;
+    let kernel = state.kernel;
+    let summaries = run_kernel(capability, correlation_id, move || {
+        kernel.list_browser_sessions(ListBrowserSessionsQuery::new(correlation_id, session))
+    })
+    .await?;
+    let dts = summaries
+        .into_iter()
+        .map(|s| BrowserSessionItemDto {
+            session_id: s.session_id().to_owned(),
+            created_at: s.created_at().to_rfc3339(),
+            expires_at: s.expires_at().to_rfc3339(),
+            last_seen_at: s.last_seen_at().to_rfc3339(),
+            location: s.location().to_owned(),
+            device_type: s.device_type().to_owned(),
+            is_current: s.is_current(),
+        })
+        .collect();
+    Ok((
+        no_store_headers(),
+        Json(ListBrowserSessionsResponse { sessions: dts }),
+    )
+        .into_response())
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/browser/sessions/{session_id}",
+    tag = "browser authentication",
+    security(("browser_session" = [])),
+    params(("session_id" = String, Path, description = "Session identifier to terminate")),
+    responses(
+        (status = 204, description = "Specific browser session terminated"),
+        (status = 401, description = "Browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "CSRF proof is missing or invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn end_specific_session(
+    State(state): State<LocalApiState>,
+    Path(session_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    let capability = CapabilityKey::EndBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let session = cookie_secret(&headers, "fasti_session", capability, correlation_id)?;
+    let csrf = csrf_from_request(&headers, capability, correlation_id)?;
+    let kernel = state.kernel;
+    run_kernel(capability, correlation_id, move || {
+        kernel.end_specific_browser_session(EndSpecificBrowserSessionCommand::new(
+            correlation_id,
+            session,
+            csrf,
+            session_id,
+        ))
+    })
+    .await?;
+    Ok((no_store_headers(), StatusCode::NO_CONTENT).into_response())
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/browser/sessions",
+    tag = "browser authentication",
+    security(("browser_session" = [])),
+    responses(
+        (status = 204, description = "All other browser sessions terminated"),
+        (status = 401, description = "Browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "CSRF proof is missing or invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn end_other_sessions(
+    State(state): State<LocalApiState>,
+    headers: HeaderMap,
+) -> Result<Response, HttpProblem> {
+    let capability = CapabilityKey::EndBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let session = cookie_secret(&headers, "fasti_session", capability, correlation_id)?;
+    let csrf = csrf_from_request(&headers, capability, correlation_id)?;
+    let kernel = state.kernel;
+    run_kernel(capability, correlation_id, move || {
+        kernel.end_all_other_browser_sessions(EndAllOtherBrowserSessionsCommand::new(
+            correlation_id,
+            session,
+            csrf,
+        ))
+    })
+    .await?;
+    Ok((no_store_headers(), StatusCode::NO_CONTENT).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/browser/session/switch-profile",
+    tag = "browser authentication",
+    security(("browser_session" = [])),
+    request_body = SwitchProfileRequest,
+    responses(
+        (status = 200, description = "Switched active profile for session", body = BrowserSessionResponse),
+        (status = 401, description = "Browser session is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "CSRF proof is missing or invalid", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 500, description = "Durable state failed an integrity check", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "Local storage is unavailable", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+pub(crate) async fn switch_profile(
+    State(state): State<LocalApiState>,
+    headers: HeaderMap,
+    payload: Result<Json<SwitchProfileRequest>, JsonRejection>,
+) -> Result<Response, HttpProblem> {
+    let capability = CapabilityKey::ReadBrowserSession;
+    let correlation_id = RequestCorrelationId::new_v7();
+    let Json(request) =
+        payload.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
+    let session = cookie_secret(&headers, "fasti_session", capability, correlation_id)?;
+    let csrf = csrf_from_request(&headers, capability, correlation_id)?;
+    let target_profile_id = request
+        .profile_id
+        .parse::<fasti_domain::ProfileId>()
+        .map_err(|_| validation_problem(capability, correlation_id))?;
+    let kernel = state.kernel;
+    let outcome = run_kernel(capability, correlation_id, move || {
+        kernel.switch_browser_session_profile(SwitchBrowserSessionProfileCommand::new(
+            correlation_id,
+            session,
+            csrf,
+            target_profile_id,
+        ))
+    })
+    .await?;
+    Ok((
+        no_store_headers(),
+        Json(BrowserSessionResponse {
+            user: user_dto(outcome.user()),
+            expires_at: outcome.expires_at().to_rfc3339(),
+        }),
+    )
+        .into_response())
+}
+
 pub(crate) fn router() -> Router<LocalApiState> {
     Router::new()
         .route(
             "/api/v1/browser/session",
             post(create_session).get(read_session).delete(end_session),
+        )
+        .route(
+            "/api/v1/browser/session/switch-profile",
+            post(switch_profile),
+        )
+        .route(
+            "/api/v1/browser/sessions",
+            get(list_sessions).delete(end_other_sessions),
+        )
+        .route(
+            "/api/v1/browser/sessions/{session_id}",
+            axum::routing::delete(end_specific_session),
         )
         .route("/api/v1/browser/users", get(list_users))
         .route(

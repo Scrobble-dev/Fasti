@@ -81,6 +81,9 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
   ]);
   assert.deepEqual(Object.keys(openapi.paths), [
     "/api/v1/browser/session",
+    "/api/v1/browser/session/switch-profile",
+    "/api/v1/browser/sessions",
+    "/api/v1/browser/sessions/{session_id}",
     "/api/v1/browser/users",
     "/api/v1/browser/users/{user_id}",
     "/api/v1/client-enrollments",
@@ -366,6 +369,10 @@ export async function validateGeneratedContracts(root = repositoryRoot) {
           : [
                 "read_session",
                 "end_session",
+                "list_sessions",
+                "end_specific_session",
+                "end_other_sessions",
+                "switch_profile",
                 "list_users",
                 "update_user",
                 "delete_user",

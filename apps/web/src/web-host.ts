@@ -3,6 +3,7 @@ import type {
   AttachIdentifierInput,
   AttachIdentifierResult,
   BrowserSession,
+  BrowserSessionItem,
   BrowserUser,
   BrowserUserUpdate,
   CreateRecordResult,
@@ -435,6 +436,31 @@ export function createWebHost(
 
     async endBrowserSession(): Promise<void> {
       await client.endBrowserSession();
+    },
+
+    async listActiveSessions(): Promise<BrowserSessionItem[]> {
+      const response = await client.listBrowserSessions();
+      return (response.sessions || []).map((s) => ({
+        sessionId: s.session_id,
+        createdAt: s.created_at,
+        expiresAt: s.expires_at,
+        lastSeenAt: s.last_seen_at,
+        location: s.location,
+        deviceType: s.device_type,
+        isCurrent: Boolean(s.is_current),
+      }));
+    },
+
+    async endSpecificSession(sessionId: string): Promise<void> {
+      await client.endSpecificBrowserSession(sessionId);
+    },
+
+    async endOtherSessions(): Promise<void> {
+      await client.endAllOtherBrowserSessions();
+    },
+
+    async switchProfile(profileId: string): Promise<BrowserSession> {
+      return client.switchBrowserSessionProfile({ profile_id: profileId });
     },
 
     async listBrowserUsers(): Promise<BrowserUser[]> {

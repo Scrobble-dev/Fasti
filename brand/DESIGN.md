@@ -140,7 +140,7 @@ Every engineer and coding agent must follow this strict 4-step decision hierarch
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│ 1. Upstream Tabler Core Component                                     │
+│ 1. Upstream Tabler Core Component (https://github.com/tabler/tabler)  │
 │    Use standard Tabler CSS classes and structural markup directly     │
 │    (.card, .btn, .table, .navbar, .badge, .form-control, etc.)       │
 └──────────────────────────────────┬────────────────────────────────────┘

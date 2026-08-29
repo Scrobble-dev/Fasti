@@ -1,13 +1,21 @@
 <script lang="ts">
   import {
+    IconDeviceDesktop,
+    IconDeviceMobile,
     IconLogin,
     IconLogout,
     IconPencil,
+    IconShieldLock,
     IconTrash,
     IconUserShield,
     IconX,
   } from "@tabler/icons-svelte";
-  import type { BrowserSession, BrowserUser, WorkbenchHost } from "./types.js";
+  import type {
+    BrowserSession,
+    BrowserSessionItem,
+    BrowserUser,
+    WorkbenchHost,
+  } from "./types.js";
 
   interface Props {
     show: boolean;
@@ -23,6 +31,7 @@
   let password = $state("");
   let sessionTimeoutMinutes = $state(60);
   let users = $state<BrowserUser[]>([]);
+  let activeSessions = $state<BrowserSessionItem[]>([]);
   let selectedUserId = $state<string | null>(null);
   let editUsername = $state("");
   let editPassword = $state("");
@@ -46,7 +55,10 @@
   });
 
   $effect(() => {
-    if (show && session?.user.is_admin) void loadUsers();
+    if (show && session) {
+      if (session.user.is_admin) void loadUsers();
+      void loadSessions();
+    }
   });
 
   function problemDetails(error: unknown):
@@ -101,6 +113,47 @@
       users = await host.listBrowserUsers();
     } catch (error) {
       problem = messageFor(error);
+    }
+  }
+
+  async function loadSessions(): Promise<void> {
+    if (!host.listActiveSessions) return;
+    try {
+      activeSessions = await host.listActiveSessions();
+    } catch (error) {
+      // Best effort load
+    }
+  }
+
+  async function revokeSession(sessionId: string): Promise<void> {
+    if (!host.endSpecificSession || busy) return;
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      await host.endSpecificSession(sessionId);
+      notice = "Session revoked.";
+      await loadSessions();
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function revokeOtherSessions(): Promise<void> {
+    if (!host.endOtherSessions || busy) return;
+    busy = true;
+    problem = "";
+    notice = "";
+    try {
+      await host.endOtherSessions();
+      notice = "All other sessions have been revoked.";
+      await loadSessions();
+    } catch (error) {
+      problem = messageFor(error);
+    } finally {
+      busy = false;
     }
   }
 
@@ -309,6 +362,9 @@
               <option value={60}>1 hour</option>
               <option value={480}>8 hours</option>
               <option value={1440}>24 hours</option>
+              <option value={43200}>30 days</option>
+              <option value={86400}>60 days</option>
+              <option value={5256000}>Indefinite (10 years)</option>
             </select>
           </div>
           <button
@@ -345,6 +401,83 @@
             <IconLogout size={17} /> Sign out
           </button>
         </div>
+
+        {#if host.listActiveSessions}
+          <section class="sessions-section" aria-labelledby="sessions-title">
+            <div class="section-heading">
+              <h3 id="sessions-title">Active Sessions</h3>
+              {#if activeSessions.filter((s) => !s.isCurrent).length > 0}
+                <button
+                  type="button"
+                  class="secondary-button danger-button"
+                  onclick={revokeOtherSessions}
+                  disabled={busy}
+                >
+                  <IconTrash size={15} /> Delete All Others
+                </button>
+              {/if}
+            </div>
+            {#if activeSessions.length === 0}
+              <p class="hint">No additional active sessions detected.</p>
+            {:else}
+              <div class="table-responsive">
+                <table class="table table-vcenter sessions-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Last Accessed</th>
+                      <th scope="col">Location</th>
+                      <th scope="col">Device Type</th>
+                      <th scope="col">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each activeSessions as sess (sess.sessionId)}
+                      <tr>
+                        <td>
+                          <div class="session-time">
+                            <strong>{formatExpiry(sess.lastSeenAt)}</strong>
+                            <span class="session-created"
+                              >Created: {formatExpiry(sess.createdAt)}</span
+                            >
+                          </div>
+                        </td>
+                        <td>
+                          <span class="location-badge">
+                            <span class="flag-icon" aria-hidden="true">🌐</span>
+                            {sess.location}
+                          </span>
+                        </td>
+                        <td>
+                          <span class="device-badge">
+                            <IconDeviceDesktop size={16} aria-hidden="true" />
+                            {sess.deviceType}
+                          </span>
+                        </td>
+                        <td>
+                          {#if sess.isCurrent}
+                            <span class="badge current-badge"
+                              >Current Session</span
+                            >
+                          {:else}
+                            <button
+                              type="button"
+                              class="text-button danger-text"
+                              onclick={() => revokeSession(sess.sessionId)}
+                              disabled={busy}
+                              title="Revoke session"
+                            >
+                              <IconTrash size={15} /> Delete
+                            </button>
+                          {/if}
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </section>
+        {/if}
 
         {#if session.user.is_admin && host.listBrowserUsers}
           <section class="users" aria-labelledby="browser-users-title">
@@ -786,6 +919,70 @@
     padding-top: 16px;
     border-top: 1px solid
       color-mix(in srgb, var(--fasti-state-error, #b42318) 35%, transparent);
+  }
+  .sessions-section {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 20%, transparent);
+  }
+  .table-responsive {
+    overflow-x: auto;
+    margin-top: 10px;
+  }
+  .sessions-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .sessions-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 2px solid
+      color-mix(in srgb, var(--fasti-text-muted) 25%, transparent);
+    color: var(--fasti-text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .sessions-table td {
+    padding: 10px;
+    border-bottom: 1px solid
+      color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
+    vertical-align: middle;
+  }
+  .session-time {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .session-created {
+    font-size: 0.75rem;
+    color: var(--fasti-text-muted);
+  }
+  .location-badge,
+  .device-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+  }
+  .current-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: calc(var(--tblr-border-radius-scale, 1) * 4px);
+    background: color-mix(
+      in srgb,
+      var(--fasti-state-success, #087a55) 15%,
+      transparent
+    );
+    color: var(--fasti-state-success, #087a55);
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+  .danger-text {
+    color: var(--fasti-state-error, #b42318);
+    font-size: 0.82rem;
   }
   @media (max-width: 36rem) {
     .modal-card {

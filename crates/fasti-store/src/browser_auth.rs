@@ -10,10 +10,12 @@ use chrono::Duration;
 use fasti_application::{
     authorize, AccessAdministrationPort, ApplicationResult, AuthenticateBrowserSessionQuery,
     AuthenticatedBrowserSession, AuthorizationRequirement, BrowserAccountPort, BrowserPassword,
-    BrowserUserView, BrowserUsername, CapabilityKey, CreateBrowserSessionCommand,
-    CreatedBrowserSession, DeleteBrowserUserCommand, EndBrowserSessionCommand,
-    EnrollFirstClientCommand, FastiProblem, InitializeNodeCommand, ListBrowserUsersQuery,
-    ProblemCode, RequestAccessContext, ScopeKey, UpdateBrowserUserCommand, Violation,
+    BrowserSessionSummary, BrowserUserView, BrowserUsername, CapabilityKey,
+    CreateBrowserSessionCommand, CreatedBrowserSession, DeleteBrowserUserCommand,
+    EndAllOtherBrowserSessionsCommand, EndBrowserSessionCommand, EndSpecificBrowserSessionCommand,
+    EnrollFirstClientCommand, FastiProblem, InitializeNodeCommand, ListBrowserSessionsQuery,
+    ListBrowserUsersQuery, ProblemCode, RequestAccessContext, ScopeKey,
+    SwitchBrowserSessionProfileCommand, UpdateBrowserUserCommand, Violation,
 };
 use fasti_domain::{BrowserUserId, ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -654,6 +656,279 @@ impl BrowserAccountPort for SqliteKernel {
         }
     }
 
+    fn list_browser_sessions(
+        &self,
+        query: ListBrowserSessionsQuery,
+    ) -> ApplicationResult<Vec<BrowserSessionSummary>> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session_secret) = query.into_parts();
+        let current_digest = digest_secret(&session_secret);
+        let connection = self.lock_connection(capability, correlation_id)?;
+        let session = authenticate_session(
+            &connection,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session_secret,
+                None,
+                false,
+            ),
+        )?;
+        let user_id = session.user().user_id().to_string();
+        let mut statement = map_sql(
+            connection.prepare(
+                r#"
+                SELECT session_digest, created_at, expires_at, last_seen_at
+                FROM browser_sessions
+                WHERE user_id = ?1
+                ORDER BY created_at DESC
+                "#,
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let rows = map_sql(
+            statement.query_map([user_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            }),
+            capability,
+            correlation_id,
+        )?;
+        let mut summaries = Vec::new();
+        let current_time = now();
+        for row in rows {
+            let (digest, created_at, expires_at, last_seen_at) =
+                map_sql(row, capability, correlation_id)?;
+            let parsed_expires = parse_timestamp(&expires_at, capability, correlation_id)?;
+            if parsed_expires <= current_time {
+                continue;
+            }
+            let is_curr = verify_digest(&digest, &current_digest);
+            let parsed_created = parse_timestamp(&created_at, capability, correlation_id)?;
+            let parsed_last_seen = parse_timestamp(&last_seen_at, capability, correlation_id)?;
+            let short_id = if digest.len() >= 16 {
+                format!("sess_{}", &digest[..12])
+            } else {
+                format!("sess_{}", &digest)
+            };
+            summaries.push(BrowserSessionSummary::new(
+                short_id,
+                parsed_created,
+                parsed_expires,
+                parsed_last_seen,
+                "Local Host (127.0.0.1)".to_string(),
+                "Desktop Browser (Workbench)".to_string(),
+                is_curr,
+            ));
+        }
+        Ok(summaries)
+    }
+
+    fn end_specific_browser_session(
+        &self,
+        command: EndSpecificBrowserSessionCommand,
+    ) -> ApplicationResult<bool> {
+        let capability = CapabilityKey::EndBrowserSession;
+        let (correlation_id, session_secret, csrf_secret, target_session_id) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session_secret,
+                Some(csrf_secret),
+                true,
+            ),
+        )?;
+        let user_id = caller.user().user_id().to_string();
+        let target_prefix = target_session_id
+            .strip_prefix("sess_")
+            .unwrap_or(&target_session_id);
+        if target_prefix.len() < 8 || !target_prefix.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(problem(
+                ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            ));
+        }
+        let changed = map_sql(
+            transaction.execute(
+                "DELETE FROM browser_sessions WHERE user_id = ?1 AND session_digest LIKE ?2 || '%'",
+                params![user_id, target_prefix],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(changed > 0)
+    }
+
+    fn end_all_other_browser_sessions(
+        &self,
+        command: EndAllOtherBrowserSessionsCommand,
+    ) -> ApplicationResult<u64> {
+        let capability = CapabilityKey::EndBrowserSession;
+        let (correlation_id, session_secret, csrf_secret) = command.into_parts();
+        let current_digest = digest_secret(&session_secret);
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session_secret,
+                Some(csrf_secret),
+                true,
+            ),
+        )?;
+        let user_id = caller.user().user_id().to_string();
+        let changed = map_sql(
+            transaction.execute(
+                "DELETE FROM browser_sessions WHERE user_id = ?1 AND session_digest != ?2",
+                params![user_id, current_digest],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(changed as u64)
+    }
+
+    fn switch_browser_session_profile(
+        &self,
+        command: SwitchBrowserSessionProfileCommand,
+    ) -> ApplicationResult<AuthenticatedBrowserSession> {
+        let capability = CapabilityKey::ReadBrowserSession;
+        let (correlation_id, session_secret, csrf_secret, target_profile_id) = command.into_parts();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        let caller = authenticate_session(
+            &transaction,
+            &AuthenticateBrowserSessionQuery::new(
+                correlation_id,
+                capability,
+                session_secret,
+                Some(csrf_secret),
+                true,
+            ),
+        )?;
+        let workspace_id = caller.access().workspace_id().to_string();
+        let client_id = caller.access().client_id().to_string();
+        let target_profile_str = target_profile_id.to_string();
+
+        if !caller.user().is_admin() && caller.access().profile_id() != target_profile_id {
+            return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+        }
+
+        let profile_exists: bool = map_sql(
+            transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = ?1 AND workspace_id = ?2)",
+                params![target_profile_str, workspace_id],
+                |row| row.get(0),
+            ),
+            capability,
+            correlation_id,
+        )?;
+        if !profile_exists {
+            return Err(problem(
+                ProblemCode::ValidationFailed,
+                capability,
+                correlation_id,
+            ));
+        }
+
+        let grant_exists: bool = map_sql(
+            transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM profile_grants WHERE client_id = ?1 AND profile_id = ?2 AND workspace_id = ?3 AND status = 'active')",
+                params![client_id, target_profile_str, workspace_id],
+                |row| row.get(0),
+            ),
+            capability,
+            correlation_id,
+        )?;
+        let grant_id = if !grant_exists {
+            if !caller.user().is_admin() {
+                return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+            }
+            let gid = format!("pg_{}", fasti_domain::ProfileGrantId::new_v7());
+            let created_at = timestamp(now());
+            map_sql(
+                transaction.execute(
+                    "INSERT INTO profile_grants (grant_id, client_id, workspace_id, profile_id, status, created_at) VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
+                    params![gid, client_id, workspace_id, target_profile_str, created_at],
+                ),
+                capability,
+                correlation_id,
+            )?;
+            gid
+        } else {
+            let gid: String = map_sql(
+                transaction.query_row(
+                    "SELECT grant_id FROM profile_grants WHERE client_id = ?1 AND profile_id = ?2 AND workspace_id = ?3 AND status = 'active'",
+                    params![client_id, target_profile_str, workspace_id],
+                    |row| row.get(0),
+                ),
+                capability,
+                correlation_id,
+            )?;
+            gid
+        };
+
+        let updated_at = timestamp(now());
+        map_sql(
+            transaction.execute(
+                "UPDATE browser_users SET profile_id = ?1, updated_at = ?2 WHERE user_id = ?3",
+                params![
+                    target_profile_str,
+                    updated_at,
+                    caller.user().user_id().to_string()
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+
+        map_sql(transaction.commit(), capability, correlation_id)?;
+
+        let parsed_grant_id = grant_id
+            .parse::<ProfileGrantId>()
+            .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+        let new_access = RequestAccessContext::new(
+            caller.access().workspace_id(),
+            target_profile_id,
+            caller.access().client_id(),
+            caller.access().credential_id(),
+            parsed_grant_id,
+            caller.access().presented_credential_epoch(),
+        );
+
+        Ok(AuthenticatedBrowserSession::new(
+            caller.user().clone(),
+            new_access,
+            caller.expires_at(),
+        ))
+    }
+
     fn list_browser_users(
         &self,
         query: ListBrowserUsersQuery,
@@ -928,7 +1203,7 @@ mod tests {
     use super::*;
     use fasti_application::{
         ClientCredentialAdministrationPort, CreateScopedClientCredentialCommand,
-        CreateScopedClientCredentialOutcome, RevokeClientCredentialCommand, ScopeKey,
+        CreateScopedClientCredentialOutcome, RevokeClientCredentialCommand,
     };
 
     fn login(
@@ -1550,5 +1825,90 @@ mod tests {
                 ordinary_access.credential_id(),
             ))
             .expect("revoke ordinary scoped access without browser administrators");
+    }
+
+    #[test]
+    fn session_management_lists_and_terminates_sessions() {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = SqliteKernel::open(root.path()).expect("kernel");
+        kernel
+            .ensure_development_browser_user(
+                BrowserUsername::try_new("testadmin").expect("username"),
+                BrowserPassword::try_new("testadmin").expect("password"),
+            )
+            .expect("seed user");
+
+        // Login session 1: 30 days timeout (43200 minutes)
+        let login1 = kernel
+            .create_browser_session(
+                CreateBrowserSessionCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    BrowserUsername::try_new("testadmin").expect("username"),
+                    BrowserPassword::try_new("testadmin").expect("password"),
+                    43200,
+                )
+                .expect("30 day session"),
+            )
+            .expect("login 1");
+
+        // Login session 2: 60 days timeout (86400 minutes)
+        let _login2 = kernel
+            .create_browser_session(
+                CreateBrowserSessionCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    BrowserUsername::try_new("testadmin").expect("username"),
+                    BrowserPassword::try_new("testadmin").expect("password"),
+                    86400,
+                )
+                .expect("60 day session"),
+            )
+            .expect("login 2");
+
+        let session1 =
+            fasti_application::SecretMaterial::try_from_hex(&login1.session().expose_hex())
+                .expect("session1");
+        let csrf1 = fasti_application::SecretMaterial::try_from_hex(&login1.csrf().expose_hex())
+            .expect("csrf1");
+
+        // List sessions from session 1 perspective
+        let sessions = kernel
+            .list_browser_sessions(ListBrowserSessionsQuery::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                session1,
+            ))
+            .expect("list sessions");
+
+        assert_eq!(sessions.len(), 2);
+        let curr_count = sessions.iter().filter(|s| s.is_current()).count();
+        assert_eq!(curr_count, 1);
+
+        // Terminate other session
+        let other_session = sessions
+            .iter()
+            .find(|s| !s.is_current())
+            .expect("other session");
+        let session1_again =
+            fasti_application::SecretMaterial::try_from_hex(&login1.session().expose_hex())
+                .expect("session1_again");
+        let terminated = kernel
+            .end_specific_browser_session(EndSpecificBrowserSessionCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                session1_again,
+                csrf1,
+                other_session.session_id().to_string(),
+            ))
+            .expect("end specific session");
+        assert!(terminated);
+
+        let session1_check =
+            fasti_application::SecretMaterial::try_from_hex(&login1.session().expose_hex())
+                .expect("session1_check");
+        let sessions_after = kernel
+            .list_browser_sessions(ListBrowserSessionsQuery::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                session1_check,
+            ))
+            .expect("list sessions after");
+        assert_eq!(sessions_after.len(), 1);
     }
 }

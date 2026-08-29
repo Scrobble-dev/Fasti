@@ -11,8 +11,8 @@ pub struct CreateBrowserSessionRequest {
     #[schemars(length(min = 8, max = 128))]
     #[schema(min_length = 8, max_length = 128, format = "password")]
     pub password: String,
-    #[schemars(range(min = 5, max = 1440))]
-    #[schema(minimum = 5, maximum = 1440)]
+    #[schemars(range(min = 5, max = 86400))]
+    #[schema(minimum = 5, maximum = 86400)]
     pub session_timeout_minutes: u32,
 }
 
@@ -36,6 +36,27 @@ pub struct BrowserSessionResponse {
     pub user: BrowserUserDto,
     #[schema(format = "date-time")]
     pub expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserSessionItemDto {
+    pub session_id: String,
+    #[schema(format = "date-time")]
+    pub created_at: String,
+    #[schema(format = "date-time")]
+    pub expires_at: String,
+    #[schema(format = "date-time")]
+    pub last_seen_at: String,
+    pub location: String,
+    pub device_type: String,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListBrowserSessionsResponse {
+    pub sessions: Vec<BrowserSessionItemDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -65,6 +86,32 @@ pub struct DeleteBrowserUserRequest {
     #[schemars(length(min = 8, max = 128))]
     #[schema(min_length = 8, max_length = 128, format = "password")]
     pub current_password: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwitchProfileRequest {
+    pub profile_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WebAuthnPasskeyDto {
+    pub credential_id: String,
+    pub name: String,
+    #[schema(format = "date-time")]
+    pub created_at: String,
+    #[schema(format = "date-time")]
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MfaStatusResponse {
+    pub passkeys_enabled: bool,
+    pub totp_enabled: bool,
+    pub recovery_codes_remaining: u32,
+    pub passkeys: Vec<WebAuthnPasskeyDto>,
 }
 
 #[cfg(test)]

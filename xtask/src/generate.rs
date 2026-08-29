@@ -178,7 +178,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 21] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 25] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -375,6 +375,50 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 21] = [
         authenticated: true,
         request: None,
         response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "listBrowserSessions",
+        operation_id: "list_sessions",
+        method: "get",
+        path: "/api/v1/browser/sessions",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: None,
+        response: Some("ListBrowserSessionsResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "endSpecificBrowserSession",
+        operation_id: "end_specific_session",
+        method: "delete",
+        path: "/api/v1/browser/sessions/{session_id}",
+        capability_id: "browser.session.end",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "endAllOtherBrowserSessions",
+        operation_id: "end_other_sessions",
+        method: "delete",
+        path: "/api/v1/browser/sessions",
+        capability_id: "browser.session.end",
+        authenticated: true,
+        request: None,
+        response: None,
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "switchBrowserSessionProfile",
+        operation_id: "switch_profile",
+        method: "post",
+        path: "/api/v1/browser/session/switch-profile",
+        capability_id: "browser.session.read",
+        authenticated: true,
+        request: Some("SwitchProfileRequest"),
+        response: Some("BrowserSessionResponse"),
         retry: "never",
     },
     ConformanceOperation {
@@ -1249,7 +1293,15 @@ fn validate_production_operation_security(
         | "clear_nuvio_collections" => vec!["credential_bearer", "browser_session"],
         "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
         | "plex_webhook" => vec!["credential_bearer"],
-        "read_session" | "end_session" | "list_users" | "update_user" | "delete_user" => {
+        "read_session"
+        | "end_session"
+        | "list_sessions"
+        | "end_specific_session"
+        | "end_other_sessions"
+        | "switch_profile"
+        | "list_users"
+        | "update_user"
+        | "delete_user" => {
             vec!["browser_session"]
         }
         "create_session" | "enroll_first_client" | "health_check" | "integration_status" => {
@@ -2272,6 +2324,9 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "CreateBrowserSessionRequest",
         "BrowserUserDto",
         "BrowserSessionResponse",
+        "BrowserSessionItemDto",
+        "ListBrowserSessionsResponse",
+        "SwitchProfileRequest",
         "ListBrowserUsersResponse",
         "UpdateBrowserUserRequest",
         "DeleteBrowserUserRequest",
@@ -2421,6 +2476,11 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         ),
         ("parseBrowserUserDto", "BrowserUserDto"),
         ("parseBrowserSessionResponse", "BrowserSessionResponse"),
+        (
+            "parseListBrowserSessionsResponse",
+            "ListBrowserSessionsResponse",
+        ),
+        ("parseSwitchProfileRequest", "SwitchProfileRequest"),
         ("parseListBrowserUsersResponse", "ListBrowserUsersResponse"),
         ("parseUpdateBrowserUserRequest", "UpdateBrowserUserRequest"),
         ("parseDeleteBrowserUserRequest", "DeleteBrowserUserRequest"),

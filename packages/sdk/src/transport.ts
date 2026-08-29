@@ -21,6 +21,7 @@ import {
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListBrowserSessionsResponse,
   parseListBrowserUsersResponse,
   parseListTrackingDispositionsResponse,
   parseNuvioCollectionsDocumentDto,
@@ -31,6 +32,7 @@ import {
   parseRegisterNamespaceRequest,
   parseRegisterNamespaceResponse,
   parseSetTrackingDispositionRequest,
+  parseSwitchProfileRequest,
   parseTrackingDispositionStateDto,
   parseUpdateBrowserUserRequest,
   parseReplayReceiptResponse,
@@ -56,6 +58,7 @@ import {
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListBrowserSessionsResponse,
   type ListBrowserUsersResponse,
   type ListTrackingDispositionsResponse,
   type NuvioCollectionsDocumentDto,
@@ -67,6 +70,7 @@ import {
   type RegisterNamespaceRequest,
   type RegisterNamespaceResponse,
   type SetTrackingDispositionRequest,
+  type SwitchProfileRequest,
   type ReplayReceiptResponse,
   type SubmitObservationRequest,
   type SubmitObservationResponse,
@@ -234,6 +238,7 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const SESSION_ID = /^[0-9a-fA-F]{16,64}$/;
 const USER_ID = /^usr_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
@@ -748,6 +753,84 @@ export class FastiClient {
       retryMode: "never",
       responseParser: undefined,
       responseLabel: "End browser session response",
+      options,
+    });
+  }
+
+  listBrowserSessions(
+    options: CallOptions = {},
+  ): Promise<ListBrowserSessionsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListBrowserSessionsResponse,
+      responseLabel: "List browser sessions response",
+      options,
+    });
+  }
+
+  endSpecificBrowserSession(
+    sessionId: string,
+    options: CallOptions = {},
+  ): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.endSpecificBrowserSession;
+    const safeSessionId = contractPathIdentifier(
+      sessionId,
+      SESSION_ID,
+      "sessionId",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path.replace(
+        "{session_id}",
+        encodeURIComponent(safeSessionId),
+      ),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: undefined,
+      responseLabel: "End specific browser session response",
+      options,
+    });
+  }
+
+  endAllOtherBrowserSessions(options: CallOptions = {}): Promise<void> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.endAllOtherBrowserSessions;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: undefined,
+      responseLabel: "End other browser sessions response",
+      options,
+    });
+  }
+
+  switchBrowserSessionProfile(
+    request: SwitchProfileRequest,
+    options: CallOptions = {},
+  ): Promise<BrowserSessionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.switchBrowserSessionProfile;
+    const body = parseOutgoing(
+      parseSwitchProfileRequest,
+      request,
+      "Switch profile request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseBrowserSessionResponse,
+      responseLabel: "Switch profile response",
       options,
     });
   }

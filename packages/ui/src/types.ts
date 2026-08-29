@@ -290,6 +290,30 @@ export interface BrowserUserUpdate {
   readonly active?: boolean;
 }
 
+export interface BrowserSessionItem {
+  readonly sessionId: string;
+  readonly createdAt: string;
+  readonly expiresAt: string;
+  readonly lastSeenAt: string;
+  readonly location: string;
+  readonly deviceType: string;
+  readonly isCurrent: boolean;
+}
+
+export interface WebAuthnPasskey {
+  readonly credentialId: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
+}
+
+export interface MfaStatus {
+  readonly passkeysEnabled: boolean;
+  readonly totpEnabled: boolean;
+  readonly recoveryCodesRemaining: number;
+  readonly passkeys: WebAuthnPasskey[];
+}
+
 export type NuvioCollectionsDocument = ReadonlyArray<Record<string, unknown>>;
 
 export interface NuvioCollectionsState {
@@ -357,6 +381,10 @@ export interface WorkbenchHost {
   ): Promise<BrowserSession>;
   currentBrowserSession?(): Promise<BrowserSession>;
   endBrowserSession?(): Promise<void>;
+  listActiveSessions?(): Promise<BrowserSessionItem[]>;
+  endSpecificSession?(sessionId: string): Promise<void>;
+  endOtherSessions?(): Promise<void>;
+  switchProfile?(profileId: string): Promise<BrowserSession>;
   listBrowserUsers?(): Promise<BrowserUser[]>;
   updateBrowserUser?(
     userId: string,
@@ -594,4 +622,30 @@ export interface WorkbenchPreferences {
   sessionDuration: number;
   customFields: CustomFieldDefinition[];
   customMediaTypes: CustomMediaTypeDefinition[];
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  avatarColor: string;
+  avatarIcon?: string;
+  role: "admin" | "standard" | "restricted";
+  isEssentialMode?: boolean;
+  pinProtected?: boolean;
+  pinHash?: string;
+  lastActive?: string;
+}
+
+export interface RegisteredPasskey {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+export interface TotpConfiguration {
+  enabled: boolean;
+  secret: string;
+  qrUri: string;
+  backupCodes: string[];
 }
