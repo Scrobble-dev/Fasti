@@ -1,3 +1,4 @@
+mod docs;
 mod evidence;
 mod generate;
 mod orchestration;
@@ -17,6 +18,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Public documentation generation, verification, and packaging
+    Docs {
+        #[command(subcommand)]
+        command: DocsCommand,
+    },
     /// Contract generation and verification tasks
     Contract {
         #[command(subcommand)]
@@ -31,6 +37,22 @@ enum Command {
     Evidence {
         #[command(subcommand)]
         command: EvidenceCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum DocsCommand {
+    /// Generate the deterministic public site projection under target/docs-site
+    Generate,
+    /// Verify governed sources and repeat the projection to prove determinism
+    Verify {
+        #[arg(long)]
+        locked: bool,
+    },
+    /// Verify, generate, and build the static Docusaurus artifact
+    Package {
+        #[arg(long)]
+        locked: bool,
     },
 }
 
@@ -99,6 +121,15 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let root = workspace_root()?;
     match cli.command {
+        Command::Docs {
+            command: DocsCommand::Generate,
+        } => docs::generate(&root).map(|_| ()),
+        Command::Docs {
+            command: DocsCommand::Verify { locked: _ },
+        } => docs::verify(&root),
+        Command::Docs {
+            command: DocsCommand::Package { locked },
+        } => docs::package(&root, locked),
         Command::Contract {
             command: ContractCommand::ValidateRegistry,
         } => {
@@ -157,6 +188,7 @@ fn main() -> anyhow::Result<()> {
 /// ```
 fn run_pr(root: &std::path::Path) -> anyhow::Result<()> {
     verify_contracts(root, true)?;
+    docs::verify(root)?;
     orchestration::run_portable_b1(root)?;
     println!("PASS: canonical B1 pull-request gate");
     Ok(())

@@ -1,0 +1,17 @@
+{
+  "name": "@fasti/deploy-plan",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure typed generator for bounded Fasti deployment review plans",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

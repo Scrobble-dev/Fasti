@@ -82,12 +82,29 @@ jobs:
         with:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
-      - run: npx nx run-many -t build
+      - run: npx nx run-many -t build --exclude=@fasti/docs
       - run: pnpm format:check
       - run: pnpm typecheck
       - run: pnpm test
       - run: npx nx fix-ci
         if: always()
+
+  documentation:
+    name: Documentation portal
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+        with:
+          version: 11.22.0
+      - run: pnpm install --frozen-lockfile
+      - run: cargo xtask docs package --locked
 
   ui-quality:
     name: Browser UI quality

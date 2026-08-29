@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "artifact_bytes_max": 5242880,
+  "html_file_bytes_max": 40960,
+  "javascript_bytes_max": 1310720,
+  "javascript_file_bytes_max": 512000,
+  "css_bytes_max": 614400,
+  "search_bytes_max": 1048576,
+  "layout_shift_max": 0.1,
+  "browser_heap_after_idle_mib_max": 64
+}

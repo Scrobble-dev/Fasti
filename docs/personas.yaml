@@ -1,0 +1,251 @@
+version: 1
+source: tests/conformance/identity-uat-matrix.v1.csv
+tracks:
+  - id: use
+    label: Use Fasti
+    outcome: Understand and keep portable media activity without giving one provider ownership of identity.
+  - id: operate
+    label: Operate and recover
+    outcome: Run a bounded local node and understand its trust, durability, recovery, and support limits.
+  - id: integrate
+    label: Integrate and automate
+    outcome: Build a client or connection that uses governed contracts, scopes, idempotency, and typed problems.
+  - id: extend
+    label: Map and extend
+    outcome: Add provider, mapping, namespace, or custom-type behavior without redefining Fasti domain rules.
+  - id: contribute
+    label: Contribute and verify
+    outcome: Change Fasti through its owned layers and provide exact-source test and review evidence.
+personas:
+  - id: anime_mapper
+    track: extend
+    outcome: Maintain explicit episode and series mappings without hiding ambiguous or partial coverage.
+    first_task: /extend/first-provider/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-031, IDF-032, IDF-033, IDF-034, IDF-035, IDF-036, IDF-037, IDF-038, IDF-039, IDF-040, IDF-042, IDF-043, IDF-044, IDF-045, IDF-046]
+    cross_cutting: false
+  - id: anime_specialist
+    track: extend
+    outcome: Preserve anime numbering, editions, and identity evidence when one automatic mapping is unsafe.
+    first_task: /extend/first-provider/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-016, IDF-017, IDF-018, IDF-019, IDF-053, IDF-054, IDF-055]
+    cross_cutting: false
+  - id: api_developer
+    track: integrate
+    outcome: Use exact HTTP operations, typed problems, and stable identifiers without guessing runtime availability.
+    first_task: /integrate/first-observation/
+    recovery_task: /integrate/problems/
+    capability_ids: [observation.accept, system.capabilities.discover]
+    uat_rows: [IDF-014, IDF-028, IDF-029, IDF-081, IDF-124]
+    cross_cutting: false
+  - id: audhd_user
+    track: use
+    outcome: Complete primary tasks in a stable layout with explicit state, short paths, and resumable recovery.
+    first_task: /start/choose-a-path/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health]
+    uat_rows: [IDF-115, IDF-117, IDF-118, IDF-120, IDF-121]
+    cross_cutting: true
+  - id: backup_owner
+    track: operate
+    outcome: Understand current durability and recovery limits before relying on a backup or restore path.
+    first_task: /operate/local-review/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health, node.initialize]
+    uat_rows: [IDF-013, IDF-062, IDF-092]
+    cross_cutting: false
+  - id: book_user
+    track: use
+    outcome: Keep book and edition identity separate while retaining useful ISBN and provider evidence.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create]
+    uat_rows: [IDF-067, IDF-068]
+    cross_cutting: false
+  - id: connection_author
+    track: integrate
+    outcome: Define a bounded connection that submits neutral observations through governed authorization.
+    first_task: /integrate/first-observation/
+    recovery_task: /integrate/problems/
+    capability_ids: [observation.accept]
+    uat_rows: [IDF-110]
+    cross_cutting: false
+  - id: custom_type_owner
+    track: extend
+    outcome: Add a custom media type or namespace without creating an untyped parallel identity model.
+    first_task: /extend/first-provider/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-075, IDF-077, IDF-078, IDF-079, IDF-082, IDF-084]
+    cross_cutting: false
+  - id: game_user
+    track: use
+    outcome: Keep game editions and provider identifiers as evidence attached to one stable local Record.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create]
+    uat_rows: [IDF-071, IDF-076]
+    cross_cutting: false
+  - id: household_owner
+    track: operate
+    outcome: Run a private local node while keeping profile, administrator, and Record boundaries explicit.
+    first_task: /operate/local-review/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health, node.initialize]
+    uat_rows: [IDF-003, IDF-027, IDF-112, IDF-119]
+    cross_cutting: false
+  - id: integration_developer
+    track: integrate
+    outcome: Submit and verify one governed media observation through the real local contract path.
+    first_task: /integrate/first-observation/
+    recovery_task: /integrate/problems/
+    capability_ids: [observation.accept]
+    uat_rows: [IDF-004]
+    cross_cutting: false
+  - id: mapping_maintainer
+    track: extend
+    outcome: Publish and validate bounded mappings with explicit version, coverage, failure, and rollback rules.
+    first_task: /extend/first-provider/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-006, IDF-047, IDF-048, IDF-049, IDF-050, IDF-125]
+    cross_cutting: false
+  - id: mcp_user
+    track: integrate
+    outcome: Use an MCP connection without giving it direct storage or unbounded authorization.
+    first_task: /integrate/first-observation/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-111]
+    cross_cutting: false
+  - id: metadata_user
+    track: use
+    outcome: Change preferred metadata while keeping Record identity and source provenance stable.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create]
+    uat_rows: [IDF-020, IDF-021, IDF-063, IDF-064, IDF-065, IDF-066, IDF-072, IDF-073, IDF-074]
+    cross_cutting: false
+  - id: mobile_user
+    track: use
+    outcome: Understand the current mobile and multi-device boundary without assuming unsupported synchronization.
+    first_task: /start/current-status/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health]
+    uat_rows: [IDF-102]
+    cross_cutting: false
+  - id: mqtt_user
+    track: integrate
+    outcome: Design MQTT use without putting personal data or credentials in topic names or discovery data.
+    first_task: /integrate/first-observation/
+    recovery_task: /security/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-114]
+    cross_cutting: false
+  - id: multi_device_user
+    track: use
+    outcome: Understand which state can remain local and which synchronization paths are not yet supported.
+    first_task: /start/current-status/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health]
+    uat_rows: [IDF-057, IDF-058, IDF-059, IDF-095, IDF-096, IDF-097, IDF-098, IDF-099, IDF-100, IDF-101]
+    cross_cutting: false
+  - id: music_user
+    track: use
+    outcome: Keep work, release, recording, and provider identity evidence distinct.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create]
+    uat_rows: [IDF-069]
+    cross_cutting: false
+  - id: performance_engineer
+    track: contribute
+    outcome: Reproduce bounded hardware and artifact evidence without converting targets into release claims.
+    first_task: /contribute/first-change/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health]
+    uat_rows: [IDF-080]
+    cross_cutting: false
+  - id: player_user
+    track: integrate
+    outcome: Report observations from a player while keeping playback independent from Fasti availability.
+    first_task: /integrate/first-observation/
+    recovery_task: /integrate/problems/
+    capability_ids: [observation.accept]
+    uat_rows: [IDF-051, IDF-103, IDF-104]
+    cross_cutting: false
+  - id: podcast_user
+    track: use
+    outcome: Keep podcast episode and feed evidence without making a changing feed URL the local identity owner.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create]
+    uat_rows: [IDF-070]
+    cross_cutting: false
+  - id: privacy_engineer
+    track: operate
+    outcome: Verify local data, network, discovery, credential, and export boundaries from source evidence.
+    first_task: /security/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health, node.initialize]
+    uat_rows: [IDF-012, IDF-060, IDF-083, IDF-109]
+    cross_cutting: false
+  - id: provider_author
+    track: extend
+    outcome: Add a provider adapter that translates bounded evidence without owning Record identity or storage.
+    first_task: /extend/first-provider/
+    recovery_task: /integrate/problems/
+    capability_ids: [observation.accept, system.capabilities.discover]
+    uat_rows: [IDF-024, IDF-113, IDF-122, IDF-123]
+    cross_cutting: false
+  - id: qa_engineer
+    track: contribute
+    outcome: Bind each claim to an executable test, exact source, environment, artifact, and result.
+    first_task: /contribute/first-change/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.capabilities.discover]
+    uat_rows: [IDF-008, IDF-015]
+    cross_cutting: false
+  - id: screen_reader_user
+    track: contribute
+    outcome: Complete every primary task with semantic structure, useful names, stable focus, and no color-only meaning.
+    first_task: /accessibility/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health]
+    uat_rows: [IDF-116]
+    cross_cutting: true
+  - id: security_engineer
+    track: operate
+    outcome: Verify listener, proxy, provider, credential, authorization, and private-report boundaries.
+    first_task: /security/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health, node.initialize]
+    uat_rows: [IDF-105, IDF-106, IDF-107, IDF-108]
+    cross_cutting: false
+  - id: support_engineer
+    track: operate
+    outcome: Diagnose a reported state from exact capability, problem, evidence, and source information.
+    first_task: /start/current-status/
+    recovery_task: /integrate/problems/
+    capability_ids: [system.health, system.capabilities.discover]
+    uat_rows: [IDF-005, IDF-007, IDF-025, IDF-026, IDF-030, IDF-056, IDF-061, IDF-126]
+    cross_cutting: false
+  - id: tracker_migrant
+    track: use
+    outcome: Preserve useful history and unresolved evidence without forcing unsafe provider identity matches.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create, observation.accept]
+    uat_rows: [IDF-001, IDF-002, IDF-009, IDF-010, IDF-011, IDF-022, IDF-023, IDF-052, IDF-085, IDF-086, IDF-087, IDF-088, IDF-089, IDF-090, IDF-091, IDF-093, IDF-094]
+    cross_cutting: false
+  - id: video_user
+    track: use
+    outcome: Keep video editions, ordering, and provider evidence separate when they describe different works or cuts.
+    first_task: /use/keep-a-local-record/
+    recovery_task: /integrate/problems/
+    capability_ids: [identity.record.create]
+    uat_rows: [IDF-041]
+    cross_cutting: false

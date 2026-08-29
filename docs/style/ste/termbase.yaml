@@ -1,0 +1,42 @@
+version: 1
+standard: ASD-STE100 Issue 9
+claim: machine assistance only; no certification claim
+terms:
+  - term: Fasti Record
+    definition: A stable local media entity whose identity does not belong to a metadata provider.
+  - term: observation
+    definition: What a source reported to Fasti.
+  - term: occurrence
+    definition: A durable media event represented by an accepted observation.
+  - term: interpretation
+    definition: The current append-only reading of observations and evidence.
+  - term: evidence
+    definition: Original information that supports an observation or identity claim.
+  - term: provider identifier
+    definition: A typed identifier claim from an external source.
+  - term: capability
+    definition: A governed Fasti operation with one stable identifier and owner.
+  - term: contract state
+    definition: The state of a governed interface definition.
+  - term: runtime state
+    definition: Whether a real executable composition exposes the behavior.
+  - term: support state
+    definition: Whether the project supports the behavior for public use.
+  - term: loopback
+    definition: A network address that is available only on the same host.
+  - term: data root
+    definition: The private directory that contains durable Fasti state.
+  - term: scoped credential
+    definition: A revocable credential that grants only named Fasti capabilities.
+  - term: fixture
+    definition: Bounded test software that proves contract behavior without a production claim.
+  - term: generated projection
+    definition: Output derived from an authoritative source and not edited as a source.
+disallowed:
+  - { phrase: fully supported, reason: Use the exact support state instead. }
+  - { phrase: production ready, reason: Name the governing release gate and evidence. }
+  - { phrase: seamless, reason: State the observed behavior and failure path. }
+  - { phrase: simply, reason: Give the exact action and prerequisite. }
+  - { phrase: obviously, reason: State the evidence. }
+  - { phrase: revolutionary, reason: Generic marketing claim. }
+  - { phrase: game-changing, reason: Generic marketing claim. }

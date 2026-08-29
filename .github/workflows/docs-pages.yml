@@ -1,0 +1,51 @@
+name: Fasti documentation Pages
+
+on:
+  push:
+    branches: ["dev"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fasti-documentation-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build exact static artifact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.22.0
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+      - run: pnpm install --frozen-lockfile
+      - run: cargo xtask docs package --locked
+      - run: node scripts/validate-docs-build.mjs
+      - uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: apps/docs/build
+
+  deploy:
+    name: Deploy exact static artifact
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
