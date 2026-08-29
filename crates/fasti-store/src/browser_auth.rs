@@ -265,6 +265,7 @@ fn authenticate_session(
 
 fn validate_grants(
     connection: &Connection,
+    subject_id: AuthSubjectId,
     workspace_id: WorkspaceId,
     grants: &[ProfileGrantId],
     capability: CapabilityKey,
@@ -273,8 +274,25 @@ fn validate_grants(
     for grant_id in grants {
         let exists = map_sql(
             connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM profile_grants WHERE grant_id = ?1 AND workspace_id = ?2 AND status = 'active')",
-                params![grant_id.to_string(), workspace_id.to_string()],
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM auth_subject_profile_grants subject_grant
+                    JOIN profile_grants grant
+                      ON grant.grant_id = subject_grant.profile_grant_id
+                    JOIN clients client ON client.client_id = grant.client_id
+                    WHERE subject_grant.auth_subject_id = ?1
+                      AND grant.grant_id = ?2
+                      AND grant.workspace_id = ?3
+                      AND grant.status = 'active'
+                      AND client.status = 'active'
+                )
+                "#,
+                params![
+                    subject_id.to_string(),
+                    grant_id.to_string(),
+                    workspace_id.to_string()
+                ],
                 |row| row.get::<_, i64>(0),
             ),
             capability,
@@ -303,6 +321,7 @@ fn insert_session(
 ) -> ApplicationResult<CreatedBrowserSession> {
     validate_grants(
         transaction,
+        subject.id(),
         workspace_id,
         grants,
         capability,
@@ -460,16 +479,17 @@ fn rotate_session(
         capability,
         correlation_id,
     )?;
-    if !grants.contains(&selected_grant_id) {
-        return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
-    }
     validate_grants(
         transaction,
-        current_session.workspace_id(),
-        &[selected_grant_id],
+        current.subject().id(),
+        current.session().workspace_id(),
+        &grants,
         capability,
         correlation_id,
     )?;
+    if !grants.contains(&selected_grant_id) {
+        return Err(problem(ProblemCode::Forbidden, capability, correlation_id));
+    }
     let (idle_timeout_seconds, write_interval_seconds): (i64, i64) = map_sql(
         transaction.query_row(
             "SELECT idle_timeout_seconds, last_seen_write_interval_seconds FROM fasti_browser_sessions WHERE browser_session_id = ?1",
@@ -1003,6 +1023,22 @@ mod tests {
                 ),
             ))
             .expect("subject");
+        {
+            let connection = kernel
+                .lock_connection(
+                    CapabilityKey::CreateBrowserSession,
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                )
+                .expect("connection");
+            for grant_id in grants {
+                connection
+                    .execute(
+                        "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                        params![subject_id.to_string(), grant_id.to_string()],
+                    )
+                    .expect("subject profile grant");
+            }
+        }
         Fixture {
             _root: root,
             kernel,
@@ -1256,6 +1292,187 @@ mod tests {
                     fixture.created_at + ChronoDuration::seconds(3),
                 )),
             ProblemCode::BrowserSessionRevoked,
+        );
+    }
+
+    #[test]
+    fn session_grants_remain_subject_owned_and_active_at_the_transaction_boundary() {
+        let fixture = fixture();
+        let other_subject_id = AuthSubjectId::new_v7();
+        fixture
+            .kernel
+            .create_auth_subject(CreateAuthSubjectCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                AuthSubject::new(
+                    other_subject_id,
+                    AuthSubjectLifecycle::Active,
+                    1,
+                    1,
+                    fixture.created_at,
+                    fixture.created_at,
+                ),
+            ))
+            .expect("other subject");
+
+        let create_for = |subject_id, workspace_id, grant_id| {
+            fixture.kernel.create_browser_session(
+                CreateBrowserSessionCommand::try_new(
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                    subject_id,
+                    workspace_id,
+                    vec![grant_id],
+                    grant_id,
+                    policy(),
+                    false,
+                    fixture.created_at,
+                )
+                .expect("session command"),
+            )
+        };
+
+        assert_problem(
+            create_for(other_subject_id, fixture.workspace_id, fixture.grants[0]),
+            ProblemCode::Forbidden,
+        );
+
+        {
+            let connection = fixture
+                .kernel
+                .lock_connection(
+                    CapabilityKey::CreateBrowserSession,
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                )
+                .expect("connection");
+            connection
+                .execute(
+                    "UPDATE profile_grants SET status = 'revoked', revoked_at = ?1 WHERE grant_id = ?2",
+                    params![timestamp(fixture.created_at), fixture.grants[0].to_string()],
+                )
+                .expect("revoke grant");
+        }
+        assert_problem(
+            create_for(fixture.subject_id, fixture.workspace_id, fixture.grants[0]),
+            ProblemCode::Forbidden,
+        );
+        {
+            let connection = fixture
+                .kernel
+                .lock_connection(
+                    CapabilityKey::CreateBrowserSession,
+                    fasti_domain::RequestCorrelationId::new_v7(),
+                )
+                .expect("connection");
+            connection
+                .execute(
+                    "UPDATE profile_grants SET status = 'active', revoked_at = NULL WHERE grant_id = ?1",
+                    [fixture.grants[0].to_string()],
+                )
+                .expect("reactivate grant");
+            connection
+                .execute(
+                    "UPDATE clients SET status = 'revoked' WHERE workspace_id = ?1",
+                    [fixture.workspace_id.to_string()],
+                )
+                .expect("revoke client");
+        }
+        assert_problem(
+            create_for(fixture.subject_id, fixture.workspace_id, fixture.grants[0]),
+            ProblemCode::Forbidden,
+        );
+        let other_workspace_id = WorkspaceId::new_v7();
+        let other_client_id = ClientId::new_v7();
+        let other_profile_id = ProfileId::new_v7();
+        let other_grant_id = ProfileGrantId::new_v7();
+        let connection = fixture
+            .kernel
+            .lock_connection(
+                CapabilityKey::CreateBrowserSession,
+                fasti_domain::RequestCorrelationId::new_v7(),
+            )
+            .expect("connection");
+        connection
+            .execute(
+                "UPDATE clients SET status = 'active' WHERE workspace_id = ?1",
+                [fixture.workspace_id.to_string()],
+            )
+            .expect("reactivate client");
+        connection
+            .execute(
+                "INSERT INTO workspaces(workspace_id, created_at) VALUES (?1, ?2)",
+                params![
+                    other_workspace_id.to_string(),
+                    timestamp(fixture.created_at)
+                ],
+            )
+            .expect("other workspace");
+        connection
+            .execute(
+                "INSERT INTO clients(client_id, workspace_id, status, current_credential_epoch, created_at) VALUES (?1, ?2, 'active', 1, ?3)",
+                params![other_client_id.to_string(), other_workspace_id.to_string(), timestamp(fixture.created_at)],
+            )
+            .expect("other client");
+        connection
+            .execute(
+                "INSERT INTO profiles(profile_id, workspace_id, created_at) VALUES (?1, ?2, ?3)",
+                params![
+                    other_profile_id.to_string(),
+                    other_workspace_id.to_string(),
+                    timestamp(fixture.created_at)
+                ],
+            )
+            .expect("other profile");
+        connection
+            .execute(
+                "INSERT INTO profile_grants(grant_id, workspace_id, profile_id, client_id, status, created_at) VALUES (?1, ?2, ?3, ?4, 'active', ?5)",
+                params![other_grant_id.to_string(), other_workspace_id.to_string(), other_profile_id.to_string(), other_client_id.to_string(), timestamp(fixture.created_at)],
+            )
+            .expect("other grant");
+        connection
+            .execute(
+                "INSERT INTO auth_subject_profile_grants(auth_subject_id, profile_grant_id) VALUES (?1, ?2)",
+                params![fixture.subject_id.to_string(), other_grant_id.to_string()],
+            )
+            .expect("cross-workspace subject grant");
+        drop(connection);
+
+        assert_problem(
+            create_for(fixture.subject_id, fixture.workspace_id, other_grant_id),
+            ProblemCode::Forbidden,
+        );
+    }
+
+    #[test]
+    fn profile_selection_rechecks_revoked_grants() {
+        let fixture = fixture();
+        let created = create_session(&fixture, &fixture.grants[..2], fixture.grants[0], 0);
+        let connection = fixture
+            .kernel
+            .lock_connection(
+                CapabilityKey::SelectBrowserSessionProfile,
+                fasti_domain::RequestCorrelationId::new_v7(),
+            )
+            .expect("connection");
+        connection
+            .execute(
+                "UPDATE profile_grants SET status = 'revoked', revoked_at = ?1 WHERE grant_id = ?2",
+                params![timestamp(fixture.created_at), fixture.grants[1].to_string()],
+            )
+            .expect("revoke grant");
+        drop(connection);
+
+        assert_problem(
+            fixture
+                .kernel
+                .select_browser_session_profile(SelectBrowserSessionProfileCommand::new(
+                    BrowserSessionMutationCommand::new(
+                        fasti_domain::RequestCorrelationId::new_v7(),
+                        secret_copy(created.session_secret()),
+                        secret_copy(created.csrf_secret()),
+                        fixture.created_at + ChronoDuration::seconds(1),
+                    ),
+                    fixture.grants[1],
+                )),
+            ProblemCode::Forbidden,
         );
     }
 

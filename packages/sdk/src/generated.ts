@@ -2942,6 +2942,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       },
       "problems": [
         "capability_unavailable",
+        "forbidden",
         "integrity_failed",
         "malformed_json",
         "payload_too_large",
@@ -4646,6 +4647,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 501,
       "title": "Capability unavailable",
       "type": "https://fasti.scrobble.dev/v1/problems/capability-unavailable"
+    },
+    {
+      "capability_id": "browser.session.create",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
     },
     {
       "capability_id": "browser.session.create",

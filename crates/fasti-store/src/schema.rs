@@ -899,6 +899,14 @@ fn migrate_v10(connection: &Connection) -> Result<()> {
             updated_at TEXT NOT NULL
         ) STRICT;
 
+        CREATE TABLE auth_subject_profile_grants (
+            auth_subject_id TEXT NOT NULL
+                REFERENCES auth_subjects(auth_subject_id) ON DELETE CASCADE,
+            profile_grant_id TEXT NOT NULL
+                REFERENCES profile_grants(grant_id) ON DELETE CASCADE,
+            PRIMARY KEY (auth_subject_id, profile_grant_id)
+        ) STRICT, WITHOUT ROWID;
+
         CREATE TABLE fasti_browser_sessions (
             browser_session_id TEXT PRIMARY KEY,
             session_digest TEXT NOT NULL UNIQUE,
@@ -2229,6 +2237,7 @@ mod tests {
         }
         for retained in [
             "auth_subjects",
+            "auth_subject_profile_grants",
             "fasti_browser_sessions",
             "fasti_browser_session_grants",
         ] {
@@ -2304,6 +2313,7 @@ mod tests {
                 "metadata_field_overrides".to_owned(),
                 "profile_record_tracking_dispositions".to_owned(),
                 "profile_nuvio_collections".to_owned(),
+                "auth_subject_profile_grants".to_owned(),
                 "auth_subjects".to_owned(),
                 "fasti_browser_session_grants".to_owned(),
                 "fasti_browser_sessions".to_owned(),
