@@ -26,6 +26,11 @@ jobs:
         with:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
+      - name: Report the exact formatter delta
+        run: |
+          pnpm exec prettier --write packages/ui/src/auth-modal.svelte
+          git diff -- packages/ui/src/auth-modal.svelte
+          git diff --exit-code -- packages/ui/src/auth-modal.svelte
       - run: cargo fetch --locked
       - name: Verify the governed B1 contract spine
         run: cargo xtask contract verify --locked
