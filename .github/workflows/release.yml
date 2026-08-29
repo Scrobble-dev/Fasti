@@ -116,7 +116,7 @@ jobs:
           mkdir -p target/fasti-evidence/b8b/checksums
           cp "target/fasti-evidence/b8b/checksums-staging/checksums-${{ matrix.arch }}.sha256" \
             target/fasti-evidence/b8b/checksums/
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b8b-checksums-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/b8b/checksums/
@@ -147,7 +147,7 @@ jobs:
           for f in target/fasti-evidence/b8b/sbom/*.cdx.json; do
             jq -e '.bomFormat == "CycloneDX" and (.components | length) > 0' "$f" > /dev/null
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b8b-sbom-rust-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/b8b/sbom/
@@ -179,7 +179,7 @@ jobs:
           pnpm exec cyclonedx-npm --ignore-npm-errors --output-format json --output-file target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json
       - name: Sanity-check the SBOM is CycloneDX and non-empty
         run: jq -e '.bomFormat == "CycloneDX" and (.components | length) > 0' target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json > /dev/null
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b8b-sbom-npm-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/b8b/sbom/npm-sbom.cdx.json
@@ -245,7 +245,7 @@ jobs:
                }
              }' \
             > target/fasti-evidence/b8b/security-review/b8b-security-review.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b8b-security-review-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/b8b/security-review/
@@ -261,11 +261,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: fasti-b8b-checksums-*-attempt-${{ github.run_attempt }}
           path: /tmp/b8b-artifacts/checksums
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: fasti-b8b-sbom-*-attempt-${{ github.run_attempt }}
           path: /tmp/b8b-artifacts/sbom
@@ -274,7 +274,7 @@ jobs:
           node scripts/generate-provenance.mjs \
             $(find /tmp/b8b-artifacts/checksums -name '*.sha256') \
             $(find /tmp/b8b-artifacts/sbom -name '*.cdx.json')
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b8b-provenance-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/b8b/provenance/
@@ -299,7 +299,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: node scripts/generate-release-notes.mjs "$RELEASE_TAG"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fasti-b8b-release-notes-attempt-${{ github.run_attempt }}
           path: target/fasti-evidence/b8b/release-notes.md
