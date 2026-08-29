@@ -1420,16 +1420,57 @@ mod tests {
         connection
             .pragma_update(None, "foreign_keys", "ON")
             .expect("enable foreign keys");
-        migrate_v1(&connection).expect("version one");
-        migrate_v2(&connection).expect("version two");
-        migrate_v3(&connection).expect("version three");
-        migrate_v4(&connection).expect("version four");
-        migrate_v5(&connection).expect("version five");
-        migrate_v6(&connection).expect("version six");
-        migrate_v7(&connection).expect("version seven");
-        migrate_v8(&connection).expect("version eight");
-        migrate_v9(&connection).expect("version nine");
+        migrate_to_version_nine(&connection);
         connection
+    }
+
+    fn migrate_to_version_nine(connection: &Connection) {
+        migrate_v1(connection).expect("version one");
+        migrate_v2(connection).expect("version two");
+        migrate_v3(connection).expect("version three");
+        migrate_v4(connection).expect("version four");
+        migrate_v5(connection).expect("version five");
+        migrate_v6(connection).expect("version six");
+        migrate_v7(connection).expect("version seven");
+        migrate_v8(connection).expect("version eight");
+        migrate_v9(connection).expect("version nine");
+    }
+
+    fn seed_version_nine_browser_state(connection: &Connection) {
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO workspaces(workspace_id, created_at)
+                    VALUES ('wsp_v9', '2026-08-24T00:00:00Z');
+                INSERT INTO profiles(profile_id, workspace_id, created_at)
+                    VALUES ('prf_v9', 'wsp_v9', '2026-08-24T00:00:01Z');
+                INSERT INTO clients(client_id, workspace_id, status,
+                                    current_credential_epoch, created_at)
+                    VALUES ('cli_v9', 'wsp_v9', 'active', 1,
+                            '2026-08-24T00:00:02Z');
+                INSERT INTO browser_users(
+                    user_id, username, password_hash, client_id, profile_id,
+                    is_admin, is_test_account, active, failed_login_count,
+                    created_at, updated_at
+                ) VALUES (
+                    'usr_v9', 'developer', 'removed-pr-only-digest', 'cli_v9',
+                    'prf_v9', 1, 1, 1, 0, '2026-08-24T00:00:03Z',
+                    '2026-08-24T00:00:03Z'
+                );
+                INSERT INTO browser_sessions(
+                    session_digest, csrf_digest, user_id, expires_at,
+                    created_at, last_seen_at
+                ) VALUES (
+                    'session-v9', 'csrf-v9', 'usr_v9',
+                    '2026-08-24T01:00:00Z', '2026-08-24T00:00:04Z',
+                    '2026-08-24T00:00:04Z'
+                );
+                INSERT INTO records(record_id, workspace_id, grain, status, created_at)
+                    VALUES ('rec_v9', 'wsp_v9', 'film', 'active',
+                            '2026-08-24T00:00:05Z');
+                "#,
+            )
+            .expect("seed populated version-nine developer root");
     }
 
     fn seed_legacy_provider_records(connection: &Connection) {
@@ -2250,6 +2291,86 @@ mod tests {
                 .expect("table inventory");
             assert_eq!(exists, 1, "{retained} is missing");
         }
+    }
+
+    #[test]
+    fn version_ten_failed_forward_is_atomic_and_retryable() {
+        let connection = version_nine_connection();
+        seed_version_nine_browser_state(&connection);
+        connection
+            .execute_batch("CREATE TABLE auth_subjects (auth_subject_id TEXT PRIMARY KEY) STRICT;")
+            .expect("inject a forward-migration conflict");
+
+        migrate(&connection).expect_err("conflicting forward migration must fail");
+        let state: (i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), (SELECT COUNT(*) FROM browser_users), (SELECT COUNT(*) FROM browser_sessions)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("failed-forward state");
+        assert_eq!(state, (9, 1, 1), "v10 failure must roll back every drop");
+
+        connection
+            .execute("DROP TABLE auth_subjects", [])
+            .expect("remove injected conflict");
+        migrate(&connection).expect("retry forward migration");
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("schema version");
+        assert_eq!(version, 10);
+    }
+
+    #[test]
+    fn version_ten_restart_and_old_binary_rollback_use_a_closed_copy() {
+        let root = tempfile::tempdir().expect("temporary migration rehearsal");
+        let version_nine = root.path().join("fasti-v9.sqlite3");
+        let backup = root.path().join("fasti-v9.backup.sqlite3");
+        let rollback = root.path().join("fasti-v9.rollback.sqlite3");
+        {
+            let connection = Connection::open(&version_nine).expect("version-nine database");
+            connection
+                .pragma_update(None, "foreign_keys", "ON")
+                .expect("enable foreign keys");
+            migrate_to_version_nine(&connection);
+            seed_version_nine_browser_state(&connection);
+        }
+        fs::copy(&version_nine, &backup).expect("closed pre-migration backup");
+
+        {
+            let connection = Connection::open(&version_nine).expect("forward database");
+            connection
+                .pragma_update(None, "foreign_keys", "ON")
+                .expect("enable foreign keys");
+            migrate(&connection).expect("forward migration");
+            let state: (i64, i64, i64) = connection
+                .query_row(
+                    "SELECT (SELECT user_version FROM pragma_user_version), (SELECT COUNT(*) FROM records WHERE record_id = 'rec_v9'), (SELECT COUNT(*) FROM auth_subjects)",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .expect("forward state");
+            assert_eq!(state, (10, 1, 0));
+        }
+        {
+            let connection = Connection::open(&version_nine).expect("restart database");
+            migrate(&connection).expect("restart migration is idempotent");
+            let version: i64 = connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .expect("restart schema version");
+            assert_eq!(version, 10);
+        }
+
+        fs::copy(&backup, &rollback).expect("restore old-binary rollback copy");
+        let connection = Connection::open(&rollback).expect("rollback database");
+        let state: (i64, i64, i64, i64) = connection
+            .query_row(
+                "SELECT (SELECT user_version FROM pragma_user_version), (SELECT COUNT(*) FROM browser_users WHERE user_id = 'usr_v9'), (SELECT COUNT(*) FROM browser_sessions WHERE user_id = 'usr_v9'), (SELECT COUNT(*) FROM records WHERE record_id = 'rec_v9')",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("restored version-nine state");
+        assert_eq!(state, (9, 1, 1, 1));
     }
 
     #[test]

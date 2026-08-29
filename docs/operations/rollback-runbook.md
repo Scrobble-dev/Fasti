@@ -25,7 +25,36 @@ Fasti has no auto-updater and none is planned. Rollback is always a manual redep
 
 ## Data and migration rollback
 
-Not defined here. Migration rollback is a proof obligation of B8a (native/OCI/source-build/migration/rollback readiness), not invented in this runbook. If B8a's migration proof does not yet cover a rollback scenario, treat data rollback as out of scope until it does — do not attempt to improvise migration rollback semantics against a live data root.
+General live-data rollback is not active. It remains a proof obligation of the
+package that introduces each production migration. Do not run an older binary
+against a data root that a newer binary opened.
+
+PR A has one narrower, unreleased developer procedure for the v9-to-v10 truth
+reset. It replaces PR-only simulated browser-account tables. It does not migrate
+real human identities. Rehearse it only on a development root:
+
+1. Run `./scripts/dev.sh --stop` from the worktree that owns the root.
+2. Resolve the exact root with `realpath .dev-data`. If `FASTI_DATA_ROOT` was
+   set, use `realpath -- "$FASTI_DATA_ROOT"` instead. Stop if the result is not
+   the intended development root.
+3. Confirm that `current/fasti.sqlite3-wal`, `current/fasti.sqlite3-shm`, and
+   `current/fasti.sqlite3-journal` do not exist. A sidecar means the root is not
+   ready for a filesystem copy.
+4. Copy the closed `current/fasti.sqlite3` to an owner-only backup directory.
+   Keep the v9 binary or exact source revision beside that copy.
+5. Start the PR A binary through `./scripts/dev.sh`. Normal startup performs the
+   forward migration. Stop and start it once more to prove restart.
+6. To return to the old binary, stop PR A, retain the v10 file separately, copy
+   the closed v9 backup into `current/fasti.sqlite3`, restore owner-only file
+   permissions, and start only the retained v9 binary. Never point the old
+   binary at the v10 file.
+
+The store tests rehearse a populated v9 root, an injected failed-forward
+transaction and retry, a v10 restart, and restoration of a closed v9 copy. The
+v10 migration preserves unrelated Fasti rows but deliberately removes the
+unreleased simulated browser credentials and sessions. A production Access
+backup, TrailBase depot backup, activation generation, clone fencing, and joint
+rollback remain blocked until their owning packages implement them.
 
 ## Verification
 
