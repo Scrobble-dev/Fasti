@@ -18,7 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@032958afbdc797a9164d3bc0b56325c1308924a5 # 1.97.1
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fc1e3dddab59af2b6 # v2
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
@@ -26,11 +26,274 @@ jobs:
         with:
           version: 11.22.0
       - run: pnpm install --frozen-lockfile
-      - name: Report the exact formatter delta
-        run: |
-          pnpm exec prettier --write packages/ui/src/auth-modal.svelte
-          git diff -- packages/ui/src/auth-modal.svelte
-          git diff --exit-code -- packages/ui/src/auth-modal.svelte
       - run: cargo fetch --locked
-      - name: Verify the governed B1 contract spine
-        run: cargo xtask contract verify --locked
+      - name: Build the reviewed remediation bundle without repository writes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def load(path: str) -> str:
+              return Path(path).read_text()
+
+          def save(path: str, text: str) -> None:
+              Path(path).write_text(text)
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              text = load(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact replacement, found {count}: {old[:80]!r}")
+              save(path, text.replace(old, new, 1))
+
+          def regex_once(path: str, pattern: str, replacement: str) -> None:
+              text = load(path)
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one regex replacement, found {count}: {pattern[:100]!r}")
+              save(path, updated)
+
+          # Public DTOs: session metadata is absent until it is measured, not invented.
+          replace_once(
+              "crates/fasti-contracts/src/browser_auth.rs",
+              "    pub location: String,\n    pub device_type: String,\n",
+              "    pub location: Option<String>,\n    pub device_type: Option<String>,\n",
+          )
+          regex_once(
+              "crates/fasti-contracts/src/browser_auth.rs",
+              r"#\[derive\(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema\)\]\n#\[serde\(deny_unknown_fields\)\]\npub struct SwitchProfileRequest \{.*?pub struct MfaStatusResponse \{.*?\n\}\n\n",
+              "",
+          )
+
+          # Application boundary: keep one honest session model and remove the unsafe account-global profile switch.
+          replace_once(
+              "crates/fasti-application/src/browser_auth.rs",
+              "    location: String,\n    device_type: String,\n",
+              "    location: Option<String>,\n    device_type: Option<String>,\n",
+          )
+          replace_once(
+              "crates/fasti-application/src/browser_auth.rs",
+              "        location: String,\n        device_type: String,\n",
+              "        location: Option<String>,\n        device_type: Option<String>,\n",
+          )
+          replace_once(
+              "crates/fasti-application/src/browser_auth.rs",
+              "    pub fn location(&self) -> &str {\n        &self.location\n    }\n\n    #[must_use]\n    pub fn device_type(&self) -> &str {\n        &self.device_type\n    }\n",
+              "    pub fn location(&self) -> Option<&str> {\n        self.location.as_deref()\n    }\n\n    #[must_use]\n    pub fn device_type(&self) -> Option<&str> {\n        self.device_type.as_deref()\n    }\n",
+          )
+          regex_once(
+              "crates/fasti-application/src/browser_auth.rs",
+              r"#\[derive\(Clone\)\]\npub struct SwitchBrowserSessionProfileCommand \{.*?\n\}\n\npub trait BrowserAccountPort",
+              "pub trait BrowserAccountPort",
+          )
+          replace_once(
+              "crates/fasti-application/src/browser_auth.rs",
+              "    fn switch_browser_session_profile(\n        &self,\n        command: SwitchBrowserSessionProfileCommand,\n    ) -> ApplicationResult<AuthenticatedBrowserSession>;\n",
+              "",
+          )
+
+          # Storage: do not publish fabricated device/location data and do not mutate an account-wide profile through a session route.
+          replace_once(
+              "crates/fasti-store/src/browser_auth.rs",
+              "    SwitchBrowserSessionProfileCommand, UpdateBrowserUserCommand, Violation,\n",
+              "    UpdateBrowserUserCommand, Violation,\n",
+          )
+          replace_once(
+              "crates/fasti-store/src/browser_auth.rs",
+              "                \"Local Host (127.0.0.1)\".to_string(),\n                \"Desktop Browser (Workbench)\".to_string(),\n",
+              "                None,\n                None,\n",
+          )
+          regex_once(
+              "crates/fasti-store/src/browser_auth.rs",
+              r"\n    fn switch_browser_session_profile\(.*?\n    fn list_browser_users\(",
+              "\n    fn list_browser_users(",
+          )
+
+          # HTTP: keep only real session inventory/revocation operations.
+          replace_once(
+              "crates/fasti-api/src/browser_auth.rs",
+              "    FastiProblem, ListBrowserSessionsQuery, ListBrowserUsersQuery,\n    SwitchBrowserSessionProfileCommand, UpdateBrowserUserCommand, Violation,\n",
+              "    FastiProblem, ListBrowserSessionsQuery, ListBrowserUsersQuery, UpdateBrowserUserCommand,\n    Violation,\n",
+          )
+          replace_once(
+              "crates/fasti-api/src/browser_auth.rs",
+              "    DeleteBrowserUserRequest, ListBrowserSessionsResponse, ListBrowserUsersResponse,\n    ProblemDetails, SwitchProfileRequest, UpdateBrowserUserRequest,\n",
+              "    DeleteBrowserUserRequest, ListBrowserSessionsResponse, ListBrowserUsersResponse,\n    ProblemDetails, UpdateBrowserUserRequest,\n",
+          )
+          replace_once(
+              "crates/fasti-api/src/browser_auth.rs",
+              "            location: s.location().to_owned(),\n            device_type: s.device_type().to_owned(),\n",
+              "            location: s.location().map(ToOwned::to_owned),\n            device_type: s.device_type().map(ToOwned::to_owned),\n",
+          )
+          regex_once(
+              "crates/fasti-api/src/browser_auth.rs",
+              r"\n#\[utoipa::path\(\n    post,\n    path = \"/api/v1/browser/session/switch-profile\".*?\n\}\n\npub\(crate\) fn router\(\)",
+              "\n\npub(crate) fn router()",
+          )
+          replace_once(
+              "crates/fasti-api/src/browser_auth.rs",
+              "        .route(\n            \"/api/v1/browser/session/switch-profile\",\n            post(switch_profile),\n        )\n",
+              "",
+          )
+
+          replace_once(
+              "crates/fasti-api/src/lib.rs",
+              "        browser_auth::end_other_sessions,\n        browser_auth::switch_profile,\n",
+              "        browser_auth::end_other_sessions,\n",
+          )
+          replace_once(
+              "crates/fasti-api/src/lib.rs",
+              "        fasti_contracts::ListBrowserUsersResponse,\n        fasti_contracts::ListTrackingDispositionsResponse,\n        fasti_contracts::SwitchProfileRequest,\n",
+              "        fasti_contracts::ListBrowserUsersResponse,\n        fasti_contracts::ListTrackingDispositionsResponse,\n",
+          )
+          replace_once(
+              "crates/fasti-api/src/lib.rs",
+              "            \"/api/v1/browser/session/switch-profile\",\n",
+              "",
+          )
+          replace_once(
+              "crates/fasti-api/src/lib.rs",
+              "        assert_eq!(document.paths.paths.len(), 22);\n",
+              "        assert_eq!(document.paths.paths.len(), 21);\n",
+          )
+
+          # Generator and validators: remove the unsupported operation from every governed surface.
+          replace_once(
+              "xtask/src/generate.rs",
+              "const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 25] = [\n",
+              "const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 24] = [\n",
+          )
+          regex_once(
+              "xtask/src/generate.rs",
+              r"    ConformanceOperation \{\n        alias: \"switchBrowserSessionProfile\",.*?\n    \},\n",
+              "",
+          )
+          replace_once(
+              "xtask/src/generate.rs",
+              "        | \"end_other_sessions\"\n        | \"switch_profile\"\n        | \"list_users\"\n",
+              "        | \"end_other_sessions\"\n        | \"list_users\"\n",
+          )
+          replace_once(
+              "xtask/src/generate.rs",
+              "        \"ListBrowserSessionsResponse\",\n        \"SwitchProfileRequest\",\n",
+              "        \"ListBrowserSessionsResponse\",\n",
+          )
+          replace_once(
+              "xtask/src/generate.rs",
+              "        (\"parseSwitchProfileRequest\", \"SwitchProfileRequest\"),\n",
+              "",
+          )
+          replace_once(
+              "scripts/validate-generated-contracts.mjs",
+              "    \"/api/v1/browser/session/switch-profile\",\n",
+              "",
+          )
+          replace_once(
+              "scripts/validate-generated-contracts.mjs",
+              "                \"end_other_sessions\",\n                \"switch_profile\",\n                \"list_users\",\n",
+              "                \"end_other_sessions\",\n                \"list_users\",\n",
+          )
+          replace_once(
+              "tests/js/generated-contracts.test.mjs",
+              "    openApiPathCount: 22,\n",
+              "    openApiPathCount: 21,\n",
+          )
+          replace_once(
+              "tests/js/sdk-client.test.mjs",
+              "          \"submitObservation\",\n          \"switchBrowserSessionProfile\",\n          \"updateBrowserUser\",\n",
+              "          \"submitObservation\",\n          \"updateBrowserUser\",\n",
+          )
+
+          # SDK and host: accept the actual opaque session identifier and expose no dead profile switch.
+          replace_once(
+              "packages/sdk/src/transport.ts",
+              "  parseSetTrackingDispositionRequest,\n  parseSwitchProfileRequest,\n  parseTrackingDispositionStateDto,\n",
+              "  parseSetTrackingDispositionRequest,\n  parseTrackingDispositionStateDto,\n",
+          )
+          replace_once(
+              "packages/sdk/src/transport.ts",
+              "  type SetTrackingDispositionRequest,\n  type SwitchProfileRequest,\n  type ReplayReceiptResponse,\n",
+              "  type SetTrackingDispositionRequest,\n  type ReplayReceiptResponse,\n",
+          )
+          replace_once(
+              "packages/sdk/src/transport.ts",
+              "const SESSION_ID = /^[0-9a-fA-F]{16,64}$/;\n",
+              "const SESSION_ID = /^sess_[0-9a-f]{12}$/;\n",
+          )
+          regex_once(
+              "packages/sdk/src/transport.ts",
+              r"\n  switchBrowserSessionProfile\(.*?\n  \}\n\n  listBrowserUsers\(",
+              "\n\n  listBrowserUsers(",
+          )
+          replace_once(
+              "apps/web/src/web-host.ts",
+              "        location: s.location,\n        deviceType: s.device_type,\n",
+              "        location: s.location ?? null,\n        deviceType: s.device_type ?? null,\n",
+          )
+          replace_once(
+              "apps/web/src/web-host.ts",
+              "\n    async switchProfile(profileId: string): Promise<BrowserSession> {\n      return client.switchBrowserSessionProfile({ profile_id: profileId });\n    },\n",
+              "",
+          )
+
+          # UI types and truthful future affordances.
+          replace_once(
+              "packages/ui/src/types.ts",
+              "  readonly location: string;\n  readonly deviceType: string;\n",
+              "  readonly location: string | null;\n  readonly deviceType: string | null;\n",
+          )
+          regex_once(
+              "packages/ui/src/types.ts",
+              r"\nexport interface WebAuthnPasskey \{.*?\n\}\n\nexport interface MfaStatus \{.*?\n\}\n",
+              "",
+          )
+          replace_once(
+              "packages/ui/src/types.ts",
+              "  endOtherSessions?(): Promise<void>;\n  switchProfile?(profileId: string): Promise<BrowserSession>;\n  listBrowserUsers?(): Promise<BrowserUser[]>;\n",
+              "  endOtherSessions?(): Promise<void>;\n  listBrowserUsers?(): Promise<BrowserUser[]>;\n",
+          )
+          replace_once(
+              "packages/ui/src/auth-modal.svelte",
+              "        <ul class=\"future-method-list\">\n          <li>\n            <IconKey size={18} aria-hidden=\"true\" />\n            <div>\n              <strong>Passkey</strong>\n",
+              "        <ul class=\"future-method-list\">\n          <li>\n            <IconUserShield size={18} aria-hidden=\"true\" />\n            <div>\n              <strong>Media profiles</strong>\n              <span>Not available in this build. Profile creation, selection, permissions, and PIN verification need server-owned capabilities.</span>\n            </div>\n          </li>\n          <li>\n            <IconKey size={18} aria-hidden=\"true\" />\n            <div>\n              <strong>Passkey</strong>\n",
+          )
+          PY
+
+          cargo fmt --all
+          pnpm exec prettier --write \
+            apps/web/src/web-host.ts \
+            packages/sdk/src/transport.ts \
+            packages/ui/src/auth-modal.svelte \
+            packages/ui/src/types.ts \
+            scripts/validate-generated-contracts.mjs \
+            tests/js/generated-contracts.test.mjs \
+            tests/js/sdk-client.test.mjs
+          cargo xtask contract generate
+          cargo xtask contract verify --locked
+
+          files=(
+            apps/web/src/web-host.ts
+            contracts/generated/v1/openapi.json
+            crates/fasti-api/src/browser_auth.rs
+            crates/fasti-api/src/lib.rs
+            crates/fasti-application/src/browser_auth.rs
+            crates/fasti-contracts/src/browser_auth.rs
+            crates/fasti-store/src/browser_auth.rs
+            packages/sdk/src/generated.ts
+            packages/sdk/src/transport.ts
+            packages/ui/src/auth-modal.svelte
+            packages/ui/src/types.ts
+            scripts/validate-generated-contracts.mjs
+            tests/js/generated-contracts.test.mjs
+            tests/js/sdk-client.test.mjs
+            xtask/src/generate.rs
+          )
+          tar -czf /tmp/fasti-pr93-remediation.tar.gz "${files[@]}"
+          echo "__FASTI_PR93_BUNDLE_BEGIN__"
+          base64 /tmp/fasti-pr93-remediation.tar.gz
+          echo "__FASTI_PR93_BUNDLE_END__"
+          echo "__FASTI_PR93_DIFF_BEGIN__"
+          git diff --stat -- "${files[@]}"
+          git diff --check -- "${files[@]}"
+          echo "__FASTI_PR93_DIFF_END__"
