@@ -560,29 +560,3 @@ export interface WorkbenchPreferences {
   customFields: CustomFieldDefinition[];
   customMediaTypes: CustomMediaTypeDefinition[];
 }
-
-export interface UserProfile {
-  id: string;
-  name: string;
-  avatarColor: string;
-  avatarIcon?: string;
-  role: "admin" | "standard" | "restricted";
-  isEssentialMode?: boolean;
-  pinProtected?: boolean;
-  pinHash?: string;
-  lastActive?: string;
-}
-
-export interface RegisteredPasskey {
-  id: string;
-  name: string;
-  createdAt: string;
-  lastUsedAt?: string;
-}
-
-export interface TotpConfiguration {
-  enabled: boolean;
-  secret: string;
-  qrUri: string;
-  backupCodes: string[];
-}
