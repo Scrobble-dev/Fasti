@@ -6,7 +6,7 @@
 //! ever supplied (history, never overwritten in place) and the single
 //! current override per field, then read them back for resolution.
 
-use crate::identity::{attach_identifier_tx, insert_record};
+use crate::identity::{attach_identifier_tx, insert_record, matching_record_ids};
 use crate::kernel::{
     authorize_transaction, map_sql, now, parse_timestamp, timestamp, SqliteKernel,
 };
@@ -123,13 +123,24 @@ impl ProviderMetadataPort for SqliteKernel {
         )?;
         authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
         let workspace_id = command.access().workspace_id();
-        let record_id = insert_record(
+        let existing = matching_record_ids(
             &transaction,
             workspace_id,
-            command.grain(),
+            std::slice::from_ref(command.identifier()),
             capability,
             correlation_id,
         )?;
+        let record_id = if let Some(record_id) = existing.first() {
+            *record_id
+        } else {
+            insert_record(
+                &transaction,
+                workspace_id,
+                command.grain(),
+                capability,
+                correlation_id,
+            )?
+        };
         attach_identifier_tx(
             &transaction,
             workspace_id,
@@ -330,14 +341,12 @@ mod tests {
     use super::*;
     use crate::test_support::TestNode;
     use fasti_application::{
-        ApplyProviderMetadataCommand, CreateProviderRecordCommand, CreateRecordCommand,
-        IdentityPort, ListRecordsQuery, ProviderMetadataField, ProviderMetadataPort,
-        RegisterNamespaceDefinitionCommand,
+        provider_identity_mapping, ApplyProviderMetadataCommand, CreateProviderRecordCommand,
+        CreateRecordCommand, IdentityPort, ListRecordsQuery, ProviderIdentityMapping,
+        ProviderMetadataField, ProviderMetadataPort, RegisterNamespaceDefinitionCommand,
+        GOOGLE_BOOKS_PROVIDER_ID, TMDB_PROVIDER_ID,
     };
-    use fasti_domain::{
-        ExternalIdentifierClaim, Grain, NamespaceDefinition, NamespaceLicencePosture, ReceivedAt,
-        TITLE_FIELD_KEY,
-    };
+    use fasti_domain::{Grain, ReceivedAt, TITLE_FIELD_KEY};
 
     fn field_key(value: &str) -> FieldKey {
         FieldKey::try_new(value).expect("valid field key")
@@ -368,21 +377,12 @@ mod tests {
             .record_id()
     }
 
-    fn register_books(node: &TestNode) {
-        let definition = NamespaceDefinition::try_new(
-            "google-books",
-            "Google Books",
-            [Grain::Chapter],
-            "[A-Za-z0-9_-]+",
-            "identity",
-            NamespaceLicencePosture::IdentifiersOnly,
-        )
-        .expect("namespace");
+    fn register_mapping(node: &TestNode, mapping: ProviderIdentityMapping) {
         node.kernel
             .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
                 RequestCorrelationId::new_v7(),
                 node.access,
-                definition,
+                mapping.namespace_definition().expect("provider namespace"),
             ))
             .expect("register namespace");
     }
@@ -396,25 +396,33 @@ mod tests {
     }
 
     #[test]
-    fn provider_record_identity_and_metadata_commit_together() {
+    fn provider_record_creation_is_atomic_and_safe_to_retry_after_an_ambiguous_response() {
         let node = TestNode::new();
-        register_books(&node);
-        let identifier = ExternalIdentifierClaim::try_new("google-books", Grain::Chapter, "book-1")
-            .expect("identifier");
-        let outcome = node
-            .kernel
-            .create_provider_record(CreateProviderRecordCommand::new(
+        let mapping = provider_identity_mapping(GOOGLE_BOOKS_PROVIDER_ID, "book")
+            .expect("Google Books mapping");
+        register_mapping(&node, mapping);
+        let command = || {
+            CreateProviderRecordCommand::new(
                 RequestCorrelationId::new_v7(),
                 node.access,
-                Grain::Chapter,
-                identifier,
+                mapping.grain(),
+                mapping.identifier("book-1").expect("identifier"),
                 vec![provider_field(
-                    "google-books",
+                    mapping.namespace(),
                     TITLE_FIELD_KEY,
                     "A real provider title",
                 )],
-            ))
+            )
+        };
+        let outcome = node
+            .kernel
+            .create_provider_record(command())
             .expect("create enriched record");
+        let retry = node
+            .kernel
+            .create_provider_record(command())
+            .expect("retry returns the existing record");
+        assert_eq!(retry.record_id(), outcome.record_id());
 
         let records = node
             .kernel
@@ -433,15 +441,16 @@ mod tests {
     #[test]
     fn invalid_provider_fields_roll_back_the_new_record() {
         let node = TestNode::new();
-        register_books(&node);
-        let identifier = ExternalIdentifierClaim::try_new("google-books", Grain::Chapter, "book-1")
-            .expect("identifier");
+        let mapping = provider_identity_mapping(GOOGLE_BOOKS_PROVIDER_ID, "book")
+            .expect("Google Books mapping");
+        register_mapping(&node, mapping);
+        let identifier = mapping.identifier("book-1").expect("identifier");
         let result = node
             .kernel
             .create_provider_record(CreateProviderRecordCommand::new(
                 RequestCorrelationId::new_v7(),
                 node.access,
-                Grain::Chapter,
+                mapping.grain(),
                 identifier,
                 vec![provider_field("tmdb", TITLE_FIELD_KEY, "Wrong source")],
             ));
@@ -460,25 +469,11 @@ mod tests {
     fn provider_refresh_attaches_identity_and_metadata_together() {
         let node = TestNode::new();
         let record_id = a_record(&node);
-        let definition = NamespaceDefinition::try_new(
-            "tmdb",
-            "TMDB",
-            [Grain::Film],
-            "[0-9]+",
-            "identity",
-            NamespaceLicencePosture::IdentifiersOnly,
-        )
-        .expect("namespace");
-        node.kernel
-            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
-                RequestCorrelationId::new_v7(),
-                node.access,
-                definition,
-            ))
-            .expect("register namespace");
+        let mapping =
+            provider_identity_mapping(TMDB_PROVIDER_ID, "movie").expect("TMDB movie mapping");
+        register_mapping(&node, mapping);
 
-        let identifier =
-            || ExternalIdentifierClaim::try_new("tmdb", Grain::Film, "438631").expect("identifier");
+        let identifier = || mapping.identifier("438631").expect("identifier");
         let invalid = node
             .kernel
             .apply_provider_metadata(ApplyProviderMetadataCommand::new(
@@ -496,7 +491,7 @@ mod tests {
                 node.access,
                 record_id,
                 identifier(),
-                vec![provider_field("tmdb", TITLE_FIELD_KEY, "Dune")],
+                vec![provider_field(mapping.namespace(), TITLE_FIELD_KEY, "Dune")],
             ))
             .expect("refresh provider metadata");
 

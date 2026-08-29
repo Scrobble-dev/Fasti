@@ -41,6 +41,9 @@ Provider identifiers are evidence, not canonical identity.
 - Adapters must not redefine business rules.
 - Reuse existing ownership before creating new abstractions.
 - Keep provider integrations modular.
+- Keep wire provider IDs separate from external identifier namespaces. Reuse
+  `fasti_application::provider_identity_mapping` for Google Books and TMDB
+  coordinates in every adapter; do not add adapter-local TMDB grain fallbacks.
 - Route governed outbound access through application policy. Provider declarations are maximum grants; operator allow lists only narrow them, and denies win.
 
 ## Contract changes
@@ -131,6 +134,11 @@ SDK/NDK, and `@tauri-apps/cli` (`npx @tauri-apps/cli@2.11.4 android build`
 from `apps/desktop/src-tauri`, after `pnpm --filter @fasti/web build`). Do not
 claim Android package support until the NDK build and device evidence pass.
 B3 restore and startup recovery remain Linux-only.
+
+Run the Linux Desktop review host with
+`FASTI_DATA_ROOT=/path/to/private/data ./scripts/dev.sh --desktop`. This path
+builds the static Workbench and starts only the Tauri host with its embedded
+kernel. It must not start `fastid`, Vite, or a browser credential fallback.
 
 Also run focused checks for changed surfaces. Add regression tests for fixed defects.
 

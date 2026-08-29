@@ -17,6 +17,8 @@ public release or promise later infrastructure.
   client service URL. Credentials remain in tab memory.
 - Trusted-host settings and unsupported domain mutations remain disabled in the
   browser.
+- Mocked trusted-host journeys verify IPC shape and presentation states. They do
+  not replace a source-run or packaged Desktop check.
 
 ## Gate layers
 
@@ -41,7 +43,7 @@ The automated matrix covers only states that the current host can produce:
 | Routes             | Workbench root, browser history, and browser or packaged service diagnostic before and after setup                           |
 | Session            | Signed out, valid memory-only bearer, rejected bearer                                                                        |
 | Records            | Empty, bounded summary list, unavailable service, native failure, successful retry, and repeated failed retry               |
-| Provider discovery | Authoritative provider status, explicit selection, search race, unconfigured state, and credential removal confirmation    |
+| Provider discovery | Browser fail-closed state; explicit selection and provider-tab recovery; same-ID movie/show candidates; non-mutating search test; single atomic Record creation; exact returned Record ID; failed credential correction; successful credential clearing; single-flight credential operations |
 | Review resolution  | Empty, open review, one mutation in flight, and resolved state                                                               |
 | Settings           | Browser client URL, saved display state, trusted-host network and credential controls, and browser-disabled host controls   |
 | Service status     | Healthy, unavailable, contract-invalid, duplicate retry prevention, setup-inspection failure, and focus recovery            |
@@ -57,6 +59,12 @@ pnpm test:ui -- tests/e2e/workbench-regressions.spec.ts tests/e2e/control-target
 ```
 
 `pnpm lint:ui` normally returns in about one second. It names the shell or theme file and the required Tabler primitive. It also rejects accent-owned focus rings and finite component radii that bypass Tabler's scale. The focused browser command proves responsive geometry, Settings canvas ownership, theme truth and continuity, enlarged-text reflow, keyboard containment, focus return, Axe, and 44px targets. The full `pnpm test:ui` suite and `PKG_CONFIG=/usr/bin/pkg-config cargo xtask test pr` remain required before a pull request.
+
+Keep three evidence layers distinct: browser-host tests prove that secrets,
+provider execution, and Record creation fail closed; mocked Tauri journeys prove
+the UI state machine and exact IPC payload; source-run or packaged Desktop
+evidence proves the native host actually starts. Only packaged assistive-
+technology checks can close the clause 11 accessibility boundary.
 
 Do not add optimistic stories for a capability that has no real host command.
 Add its states when its bounded context, contract or IPC adapter, typed recovery,

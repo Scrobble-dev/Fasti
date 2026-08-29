@@ -6,7 +6,7 @@ import process from "node:process";
 
 const ROOT = process.cwd();
 const SOURCE_ROOTS = ["apps/web/src", "packages/ui/src"];
-const SOURCE_EXTENSIONS = new Set([".ts", ".svelte"]);
+const SOURCE_EXTENSIONS = new Set([".ts", ".js", ".svelte"]);
 
 // Tabler is the product UI system. Semantic HTML, Svelte, local modules, and
 // non-UI utility libraries remain valid. Competing component/icon/theme systems

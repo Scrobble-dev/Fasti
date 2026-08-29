@@ -25,7 +25,9 @@ use crate::restore_activation::{
     write_restore_phase, RestoreActivationError, RestoreActivationMarker,
     RESTORE_STAGING_DIRECTORY, RESTORE_STATE_FILES,
 };
-use crate::schema::{migrate, workspace_revision, SCHEMA_VERSION};
+use crate::schema::{
+    migrate, repair_legacy_provider_coordinates_v1, workspace_revision, SCHEMA_VERSION,
+};
 use chrono::{DateTime, Utc};
 use fasti_application::{
     CancellationSignal, CapabilityKey, FastiProblem, PortabilityLimits, ReadSeek,
@@ -491,7 +493,7 @@ fn import_verified_pass_two(
     pass_two?;
     crash_test_point("import", "rows_written");
 
-    verify_imported_database(
+    verify_imported_archive(
         &transaction,
         preflight.manifest(),
         correlation_id,
@@ -499,6 +501,8 @@ fn import_verified_pass_two(
         limits,
         cancellation,
     )?;
+    repair_legacy_provider_coordinates_v1(&transaction).map_err(RestoreImportError::Sqlite)?;
+    verify_imported_database(&transaction, preflight.manifest(), correlation_id)?;
     crash_test_point("import", "verified");
     transaction.commit().map_err(RestoreImportError::Sqlite)?;
     crash_test_point("import", "transaction_committed");
@@ -801,7 +805,7 @@ fn verify_schema(
     Ok(())
 }
 
-fn verify_imported_database(
+fn verify_imported_archive(
     transaction: &Transaction<'_>,
     verified: &VerifiedInboundWorkspaceManifest,
     correlation_id: RequestCorrelationId,
@@ -819,16 +823,6 @@ fn verify_imported_database(
     verify_sql_counts(transaction, imported_counts)?;
     verify_evidence_inventory(transaction, verified)?;
     verify_node_local_state_absent(transaction)?;
-    verify_import_domain_invariants(transaction, manifest.workspace_id())?;
-    verify_sqlite_integrity(transaction, CapabilityKey::RestoreWorkspace, correlation_id)
-        .map_err(|_| RestoreImportError::DomainInvariant)?;
-    verify_domain_relations(
-        transaction,
-        manifest.workspace_id(),
-        CapabilityKey::RestoreWorkspace,
-        correlation_id,
-    )
-    .map_err(|_| RestoreImportError::DomainInvariant)?;
 
     for expected in manifest.streams() {
         let mut sink = io::sink();
@@ -860,6 +854,26 @@ fn verify_imported_database(
             });
         }
     }
+
+    Ok(())
+}
+
+fn verify_imported_database(
+    transaction: &Transaction<'_>,
+    verified: &VerifiedInboundWorkspaceManifest,
+    correlation_id: RequestCorrelationId,
+) -> Result<(), RestoreImportError> {
+    let manifest = verified.manifest();
+    verify_import_domain_invariants(transaction, manifest.workspace_id())?;
+    verify_sqlite_integrity(transaction, CapabilityKey::RestoreWorkspace, correlation_id)
+        .map_err(|_| RestoreImportError::DomainInvariant)?;
+    verify_domain_relations(
+        transaction,
+        manifest.workspace_id(),
+        CapabilityKey::RestoreWorkspace,
+        correlation_id,
+    )
+    .map_err(|_| RestoreImportError::DomainInvariant)?;
 
     let revision = i64::try_from(manifest.workspace_revision())
         .map_err(|_| RestoreImportError::RevisionMismatch)?;
@@ -2589,6 +2603,92 @@ mod tests {
         }
     }
 
+    fn legacy_google_books_archive() -> Vec<u8> {
+        let fixture = full_fixture();
+        fixture
+            .node
+            .kernel
+            .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                RequestCorrelationId::new_v7(),
+                fixture.node.access,
+                NamespaceDefinition::try_new(
+                    "google-books",
+                    "google-books",
+                    [Grain::Chapter],
+                    ".+",
+                    "identity",
+                    NamespaceLicencePosture::IdentifiersOnly,
+                )
+                .expect("legacy Google Books namespace"),
+            ))
+            .expect("register legacy Google Books namespace");
+        let record_id = fixture
+            .node
+            .kernel
+            .create_record(CreateRecordCommand::new(
+                RequestCorrelationId::new_v7(),
+                fixture.node.access,
+                Grain::Chapter,
+            ))
+            .expect("legacy Google Books record")
+            .record_id();
+        fixture
+            .node
+            .kernel
+            .attach_identifier(fasti_application::AttachIdentifierCommand::new(
+                RequestCorrelationId::new_v7(),
+                fixture.node.access,
+                record_id,
+                ExternalIdentifierClaim::try_new("google-books", Grain::Chapter, "restore-book")
+                    .expect("legacy Google Books identifier"),
+            ))
+            .expect("attach legacy Google Books identifier");
+        {
+            let connection = fixture
+                .node
+                .kernel
+                .inner
+                .connection
+                .lock()
+                .expect("SQLite connection");
+            crate::metadata::write_field_claim(
+                &connection,
+                fixture.node.access.workspace_id(),
+                record_id,
+                &FieldKey::try_new("core.title").expect("field key"),
+                &FieldClaim::try_new(
+                    NamespaceKey::try_new("google-books").expect("legacy metadata source"),
+                    "Restored book",
+                    None,
+                    ReceivedAt::from_application_clock(
+                        DateTime::parse_from_rfc3339("2026-08-24T11:30:00Z")
+                            .expect("metadata time")
+                            .with_timezone(&Utc),
+                    ),
+                    None,
+                )
+                .expect("legacy provider claim"),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("persist legacy provider claim");
+        }
+
+        let destination = Arc::new(Mutex::new(DestinationState::default()));
+        export_online_workspace_archive(
+            &fixture.node.kernel,
+            ExportWorkspaceRequest::new(
+                ExportWorkspaceQuery::new(RequestCorrelationId::new_v7(), fixture.node.access),
+                limits(),
+                CancellationSignal::new(),
+            ),
+            Box::new(MemoryDestination(Arc::clone(&destination))),
+        )
+        .expect("export legacy provider fixture");
+        let archive = destination.lock().expect("destination state").bytes.clone();
+        archive
+    }
+
     fn archive_entries(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
         let archive_limits =
             ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
@@ -3064,6 +3164,63 @@ mod tests {
         assert!(!descriptor_child_path(&staged.attempt, "COMPLETE").exists());
         assert!(!restore_root.path().join("current").exists());
 
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn restore_repairs_legacy_provider_coordinates_before_activation() {
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(legacy_google_books_archive()),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage legacy provider fixture");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let restored: (String, String, String, String, i64) = database
+            .query_row(
+                r#"
+                SELECT record.grain, identifier.namespace, identifier.grain, claim.source,
+                       (SELECT user_version FROM pragma_user_version)
+                FROM records record
+                JOIN external_identifiers identifier ON identifier.record_id = record.record_id
+                JOIN metadata_field_claims claim ON claim.record_id = record.record_id
+                WHERE identifier.value = 'restore-book'
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("restored canonical provider coordinate");
+        assert_eq!(
+            restored,
+            (
+                "edition".to_owned(),
+                "googlebooks.volume".to_owned(),
+                "edition".to_owned(),
+                "googlebooks.volume".to_owned(),
+                9,
+            )
+        );
+
+        drop(database);
         staged.cleanup().expect("remove staged attempt");
         assert_attempt_removed(restore_root.path(), attempt_id);
     }

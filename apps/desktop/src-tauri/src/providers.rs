@@ -2,13 +2,14 @@ use crate::outbound_http::{bounded_body, pinned_client, resolve_once};
 use crate::secure_storage::{Entry, Error as KeyringError};
 use crate::setup::{DesktopProblem, KEYRING_SERVICE};
 use fasti_application::{
-    authorize_outbound, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
-    ProviderMetadataField,
+    authorize_outbound, provider_identity_mapping, NetworkClass, OutboundAccessDeclaration,
+    OutboundAccessPolicy, ProviderIdentityMapping, ProviderMetadataField, GOOGLE_BOOKS_PROVIDER_ID,
+    TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaim, FieldKey, Grain, NamespaceDefinition, NamespaceKey,
-    NamespaceLicencePosture, ReceivedAt, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY,
-    POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    ReceivedAt, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY,
+    RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
 };
 use fasti_store::DataRootIdentity;
 use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
@@ -17,14 +18,14 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 use zeroize::Zeroize;
 
-pub(crate) const GOOGLE_BOOKS_PROVIDER: &str = "google-books";
+pub(crate) const GOOGLE_BOOKS_PROVIDER: &str = GOOGLE_BOOKS_PROVIDER_ID;
 const GOOGLE_BOOKS_LABEL: &str = "Google Books";
 const GOOGLE_BOOKS_HOST: &str = "www.googleapis.com";
 const GOOGLE_BOOKS_URL: &str = "https://www.googleapis.com/books/v1/volumes";
 const GOOGLE_BOOKS_ENV: &str = "GOOGLE_BOOKS_API_KEY";
 const GOOGLE_BOOKS_ACCOUNT: &str = "provider/google-books/api-key";
 const GOOGLE_BOOKS_DOCS: &str = "https://developers.google.com/books/docs/v1/using";
-pub(crate) const TMDB_PROVIDER: &str = "tmdb";
+pub(crate) const TMDB_PROVIDER: &str = TMDB_PROVIDER_ID;
 const TMDB_LABEL: &str = "The Movie Database (TMDB)";
 const TMDB_HOST: &str = "api.themoviedb.org";
 const TMDB_SEARCH_URL: &str = "https://api.themoviedb.org/3/search/multi";
@@ -140,43 +141,30 @@ pub(crate) struct ProviderCandidate {
 }
 
 impl ProviderCandidate {
+    fn identity_mapping(&self) -> Result<ProviderIdentityMapping, DesktopProblem> {
+        provider_identity_mapping(self.provider, self.kind).ok_or_else(|| {
+            DesktopProblem::provider("The provider returned an unsupported media type.")
+        })
+    }
+
     pub(crate) fn grain(&self) -> Result<Grain, DesktopProblem> {
-        match self.kind {
-            "book" => Ok(Grain::Chapter),
-            "movie" => Ok(Grain::Film),
-            "show" => Ok(Grain::Series),
-            _ => Err(DesktopProblem::provider(
-                "The provider returned an unsupported media type.",
-            )),
-        }
+        Ok(self.identity_mapping()?.grain())
     }
 
     pub(crate) fn namespace_definition(&self) -> Result<NamespaceDefinition, DesktopProblem> {
-        let (label, grains, pattern) = match self.provider {
-            // Keep the namespace declaration byte-for-byte compatible with
-            // records created by the earlier Discover fallback.
-            GOOGLE_BOOKS_PROVIDER => (GOOGLE_BOOKS_PROVIDER, vec![Grain::Chapter], ".+"),
-            TMDB_PROVIDER => (TMDB_LABEL, vec![Grain::Film, Grain::Series], "[0-9]+"),
-            _ => return Err(unsupported_provider()),
-        };
-        NamespaceDefinition::try_new(
-            self.provider,
-            label,
-            grains,
-            pattern,
-            "identity",
-            NamespaceLicencePosture::IdentifiersOnly,
-        )
-        .map_err(|_| DesktopProblem::provider("The provider namespace definition is invalid."))
+        self.identity_mapping()?
+            .namespace_definition()
+            .map_err(|_| DesktopProblem::provider("The provider namespace definition is invalid."))
     }
 
     pub(crate) fn identifier(&self) -> Result<ExternalIdentifierClaim, DesktopProblem> {
-        ExternalIdentifierClaim::try_new(self.provider, self.grain()?, &self.provider_id)
+        self.identity_mapping()?
+            .identifier(&self.provider_id)
             .map_err(|_| DesktopProblem::provider("The provider returned an invalid identifier."))
     }
 
     pub(crate) fn metadata_fields(&self) -> Result<Vec<ProviderMetadataField>, DesktopProblem> {
-        let source = NamespaceKey::try_new(self.provider)
+        let source = NamespaceKey::try_new(self.identity_mapping()?.namespace())
             .map_err(|_| DesktopProblem::provider("The provider namespace is invalid."))?;
         let fetched_at = ReceivedAt::from_application_clock(chrono::Utc::now());
         let mut fields = vec![provider_field(
@@ -375,17 +363,19 @@ pub(crate) async fn fetch(
     policy: &OutboundAccessPolicy,
     identity: DataRootIdentity,
 ) -> Result<ProviderCandidate, DesktopProblem> {
-    validate_provider_id(provider_id)?;
+    let mapping = provider_identity_mapping(provider, kind).ok_or_else(|| {
+        if matches!(provider, GOOGLE_BOOKS_PROVIDER | TMDB_PROVIDER) {
+            DesktopProblem::configuration("The selected provider does not support that media type.")
+        } else {
+            unsupported_provider()
+        }
+    })?;
+    mapping
+        .identifier(provider_id)
+        .map_err(|_| DesktopProblem::configuration("The selected provider ID is invalid."))?;
     match provider {
-        GOOGLE_BOOKS_PROVIDER if kind == "book" => {
-            fetch_google_book(provider_id, policy, identity).await
-        }
-        TMDB_PROVIDER if matches!(kind, "movie" | "show") => {
-            fetch_tmdb(provider_id, kind, policy, identity).await
-        }
-        GOOGLE_BOOKS_PROVIDER | TMDB_PROVIDER => Err(DesktopProblem::configuration(
-            "The selected provider does not support that media type.",
-        )),
+        GOOGLE_BOOKS_PROVIDER => fetch_google_book(provider_id, policy, identity).await,
+        TMDB_PROVIDER => fetch_tmdb(provider_id, kind, policy, identity).await,
         _ => Err(unsupported_provider()),
     }
 }
@@ -795,21 +785,6 @@ fn validate_credential_bytes(value: &[u8]) -> Result<(), DesktopProblem> {
     Ok(())
 }
 
-fn validate_provider_id(provider_id: &str) -> Result<(), DesktopProblem> {
-    if !provider_id.is_empty()
-        && provider_id.len() <= 256
-        && provider_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        Ok(())
-    } else {
-        Err(DesktopProblem::configuration(
-            "The provider ID must contain 1 to 256 ASCII letters, digits, hyphens, or underscores.",
-        ))
-    }
-}
-
 fn parse_google_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
     let response: GoogleVolumesResponse = serde_json::from_slice(body)
         .map_err(|_| DesktopProblem::provider("Google Books returned invalid JSON."))?;
@@ -827,7 +802,9 @@ fn google_candidate(item: GoogleVolume) -> Option<ProviderCandidate> {
     let provider_id = item.id?;
     let volume_info = item.volume_info?;
     let title = volume_info.title?;
-    if validate_provider_id(&provider_id).is_err()
+    if provider_identity_mapping(GOOGLE_BOOKS_PROVIDER, "book")?
+        .identifier(provider_id.as_str())
+        .is_err()
         || !valid_candidate_text(&title, 512)
         || volume_info.authors.len() > 10
         || volume_info
@@ -878,6 +855,9 @@ fn tmdb_candidate(item: TmdbItem, forced_kind: Option<&str>) -> Option<ProviderC
         _ => return None,
     };
     let provider_id = item.id?.to_string();
+    provider_identity_mapping(TMDB_PROVIDER, kind)?
+        .identifier(provider_id.as_str())
+        .ok()?;
     let title = if kind == "show" {
         item.name
     } else {
@@ -973,9 +953,11 @@ mod tests {
         assert!(candidates[0].image_url.is_none());
         let namespace = candidates[0]
             .namespace_definition()
-            .expect("legacy-compatible namespace");
-        assert_eq!(namespace.label(), GOOGLE_BOOKS_PROVIDER);
-        assert_eq!(namespace.id_pattern(), ".+");
+            .expect("canonical namespace");
+        assert_eq!(candidates[0].grain().expect("book grain"), Grain::Edition);
+        assert_eq!(namespace.namespace().as_str(), "googlebooks.volume");
+        assert_eq!(namespace.grains(), [Grain::Edition]);
+        assert_eq!(namespace.id_pattern(), "[A-Za-z0-9_-]+");
     }
 
     #[test]
@@ -1016,8 +998,6 @@ mod tests {
         assert!(validate_query("isbn:9780140328721").is_ok());
         assert!(validate_query(" leading").is_err());
         assert!(validate_query(&"x".repeat(QUERY_LIMIT + 1)).is_err());
-        assert!(validate_provider_id("book_42-valid").is_ok());
-        assert!(validate_provider_id("../other-path").is_err());
     }
 
     #[test]
@@ -1061,7 +1041,8 @@ mod tests {
             {"id": 42, "adult": false, "media_type": "movie", "title": "A Film", "original_title": "Original Film", "release_date": "2025-04-03", "overview": "Film overview", "poster_path": "/film.jpg"},
             {"id": 42, "adult": false, "media_type": "tv", "name": "A Show", "first_air_date": "2024-01-02", "poster_path": "/show.jpg"},
             {"id": 7, "adult": false, "media_type": "person", "name": "Not media"},
-            {"id": 8, "adult": true, "media_type": "movie", "title": "Adult media"}
+            {"id": 8, "adult": true, "media_type": "movie", "title": "Adult media"},
+            {"id": 0, "adult": false, "media_type": "movie", "title": "Invalid identity"}
           ]
         }"#;
         let candidates = parse_tmdb_candidates(body).expect("TMDB candidates");
@@ -1078,6 +1059,12 @@ mod tests {
             Some("https://image.tmdb.org/t/p/w500/film.jpg")
         );
         assert_eq!(candidates[1].kind, "show");
+        let movie_identifier = candidates[0].identifier().expect("movie identifier");
+        assert_eq!(movie_identifier.namespace(), "tmdb.movie");
+        assert_eq!(movie_identifier.grain(), Grain::Film);
+        let show_identifier = candidates[1].identifier().expect("show identifier");
+        assert_eq!(show_identifier.namespace(), "tmdb.tv");
+        assert_eq!(show_identifier.grain(), Grain::Series);
         assert_eq!(release_year("2025oops"), None);
         assert!(verify_selected_candidate(candidates[0].clone(), "42", "movie").is_ok());
         assert!(verify_selected_candidate(candidates[0].clone(), "7", "movie").is_err());
