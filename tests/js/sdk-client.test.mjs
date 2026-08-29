@@ -816,7 +816,10 @@ test("client.listRecords() surfaces the truncated flag through the transport", a
       }),
   });
 
-  assert.deepEqual(await client.listRecords(), { records: [], truncated: true });
+  assert.deepEqual(await client.listRecords(), {
+    records: [],
+    truncated: true,
+  });
 });
 
 test("base URL semantics reject application paths instead of silently discarding them", () => {
