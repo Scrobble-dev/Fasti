@@ -118,6 +118,14 @@ def require_command(name: str) -> None:
         raise CaptureError(f"required command is unavailable: {name}")
 
 
+def resolved_command(name: str) -> str:
+    """Resolve a command to an absolute path so argv[0] can't be redirected by PATH."""
+    path = shutil.which(name)
+    if path is None:
+        raise CaptureError(f"required command is unavailable: {name}")
+    return path
+
+
 def sha256_regular_file(path: Path, label: str) -> tuple[str, int]:
     """Hash one retained regular file through a no-follow descriptor."""
 
@@ -779,8 +787,8 @@ def validate_profile_requirements(
 
 def detect_systemd_virtualization() -> str:
     require_command("systemd-detect-virt")
-    result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- "systemd-detect-virt" is a fixed literal resolved via PATH like every other tool this file shells out to; no shell, no untrusted input.
-        ["systemd-detect-virt"],
+    result = subprocess.run(  # nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
+        [resolved_command("systemd-detect-virt")],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -2665,8 +2673,8 @@ def artifact_sizes(
                 )
                 if source.stdout is None:
                     raise CaptureError("gzip pipeline: source process has no stdout pipe")
-                compressor = subprocess.Popen(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- "gzip" is a fixed literal resolved via PATH like every other tool this file shells out to; no shell, no untrusted input.
-                    ["gzip", "-n", "-9"],
+                compressor = subprocess.Popen(  # nosec B603 -- argv[0] is an absolute path resolved by resolved_command(), not PATH-searched; no shell, no untrusted input.
+                    [resolved_command("gzip"), "-n", "-9"],
                     cwd=source_cwd,
                     stdin=source.stdout,
                     stdout=output,

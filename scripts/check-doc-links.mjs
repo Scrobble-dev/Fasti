@@ -1,9 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRootReal = realpathSync(repoRoot);
+
+// resolve()/relative() only prove lexical containment; a symlinked ancestor
+// directory or the target itself could still resolve outside the repo on
+// the real filesystem. Call this only after existsSync() has confirmed the
+// lexically-contained path exists.
+function isReallyContained(lexicallyContainedPath) {
+  const real = realpathSync(lexicallyContainedPath);
+  return real === repoRootReal || real.startsWith(repoRootReal + sep);
+}
 const markdownFiles = execFileSync(
   "git",
   ["ls-files", "--cached", "--others", "--exclude-standard", "--", "*.md"],
@@ -50,6 +60,12 @@ function checkTarget(file, rawTarget) {
   // eslint-disable-next-line security/detect-non-literal-fs-filename
   if (!existsSync(absolute)) {
     failures.push(`${file}: missing local link target ${pathPart}`);
+    return;
+  }
+  if (!isReallyContained(absolute)) {
+    failures.push(
+      `${file}: link target resolves outside the repository via a symlink ${pathPart}`,
+    );
   }
 }
 
@@ -62,8 +78,13 @@ for (const file of markdownFiles) {
     continue;
   }
 
-  const content = readFileSync(absoluteFile, "utf8");
   /* eslint-enable security/detect-non-literal-fs-filename */
+  if (!isReallyContained(absoluteFile)) {
+    failures.push(`${file}: tracked file resolves outside the repository via a symlink`);
+    continue;
+  }
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  const content = readFileSync(absoluteFile, "utf8");
   for (const match of content.matchAll(inlineLink)) {
     checkTarget(file, match[1]);
   }

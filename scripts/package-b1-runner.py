@@ -32,7 +32,9 @@ class BundleError(RuntimeError):
 
 
 def run_checked(parts: list[str | Path], *, cwd: Path = ROOT) -> str:
-    result = subprocess.run(  # nosec -- nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit -- argv is a list (no shell), and the command name is always a literal; only internally-generated identifiers (uuid4/getpid/a fixed scenario tuple) vary.
+    if parts[0] != "git":
+        raise BundleError(f"run_checked only permits the git executable, got: {parts[0]!r}")
+    result = subprocess.run(  # nosec -- argv is a list (no shell); parts[0] is asserted to be the literal "git" above, and every other argument is either a literal or an internally-generated path.
         [str(part) for part in parts],
         cwd=cwd,
         text=True,
