@@ -20,7 +20,7 @@ import shutil
 import signal
 import stat
 import statistics
-import subprocess
+import subprocess  # nosec B404 -- every subprocess.run/Popen call site in this file uses a literal command name, no shell, and either internally-generated or CLI-supplied arguments; see the nosec/nosemgrep comments at each call site.
 import sys
 import tarfile
 import tempfile

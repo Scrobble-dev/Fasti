@@ -12,7 +12,7 @@ import json
 import os
 import socket
 import stat
-import subprocess
+import subprocess  # nosec B404 -- every subprocess.run call in this test file uses a fully literal argv (e.g. ["git", "init", "-q"]), no shell.
 import tarfile
 import tempfile
 import unittest
