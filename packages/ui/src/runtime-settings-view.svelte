@@ -865,7 +865,15 @@
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(fallback)) {
-          return (Array.isArray(parsed) ? parsed : fallback) as T;
+          if (!Array.isArray(parsed)) return fallback;
+          const validItems = parsed.filter(
+            (item) =>
+              item !== null &&
+              typeof item === "object" &&
+              typeof (item as { id?: unknown }).id === "string" &&
+              Boolean((item as { id?: string }).id),
+          );
+          return (validItems.length > 0 ? validItems : fallback) as T;
         }
         if (typeof fallback === "object" && fallback !== null) {
           return (
