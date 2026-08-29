@@ -65,6 +65,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          target: runtime
           platforms: ${{ matrix.platform }}
           push: false
           tags: fasti:release-readiness
@@ -93,7 +94,7 @@ jobs:
       - name: Build native release binaries
         run: cargo build --locked --release --bin fastid --bin fasti
       - name: Build the OCI image for this architecture
-        run: docker build --tag "fasti:release-readiness-${{ matrix.arch }}" .
+        run: docker build --target runtime --tag "fasti:release-readiness-${{ matrix.arch }}" .
       - name: Save the OCI archive
         run: |
           mkdir -p target/fasti-evidence/b8b/checksums-staging

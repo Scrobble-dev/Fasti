@@ -240,16 +240,40 @@
     return null;
   }
 
-  function refreshSelection(xid: ExternalId): ProviderSelection | null {
-    const provider = xid.namespace.toLowerCase();
-    const kind = providerKindForRecord();
-    if (
-      (provider === "google-books" && kind === "book") ||
-      (provider === "tmdb" && (kind === "movie" || kind === "show"))
-    ) {
-      return { provider, provider_id: xid.value, kind };
+  function providerLabel(provider: string): string {
+    return (
+      providerCredentials?.find(
+        (credential) => credential.provider === provider,
+      )?.label ??
+      (provider === "google-books"
+        ? "Google Books"
+        : provider === "tmdb"
+          ? "TMDB"
+          : provider)
+    );
+  }
+
+  function providerMappingForIdentifier(
+    xid: ExternalId,
+  ): Omit<ProviderSelection, "provider_id"> | null {
+    const namespace = xid.namespace.toLowerCase();
+    if (namespace === "googlebooks.volume" || namespace === "google-books") {
+      return { provider: "google-books", kind: "book" };
     }
-    return null;
+    if (namespace === "tmdb.movie") return { provider: "tmdb", kind: "movie" };
+    if (namespace === "tmdb.tv") return { provider: "tmdb", kind: "show" };
+    const currentKind = providerKindForRecord();
+    return namespace === "tmdb" &&
+      (currentKind === "movie" || currentKind === "show")
+      ? { provider: "tmdb", kind: currentKind }
+      : null;
+  }
+
+  function refreshSelection(xid: ExternalId): ProviderSelection | null {
+    const mapping = providerMappingForIdentifier(xid);
+    return mapping?.kind === providerKindForRecord()
+      ? { ...mapping, provider_id: xid.value }
+      : null;
   }
 
   async function searchCompatibleMetadata(
@@ -283,7 +307,7 @@
     metadataNotice = "";
     try {
       await onApplyMetadata(record.id, selection);
-      metadataNotice = `Refreshed metadata from ${xid.namespace}.`;
+      metadataNotice = `Refreshed metadata from ${providerLabel(selection.provider)}.`;
     } catch (error) {
       metadataProblem = hostProblemText(error, "Metadata refresh failed.");
     } finally {
@@ -570,7 +594,7 @@
   <div class="details-body-grid">
     <!-- Left Metadata Sidebar -->
     <aside class="sidebar-details-card">
-      <h3 class="details-sidebar-heading">Details</h3>
+      <h2 class="details-sidebar-heading">Details</h2>
 
       <dl class="sidebar-meta-list">
         {#if record.format}
@@ -622,7 +646,7 @@
       <!-- Genres -->
       {#if record.genres && record.genres.length > 0}
         <div class="sidebar-section">
-          <h4 class="sidebar-subheading">Genres</h4>
+          <h3 class="sidebar-subheading">Genres</h3>
           <div class="chips-row">
             {#each record.genres as g}
               <span class="genre-chip">{g}</span>
@@ -634,7 +658,7 @@
       <!-- Studios & Production -->
       {#if record.studios && record.studios.length > 0}
         <div class="sidebar-section">
-          <h4 class="sidebar-subheading">Studios & Networks</h4>
+          <h3 class="sidebar-subheading">Studios & Networks</h3>
           <ul class="studios-list">
             {#each record.studios as st}
               <li>{st}</li>
@@ -645,7 +669,7 @@
 
       <!-- External Links -->
       <div class="sidebar-section">
-        <h4 class="sidebar-subheading">External Identifiers</h4>
+        <h3 class="sidebar-subheading">External Identifiers</h3>
         {#if isSummary}
           <p class="empty-custom-fields-hint">
             External identifiers are not included in this record summary.
@@ -675,7 +699,7 @@
 
       <!-- Custom Fields -->
       <div class="sidebar-section">
-        <h4 class="sidebar-subheading">Custom Fields</h4>
+        <h3 class="sidebar-subheading">Custom Fields</h3>
         {#if isSummary}
           <p class="empty-custom-fields-hint">
             Custom fields are not included in this record summary.
@@ -1157,10 +1181,13 @@
                 onSearch={searchCompatibleMetadata}
                 onOpenSettings={onOpenProviderSettings ?? (() => {})}
                 onRetry={onRetryProviders ?? (() => {})}
-                onTrackRecord={onApplyMetadata ? chooseMetadata : undefined}
+                onCandidateAction={onApplyMetadata ? chooseMetadata : undefined}
                 actionLabel="Use metadata"
+                pendingLabel="Applying…"
                 completedLabel="Metadata applied"
                 actionProblemFallback="Fasti could not apply metadata to this record."
+                actionUnavailableLabel="Metadata changes unavailable"
+                actionUnavailableText="Search does not change this Record. Metadata changes require the trusted host to apply the selected provider claims."
               />
             {/key}
 
@@ -1170,7 +1197,7 @@
             {#if metadataProblem}
               <p class="metadata-problem" role="alert">{metadataProblem}</p>
             {/if}
-            {#if record.externalIds.some((identifier) => identifier.namespace.toLowerCase() === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
+            {#if record.externalIds.some((identifier) => providerMappingForIdentifier(identifier)?.provider === "tmdb") || (providerCredentials ?? []).some((provider) => provider.provider === "tmdb")}
               <TmdbAttribution />
             {/if}
           </section>

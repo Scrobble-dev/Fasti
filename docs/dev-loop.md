@@ -46,6 +46,20 @@ Direct `fastid` does not provide CORS. Node listener, public URL, provider, and
 credential settings remain disabled in the browser because they require the
 trusted host.
 
+### Trusted Desktop review host
+
+Use a separate private data root to run the trusted Desktop review host:
+
+```bash
+FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
+```
+
+This command builds the static Workbench and starts the Tauri app in the
+foreground. The app embeds its local kernel. It does not start `fastid` or Vite.
+Close the window or press `Ctrl-C` to stop it. `--status` and `--stop` continue
+to manage only the daemon, web harness, and scoped container. Desktop remains an
+unpackaged review candidate.
+
 Other commands:
 
 ```bash
@@ -54,6 +68,7 @@ Other commands:
 ./scripts/dev.sh --open      # open the web UI, or the API health check
 ./scripts/dev.sh --podman    # run fastid in a scoped Podman container instead
 ./scripts/dev.sh --docker    # same, using Docker
+./scripts/dev.sh --desktop   # run the trusted Desktop review host in foreground
 ./scripts/dev.sh --self-test # verify the launcher's own process handling
 ```
 
@@ -65,7 +80,7 @@ the fallback), `FASTI_PUBLIC_URL` (show a separate reverse-proxy origin), and
 `FASTI_DEV_SCOPE` (name this worktree's container so multiple worktrees can
 run containers side by side).
 
-## QA
+## Browser and daemon QA
 
 Check the daemon by hand, using the URL `./scripts/dev.sh` printed (or
 `./scripts/dev.sh --status` to see it again) -- fastid may be on a fallback
@@ -90,6 +105,24 @@ cargo xtask test pr
 See [Definition of Done](definition-of-done.md) for the B1 conformance
 fixture and the Playwright/axe gates that apply once a change touches those
 surfaces.
+
+## Desktop QA
+
+The mocked Tauri Playwright journeys prove UI behavior and IPC payload shape.
+They do not prove a packaged Desktop runtime. For source-run acceptance, use an
+isolated `FASTI_DATA_ROOT`, launch `--desktop`, and verify these facts:
+
+- the Fasti window renders and closes cleanly;
+- the launcher did not start `fastid` or Vite;
+- browser mode still rejects provider secrets and provider execution;
+- the trusted host accepts a configured provider search and creates one Record
+  through `track_provider_candidate`;
+- the success status shows the exact returned Fasti Record ID.
+
+Do not record a token, credential field, provider request header, or data-root
+content in screenshots or logs. A real provider acceptance requires an
+operator-owned credential. Mocked IPC is not that evidence. Packaged Orca,
+NVDA, and VoiceOver checks remain open release gates.
 
 ## Update
 
@@ -138,3 +171,41 @@ opened by `fastid` or `apps/web` will not show up as a "published port" in
 Podman Desktop or BoxBuddy. This is expected. A host-networked container
 never publishes ports the way `podman run -p` does. Check that a port is
 alive with `curl` or `ss`, not by looking for it in a container manager UI.
+
+### The `local` build target: one container with the web UI
+
+The Dockerfile has a second, optional target named `local`. It adds the
+built web UI on top of the same release image. Build it with:
+
+```bash
+podman build --target local --tag fasti:local .
+```
+
+Plain `docker build .` (no `--target`) still builds the release image only.
+CI's own image builds pass `--target runtime` explicitly, so they are not
+affected by this second target. The two images share every stage up to
+`runtime` -- there is one Dockerfile, not two, so the build recipe for
+`fastid` itself never drifts between them.
+
+`fastid` serves the UI itself. There is no separate reverse proxy and no
+second process. It does this with one environment variable:
+
+- `FASTI_STATIC_DIR` names a directory of pre-built static files (the output
+  of `apps/web`'s `vite build`). The `local` image sets this by default. Any
+  request that does not match an `/api/*` route falls back to the files in
+  this directory, and a missing file falls back further to `index.html`, so
+  the web UI's own client-side router can take over. See
+  `with_static_fallback` in `crates/fasti-api/src/lib.rs`.
+
+This is unrelated to `FASTI_DATA_ROOT` and `FASTI_EXTERNAL_BIND_IP`, which
+control the durable API (see above). A bare `podman run fasti:local` with no
+other flags serves the UI on a safe, health-only backend -- the UI does not
+turn on durable routes by itself. To get the full product -- UI and durable
+API together, on one URL -- pass all three: a data volume, `FASTI_DATA_ROOT`,
+and `FASTI_EXTERNAL_BIND_IP`. The README's container quick start shows the
+exact commands.
+
+This does not change `apps/web`'s status as B4, review-only, and not a
+release claim (see the top of this page). The `local` target exists so
+anyone can try Fasti in one command. It is not what CI validates as the
+release artifact -- that remains the plain `runtime` target, unchanged.

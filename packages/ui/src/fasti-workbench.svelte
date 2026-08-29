@@ -34,6 +34,7 @@
   import type {
     ActiveNavSection,
     BrowserSession,
+    CreateRecordResult,
     MediaRecord,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
@@ -425,6 +426,11 @@
     );
   }
 
+  function openProviderSettings(): void {
+    settingsTab = "providers";
+    select("settings");
+  }
+
   function handleSelectSection(section: string): void {
     select(section as Section);
   }
@@ -659,21 +665,22 @@
     }
   }
 
-  async function trackRecordFromDiscover(
+  async function createRecordFromDiscover(
     candidate: ProviderSearchCandidate,
-  ): Promise<void> {
+  ): Promise<CreateRecordResult> {
     if (!host.trackProviderCandidate) {
       throw new Error(
-        "Adding titles to your library is not available on this host.",
+        "Creating a Record from provider metadata is not available on this host.",
       );
     }
-    await host.trackProviderCandidate({
+    const result = await host.trackProviderCandidate({
       provider: candidate.provider,
       provider_id: candidate.provider_id,
       kind: candidate.kind,
     });
     recordsLoaded = false;
     await loadRecords();
+    return result;
   }
 
   function resetClientEndpoint(): void {
@@ -1005,10 +1012,10 @@
           bind:selectedProviderId={discoverSelectedProviderId}
           bind:selectionExplicit={discoverSelectionExplicit}
           onSearch={(provider, query) => host.searchProvider(provider, query)}
-          onOpenSettings={() => select("settings")}
+          onOpenSettings={openProviderSettings}
           onRetry={() => loadDiscover()}
-          onTrackRecord={host.trackProviderCandidate
-            ? trackRecordFromDiscover
+          onCandidateAction={host.trackProviderCandidate
+            ? createRecordFromDiscover
             : undefined}
         />
       {:else if activeSection === "reconciliation"}
@@ -1070,7 +1077,7 @@
             onApplyMetadata={host.applyProviderMetadata
               ? applyProviderMetadata
               : undefined}
-            onOpenProviderSettings={() => select("settings")}
+            onOpenProviderSettings={openProviderSettings}
             onRetryProviders={() => loadDiscover()}
             onSetTrackingDisposition={(recordId, disposition) =>
               void setTrackingDisposition(recordId, disposition)}

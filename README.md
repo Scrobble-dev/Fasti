@@ -66,6 +66,56 @@ This runs `fastid`, the Fasti daemon, on your machine. It takes about 2 minutes 
 
 For the full day-to-day dev loop -- hot rebuilds, Podman/Docker, and the web QA harness -- see [docs/dev-loop.md](docs/dev-loop.md).
 
+### Quick start: one container, no Rust toolchain
+
+This runs `fastid` and the web UI together, in one container, on one URL. Use this if you do not want to install Rust or Node.
+
+**You need:**
+
+- Podman or Docker
+- Git
+
+**Steps:**
+
+1. Clone the repo and enter it. Same as step 1 above.
+
+2. Build the image. This step is slow the first time. It is fast after that.
+
+   ```bash
+   podman build --target local --tag fasti:local .
+   ```
+
+3. Make a place for your data to live. This keeps your data safe when the container restarts.
+
+   ```bash
+   podman volume create fasti-data
+   podman run --rm --user 0:0 --volume fasti-data:/data fasti:local chown fasti:fasti /data
+   ```
+
+4. Start the container. `FASTI_DEVELOPMENT_TEST_ACCOUNT=true` gives you a
+   real account to sign in with right away. Remove it once you set up your
+   own account; it works only over loopback, never on a public listener.
+
+   ```bash
+   podman run --detach --name fasti \
+     --publish 127.0.0.1:8420:8420 \
+     --volume fasti-data:/data \
+     --env FASTI_DATA_ROOT=/data \
+     --env FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
+     --env FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
+     fasti:local
+   ```
+
+5. Open [http://127.0.0.1:8420](http://127.0.0.1:8420) in your browser and
+   sign in with username `testadmin`, password `testadmin`. This is the
+   whole product: the UI and the API, on one URL.
+
+**To stop it:** `podman stop fasti`. **To start it again:** `podman start fasti` (skip step 4 -- the container already exists).
+
+**A plain `docker run fasti:local` with no flags still works.** It serves the UI but not saved data -- a safe default, not a broken one. Step 4's flags are what turn on real, saved data. This mirrors `scripts/dev.sh --podman`'s own container recipe; see [docs/dev-loop.md](docs/dev-loop.md) for what each flag does and why.
+
+**This container image is not the same as the official release image.** The official image (`docker build .`, no `--target`) is `fastid` only, matches the two-command Quick Start above, and is what CI builds and tests on every change. The `local` target adds the web UI on top -- it exists to make trying Fasti easy, it does not change what counts as a supported release.
+
 ## Purpose
 
 Media history is usually split across services, devices, readers, trackers, and launchers. Each source remembers only part of what happened and usually owns the identity it assigned.
@@ -215,9 +265,15 @@ The scoped launcher supplies its private data root in native and container modes
 FASTI_PORT=19420 ./scripts/dev.sh
 FASTI_PORT=19420 ./scripts/dev.sh --podman
 FASTI_PORT=19420 ./scripts/dev.sh --docker
+FASTI_DATA_ROOT=/path/to/private/fasti-desktop-data ./scripts/dev.sh --desktop
 ./scripts/dev.sh --status
 ./scripts/dev.sh --stop
 ```
+
+Desktop mode builds the static Workbench and runs the trusted Tauri review host
+with its embedded local kernel. It does not start `fastid` or Vite. It runs in
+the foreground and is still an unpackaged review candidate, not a supported
+release.
 
 `FASTI_PORT` sets the native or host port. `FASTI_LISTEN` and `FASTI_API_URL` can override the native listen address and probe URL. `FASTI_PUBLIC_URL` records a separate reverse-proxy origin and can omit the port when HTTPS uses port 443. Port collisions fail closed by default; set `FASTI_PORT_FALLBACK=auto` to allow safe loopback recovery. Native mode requires a user cgroup v2 scope. Native and container modes read the 192 MiB ceiling from the governed performance budget and disable swap. The canonical benchmark remains the owner of the separate 64 MiB idle measurement. Container mode uses the documented `fasti:b0` image and publishes only to host loopback; `FASTI_IMAGE` can select another local image. The launcher tracks only this worktree's process and container.
 

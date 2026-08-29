@@ -12,8 +12,9 @@
 
 use crate::{
     derive_deterministic_evidence_digest as derive_ingest_evidence_digest,
-    derive_deterministic_operation_id as derive_ingest_operation_id, AcceptObservationCommand,
-    RequestAccessContext,
+    derive_deterministic_operation_id as derive_ingest_operation_id,
+    provider_identity_mapping_for_grain, AcceptObservationCommand, RequestAccessContext,
+    TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     EvidenceId, EvidenceReference, ExternalIdentifierClaim, Grain, ObservedAt, RequestCorrelationId,
@@ -128,19 +129,17 @@ impl PlexWebhookPayload {
         let mut claims = Vec::new();
         for guid in metadata.guids.iter().take(MAX_INGEST_GUIDS) {
             if let Some((scheme, value)) = guid.id.split_once("://") {
-                let ns_str = match (scheme, grain) {
-                    ("tmdb", Grain::Film) => "tmdb.movie",
-                    ("tmdb", Grain::Episode) => "tmdb.tv",
-                    ("imdb", _) => "imdb.title",
-                    ("tvdb", _) => "tvdb.series",
+                let claim = match scheme {
+                    "tmdb" => provider_identity_mapping_for_grain(TMDB_PROVIDER_ID, grain)
+                        .and_then(|mapping| mapping.identifier(value).ok()),
+                    "imdb" => ExternalIdentifierClaim::try_new("imdb.title", grain, value).ok(),
+                    "tvdb" => ExternalIdentifierClaim::try_new("tvdb.series", grain, value).ok(),
                     // Reject GUID schemes Fasti does not have a mapped
                     // namespace for, rather than minting a domain claim in an
-                    // attacker- or vendor-controlled namespace string. This
-                    // also covers tmdb claims on a grain (track, custom) that
-                    // has no justified TMDB namespace.
-                    _ => continue,
+                    // attacker- or vendor-controlled namespace string.
+                    _ => None,
                 };
-                if let Ok(claim) = ExternalIdentifierClaim::try_new(ns_str, grain, value) {
+                if let Some(claim) = claim {
                     claims.push(claim);
                 }
             }
@@ -236,17 +235,10 @@ impl JellyfinWebhookPayload {
 
         let mut claims = Vec::new();
         if let Some(tmdb_id) = &self.provider_tmdb {
-            // Only Film and Episode grains have a justified TMDB namespace;
-            // a track or unrecognized item type has no TMDB representation.
-            let ns_key = match grain {
-                Grain::Film => Some("tmdb.movie"),
-                Grain::Episode => Some("tmdb.tv"),
-                _ => None,
-            };
-            if let Some(ns_key) = ns_key {
-                if let Ok(claim) = ExternalIdentifierClaim::try_new(ns_key, grain, tmdb_id) {
-                    claims.push(claim);
-                }
+            if let Some(claim) = provider_identity_mapping_for_grain(TMDB_PROVIDER_ID, grain)
+                .and_then(|mapping| mapping.identifier(tmdb_id).ok())
+            {
+                claims.push(claim);
             }
         }
         if let Some(imdb_id) = &self.provider_imdb {
@@ -392,6 +384,9 @@ mod tests {
                         id: "tmdb://128".to_owned(),
                     },
                     PlexGuidItem {
+                        id: "tmdb://not-a-number".to_owned(),
+                    },
+                    PlexGuidItem {
                         id: "imdb://tt0119698".to_owned(),
                     },
                 ],
@@ -434,12 +429,10 @@ mod tests {
             .expect("maps to command");
 
         assert_eq!(cmd.target_grain(), Some(Grain::Episode));
-        assert_eq!(cmd.identity_clues().len(), 3);
-        assert_eq!(cmd.identity_clues()[0].namespace(), "tmdb.tv");
-        assert_eq!(cmd.identity_clues()[0].value(), "2490");
-        assert_eq!(cmd.identity_clues()[1].namespace(), "imdb.title");
-        assert_eq!(cmd.identity_clues()[2].namespace(), "tvdb.series");
-        assert_eq!(cmd.identity_clues()[2].value(), "76142");
+        assert_eq!(cmd.identity_clues().len(), 2);
+        assert_eq!(cmd.identity_clues()[0].namespace(), "imdb.title");
+        assert_eq!(cmd.identity_clues()[1].namespace(), "tvdb.series");
+        assert_eq!(cmd.identity_clues()[1].value(), "76142");
     }
 
     #[test]

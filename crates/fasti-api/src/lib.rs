@@ -6,6 +6,7 @@ use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, Violatio
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
+use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
     openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme},
     Modify, OpenApi,
@@ -265,6 +266,29 @@ pub fn remote_api_router(
         .merge(integrations::router().with_state(integration_state))
 }
 
+/// Adds a static-file fallback to `router`, serving a pre-built single-page
+/// app from `static_dir` for any request that doesn't match an `/api/*`
+/// route. A missing file (including client-side routes like `/status`)
+/// falls back to `static_dir/index.html`, so the SPA's own router handles
+/// the path. When `static_dir` is `None`, `router` is returned unchanged --
+/// existing callers that never pass a static dir see no behavior change.
+///
+/// This is applied once, after the durable/remote/health router is chosen,
+/// rather than duplicated into each of those three constructors above.
+pub fn with_static_fallback(router: Router, static_dir: Option<&Path>) -> Router {
+    let Some(static_dir) = static_dir else {
+        return router;
+    };
+    // `.fallback()`, not `.not_found_service()` -- the latter forces the
+    // response status to 404, which is right for a custom error page but
+    // wrong for SPA client-side routing: `/status` is a real page in the
+    // app, so it must come back 200 with index.html for the SPA's own
+    // router to take over.
+    let index_html = static_dir.join("index.html");
+    let serve_dir = ServeDir::new(static_dir).fallback(ServeFile::new(index_html));
+    router.fallback_service(serve_dir)
+}
+
 /// Seeds the one-time development account with the given credential. The
 /// durable marker prevents this call from recreating an account after it is
 /// renamed or deleted. Returns `true` when this call actually created the
@@ -305,6 +329,89 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn test_bind_addr() -> SocketAddr {
         "127.0.0.1:8420".parse().expect("loopback address")
+    }
+
+    #[tokio::test]
+    async fn static_fallback_is_a_no_op_when_no_dir_is_configured() {
+        let router = with_static_fallback(health_router(), None);
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/nonexistent")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        // No static dir configured -> unmatched routes still 404, exactly as
+        // health_router() alone behaves. This is the regression guard: adding
+        // FASTI_STATIC_DIR support must not change behavior when it's unset.
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn static_fallback_serves_index_html_for_unmatched_spa_routes() {
+        let static_dir = tempfile::tempdir().expect("temporary static dir");
+        std::fs::write(
+            static_dir.path().join("index.html"),
+            "<html>fasti workbench</html>",
+        )
+        .expect("write index.html");
+
+        // The real API route still wins over the static fallback.
+        let response = with_static_fallback(health_router(), Some(static_dir.path()))
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/health")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // A client-side route (not a real file, not an API route) falls
+        // back to index.html so the SPA's own router can handle it.
+        let response = with_static_fallback(health_router(), Some(static_dir.path()))
+            .oneshot(
+                Request::builder()
+                    .uri("/status")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(body, "<html>fasti workbench</html>".as_bytes());
+    }
+
+    #[tokio::test]
+    async fn static_fallback_serves_a_real_asset_file_directly() {
+        let static_dir = tempfile::tempdir().expect("temporary static dir");
+        std::fs::write(static_dir.path().join("index.html"), "shell").expect("write index.html");
+        std::fs::write(static_dir.path().join("app.js"), "console.log(1)").expect("write app.js");
+
+        let router = with_static_fallback(health_router(), Some(static_dir.path()));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/app.js")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(body, "console.log(1)".as_bytes());
     }
 
     #[test]

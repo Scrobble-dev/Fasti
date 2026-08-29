@@ -36,8 +36,20 @@ async function mockHealth(page: Page) {
   );
 }
 
-async function mockTrustedHost(page: Page, providerConfigured = false) {
-  await page.addInitScript((configured) => {
+async function mockTrustedHost(
+  page: Page,
+  providerConfigured = false,
+  holdProviderSearch = false,
+  environmentManaged = false,
+) {
+  const mockOptions =
+    (providerConfigured ? 1 : 0) |
+    (holdProviderSearch ? 2 : 0) |
+    (environmentManaged ? 4 : 0);
+  await page.addInitScript((options) => {
+    const managed = Boolean(options & 4);
+    const configured = Boolean(options & 1) || managed;
+    const holdSearch = Boolean(options & 2);
     const networkConfiguration = {
       connection: {
         service_url: {
@@ -58,19 +70,28 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
         deny_networks: [],
       },
     };
-    const providerStatus = [
+    let providerIsConfigured = configured;
+    const providerStatus = () => [
       {
         provider: "google-books",
         label: "Google Books",
-        configured,
-        source: "none",
-        writable: true,
+        configured: providerIsConfigured,
+        source: managed
+          ? "environment"
+          : providerIsConfigured
+            ? "credential_store"
+            : "none",
+        writable: !managed,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
     ];
     let nuvioDocument: unknown = null;
     const browserWindow = window as typeof window & {
       __PROVIDER_SECRET_MATCH__?: boolean;
+      __PROVIDER_SAVE_CALLS__?: number;
+      __PROVIDER_STATUS_CALLS__?: number;
+      __PROVIDER_SEARCH_CALLS__?: number;
+      __RESOLVE_PROVIDER_SEARCH__?: () => void;
       __NUVIO_REPLACE_COUNT__?: number;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_: unknown) => Promise<unknown>;
@@ -84,7 +105,9 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
           case "load_network_configuration":
             return networkConfiguration;
           case "provider_credential_status":
-            return providerStatus;
+            browserWindow.__PROVIDER_STATUS_CALLS__ =
+              (browserWindow.__PROVIDER_STATUS_CALLS__ ?? 0) + 1;
+            return providerStatus();
           case "get_nuvio_collections":
             return { document: nuvioDocument };
           case "replace_nuvio_collections": {
@@ -105,27 +128,42 @@ async function mockTrustedHost(page: Page, providerConfigured = false) {
               version: "0.1.0-test",
             };
           case "save_provider_credential": {
+            browserWindow.__PROVIDER_SAVE_CALLS__ =
+              (browserWindow.__PROVIDER_SAVE_CALLS__ ?? 0) + 1;
             const candidate = arguments_ as {
               input?: { provider?: string; credential?: string };
             };
             browserWindow.__PROVIDER_SECRET_MATCH__ =
               candidate.input?.provider === "google-books" &&
-              candidate.input?.credential === "test-secret-not-retained";
-            throw {
-              code: "secure_storage_unavailable",
-              title: "Secure storage is unavailable",
-              detail: "The credential store rejected the test value.",
-              next_action: "Unlock the credential store, then retry.",
-            };
+              candidate.input?.credential === "test-secret-for-correction";
+            if (browserWindow.__PROVIDER_SECRET_MATCH__) {
+              throw {
+                code: "secure_storage_unavailable",
+                title: "Secure storage is unavailable",
+                detail: "The credential store rejected the test value.",
+                next_action: "Unlock the credential store, then retry.",
+              };
+            }
+            providerIsConfigured = true;
+            return providerStatus();
           }
           case "search_provider":
+            browserWindow.__PROVIDER_SEARCH_CALLS__ =
+              (browserWindow.__PROVIDER_SEARCH_CALLS__ ?? 0) + 1;
+            if (holdSearch) {
+              await new Promise<void>((resolve) => {
+                browserWindow.__RESOLVE_PROVIDER_SEARCH__ = resolve;
+              });
+              return [];
+            }
+            if (managed) return [];
             throw new Error("Trusted provider execution is unavailable.");
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
         }
       },
     };
-  }, providerConfigured);
+  }, mockOptions);
 }
 
 test("the development browser user can sign in and edit but cannot delete the last administrator", async ({
@@ -441,116 +479,228 @@ test("record metadata can refresh or switch through a configured provider", asyn
   page,
 }) => {
   const recordId = "rec_01991f588e0070008000000000000003";
+  const showRecordId = "rec_01991f588e0070008000000000000004";
+  const bookRecordId = "rec_01991f588e0070008000000000000005";
   await page.setViewportSize({ width: 320, height: 900 });
-  await page.addInitScript((id) => {
-    let title = "Dune";
-    let overview = "A noble family becomes involved in a war for Arrakis.";
-    let identifiers = [{ namespace: "tmdb", grain: "film", value: "438631" }];
-    const browserWindow = window as typeof window & {
-      __METADATA_CALLS__?: unknown[];
-      __TAURI_INTERNALS__: {
-        invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+  await page.addInitScript(
+    ({ id, showId, bookId }) => {
+      let title = "Dune";
+      let overview = "A noble family becomes involved in a war for Arrakis.";
+      let identifiers = [
+        { namespace: "tmdb.tv", grain: "film", value: "438631" },
+      ];
+      let providerStatusCalls = 0;
+      const browserWindow = window as typeof window & {
+        __METADATA_CALLS__?: unknown[];
+        __TAURI_INTERNALS__: {
+          invoke: (command: string, arguments_: unknown) => Promise<unknown>;
+        };
       };
-    };
-    browserWindow.__METADATA_CALLS__ = [];
-    browserWindow.__TAURI_INTERNALS__ = {
-      invoke: async (command, arguments_) => {
-        switch (command) {
-          case "setup_status":
-            return { phase: "ready", proof_cleanup_pending: false };
-          case "provider_credential_status":
-            return [
-              {
-                provider: "tmdb",
-                label: "TMDB",
-                configured: true,
-                source: "credential_store",
-                writable: true,
-                docs_url: "https://developer.themoviedb.org/",
-              },
-            ];
-          case "list_tracking_dispositions":
-            return { states: [], truncated: false };
-          case "list_records":
-            return [
-              {
-                grain: "film",
-                identifiers,
-                latest_activity: null,
-                original_title: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: title,
-                  source: "tmdb",
+      browserWindow.__METADATA_CALLS__ = [];
+      browserWindow.__TAURI_INTERNALS__ = {
+        invoke: async (command, arguments_) => {
+          switch (command) {
+            case "setup_status":
+              return { phase: "ready", proof_cleanup_pending: false };
+            case "provider_credential_status":
+              providerStatusCalls += 1;
+              if (providerStatusCalls === 1) {
+                throw new Error("Provider status is temporarily unavailable.");
+              }
+              return [
+                {
+                  provider: "tmdb",
+                  label: "TMDB",
+                  configured: true,
+                  source: "credential_store",
+                  writable: true,
+                  docs_url: "https://developer.themoviedb.org/",
                 },
-                overview: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: overview,
-                  source: "tmdb",
+                {
+                  provider: "google-books",
+                  label: "Google Books",
+                  configured: true,
+                  source: "credential_store",
+                  writable: true,
+                  docs_url: "https://developers.google.com/books/",
                 },
-                poster: {
-                  is_stale: false,
-                  tier: "empty",
-                  value: null,
-                  source: null,
-                },
-                record_id: id,
-                release_year: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: "2021",
-                  source: "tmdb",
-                },
-                status: "active",
-                title: {
-                  is_stale: false,
-                  tier: "fallback_provider_claim",
-                  value: title,
-                  source: "tmdb",
-                },
-              },
-            ];
-          case "search_provider":
-            return [
-              {
-                provider: "tmdb",
-                provider_id: "693134",
-                title: "Dune: Part Two",
-                original_title: "Dune: Part Two",
-                kind: "movie",
-                release_year: 2024,
-                authors: [],
-                image_url: null,
-                overview: "Paul Atreides unites with Chani and the Fremen.",
-              },
-            ];
-          case "apply_provider_metadata": {
-            const call = (arguments_ as { input: unknown }).input as {
-              record_id: string;
-              selection: {
-                provider: string;
-                provider_id: string;
-                kind: string;
-              };
-            };
-            browserWindow.__METADATA_CALLS__?.push(call);
-            if (call.selection.provider_id === "693134") {
-              title = "Dune: Part Two";
-              overview = "Paul Atreides unites with Chani and the Fremen.";
-              identifiers = [
-                ...identifiers,
-                { namespace: "tmdb", grain: "film", value: "693134" },
               ];
+            case "list_tracking_dispositions":
+              return { states: [], truncated: false };
+            case "list_records":
+              return [
+                {
+                  grain: "film",
+                  identifiers,
+                  latest_activity: null,
+                  original_title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: title,
+                    source: "tmdb.movie",
+                  },
+                  overview: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: overview,
+                    source: "tmdb.movie",
+                  },
+                  poster: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  record_id: id,
+                  release_year: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "2021",
+                    source: "tmdb.movie",
+                  },
+                  status: "active",
+                  title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: title,
+                    source: "tmdb.movie",
+                  },
+                },
+                {
+                  grain: "series",
+                  identifiers: [
+                    { namespace: "tmdb.tv", grain: "series", value: "1396" },
+                  ],
+                  latest_activity: null,
+                  original_title: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  overview: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value:
+                      "A chemistry teacher becomes a methamphetamine producer.",
+                    source: "tmdb.tv",
+                  },
+                  poster: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  record_id: showId,
+                  release_year: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "2008",
+                    source: "tmdb.tv",
+                  },
+                  status: "active",
+                  title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "Breaking Bad",
+                    source: "tmdb.tv",
+                  },
+                },
+                {
+                  grain: "edition",
+                  identifiers: [
+                    {
+                      namespace: "googlebooks.volume",
+                      grain: "edition",
+                      value: "dune-volume",
+                    },
+                  ],
+                  latest_activity: null,
+                  original_title: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  overview: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "A science fiction novel.",
+                    source: "googlebooks.volume",
+                  },
+                  poster: {
+                    is_stale: false,
+                    tier: "empty",
+                    value: null,
+                    source: null,
+                  },
+                  record_id: bookId,
+                  release_year: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "1965",
+                    source: "googlebooks.volume",
+                  },
+                  status: "active",
+                  title: {
+                    is_stale: false,
+                    tier: "fallback_provider_claim",
+                    value: "Dune edition",
+                    source: "googlebooks.volume",
+                  },
+                },
+              ];
+            case "search_provider":
+              return [
+                {
+                  provider: "tmdb",
+                  provider_id: "693134",
+                  title: "Dune: Part Two",
+                  original_title: "Dune: Part Two",
+                  kind: "movie",
+                  release_year: 2024,
+                  authors: [],
+                  image_url: null,
+                  overview: "Paul Atreides unites with Chani and the Fremen.",
+                },
+              ];
+            case "apply_provider_metadata": {
+              const call = (arguments_ as { input: unknown }).input as {
+                record_id: string;
+                selection: {
+                  provider: string;
+                  provider_id: string;
+                  kind: string;
+                };
+              };
+              browserWindow.__METADATA_CALLS__?.push(call);
+              if (call.selection.provider_id === "693134") {
+                title = "Dune: Part Two";
+                overview = "Paul Atreides unites with Chani and the Fremen.";
+                identifiers = [
+                  ...identifiers,
+                  { namespace: "tmdb.movie", grain: "film", value: "693134" },
+                ];
+              }
+              return undefined;
             }
-            return undefined;
+            default:
+              throw new Error(`Unexpected trusted-host command: ${command}`);
           }
-          default:
-            throw new Error(`Unexpected trusted-host command: ${command}`);
-        }
-      },
-    };
-  }, recordId);
+        },
+      };
+    },
+    { id: recordId, showId: showRecordId, bookId: bookRecordId },
+  );
+  const metadataCalls = () =>
+    page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __METADATA_CALLS__?: unknown[];
+          }
+        ).__METADATA_CALLS__,
+    );
 
   await page.goto(`/records/${recordId}`);
   await expect(
@@ -558,8 +708,13 @@ test("record metadata can refresh or switch through a configured provider", asyn
   ).toBeVisible();
   await page.getByRole("button", { name: /Sources & Identity/ }).click();
 
-  await page.getByRole("button", { name: "Refresh" }).click();
-  await expect(page.getByText("Refreshed metadata from tmdb.")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Provider credits" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("row").filter({ hasText: "tmdb.tv" }),
+  ).toContainText("No live adapter");
+  await page.getByRole("button", { name: "Retry host connection" }).click();
   await page
     .getByRole("searchbox", { name: "Search TMDB" })
     .fill("Dune Part Two");
@@ -569,24 +724,49 @@ test("record metadata can refresh or switch through a configured provider", asyn
   await expect(
     page.getByRole("heading", { level: 1, name: "Dune: Part Two" }),
   ).toBeVisible();
-
-  expect(
-    await page.evaluate(
-      () =>
-        (
-          window as typeof window & {
-            __METADATA_CALLS__?: unknown[];
-          }
-        ).__METADATA_CALLS__,
-    ),
-  ).toEqual([
+  await page
+    .getByRole("row")
+    .filter({ hasText: "tmdb.movie" })
+    .getByRole("button", { name: "Refresh" })
+    .click();
+  await expect(page.getByText("Refreshed metadata from TMDB.")).toBeVisible();
+  expect(await metadataCalls()).toEqual([
     {
       record_id: recordId,
-      selection: { provider: "tmdb", provider_id: "438631", kind: "movie" },
+      selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
     },
     {
       record_id: recordId,
       selection: { provider: "tmdb", provider_id: "693134", kind: "movie" },
+    },
+  ]);
+
+  await page.goto(`/records/${showRecordId}`);
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(page.getByText("Refreshed metadata from TMDB.")).toBeVisible();
+  expect(await metadataCalls()).toEqual([
+    {
+      record_id: showRecordId,
+      selection: { provider: "tmdb", provider_id: "1396", kind: "show" },
+    },
+  ]);
+
+  await page.goto(`/records/${bookRecordId}`);
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+  await page.getByRole("button", { name: "Refresh" }).click();
+  await expect(
+    page.getByText("Refreshed metadata from Google Books."),
+  ).toBeVisible();
+
+  expect(await metadataCalls()).toEqual([
+    {
+      record_id: bookRecordId,
+      selection: {
+        provider: "google-books",
+        provider_id: "dune-volume",
+        kind: "book",
+      },
     },
   ]);
   expect(
@@ -962,7 +1142,7 @@ test("the harness does not contact third-party origins", async ({ page }) => {
   expect([...externalOrigins]).toEqual([]);
 });
 
-test("trusted-host provider settings clear a rejected secret", async ({
+test("trusted-host provider settings retain a rejected secret for correction", async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 900 });
@@ -975,14 +1155,18 @@ test("trusted-host provider settings clear a rejected secret", async ({
     .selectOption("providers");
   await expect(page.getByText("No credential is configured.")).toBeVisible();
 
-  const credential = page.getByLabel("New credential");
-  await credential.fill("test-secret-not-retained");
+  const credential = page.getByLabel("Google Books API key");
+  await expect(credential).toHaveAttribute("type", "password");
+  await credential.fill("test-secret-for-correction");
+  await page.getByRole("button", { name: "Show secret" }).click();
+  await expect(credential).toHaveAttribute("type", "text");
   await page.getByRole("button", { name: "Save" }).click();
 
   await expect(page.getByRole("alert")).toContainText(
     "The credential store rejected the test value.",
   );
-  await expect(credential).toHaveValue("");
+  await expect(credential).toHaveValue("test-secret-for-correction");
+  await expect(credential).toHaveAttribute("type", "password");
   expect(
     await page.evaluate(
       () =>
@@ -991,8 +1175,22 @@ test("trusted-host provider settings clear a rejected secret", async ({
     ),
   ).toBe(true);
   expect((await page.locator("body").textContent()) ?? "").not.toContain(
-    "test-secret-not-retained",
+    "test-secret-for-correction",
   );
+  expect(page.url()).not.toContain("test-secret-for-correction");
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(
+    "test-secret-for-correction",
+  );
+
+  await credential.fill("test-secret-stored");
+  await page.getByRole("button", { name: "Show secret" }).click();
+  await expect(credential).toHaveAttribute("type", "text");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Credential saved" }),
+  ).toBeVisible();
+  await expect(credential).toHaveValue("");
+  await expect(credential).toHaveAttribute("type", "password");
 
   const undersizedControls = await page
     .locator("button:visible, input:visible")
@@ -1017,17 +1215,106 @@ test("trusted-host provider settings clear a rejected secret", async ({
   });
 });
 
-test("provider connection tests fail closed when trusted execution is unavailable", async ({
+test("provider search tests fail closed when trusted execution is unavailable", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await mockTrustedHost(page, true);
   await page.goto("/settings/metadata");
 
-  await page.getByRole("button", { name: "Test Connection" }).click();
+  await page.getByRole("button", { name: "Test search" }).click();
   const result = page.locator(".test-result-alert");
   await expect(result).toHaveText("Trusted provider execution is unavailable.");
-  await expect(result).not.toContainText("Connection successful");
+  await expect(result).not.toContainText("Search succeeded");
+});
+
+test("environment-managed credentials remain testable and read-only", async ({
+  page,
+}) => {
+  await mockTrustedHost(page, false, false, true);
+  await page.goto("/settings/metadata");
+
+  await expect(
+    page.getByText(
+      "This credential is managed by the process environment and is read-only in Settings.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Test search" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SEARCH_CALLS__?: number })
+          .__PROVIDER_SEARCH_CALLS__,
+    ),
+  ).toBe(1);
+});
+
+test("provider credential operations remain single-flight", async ({
+  page,
+}) => {
+  await mockTrustedHost(page, true, true);
+  await page.goto("/settings/metadata");
+
+  const credential = page.getByLabel("Google Books API key");
+  await credential.fill("queued-save");
+  await page.getByRole("button", { name: "Test search" }).click();
+  await expect(page.getByRole("button", { name: "Testing…" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Remove" })).toBeDisabled();
+  await expect(credential).toBeDisabled();
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SEARCH_CALLS__?: number })
+          .__PROVIDER_SEARCH_CALLS__,
+    ),
+  ).toBe(1);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_STATUS_CALLS__?: number })
+          .__PROVIDER_STATUS_CALLS__,
+    ),
+  ).toBe(1);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SAVE_CALLS__?: number })
+          .__PROVIDER_SAVE_CALLS__ ?? 0,
+    ),
+  ).toBe(0);
+
+  await page.evaluate(() =>
+    (
+      window as typeof window & {
+        __RESOLVE_PROVIDER_SEARCH__?: () => void;
+      }
+    ).__RESOLVE_PROVIDER_SEARCH__?.(),
+  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Credential saved" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as typeof window & { __PROVIDER_SAVE_CALLS__?: number })
+          .__PROVIDER_SAVE_CALLS__,
+    ),
+  ).toBe(1);
 });
 
 test("profile Nuvio Collections import, export, and clear stay local", async ({

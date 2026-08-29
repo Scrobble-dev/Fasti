@@ -430,6 +430,12 @@ fn command_gates(locked: bool) -> Vec<CommandGate> {
             "repair OKF links or UAT ownership so every governed ID resolves exactly once",
         ),
         CommandGate::new(
+            "contracts.integrations",
+            "node",
+            ["scripts/validate-integration-contracts.mjs"],
+            "fix the integration AsyncAPI/OpenAPI drift reported by scripts/validate-integration-contracts.mjs",
+        ),
+        CommandGate::new(
             "javascript.format",
             "pnpm",
             ["run", "format:check"],
@@ -910,6 +916,7 @@ mod tests {
             "contracts.authored",
             "contracts.generated",
             "contracts.okf_uat",
+            "contracts.integrations",
             "javascript.format",
             "javascript.typecheck",
             "javascript.mutation_sdk_tests",

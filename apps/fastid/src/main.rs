@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use fasti_api::{
     api_router, ensure_development_test_account, health_router, integration_router,
-    remote_api_router,
+    remote_api_router, with_static_fallback,
 };
 use fasti_store::SqliteKernel;
 use std::env;
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8420";
 const DEFAULT_PORT_FALLBACK: &str = "fail";
@@ -185,6 +185,26 @@ fn parse_data_root(value: Option<OsString>) -> Result<Option<PathBuf>> {
 
 fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
+}
+
+/// `FASTI_STATIC_DIR` reuses the same "unset -> None, empty -> error" shape
+/// as `FASTI_DATA_ROOT` -- see `parse_data_root`. It names a pre-built web
+/// UI bundle (e.g. `apps/web`'s `vite build` output) for fastid to serve
+/// directly. This is optional and orthogonal to the durable data root: a
+/// health-only or remote listener can still serve the UI.
+fn parse_static_dir(value: Option<OsString>) -> Result<Option<PathBuf>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        !value.is_empty(),
+        "FASTI_STATIC_DIR must name a directory when it is set"
+    );
+    Ok(Some(PathBuf::from(value)))
+}
+
+fn static_dir() -> Result<Option<PathBuf>> {
+    parse_static_dir(env::var_os("FASTI_STATIC_DIR"))
 }
 
 fn parse_boolean(name: &str, value: Option<String>, default: bool) -> Result<bool> {
@@ -380,6 +400,7 @@ async fn main() -> Result<()> {
             health_router()
         }
     };
+    let app = with_static_fallback(app, static_dir()?.as_deref());
 
     publish_bound_addr("FASTI_BOUND_ADDR_FILE", addr)?;
     if used_fallback {
@@ -396,6 +417,12 @@ async fn main() -> Result<()> {
             integration_transport_allowed(requested, tls_terminated),
             "non-loopback FASTI_INTEGRATION_LISTEN requires FASTI_INTEGRATION_TLS_TERMINATED=true and a trusted TLS reverse proxy"
         );
+        if !requested.ip().is_loopback() {
+            anyhow::ensure!(
+                remote_proxy_is_trusted()?,
+                "a non-loopback integration listener requires FASTI_REMOTE_TRUSTED_PROXY=true"
+            );
+        }
         let (integration_listener, used_integration_fallback) =
             bind_listener(requested, PortFallback::Fail).await?;
         debug_assert!(!used_integration_fallback);
@@ -418,18 +445,18 @@ async fn main() -> Result<()> {
         Some(task) => {
             let abort_handle = task.abort_handle();
             tokio::select! {
-                result = axum::serve(listener, app) => {
-                    abort_handle.abort();
-                    result?;
-                }
-                joined = task => {
-                    match joined {
-                        Ok(Ok(())) => error!("Fasti isolated integration listener exited unexpectedly"),
-                        Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
-                        Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
-                    }
-                }
-            }
+                            result = axum::serve(listener, app) => {
+                                abort_handle.abort();
+                                result?;
+                            }
+                            joined = task => {
+                                match joined {
+            Ok(Ok(())) => return Err(anyhow::anyhow!("Fasti isolated integration listener exited unexpectedly")),
+                                    Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
+                                    Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
+                                }
+                            }
+                        }
         }
         None => axum::serve(listener, app).await?,
     }
@@ -524,6 +551,16 @@ mod tests {
         assert_eq!(
             parse_data_root(Some(OsString::from("/tmp/fasti-data"))).expect("data root"),
             Some(PathBuf::from("/tmp/fasti-data"))
+        );
+    }
+
+    #[test]
+    fn static_dir_is_explicit_and_optional() {
+        assert_eq!(parse_static_dir(None).expect("absent static dir"), None);
+        assert!(parse_static_dir(Some(OsString::new())).is_err());
+        assert_eq!(
+            parse_static_dir(Some(OsString::from("/srv/web"))).expect("static dir"),
+            Some(PathBuf::from("/srv/web"))
         );
     }
 

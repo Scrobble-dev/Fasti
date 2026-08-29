@@ -714,13 +714,15 @@ mod tests {
     use crate::test_support::TestNode;
     use chrono::{TimeZone, Utc};
     use fasti_application::{
-        AcceptObservationCommand, IdentityPort, ListRecordsQuery, ObservationAcceptancePort,
-        RegisterNamespaceDefinitionCommand,
+        provider_identity_mapping, AcceptObservationCommand, CreateProviderRecordCommand,
+        IdentityPort, ListRecordsQuery, ObservationAcceptancePort, ProviderMetadataField,
+        ProviderMetadataPort, RegisterNamespaceDefinitionCommand, GOOGLE_BOOKS_PROVIDER_ID,
+        TMDB_PROVIDER_ID,
     };
     use fasti_domain::{
         ClaimedTrust, FieldClaim, FieldResolutionTier, NamespaceDefinition, NamespaceKey,
-        NamespaceLicencePosture, ObservedAt, OperationId, ReceivedAt, RequestCorrelationId,
-        TITLE_FIELD_KEY,
+        NamespaceLicencePosture, ObservationResolution, ObservedAt, OperationId, ReceivedAt,
+        RequestCorrelationId, TITLE_FIELD_KEY,
     };
 
     fn definition(namespace: &str, grains: impl IntoIterator<Item = Grain>) -> NamespaceDefinition {
@@ -1006,5 +1008,72 @@ mod tests {
             activity.interpretation_state(),
             InterpretationState::Resolved
         );
+    }
+
+    #[test]
+    fn provider_created_records_reuse_the_same_google_books_and_tmdb_coordinates_as_ingest() {
+        let node = TestNode::new();
+        let observed_at = ObservedAt::parse("2026-08-23T10:30:00Z", ClaimedTrust::DeviceObserved)
+            .expect("observed_at");
+
+        for (provider, kind, value) in [
+            (GOOGLE_BOOKS_PROVIDER_ID, "book", "book-1"),
+            (TMDB_PROVIDER_ID, "movie", "42"),
+            (TMDB_PROVIDER_ID, "show", "42"),
+        ] {
+            let mapping = provider_identity_mapping(provider, kind).expect("provider mapping");
+            node.kernel
+                .register_namespace_definition(RegisterNamespaceDefinitionCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    mapping.namespace_definition().expect("provider namespace"),
+                ))
+                .expect("register provider namespace");
+            let source = NamespaceKey::try_new(mapping.namespace()).expect("provider source");
+            let field = ProviderMetadataField::new(
+                FieldKey::try_new(TITLE_FIELD_KEY).expect("title field"),
+                FieldClaim::try_new(
+                    source,
+                    format!("{provider} {kind}"),
+                    None,
+                    received(100),
+                    None,
+                )
+                .expect("provider field"),
+            );
+            let created = node
+                .kernel
+                .create_provider_record(CreateProviderRecordCommand::new(
+                    RequestCorrelationId::new_v7(),
+                    node.access,
+                    mapping.grain(),
+                    mapping.identifier(value).expect("provider identifier"),
+                    vec![field],
+                ))
+                .expect("create provider record");
+            let evidence = node.upload(format!("{provider}:{kind}:{value}").as_bytes());
+            let accepted = node
+                .kernel
+                .authorize_and_accept(
+                    AcceptObservationCommand::new(
+                        RequestCorrelationId::new_v7(),
+                        node.access,
+                        OperationId::new_v7(),
+                        None,
+                        observed_at.clone(),
+                        evidence,
+                    )
+                    .with_identity_clues(
+                        vec![mapping.identifier(value).expect("ingest identifier")],
+                        Some(mapping.grain()),
+                    ),
+                )
+                .expect("accept provider-coordinate observation");
+            assert_eq!(
+                accepted.receipt().resolution(),
+                ObservationResolution::Resolved
+            );
+            assert_eq!(accepted.receipt().record_id(), Some(created.record_id()));
+        }
     }
 }

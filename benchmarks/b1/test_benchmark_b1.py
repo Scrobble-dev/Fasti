@@ -31,6 +31,8 @@ SPEC.loader.exec_module(benchmark)
 
 
 class HardwareProfileTests(unittest.TestCase):
+    """Test cases for hardware profile detection and temperature sensor parsing."""
+
     def test_temperature_falls_back_to_cpu_hwmon(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:
             root = Path(temp_name)
@@ -228,6 +230,8 @@ class HardwareProfileTests(unittest.TestCase):
 
 
 class DockerLocalityTests(unittest.TestCase):
+    """Test cases for Docker socket locality validation and security boundaries."""
+
     def test_remote_endpoint_is_refused_before_pid_measurement(self) -> None:
         with self.assertRaisesRegex(benchmark.CaptureError, "local Unix socket"):
             benchmark.local_docker_socket_path("tcp://benchmark.example:2376")
@@ -264,6 +268,8 @@ class DockerLocalityTests(unittest.TestCase):
 
 
 class ImmutableSourceTests(unittest.TestCase):
+    """Test cases for immutable source identity validation and OCI image labels."""
+
     def setUp(self) -> None:
         self.commit = "1" * 40
         self.tree = "2" * 40
@@ -356,6 +362,7 @@ class ImmutableSourceTests(unittest.TestCase):
         ]
 
         def descriptor(payload: bytes, media_type: str, size_delta: int = 0) -> dict[str, object]:
+            """Create an OCI descriptor for the given payload and media type."""
             return {
                 "mediaType": media_type,
                 "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
@@ -410,6 +417,7 @@ class ImmutableSourceTests(unittest.TestCase):
         )
 
         def path(item: dict[str, object]) -> str:
+            """Convert a descriptor to its OCI blob path."""
             return "blobs/sha256/" + str(item["digest"]).removeprefix("sha256:")
 
         config_path = path(config_descriptor)
@@ -865,6 +873,7 @@ class ImmutableSourceTests(unittest.TestCase):
         config_path = image_id.removeprefix("sha256:") + ".json"
 
         def manifest(layers: list[str]) -> tuple[str, bytes, bytes]:
+            """Create a Docker manifest.json member with the given layer list."""
             return (
                 "manifest.json",
                 json.dumps([{"Config": config_path, "Layers": layers}]).encode(),
@@ -1120,15 +1129,21 @@ class ImmutableSourceTests(unittest.TestCase):
 
 
 class IdleGateTests(unittest.TestCase):
+    """Test cases for idle CPU measurement window and sampling logic."""
+
     def test_idle_wait_extends_until_raw_samples_span_the_locked_window(self) -> None:
         class PhaseOffsetSampler:
+            """Mock sampler that simulates phase offset between samples."""
+
             interval_seconds = 1.0
             error = None
 
             def __init__(self) -> None:
+                """Initialize the mock sampler with zero calls."""
                 self.calls = 0
 
             def records_snapshot(self) -> list[dict[str, int]]:
+                """Return mock sample records with increasing time spans."""
                 self.calls += 1
                 final = 900_000_000_000 if self.calls == 1 else 900_800_000_000
                 return [
@@ -1137,6 +1152,7 @@ class IdleGateTests(unittest.TestCase):
                 ]
 
             def is_running(self) -> bool:
+                """Return True to indicate the sampler is still running."""
                 return True
 
         sampler = PhaseOffsetSampler()
@@ -1254,7 +1270,10 @@ class IdleGateTests(unittest.TestCase):
 
 
 class LockedProfileTests(unittest.TestCase):
+    """Test cases for hardware profile validation and requirement enforcement."""
+
     def valid_storage(self) -> dict[str, object]:
+        """Return a valid storage configuration for profile validation."""
         return {
             "transport": "sata",
             "storage_class": "ssd",
@@ -1384,6 +1403,8 @@ class LockedProfileTests(unittest.TestCase):
 
 
 class ProvenanceAndStorageTests(unittest.TestCase):
+    """Test cases for build provenance, storage fingerprinting, and artifact integrity."""
+
     def test_contract_sdk_build_uses_supported_pnpm_run_options(self) -> None:
         self.assertEqual(
             benchmark.CONTRACT_SDK_BUILD_COMMAND,
@@ -1394,6 +1415,7 @@ class ProvenanceAndStorageTests(unittest.TestCase):
         commands: list[list[str]] = []
 
         def fake_run(args: list[str], **_kwargs: object) -> str:
+            """Mock run_checked to capture executed commands."""
             commands.append(args)
             if args[0] == "findmnt":
                 return "/dev/sda1 ext4 rw,noatime"
@@ -1655,6 +1677,8 @@ class ProvenanceAndStorageTests(unittest.TestCase):
 
 
 class EvidenceInputTests(unittest.TestCase):
+    """Test cases for evidence input validation and placeholder rejection."""
+
     def test_placeholders_are_rejected(self) -> None:
         for value in ["TBD", "placeholder runner", "unassigned", "example"]:
             with self.subTest(value=value), self.assertRaises(benchmark.CaptureError):
@@ -1722,6 +1746,7 @@ class ThermalReadingSchemaTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        """Load the thermal reading source pattern from the evidence schema."""
         schema_path = ROOT / "benchmarks" / "b1" / "evidence.schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         cls.pattern = schema["$defs"]["thermalReading"]["properties"]["source"]["pattern"]
