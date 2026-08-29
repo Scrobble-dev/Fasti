@@ -142,14 +142,71 @@ manifest_dependency_names() {
   ' "$manifest" | sort -u
 }
 
-while IFS= read -r -d '' manifest; do
-  while IFS= read -r dependency; do
-    if [[ "$dependency" == "loco-rs" ]]; then
-      echo "Loco is a reference for workflow patterns, not an active Fasti runtime dependency: $manifest" >&2
-      exit 1
-    fi
-  done < <(manifest_dependency_names "$manifest")
-done < <(find . -name Cargo.toml -not -path './target/*' -not -path './.git/*' -print0)
+python3 - <<'PYTHON'
+from __future__ import annotations
+
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any
+
+DEPENDENCY_TABLES = {"dependencies", "dev-dependencies", "build-dependencies"}
+
+
+def loco_declarations(document: dict[str, Any]) -> list[str]:
+    declarations: list[str] = []
+
+    def visit(value: Any, path: tuple[str, ...] = ()) -> None:
+        if not isinstance(value, dict):
+            return
+        for key, child in value.items():
+            child_path = (*path, str(key))
+            if key in DEPENDENCY_TABLES and isinstance(child, dict):
+                for local_name, specification in child.items():
+                    package_name = local_name
+                    if isinstance(specification, dict):
+                        package_name = specification.get("package", local_name)
+                    if package_name == "loco-rs":
+                        declarations.append(".".join((*child_path, str(local_name))))
+            visit(child, child_path)
+
+    visit(document)
+    return declarations
+
+
+def parse_manifest(text: str, name: str) -> dict[str, Any]:
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"invalid Cargo manifest in framework boundary check ({name}): {error}") from error
+
+
+cases = {
+    "direct": ('[dependencies]\nloco-rs = "1"\n', True),
+    "renamed": ('[dependencies]\nweb = { package = "loco-rs", version = "1" }\n', True),
+    "table": ('[dependencies.web]\npackage = "loco-rs"\nversion = "1"\n', True),
+    "target": ('[target.\'cfg(unix)\'.dev-dependencies]\nweb = { package = "loco-rs", version = "1" }\n', True),
+    "negative": ('[dependencies]\naxum = "1"\n', False),
+}
+for case_name, (source, expected) in cases.items():
+    found = bool(loco_declarations(parse_manifest(source, case_name)))
+    if found != expected:
+        raise SystemExit(f"framework boundary self-test failed: {case_name}")
+
+for manifest in Path(".").rglob("Cargo.toml"):
+    if any(part in {".git", "target", "node_modules"} for part in manifest.parts):
+        continue
+    document = parse_manifest(manifest.read_text(encoding="utf-8"), str(manifest))
+    declarations = loco_declarations(document)
+    if declarations:
+        joined = ", ".join(declarations)
+        print(
+            "Loco is a reference for workflow patterns, not an active Fasti "
+            f"runtime dependency: {manifest} ({joined})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+PYTHON
 
 assert_no_boundary_dependencies() {
   local crate="$1"
