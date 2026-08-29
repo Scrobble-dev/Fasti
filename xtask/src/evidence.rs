@@ -4054,8 +4054,19 @@ fn schema_digest() -> anyhow::Result<String> {
     Ok(sha256_bytes(&canonical))
 }
 
-fn sha256_bytes(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+pub(crate) fn encode_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        value.push(char::from(HEX[usize::from(byte >> 4)]));
+        value.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    value
+}
+
+pub(crate) fn sha256_bytes(bytes: &[u8]) -> String {
+    let digest_bytes: [u8; 32] = Sha256::digest(bytes).into();
+    encode_hex(&digest_bytes)
 }
 
 fn sha256_reader(reader: &mut impl Read, label: &str) -> anyhow::Result<(String, u64)> {
@@ -4074,7 +4085,8 @@ fn sha256_reader(reader: &mut impl Read, label: &str) -> anyhow::Result<(String,
             .with_context(|| format!("{label} size overflowed"))?;
         digest.update(&buffer[..count]);
     }
-    Ok((format!("{:x}", digest.finalize()), bytes))
+    let digest_bytes: [u8; 32] = digest.finalize().into();
+    Ok((encode_hex(&digest_bytes), bytes))
 }
 
 fn git_output(root: &Path, args: &[&str]) -> anyhow::Result<String> {

@@ -780,8 +780,9 @@ impl WorkspaceArchiveDestination for FilesystemArchiveDestination {
             .ok_or_else(|| io::Error::other("archive destination is closed"))?;
         sync_open_handle(file).map_err(archive_error_to_io)?;
         destination_crash_test_point("file_synced");
-        let actual_digest = format!("sha256:{:x}", self.hasher.clone().finalize());
-        if actual_digest != archive_digest.as_str() {
+        let actual_digest_bytes: [u8; 32] = self.hasher.clone().finalize().into();
+        let actual_digest = Sha256Digest::from_bytes(&actual_digest_bytes);
+        if actual_digest != *archive_digest {
             return Err(io::Error::other("archive destination digest mismatch").into());
         }
         #[cfg(not(target_os = "linux"))]
@@ -1103,8 +1104,8 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     fn destination_digest(bytes: &[u8]) -> Sha256Digest {
-        Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(bytes)))
-            .expect("destination digest")
+        let digest_bytes: [u8; 32] = Sha256::digest(bytes).into();
+        Sha256Digest::from_bytes(&digest_bytes)
     }
 
     #[cfg(target_os = "linux")]

@@ -278,12 +278,12 @@ fn verify_snapshot(
     started: Instant,
     max_total_time: Duration,
 ) -> Result<(), SnapshotError> {
-    connection.progress_handler(
+    let _ = connection.progress_handler(
         INTEGRITY_PROGRESS_OPS,
         Some(move || started.elapsed() >= max_total_time),
     );
     let verification = verify_snapshot_inner(connection);
-    connection.progress_handler(0, None::<fn() -> bool>);
+    let _ = connection.progress_handler(0, None::<fn() -> bool>);
     if started.elapsed() >= max_total_time {
         return Err(SnapshotError::OverallTimeout);
     }

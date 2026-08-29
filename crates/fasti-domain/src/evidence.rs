@@ -28,6 +28,17 @@ pub enum Sha256DigestError {
 }
 
 impl Sha256Digest {
+    pub fn from_bytes(bytes: &[u8; 32]) -> Self {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut value = String::with_capacity(SHA256_CANONICAL_LENGTH);
+        value.push_str(SHA256_PREFIX);
+        for byte in bytes {
+            value.push(char::from(HEX[usize::from(byte >> 4)]));
+            value.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+        Self(value)
+    }
+
     pub fn parse(value: impl AsRef<str>) -> Result<Self, Sha256DigestError> {
         value.as_ref().parse()
     }
@@ -163,6 +174,16 @@ mod tests {
         assert_eq!(
             format!("{SHA256_PREFIX}{}g", "0".repeat(63)).parse::<Sha256Digest>(),
             Err(Sha256DigestError::NonCanonicalHex)
+        );
+    }
+
+    #[test]
+    fn from_bytes_constructs_canonical_digest() {
+        let bytes = [0xabu8; 32];
+        let digest = Sha256Digest::from_bytes(&bytes);
+        assert_eq!(
+            digest.as_str(),
+            format!("{SHA256_PREFIX}{}", "ab".repeat(32))
         );
     }
 

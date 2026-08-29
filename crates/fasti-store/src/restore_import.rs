@@ -774,8 +774,8 @@ fn copy_blob(
                     path: expected_path.clone(),
                 })?;
     }
-    let digest = Sha256Digest::parse(format!("sha256:{:x}", hasher.finalize()))
-        .expect("SHA-256 output is canonical");
+    let digest_bytes: [u8; 32] = hasher.finalize().into();
+    let digest = Sha256Digest::from_bytes(&digest_bytes);
     if bytes != declared_size || digest != *expected.digest() {
         return Err(RestoreImportError::BlobDescriptor {
             path: expected_path,
@@ -2705,8 +2705,8 @@ mod tests {
     }
 
     fn digest(bytes: &[u8]) -> Sha256Digest {
-        Sha256Digest::parse(format!("sha256:{:x}", Sha256::digest(bytes)))
-            .expect("canonical digest")
+        let digest_bytes: [u8; 32] = Sha256::digest(bytes).into();
+        Sha256Digest::from_bytes(&digest_bytes)
     }
 
     fn rewrite_stream(

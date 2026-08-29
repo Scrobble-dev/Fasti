@@ -1003,9 +1003,9 @@ mod tests {
                 .query_row(
                     "SELECT COUNT(*) FROM operations WHERE workspace_id = ?1",
                     [node.access.workspace_id().to_string()],
-                    |row| row.get(0),
+                    |row| row.get::<_, i64>(0),
                 )
-                .expect("expected operation count")
+                .expect("expected operation count") as u64
         };
         let mut bytes = Vec::new();
         let outcome = node
