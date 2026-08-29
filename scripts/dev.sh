@@ -8,6 +8,8 @@
 #   ./scripts/dev.sh --desktop   # Start the trusted Desktop review host
 #   ./scripts/dev.sh --status    # Check this worktree's daemon and API health
 #   ./scripts/dev.sh --stop      # Stop this worktree's daemon or container
+#   ./scripts/dev.sh --reset-access [--full-dev-root]
+#                                # Reset the confirmed development root
 #   ./scripts/dev.sh --open      # Open the web UI, or the API health check
 #   ./scripts/dev.sh --self-test # Verify scoped process cleanup
 #
@@ -328,6 +330,7 @@ _has_web() {
 _stop_processes() {
   _stop_pidfile daemon
   _stop_pidfile web
+  _stop_pidfile reset-daemon
   rm -f "$BOUND_ADDR_FILE"
 }
 
@@ -486,6 +489,176 @@ _stop() {
   done
   rm -f "$BOUND_ADDR_FILE"
   echo "Stopped Fasti dev scope $DEV_SCOPE."
+}
+
+_validated_reset_root() {
+  python3 - "$PROJECT_ROOT" "$1" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+
+project = Path(sys.argv[1]).resolve(strict=True)
+candidate = Path(sys.argv[2]).resolve(strict=False)
+expected = project / ".dev-data"
+
+try:
+    top = Path(
+        subprocess.run(
+            ["git", "-C", str(project), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    ).resolve(strict=True)
+except (OSError, subprocess.CalledProcessError):
+    raise SystemExit("reset requires a Git worktree")
+
+if top != project:
+    raise SystemExit("reset root is ambiguous because the launcher is not at the worktree root")
+if candidate != expected:
+    raise SystemExit(f"reset refuses non-development, outside-worktree, or symlink-escaped root: {candidate}")
+print(candidate)
+PY
+}
+
+_data_root_is_active() {
+  local root="$1"
+  local lock="$root/fasti.lock"
+  [[ -e "$lock" ]] || return 1
+  [[ -f "$lock" && ! -L "$lock" ]] || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  local lock_fd
+  exec {lock_fd}<"$lock" || return 0
+  if flock --nonblock "$lock_fd"; then
+    flock --unlock "$lock_fd"
+    exec {lock_fd}>&-
+    return 1
+  fi
+  exec {lock_fd}>&-
+  return 0
+}
+
+_confirm_full_dev_root_reset() {
+  local root="$1"
+  local expected="RESET $root"
+  local answer=""
+  printf 'This removes all Fasti development data in this root, including Chronicle data.\n'
+  printf 'Type %s to continue: ' "$expected"
+  IFS= read -r answer || return 1
+  [[ "$answer" == "$expected" ]]
+}
+
+_rebuild_fasti_root() {
+  local root="$1"
+  local reset_bound_addr="$RUNDIR/reset-bound-addr"
+  local reset_log="$LOGDIR/reset-fastid.log"
+  local pid=""
+  local addr=""
+  local api_url=""
+  local status=""
+
+  (umask 077; mkdir -p "$root" "$LOGDIR" "$RUNDIR")
+  rm -f "$reset_bound_addr"
+  set -m
+  (
+    umask 077
+    FASTI_DATA_ROOT="$root" \
+      FASTI_LISTEN=127.0.0.1:0 \
+      FASTI_PORT_FALLBACK=fail \
+      FASTI_BOUND_ADDR_FILE="$reset_bound_addr" \
+      exec "$PROJECT_ROOT/target/debug/fastid" >"$reset_log" 2>&1
+  ) &
+  pid=$!
+  set +m
+  _write_pidfile reset-daemon "$pid"
+  for _ in {1..50}; do
+    kill -0 "$pid" 2>/dev/null || break
+    [[ -s "$reset_bound_addr" ]] && break
+    sleep 0.1
+  done
+  if [[ ! -s "$reset_bound_addr" ]]; then
+    _stop_pidfile reset-daemon
+    echo "Fasti reset migration failed; see $reset_log" >&2
+    return 1
+  fi
+  addr="$(<"$reset_bound_addr")"
+  api_url="$(_api_url_for_addr "$addr")"
+  for _ in {1..20}; do
+    if curl --connect-timeout 2 --max-time 5 --silent --fail "$api_url/api/v1/health" >/dev/null 2>&1; then
+      status="$(curl --connect-timeout 2 --max-time 5 --silent --output /dev/null \
+        --write-out '%{http_code}' --request POST --header 'content-type: application/json' \
+        --data '{}' "$api_url/api/v1/node/initialization" || true)"
+      [[ "$status" == 403 ]] && break
+    fi
+    sleep 0.1
+  done
+  _stop_pidfile reset-daemon
+  rm -f "$reset_bound_addr"
+  if [[ "$status" != 403 ]]; then
+    echo "Fasti reset migration did not expose the durable initialization surface; see $reset_log" >&2
+    return 1
+  fi
+}
+
+_reset_access() {
+  local selection="${1:-}"
+  local root=""
+  local backup=""
+  local failed=""
+
+  case "$selection" in
+    "") ;;
+    --full-dev-root) ;;
+    *) echo "--reset-access accepts only --full-dev-root" >&2; return 1 ;;
+  esac
+
+  root="$(_validated_reset_root "$DATADIR")" || return 1
+  echo "=== Fasti Access Development Reset ($DEV_SCOPE) ==="
+  echo "  Fasti development root: $root"
+  echo "  TrailBase development root: UNAVAILABLE (PR A has no TrailBase runtime)"
+
+  if [[ "$selection" != --full-dev-root ]]; then
+    echo "Access-only reset is unavailable in PR A because no public Access reset service is mounted." >&2
+    echo "No data changed. Use --full-dev-root only when Chronicle data may also be reset." >&2
+    return 2
+  fi
+
+  _confirm_full_dev_root_reset "$root" || {
+    echo "Reset canceled; no data changed." >&2
+    return 1
+  }
+  trap _cleanup EXIT
+  trap '_cleanup; exit 130' INT
+  trap '_cleanup; exit 143' TERM
+  _stop
+  if _data_root_is_active "$root"; then
+    echo "Reset refused because the Fasti development root is active or its lock is ambiguous." >&2
+    return 1
+  fi
+
+  cargo build --locked --bin fastid
+  (umask 077; mkdir -p "$PROJECT_ROOT/.dev-reset-backups")
+  if [[ -e "$root" ]]; then
+    backup="$PROJECT_ROOT/.dev-reset-backups/fasti-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    mv -- "$root" "$backup"
+    echo "Previous Fasti development root retained at: $backup"
+  fi
+
+  if ! _rebuild_fasti_root "$root"; then
+    if [[ -e "$root" ]]; then
+      failed="$PROJECT_ROOT/.dev-reset-backups/failed-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+      mv -- "$root" "$failed"
+      echo "Failed replacement root retained at: $failed" >&2
+    fi
+    if [[ -n "$backup" && -d "$backup" ]]; then
+      mv -- "$backup" "$root"
+      echo "Previous Fasti development root restored after the failed rebuild." >&2
+    fi
+    return 1
+  fi
+  echo "Fasti development root rebuilt through normal forward migrations and public service probes."
+  echo "TrailBase reset remains unavailable until its pinned runtime is implemented."
+  trap - EXIT INT TERM
 }
 
 _require_container_image() {
@@ -864,6 +1037,57 @@ _self_test() {
   fi
   [[ "$(_resolve_data_root .custom-data)" == "$PROJECT_ROOT/.custom-data" ]]
   [[ "$(_resolve_data_root /tmp/fasti-custom-data)" == "/tmp/fasti-custom-data" ]]
+  local reset_root
+  reset_root="$(_validated_reset_root "$PROJECT_ROOT/.dev-data")"
+  [[ "$reset_root" == "$PROJECT_ROOT/.dev-data" ]]
+  if _validated_reset_root "$PROJECT_ROOT/data" >/dev/null 2>&1; then
+    echo "self-test accepted a non-development reset root" >&2
+    return 1
+  fi
+  mkdir -p "$RUNDIR/reset-outside"
+  ln -s "$RUNDIR/reset-outside" "$RUNDIR/reset-link"
+  if _validated_reset_root "$RUNDIR/reset-link" >/dev/null 2>&1; then
+    echo "self-test accepted a symlink-escaped reset root" >&2
+    return 1
+  fi
+  rm -f "$RUNDIR/reset-link"
+  rmdir "$RUNDIR/reset-outside"
+  if _confirm_full_dev_root_reset "$reset_root" <<<"RESET something-else" >/dev/null 2>&1; then
+    echo "self-test accepted an inexact reset confirmation" >&2
+    return 1
+  fi
+  _confirm_full_dev_root_reset "$reset_root" <<<"RESET $reset_root" >/dev/null
+  local reset_lock_root="$RUNDIR/reset-lock-root"
+  mkdir -p "$reset_lock_root"
+  : > "$reset_lock_root/fasti.lock"
+  python3 - "$reset_lock_root/fasti.lock" <<'PY' &
+import fcntl
+import sys
+import time
+
+with open(sys.argv[1], "r+", encoding="utf-8") as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    time.sleep(30)
+PY
+  local reset_lock_pid=$!
+  for _ in {1..20}; do
+    _data_root_is_active "$reset_lock_root" && break
+    sleep 0.01
+  done
+  if ! _data_root_is_active "$reset_lock_root"; then
+    echo "self-test missed an active development-root lock" >&2
+    kill "$reset_lock_pid" 2>/dev/null || true
+    wait "$reset_lock_pid" 2>/dev/null || true
+    return 1
+  fi
+  kill "$reset_lock_pid" 2>/dev/null || true
+  wait "$reset_lock_pid" 2>/dev/null || true
+  if _data_root_is_active "$reset_lock_root"; then
+    echo "self-test retained an inactive development-root lock" >&2
+    return 1
+  fi
+  rm -f "$reset_lock_root/fasti.lock"
+  rmdir "$reset_lock_root"
   FASTI_DATA_ROOT_EXPLICIT=0
   if _start_desktop >/dev/null 2>&1; then
     echo "self-test accepted inferred Desktop data root" >&2
@@ -921,6 +1145,8 @@ Commands / Options:
   --status, status      Check this worktree's daemon, web, container, and API health
   --update, update      Pull latest dev, fetch Cargo/pnpm deps, and rebuild packages
   --stop, stop          Stop running daemon, web, and container processes
+  --reset-access [--full-dev-root]
+                        Validate and reset this worktree's development Access root
   --podman              Start Fasti in a scoped Podman container
   --docker              Start Fasti in a scoped Docker container
   --container           Start Fasti in a container using the configured runtime
@@ -945,6 +1171,9 @@ Examples:
   fasti update            # Pull latest dev and rebuild workspace
   fasti status            # Check running services and health probe
   fasti stop              # Cleanly stop all Fasti background processes
+  fasti --reset-access    # Report PR A's unavailable Access-only reset safely
+  fasti --reset-access --full-dev-root
+                          # Confirm a full .dev-data reset, including Chronicle
   FASTI_DATA_ROOT=/private/path fasti desktop
 EOF
 }
@@ -953,6 +1182,14 @@ case "${1:-}" in
   --help|-h|help) _help ;;
   --update|update) _update ;;
   --stop|stop) _stop ;;
+  --reset-access|reset-access)
+    shift
+    if (($# > 1)); then
+      echo "--reset-access accepts at most one --full-dev-root argument" >&2
+      exit 1
+    fi
+    _reset_access "${1:-}"
+    ;;
   --status|status) _status ;;
   --open|open) shift 1 2>/dev/null || true; _open "$@" ;;
   --podman) FASTI_CONTAINER_RUNTIME=podman; _start_container ;;
