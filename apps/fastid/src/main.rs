@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8420";
 const DEFAULT_PORT_FALLBACK: &str = "fail";
