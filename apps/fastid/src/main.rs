@@ -342,18 +342,18 @@ async fn main() -> Result<()> {
         Some(task) => {
             let abort_handle = task.abort_handle();
             tokio::select! {
-                result = axum::serve(listener, app) => {
-                    abort_handle.abort();
-                    result?;
-                }
-                joined = task => {
-                    match joined {
-Ok(Ok(())) => return Err(anyhow::anyhow!("Fasti isolated integration listener exited unexpectedly")),
-                        Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
-                        Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
-                    }
-                }
-            }
+                            result = axum::serve(listener, app) => {
+                                abort_handle.abort();
+                                result?;
+                            }
+                            joined = task => {
+                                match joined {
+            Ok(Ok(())) => return Err(anyhow::anyhow!("Fasti isolated integration listener exited unexpectedly")),
+                                    Ok(Err(err)) => return Err(err).context("Fasti isolated integration listener failed"),
+                                    Err(join_err) => return Err(join_err).context("Fasti isolated integration listener task panicked"),
+                                }
+                            }
+                        }
         }
         None => axum::serve(listener, app).await?,
     }
