@@ -89,7 +89,18 @@ Current file ownership:
 | `pr93_live_inventory` | GitHub and PR evidence | Read-only. |
 | `pr93_slice_gap_audit` | PR #93 source and requirement audit | Read-only. |
 | `fasti_handoff_evidence` | Handoffs and historical context | Read-only. |
-| Future write agents | No paths assigned yet | Create an isolated worktree and update this table before the first write. Two agents never own the same file. |
+| `pr93_core_session` | `crates/fasti-application/src/browser_auth.rs`, `crates/fasti-store/src/browser_auth.rs`, `crates/fasti-store/src/schema.rs`, and focused Rust tests in those files | Isolated branch `codex/fasti-pr93-core`; sole owner of the session model, policy, persistence, migration, and store invariants. |
+| `pr93_ui_truth` | `packages/ui/src/auth-modal.svelte`, `packages/ui/src/runtime-settings-view.svelte`, `packages/ui/src/fasti-workbench.svelte`, `packages/ui/src/types.ts`, `apps/web/src/web-host.ts`, and `tests/e2e/workbench-regressions.spec.ts` | Isolated branch `codex/fasti-pr93-ui`; preserve Gate 10 A+C and remove false active behavior. Do not edit generated SDK or registry files. |
+| `pr93_docs_truth` | `AGENTS.md`, `SECURITY.md`, `docs/architecture/authentication.md`, `docs/capability-ledger.md`, `docs/quality/`, `docs/reviews/pr-93-auth-session-review.md`, and `contracts/seed/fasti_fresh_blind_master_plan_v2_2026-08-21.md` | Isolated branch `codex/fasti-pr93-docs`; correct false claims and record implemented versus unavailable state. Do not edit registry or generated files. |
+| Commander after core freeze | `crates/fasti-contracts`, `crates/fasti-api`, `contracts/registry`, `contracts/generated`, `xtask`, `packages/sdk`, contract tests, and integration | Begin only after the core owner freezes identifiers, policy, capabilities, and problems. |
+
+PR A source-gap gate, recorded 2026-08-29:
+
+- Exact audit basis: remote PR head `2605819740cd49f4002ee533be0e0b7180828c55` against `origin/dev` `d035933bd2b804f23db1a5402ee564eba7ce5b0c`.
+- Result: `FAIL_EXPECTED_BEFORE_IMPLEMENTATION`. Fake passkey, TOTP, recovery, and OIDC success remains mounted; historical v8 is edited; `BrowserUser` owns identity; final session policy, exact public IDs, complete revocation, rotation, Origin/Host checks, session-local authorized profile selection, truthful contracts, and meaningful UI tests are absent.
+- Retained evidence: Account and Sessions information architecture, digest-backed secret storage, secure cookie and CSRF foundations, and administrator-continuity behavior have value and must not be discarded.
+- Dependency result: no external dependency blocks PR A. TrailBase runtime and protocol work remain in B and C and must not be simulated here.
+- Implementation order: remove false surfaces; restore migration history and add a forward migration; define the final dormant session model and policy; implement store invariants; add request-boundary checks; regenerate contracts and SDK; apply the persistent Gate 10 A+C unavailable state; add focused tests; correct documentation and executable truth gates.
 
 ### 2.2 Primary source registry
 
