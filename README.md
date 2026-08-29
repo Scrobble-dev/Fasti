@@ -92,7 +92,9 @@ This runs `fastid` and the web UI together, in one container, on one URL. Use th
    podman run --rm --user 0:0 --volume fasti-data:/data fasti:local chown fasti:fasti /data
    ```
 
-4. Start the container.
+4. Start the container. `FASTI_DEVELOPMENT_TEST_ACCOUNT=true` gives you a
+   real account to sign in with right away. Remove it once you set up your
+   own account; it works only over loopback, never on a public listener.
 
    ```bash
    podman run --detach --name fasti \
@@ -100,10 +102,13 @@ This runs `fastid` and the web UI together, in one container, on one URL. Use th
      --volume fasti-data:/data \
      --env FASTI_DATA_ROOT=/data \
      --env FASTI_EXTERNAL_BIND_IP=127.0.0.1 \
+     --env FASTI_DEVELOPMENT_TEST_ACCOUNT=true \
      fasti:local
    ```
 
-5. Open [http://127.0.0.1:8420](http://127.0.0.1:8420) in your browser. This is the whole product: the UI and the API, on one URL.
+5. Open [http://127.0.0.1:8420](http://127.0.0.1:8420) in your browser and
+   sign in with username `testadmin`, password `testadmin`. This is the
+   whole product: the UI and the API, on one URL.
 
 **To stop it:** `podman stop fasti`. **To start it again:** `podman start fasti` (skip step 4 -- the container already exists).
 
