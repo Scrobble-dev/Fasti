@@ -662,25 +662,18 @@
   async function trackRecordFromDiscover(
     candidate: ProviderSearchCandidate,
   ): Promise<void> {
-    if (host.trackProviderCandidate) {
-      await host.trackProviderCandidate({
-        provider: candidate.provider,
-        provider_id: candidate.provider_id,
-        kind: candidate.kind,
-      });
-      recordsLoaded = false;
-      await loadRecords();
-      return;
-    }
-    if (
-      !host.createRecord ||
-      !host.attachIdentifier ||
-      !host.registerNamespace
-    ) {
+    if (!host.trackProviderCandidate) {
       throw new Error(
         "Adding titles to your library is not available on this host.",
       );
     }
+    await host.trackProviderCandidate({
+      provider: candidate.provider,
+      provider_id: candidate.provider_id,
+      kind: candidate.kind,
+    });
+    recordsLoaded = false;
+    await loadRecords();
   }
 
   function resetClientEndpoint(): void {
@@ -1014,8 +1007,7 @@
           onSearch={(provider, query) => host.searchProvider(provider, query)}
           onOpenSettings={() => select("settings")}
           onRetry={() => loadDiscover()}
-          onTrackRecord={host.trackProviderCandidate ||
-          (host.createRecord && host.attachIdentifier && host.registerNamespace)
+          onTrackRecord={host.trackProviderCandidate
             ? trackRecordFromDiscover
             : undefined}
         />

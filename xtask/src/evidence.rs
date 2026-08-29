@@ -189,9 +189,9 @@ struct Summary {
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
 #[serde(deny_unknown_fields)]
-struct EvidenceManifest {
+pub(crate) struct EvidenceManifest {
     schema: SchemaBinding,
-    body: Body,
+    pub(crate) body: Body,
     source: SourceBinding,
     ci: CiBinding,
     command: String,
@@ -490,7 +490,7 @@ type PerformancePackageFile = (String, String, EvidenceKind, PathBuf, String);
 
 #[derive(Debug)]
 pub(crate) struct VerifiedManifest {
-    manifest: EvidenceManifest,
+    pub(crate) manifest: EvidenceManifest,
 }
 
 pub(crate) fn print_schema() -> anyhow::Result<()> {
@@ -881,12 +881,18 @@ fn verify_b8b_manifest_requirements(
         "B8b requires a passing B8a manifest at {}; none exists yet",
         b8a_manifest_path.display()
     );
-    verify(root, &b8a_manifest_path).with_context(|| {
+    let b8a = verify(root, &b8a_manifest_path).with_context(|| {
         format!(
             "B8b requires a passing B8a manifest at {}",
             b8a_manifest_path.display()
         )
     })?;
+    ensure!(
+        b8a.manifest.body == Body::B8a,
+        "the B8b prerequisite at {} must declare body B8a, not {}",
+        b8a_manifest_path.display(),
+        b8a.manifest.body.as_str()
+    );
     ensure!(
         manifest.command == "cargo xtask test milestone --body B8b",
         "B8b evidence manifest must bind the exact milestone command"

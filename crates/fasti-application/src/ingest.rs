@@ -128,16 +128,16 @@ impl PlexWebhookPayload {
         let mut claims = Vec::new();
         for guid in metadata.guids.iter().take(MAX_INGEST_GUIDS) {
             if let Some((scheme, value)) = guid.id.split_once("://") {
-                let ns_str = match scheme {
-                    "tmdb" => match grain {
-                        Grain::Film => "tmdb.movie",
-                        _ => "tmdb.tv",
-                    },
-                    "imdb" => "imdb.title",
-                    "tvdb" => "tvdb.series",
+                let ns_str = match (scheme, grain) {
+                    ("tmdb", Grain::Film) => "tmdb.movie",
+                    ("tmdb", Grain::Episode) => "tmdb.tv",
+                    ("imdb", _) => "imdb.title",
+                    ("tvdb", _) => "tvdb.series",
                     // Reject GUID schemes Fasti does not have a mapped
                     // namespace for, rather than minting a domain claim in an
-                    // attacker- or vendor-controlled namespace string.
+                    // attacker- or vendor-controlled namespace string. This
+                    // also covers tmdb claims on a grain (track, custom) that
+                    // has no justified TMDB namespace.
                     _ => continue,
                 };
                 if let Ok(claim) = ExternalIdentifierClaim::try_new(ns_str, grain, value) {
@@ -236,13 +236,17 @@ impl JellyfinWebhookPayload {
 
         let mut claims = Vec::new();
         if let Some(tmdb_id) = &self.provider_tmdb {
-            let ns_key = if grain == Grain::Film {
-                "tmdb.movie"
-            } else {
-                "tmdb.tv"
+            // Only Film and Episode grains have a justified TMDB namespace;
+            // a track or unrecognized item type has no TMDB representation.
+            let ns_key = match grain {
+                Grain::Film => Some("tmdb.movie"),
+                Grain::Episode => Some("tmdb.tv"),
+                _ => None,
             };
-            if let Ok(claim) = ExternalIdentifierClaim::try_new(ns_key, grain, tmdb_id) {
-                claims.push(claim);
+            if let Some(ns_key) = ns_key {
+                if let Ok(claim) = ExternalIdentifierClaim::try_new(ns_key, grain, tmdb_id) {
+                    claims.push(claim);
+                }
             }
         }
         if let Some(imdb_id) = &self.provider_imdb {
