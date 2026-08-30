@@ -217,20 +217,18 @@ fn metadata_and_provider_router(
         kernel.clone(),
         OutboundAccessPolicy::default(),
     ));
-    // ponytail: one process-wide gate keeps vault mutation and provider reads
-    // coherent; move to per-provider gates only if measured throughput needs it.
-    let credential_operation_lock = Arc::new(tokio::sync::Mutex::new(()));
+    let provider_operation_locks = fasti_api::ProviderOperationLocks::new(&providers);
     provider_api_router(
         kernel.clone(),
         kernel.clone(),
         providers,
-        credential_operation_lock.clone(),
+        provider_operation_locks.clone(),
     )
     .merge(metadata_api_router(
         kernel.clone(),
         refresh,
         kernel,
-        credential_operation_lock,
+        provider_operation_locks,
     ))
 }
 

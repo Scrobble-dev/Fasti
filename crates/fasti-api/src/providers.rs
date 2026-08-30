@@ -1,5 +1,6 @@
 use crate::local::{authenticate_request, request_authentication};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
+use crate::ProviderOperationLocks;
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, Path, State},
     http::HeaderMap,
@@ -35,7 +36,15 @@ pub(crate) struct ProviderApiState {
     pub(crate) kernel: Arc<dyn fasti_application::LocalKernel>,
     pub(crate) provider_state: Arc<dyn ProviderStatePort>,
     pub(crate) runtime: Arc<ProviderRuntime>,
-    pub(crate) credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) provider_operation_locks: ProviderOperationLocks,
+}
+
+impl ProviderApiState {
+    fn operation_lock(&self, provider: &ProviderSpec) -> Arc<tokio::sync::Mutex<()>> {
+        self.provider_operation_locks
+            .get(provider.provider)
+            .expect("resolved providers have operation locks")
+    }
 }
 
 async fn authorize(
@@ -619,7 +628,8 @@ pub(crate) async fn configure_provider_credential(
         capability,
         correlation_id,
     )?;
-    let _credential_guard = state.credential_operation_lock.lock().await;
+    let operation_lock = state.operation_lock(provider);
+    let _credential_guard = operation_lock.lock().await;
     let reference = state
         .runtime
         .credential_reference(&provider_id)
@@ -786,7 +796,8 @@ pub(crate) async fn remove_provider_credential(
         capability,
         correlation_id,
     )?;
-    let _credential_guard = state.credential_operation_lock.lock().await;
+    let operation_lock = state.operation_lock(provider);
+    let _credential_guard = operation_lock.lock().await;
     let reference = state
         .runtime
         .credential_reference(&provider_id)
@@ -1046,7 +1057,8 @@ pub(crate) async fn test_provider_credential(
         capability,
         correlation_id,
     )?;
-    let _credential_guard = state.credential_operation_lock.lock().await;
+    let operation_lock = state.operation_lock(provider);
+    let _credential_guard = operation_lock.lock().await;
     execute_check(
         &state,
         access.workspace_id(),
@@ -1118,7 +1130,8 @@ pub(crate) async fn read_provider_health(
             correlation_id,
         ))));
     }
-    let _credential_guard = state.credential_operation_lock.lock().await;
+    let operation_lock = state.operation_lock(provider);
+    let _credential_guard = operation_lock.lock().await;
     let mut capabilities = Vec::with_capacity(provider.capabilities.len());
     for spec in provider.capabilities {
         let updated = execute_check(
@@ -1313,13 +1326,14 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = Arc::new(SqliteKernel::open(root.path()).expect("SQLite kernel"));
         let state = Arc::new(CountingState(AtomicUsize::new(0)));
+        let runtime = Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+            CredentialVaultSource::None,
+        ))));
         let app = router().with_state(ProviderApiState {
             kernel,
             provider_state: state.clone(),
-            runtime: Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
-                CredentialVaultSource::None,
-            )))),
-            credential_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            provider_operation_locks: ProviderOperationLocks::new(&runtime),
+            runtime,
         });
         let response = app
             .oneshot(
@@ -1334,16 +1348,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_checks_wait_for_the_shared_credential_operation_lock() {
+    async fn provider_operations_are_serialized_per_provider() {
         let (_root, kernel, _workspace_id, credential) = enrolled_kernel();
-        let operation_lock = Arc::new(tokio::sync::Mutex::new(()));
+        let runtime = Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+            CredentialVaultSource::None,
+        ))));
+        let operation_locks = ProviderOperationLocks::new(&runtime);
+        let tmdb_lock = operation_locks.get("tmdb").expect("TMDB operation lock");
+        let google_books_lock = operation_locks
+            .get("google-books")
+            .expect("Google Books operation lock");
+        assert!(!Arc::ptr_eq(&tmdb_lock, &google_books_lock));
         let app = router().with_state(ProviderApiState {
             kernel: kernel.clone(),
             provider_state: kernel,
-            runtime: Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
-                CredentialVaultSource::None,
-            )))),
-            credential_operation_lock: operation_lock.clone(),
+            runtime,
+            provider_operation_locks: operation_locks,
         });
 
         for request in [
@@ -1356,13 +1376,30 @@ mod tests {
                 .body(Body::empty())
                 .expect("provider-health request"),
         ] {
-            let guard = operation_lock.lock().await;
+            let guard = tmdb_lock.lock().await;
             let result =
                 tokio::time::timeout(Duration::from_millis(200), app.clone().oneshot(request))
                     .await;
-            assert!(result.is_err(), "provider check bypassed the shared lock");
+            assert!(result.is_err(), "TMDB operation bypassed its provider lock");
             drop(guard);
         }
+
+        let guard = tmdb_lock.lock().await;
+        let response = tokio::time::timeout(
+            Duration::from_secs(1),
+            app.oneshot(
+                Request::put("/api/v1/providers/google-books/credentials/metadata.read")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"secret":"google-books-secret"}"#))
+                    .expect("Google Books credential request"),
+            ),
+        )
+        .await
+        .expect("unrelated provider was delayed by the TMDB lock")
+        .expect("Google Books credential response");
+        assert_eq!(response.status(), StatusCode::OK);
+        drop(guard);
     }
 
     #[test]
@@ -1405,11 +1442,12 @@ mod tests {
     async fn configure_is_write_only_and_rejects_read_only_sources_without_state_mutation() {
         let (_root, kernel, workspace_id, credential) = enrolled_kernel();
         let writable_vault = Arc::new(MemoryVault::new(CredentialVaultSource::None));
+        let writable_runtime = Arc::new(ProviderRuntime::new(writable_vault.clone()));
         let writable = router().with_state(ProviderApiState {
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
-            runtime: Arc::new(ProviderRuntime::new(writable_vault.clone())),
-            credential_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            provider_operation_locks: ProviderOperationLocks::new(&writable_runtime),
+            runtime: writable_runtime,
         });
         let response = writable
             .clone()
@@ -1472,13 +1510,14 @@ mod tests {
         assert!(writable_vault.value.lock().expect("memory vault").is_none());
 
         let (_root, kernel, workspace_id, credential) = enrolled_kernel();
+        let readonly_runtime = Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+            CredentialVaultSource::Environment,
+        ))));
         let readonly = router().with_state(ProviderApiState {
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
-            runtime: Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
-                CredentialVaultSource::Environment,
-            )))),
-            credential_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            provider_operation_locks: ProviderOperationLocks::new(&readonly_runtime),
+            runtime: readonly_runtime,
         });
         let response = readonly
             .clone()
@@ -1512,13 +1551,14 @@ mod tests {
             .is_empty());
 
         let (_root, kernel, workspace_id, credential) = enrolled_kernel();
+        let invalid_runtime = Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+            CredentialVaultSource::None,
+        ))));
         let invalid = router().with_state(ProviderApiState {
             kernel: kernel.clone(),
             provider_state: kernel.clone(),
-            runtime: Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
-                CredentialVaultSource::None,
-            )))),
-            credential_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            provider_operation_locks: ProviderOperationLocks::new(&invalid_runtime),
+            runtime: invalid_runtime,
         });
         let response = invalid
             .clone()

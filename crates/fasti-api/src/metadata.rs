@@ -1,5 +1,6 @@
 use crate::local::{authenticate_request, request_authentication};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
+use crate::ProviderOperationLocks;
 use axum::{
     extract::{rejection::JsonRejection, DefaultBodyLimit, FromRequestParts, Path, Query, State},
     http::{request::Parts, HeaderMap},
@@ -35,7 +36,7 @@ pub(crate) struct MetadataApiState {
     pub(crate) kernel: Arc<dyn fasti_application::LocalKernel>,
     pub(crate) refresh_service: Arc<dyn MetadataClaimRefreshService>,
     pub(crate) projection_port: Arc<dyn MetadataProjectionPort>,
-    pub(crate) credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) provider_operation_locks: ProviderOperationLocks,
 }
 
 pub(crate) struct RefreshMetadataAccess {
@@ -268,7 +269,11 @@ pub(crate) async fn refresh_metadata_claims(
         })?;
     let mode = metadata_refresh_mode(request.mode);
     let provider_id_text = provider_id.as_str().to_owned();
-    let _credential_guard = state.credential_operation_lock.lock().await;
+    let operation_lock = state.provider_operation_locks.get(provider_id.as_str());
+    let _credential_guard = match operation_lock.as_ref() {
+        Some(lock) => Some(lock.lock().await),
+        None => None,
+    };
     let outcome = state
         .refresh_service
         .authorize_and_refresh(RefreshMetadataClaimsCommand::new(
@@ -616,11 +621,14 @@ mod tests {
     fn unauthenticated_test_router() -> (tempfile::TempDir, Router) {
         let root = tempfile::tempdir().expect("temporary data root");
         let kernel = Arc::new(SqliteKernel::open(root.path()).expect("SQLite kernel"));
+        let runtime = fasti_provider_runtime::ProviderRuntime::new(Arc::new(
+            fasti_provider_runtime::PlatformCredentialVault::new("fasti-test", "metadata-api"),
+        ));
         let app = router().with_state(MetadataApiState {
             kernel: kernel.clone(),
             refresh_service: Arc::new(NeverRefresh),
             projection_port: kernel,
-            credential_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+            provider_operation_locks: ProviderOperationLocks::new(&runtime),
         });
         (root, app)
     }

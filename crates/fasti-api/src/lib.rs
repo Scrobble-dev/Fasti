@@ -9,6 +9,7 @@ use axum::{
 };
 use fasti_application::LocalKernel;
 use fasti_contracts::{HealthResponse, ProblemActionDto, ProblemDetails, ViolationDto};
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -31,6 +32,31 @@ mod problem;
 mod profile_state;
 mod providers;
 mod records;
+
+/// Provider-scoped gates shared by credential mutation, provider checks, and
+/// metadata refreshes in one API process.
+#[derive(Clone)]
+pub struct ProviderOperationLocks {
+    locks: Arc<BTreeMap<&'static str, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl ProviderOperationLocks {
+    pub fn new(runtime: &fasti_provider_runtime::ProviderRuntime) -> Self {
+        Self {
+            locks: Arc::new(
+                runtime
+                    .descriptors()
+                    .iter()
+                    .map(|provider| (provider.provider, Arc::new(tokio::sync::Mutex::new(()))))
+                    .collect(),
+            ),
+        }
+    }
+
+    pub(crate) fn get(&self, provider_id: &str) -> Option<Arc<tokio::sync::Mutex<()>>> {
+        self.locks.get(provider_id).cloned()
+    }
+}
 
 #[cfg(feature = "conformance-fixture")]
 mod conformance;
@@ -242,13 +268,13 @@ pub fn provider_api_router(
     kernel: Arc<dyn LocalKernel>,
     provider_state: Arc<dyn fasti_application::ProviderStatePort>,
     runtime: Arc<fasti_provider_runtime::ProviderRuntime>,
-    credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
+    provider_operation_locks: ProviderOperationLocks,
 ) -> Router {
     providers::router().with_state(providers::ProviderApiState {
         kernel,
         provider_state,
         runtime,
-        credential_operation_lock,
+        provider_operation_locks,
     })
 }
 
@@ -259,13 +285,13 @@ pub fn metadata_api_router(
     kernel: Arc<dyn LocalKernel>,
     refresh_service: Arc<dyn fasti_application::MetadataClaimRefreshService>,
     projection_port: Arc<dyn fasti_application::MetadataProjectionPort>,
-    credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
+    provider_operation_locks: ProviderOperationLocks,
 ) -> Router {
     metadata::router().with_state(metadata::MetadataApiState {
         kernel,
         refresh_service,
         projection_port,
-        credential_operation_lock,
+        provider_operation_locks,
     })
 }
 
