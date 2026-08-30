@@ -60,6 +60,27 @@ Primary source:
 Context7 was used for discovery. Its TrailBase material tracks `main` and does
 not establish these `v0.33.5` capabilities. Exact tagged source controls.
 
+### 2.1 Upstream revalidation
+
+Rechecked: 2026-08-30
+
+- GitHub still reports `v0.33.5` as the latest non-draft, non-prerelease
+  TrailBase release.
+- `refs/tags/v0.33.5` still resolves to
+  `b4c85d5152d4e5f472e0b5da5303f7c938e3a083`.
+- `refs/heads/main` resolves to
+  `e8fd53a798ada706cf95ebfba47b6220f2fc7a5f`, dated 2026-08-27. Targeted
+  source searches on that revision find only the existing administrator
+  `public_key` owner and no JSON Web Key Set, introspection, key-rotation, or
+  disabled-user implementation.
+- Targeted upstream issue and pull-request searches found no published work
+  item for JSON Web Key Set, key rotation, account disablement, or token
+  introspection.
+
+This check does not replace exact tagged-source review when a new release
+appears. A future continuation must compare the new tag, public OpenAPI, and
+source against every `C1-TB-TRUST` requirement before it changes this gate.
+
 ## 3. Browser ceremony evidence
 
 TrailBase can carry the redirect URI, response type, and Proof Key for Code
