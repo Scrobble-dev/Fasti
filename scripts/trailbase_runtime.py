@@ -492,13 +492,48 @@ def _acquire_runtime_lock(root: Path) -> int:
     )
     try:
         metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
-            raise ReleaseError("TrailBase runtime lock is not an owner-only regular file")
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+        ):
+            raise ReleaseError("TrailBase runtime lock is not a singly linked owner file")
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.fchmod(descriptor, 0o600)
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ReleaseError("TrailBase runtime lock is not an owner-only regular file")
         return descriptor
     except (OSError, ReleaseError):
         os.close(descriptor)
         raise
+
+
+def prepare_runtime_lock(root: Path) -> None:
+    try:
+        descriptor = _acquire_runtime_lock(root)
+    except BlockingIOError as error:
+        raise ReleaseError("TrailBase development root is already active") from error
+    os.close(descriptor)
+
+
+def verify_runtime_lock(root: Path) -> None:
+    descriptor = _open_safe_regular_file(root / "runtime.lock")
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ReleaseError("TrailBase runtime lock is not an owner-only regular file")
+    finally:
+        os.close(descriptor)
 
 
 def _prepare_native_release(root: Path, release: dict[str, Any], offline: bool) -> Path:
@@ -1356,6 +1391,13 @@ def restore_depot(
                 if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
                     raise ReleaseError("depot backup entry is invalid")
                 relative = _archive_path(entry["path"])
+                if not (
+                    relative.parts == ("bootstrap.json",)
+                    or relative.parts[0] == "depot"
+                ):
+                    raise ReleaseError(
+                        "depot backup entry is outside the bootstrap and depot boundary"
+                    )
                 name = relative.as_posix()
                 if name in entries or entry.get("kind") not in {"directory", "file"}:
                     raise ReleaseError("depot backup contains duplicate or invalid entries")
@@ -1432,6 +1474,8 @@ def restore_depot(
                     os.close(descriptor)
                 if size != entry["bytes"] or digest.hexdigest() != entry["sha256"]:
                     raise ReleaseError(f"depot backup content mismatch: {name}")
+        prepare_runtime_lock(temporary)
+        verify_runtime_lock(temporary)
         verify_private_root(temporary, release_version)
         current_parent = _validate_restore_parent(parent)
         if (current_parent.st_dev, current_parent.st_ino) != (
@@ -1451,7 +1495,7 @@ def restore_depot(
 
 
 def _backup_restore_self_test() -> None:
-    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-") as directory:
+    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-depot-test-", dir=Path.home()) as directory:
         base = Path(directory)
         os.chmod(base, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
         root = base / "source"
@@ -1479,6 +1523,7 @@ def _backup_restore_self_test() -> None:
         backup, _digest = backup_depot(root, base / "backups")
         restored = base / "restored"
         restore_depot(backup, restored)
+        verify_runtime_lock(restored)
         verify_private_root(restored)
         if (restored / "depot/uploads/example.bin").read_bytes() != b"depot/uploads/example.bin":
             raise ReleaseError("full-depot backup self-test lost nested content")
@@ -1509,6 +1554,36 @@ def _backup_restore_self_test() -> None:
             pass
         else:
             raise ReleaseError("member-size-mismatched restore self-test did not fail")
+
+        unexpected = base / "unexpected-top-level.zip"
+        unexpected_payload = b"archive-controlled-lock"
+        with zipfile.ZipFile(backup) as source, zipfile.ZipFile(
+            unexpected, "w", compression=zipfile.ZIP_DEFLATED
+        ) as destination:
+            manifest = json.loads(source.read("manifest.json"))
+            manifest["entries"].append(
+                {
+                    "path": "runtime.lock",
+                    "kind": "file",
+                    "mode": 0o600,
+                    "bytes": len(unexpected_payload),
+                    "sha256": hashlib.sha256(unexpected_payload).hexdigest(),
+                }
+            )
+            for info in source.infolist():
+                payload = (
+                    json.dumps(manifest, indent=2, sort_keys=True).encode()
+                    if info.filename == "manifest.json"
+                    else source.read(info.filename)
+                )
+                destination.writestr(info, payload)
+            destination.writestr("runtime.lock", unexpected_payload)
+        try:
+            restore_depot(unexpected, base / "unexpected-top-level-restore")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("unexpected top-level restore entry self-test did not fail")
 
         unsafe_parent = base / "unsafe-parent"
         unsafe_parent.mkdir(mode=0o777)
@@ -1591,6 +1666,79 @@ runtime.start_managed_process_group(
             raise ReleaseError("termination cleanup left a child process group active")
     finally:
         stop_managed_process_group(worker)
+
+
+def _runtime_lock_self_test() -> None:
+    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-lock-") as workspace:
+        root = Path(workspace) / "root"
+        previous_umask = os.umask(0o002)
+        try:
+            prepare_runtime_lock(root)
+        finally:
+            os.umask(previous_umask)
+        lock = root / "runtime.lock"
+        verify_runtime_lock(root)
+
+        os.chmod(lock, 0o644)
+        held = os.open(lock, os.O_RDWR | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                verify_runtime_lock(root)
+            except ReleaseError:
+                pass
+            else:
+                raise ReleaseError("runtime lock self-test verified an unsafe active lock")
+            try:
+                prepare_runtime_lock(root)
+            except ReleaseError:
+                pass
+            else:
+                raise ReleaseError("runtime lock self-test ignored an active lock")
+            if stat.S_IMODE(os.fstat(held).st_mode) != 0o644:
+                raise ReleaseError("runtime lock self-test modified an active lock")
+        finally:
+            os.close(held)
+        prepare_runtime_lock(root)
+        if stat.S_IMODE(lock.stat().st_mode) != 0o600:
+            raise ReleaseError("runtime lock self-test did not repair a stopped lock")
+
+        alias = root / "runtime-lock-alias"
+        os.link(lock, alias)
+        try:
+            try:
+                verify_runtime_lock(root)
+            except ReleaseError:
+                pass
+            else:
+                raise ReleaseError("runtime lock self-test verified a multiply linked lock")
+            try:
+                prepare_runtime_lock(root)
+            except ReleaseError:
+                pass
+            else:
+                raise ReleaseError("runtime lock self-test accepted a multiply linked lock")
+        finally:
+            alias.unlink()
+
+        lock.unlink()
+        target = root / "symlink-target"
+        _write_private(target, b"", 0o600)
+        lock.symlink_to(target.name)
+        try:
+            prepare_runtime_lock(root)
+        except OSError:
+            pass
+        else:
+            raise ReleaseError("runtime lock self-test accepted a symlink")
+        lock.unlink()
+        lock.mkdir(mode=0o700)
+        try:
+            prepare_runtime_lock(root)
+        except OSError:
+            pass
+        else:
+            raise ReleaseError("runtime lock self-test accepted a directory")
 
 
 def self_test() -> None:
@@ -1717,6 +1865,7 @@ def self_test() -> None:
         else:
             raise ReleaseError("non-loopback or mismatched public URL self-test did not fail")
     _backup_restore_self_test()
+    _runtime_lock_self_test()
     _managed_process_group_self_test()
     print("PASS: TrailBase release-lock mutation sentinels")
 
@@ -1748,6 +1897,10 @@ def main() -> int:
     prepare_oci_parser.add_argument("root", type=Path)
     prepare_oci_parser.add_argument("--runtime", choices=["podman", "docker"], required=True)
     prepare_oci_parser.add_argument("--offline", action="store_true")
+    prepare_runtime_lock_parser = subcommands.add_parser(
+        "prepare-runtime-lock", help="create or repair the stopped owner-only runtime lock"
+    )
+    prepare_runtime_lock_parser.add_argument("root", type=Path)
     verify_oci_container_parser = subcommands.add_parser(
         "verify-oci-container", help="verify a running container uses the exact release image"
     )
@@ -1807,6 +1960,9 @@ def main() -> int:
             print(executable)
         elif arguments.command == "prepare-oci":
             print(prepare_oci(arguments.root, arguments.runtime, arguments.offline))
+        elif arguments.command == "prepare-runtime-lock":
+            prepare_runtime_lock(arguments.root)
+            print(f"PASS: owner-only TrailBase runtime lock {arguments.root}")
         elif arguments.command == "verify-oci-container":
             verify_oci_container(arguments.root, arguments.runtime, arguments.name)
             print(f"PASS: exact running TrailBase OCI container {arguments.name}")
@@ -1828,6 +1984,7 @@ def main() -> int:
                 arguments.cors_origin,
             )
         elif arguments.command == "verify-root":
+            verify_runtime_lock(arguments.root)
             verify_private_root(arguments.root)
             print("PASS: owner-only TrailBase root and bootstrap receipt")
         elif arguments.command == "backup-depot":

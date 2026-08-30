@@ -58,7 +58,9 @@ lost, use TrailBase's documented password-reset flow. Do not edit its database.
 
 The worktree-local root is `.dev-trailbase`. The root, depot, cache, receipt,
 and files must remain owned by the current user and inaccessible to group and
-other users. Symlinks and unsupported file types are rejected.
+other users. Symlinks and unsupported file types are rejected. Native and OCI
+start repair only a stopped, current-user `runtime.lock`; active, linked, or
+foreign-owned lock files fail closed.
 
 ## Start and inspect
 
@@ -135,8 +137,9 @@ Restore only to a new isolated directory:
   /absolute/private/isolated-trailbase-root
 ```
 
-The target and its parents must be private. Restore publishes atomically and
-never overwrites an existing root. Verify the restored root before activation:
+The target and its parents must be private. Restore creates a fresh owner-only
+runtime lock, publishes atomically, and never overwrites an existing root. The
+lock is not restored from the archive. Verify the restored root before activation:
 
 ```bash
 python3 -B scripts/trailbase_runtime.py verify-root \

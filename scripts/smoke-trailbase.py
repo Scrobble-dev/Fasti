@@ -534,7 +534,7 @@ def run_fixture(source_root: Path, receipt_path: Path) -> None:
     runtime.verify_private_root(source_root)
     executable = runtime.prepare_native(source_root, offline=True)
     checks: list[dict[str, object]] = []
-    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-conformance-") as directory:
+    with tempfile.TemporaryDirectory(prefix="fasti-trailbase-conformance-", dir=Path.home()) as directory:
         fixture = Path(directory)
         os.chmod(fixture, 0o700)  # nosec B103 -- nosemgrep -- owner-only is required.
         backup, backup_digest = runtime.backup_depot(source_root, fixture / "backups")

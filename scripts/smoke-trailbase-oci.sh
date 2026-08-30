@@ -22,6 +22,12 @@ if podman inspect "$container" --format '{{.State.Running}}' 2>/dev/null | grep 
   echo "Stop the scoped TrailBase container before the OCI conformance gate." >&2
   exit 1
 fi
+stopped_status="$("$repo_root/scripts/dev.sh" trailbase status)"
+grep -q 'Process: STOPPED' <<<"$stopped_status" || {
+  echo "Stop the scoped native TrailBase runtime before the OCI conformance gate." >&2
+  exit 1
+}
+rm -f -- "$repo_root/.dev-trailbase/runtime.lock"
 
 start_output="$("$repo_root/scripts/dev.sh" trailbase start --podman)"
 if grep -q 'is already running' <<<"$start_output"; then
@@ -30,6 +36,10 @@ if grep -q 'is already running' <<<"$start_output"; then
 fi
 printf '%s\n' "$start_output"
 owned_container_id="$(sed -n 's/^Container ID: //p' <<<"$start_output")"
+[[ "$(stat -c '%a' "$repo_root/.dev-trailbase/runtime.lock")" == 600 ]] || {
+  echo "OCI launcher did not create an owner-only runtime lock." >&2
+  exit 1
+}
 if [[ ! "$owned_container_id" =~ ^[0-9a-f]{64}$ ]] ||
   [[ "$(podman inspect "$container" --format '{{.Id}}')" != "$owned_container_id" ]]; then
   echo "The OCI launcher did not return the exact container it created." >&2
