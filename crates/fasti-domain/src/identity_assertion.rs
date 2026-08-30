@@ -150,6 +150,8 @@ impl IdentityCoverageSegment {
             || source_start > source_end
             || target_start < 1
             || target_end < target_start
+            || u32::try_from(target_start).is_err()
+            || u32::try_from(target_end).is_err()
             || matches!(mode, IdentityCoverageMode::Season) != season.is_some()
             || !region_is_valid
         {
@@ -189,6 +191,16 @@ impl IdentityCoverageSegment {
 
     pub const fn source_end(&self) -> u32 {
         self.source_end
+    }
+
+    pub fn target_start(&self) -> u32 {
+        u32::try_from(i64::from(self.source_start) + i64::from(self.offset))
+            .expect("validated coverage target start")
+    }
+
+    pub fn target_end(&self) -> u32 {
+        u32::try_from(i64::from(self.source_end) + i64::from(self.offset))
+            .expect("validated coverage target end")
     }
 
     pub const fn offset(&self) -> i32 {
@@ -286,6 +298,7 @@ pub enum IdentityEvidenceMethod {
 pub struct IdentityAssertionEvidence {
     method: IdentityEvidenceMethod,
     observed_source: String,
+    derivation_root: Option<String>,
     reviewer: Option<String>,
     observed_at: NaiveDate,
     evidence_id: Option<EvidenceId>,
@@ -295,20 +308,28 @@ impl IdentityAssertionEvidence {
     pub fn try_new(
         method: IdentityEvidenceMethod,
         observed_source: impl Into<String>,
+        derivation_root: Option<String>,
         reviewer: Option<String>,
         observed_at: NaiveDate,
         evidence_id: Option<EvidenceId>,
     ) -> Result<Self, IdentityAssertionError> {
         let observed_source = observed_source.into();
+        let derivation_root_is_valid = derivation_root
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
         let reviewer_is_valid = reviewer
             .as_deref()
             .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
-        if !valid_text(&observed_source, MAX_PROVENANCE_TEXT_BYTES) || !reviewer_is_valid {
+        if !valid_text(&observed_source, MAX_PROVENANCE_TEXT_BYTES)
+            || !derivation_root_is_valid
+            || !reviewer_is_valid
+        {
             return Err(IdentityAssertionError::InvalidEvidence);
         }
         Ok(Self {
             method,
             observed_source,
+            derivation_root,
             reviewer,
             observed_at,
             evidence_id,
@@ -321,6 +342,10 @@ impl IdentityAssertionEvidence {
 
     pub fn observed_source(&self) -> &str {
         &self.observed_source
+    }
+
+    pub fn derivation_root(&self) -> Option<&str> {
+        self.derivation_root.as_deref()
     }
 
     pub fn reviewer(&self) -> Option<&str> {
@@ -349,6 +374,7 @@ pub struct IdentityAssertion {
     evidence_class: IdentityAssertionEvidenceClass,
     evidence: Vec<IdentityAssertionEvidence>,
     id_source: String,
+    source_version: Option<String>,
     authority: Option<String>,
     reasoning: Option<String>,
     initial_status: IdentityAssertionStatus,
@@ -370,6 +396,7 @@ impl IdentityAssertion {
         evidence_class: IdentityAssertionEvidenceClass,
         evidence: Vec<IdentityAssertionEvidence>,
         id_source: impl Into<String>,
+        source_version: Option<String>,
         authority: Option<String>,
         reasoning: Option<String>,
         initial_status: IdentityAssertionStatus,
@@ -388,6 +415,13 @@ impl IdentityAssertion {
             .collect::<HashSet<_>>()
             .len()
             == evidence.len();
+        let derivation_roots = evidence
+            .iter()
+            .filter_map(|item| item.derivation_root())
+            .collect::<HashSet<_>>();
+        let source_version_is_valid = source_version
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
         let authority_is_valid = authority
             .as_deref()
             .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
@@ -411,7 +445,10 @@ impl IdentityAssertion {
         {
             return Err(IdentityAssertionError::InvalidEvidence);
         }
-        if !valid_text(&id_source, MAX_IDENTITY_SOURCE_BYTES) || !authority_is_valid {
+        if !valid_text(&id_source, MAX_IDENTITY_SOURCE_BYTES)
+            || !source_version_is_valid
+            || !authority_is_valid
+        {
             return Err(IdentityAssertionError::InvalidProvenance);
         }
         if !reasoning_is_valid
@@ -431,7 +468,7 @@ impl IdentityAssertion {
                         && item.reviewer().is_some()
                 }))
             || (matches!(evidence_class, IdentityAssertionEvidenceClass::Corroborated)
-                && evidence.len() < 2)
+                && (evidence.len() < 2 || derivation_roots.len() != evidence.len()))
             || (initial_status.can_route()
                 && matches!(
                     evidence_class,
@@ -453,6 +490,7 @@ impl IdentityAssertion {
             evidence_class,
             evidence,
             id_source,
+            source_version,
             authority,
             reasoning,
             initial_status,
@@ -502,6 +540,10 @@ impl IdentityAssertion {
 
     pub fn id_source(&self) -> &str {
         &self.id_source
+    }
+
+    pub fn source_version(&self) -> Option<&str> {
+        self.source_version.as_deref()
     }
 
     pub fn authority(&self) -> Option<&str> {
@@ -631,6 +673,7 @@ mod tests {
         IdentityAssertionEvidence::try_new(
             method,
             "pinned source record",
+            Some("pinned-source-root".to_owned()),
             (method == IdentityEvidenceMethod::HumanVerified).then(|| "gh:reviewer".to_owned()),
             NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
             None,
@@ -655,6 +698,7 @@ mod tests {
             IdentityAssertionEvidenceClass::Verified,
             vec![evidence(IdentityEvidenceMethod::HumanVerified)],
             "anime-crosswalk-mappings:release",
+            Some("dee4c1f4808d656b7ca71da584a8af95a2653277".to_owned()),
             None,
             None,
             IdentityAssertionStatus::Accepted,
@@ -700,6 +744,7 @@ mod tests {
             "source:route",
             None,
             None,
+            None,
             IdentityAssertionStatus::Accepted,
             at(),
         )
@@ -719,6 +764,55 @@ mod tests {
             IdentityAssertionEvidenceClass::Candidate,
             vec![evidence(IdentityEvidenceMethod::HeuristicTitleMatch)],
             "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Accepted,
+            at(),
+        )
+        .is_err());
+
+        assert!(IdentityCoverageSegment::try_new(
+            IdentityCoverageMode::Flat,
+            None,
+            IdentityNumberingSpace::Regular,
+            IdentityOrdering::Provider,
+            u32::MAX,
+            u32::MAX,
+            1,
+            None,
+        )
+        .is_err());
+
+        let duplicate_root_evidence = ["source-a", "source-b"]
+            .map(|observed_source| {
+                IdentityAssertionEvidence::try_new(
+                    IdentityEvidenceMethod::UpstreamDeclared,
+                    observed_source,
+                    Some("shared-upstream".to_owned()),
+                    None,
+                    NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
+                    None,
+                )
+                .expect("evidence")
+            })
+            .into_iter()
+            .collect();
+        let (assertion_id, workspace_id, record_id, source_id) = base();
+        assert!(IdentityAssertion::try_new(
+            assertion_id,
+            workspace_id,
+            record_id,
+            source_id,
+            &source,
+            claim("imdb.title", Grain::Release, "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Corroborated,
+            duplicate_root_evidence,
+            "source:route",
+            None,
             None,
             None,
             IdentityAssertionStatus::Accepted,

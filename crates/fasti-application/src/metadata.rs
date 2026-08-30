@@ -1862,12 +1862,14 @@ mod tests {
             vec![IdentityAssertionEvidence::try_new(
                 IdentityEvidenceMethod::HumanVerified,
                 "pinned fixture source",
+                Some("fixture-root".to_owned()),
                 Some("fixture-reviewer".to_owned()),
                 NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
                 None,
             )
             .expect("evidence fixture")],
             "test-fixture",
+            Some("fixture-v1".to_owned()),
             None,
             (relation == IdentityAssertionRelation::NotSameAs)
                 .then(|| "These coordinates identify different releases.".to_owned()),

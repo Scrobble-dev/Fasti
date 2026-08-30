@@ -42,8 +42,10 @@ candidate, but it cannot attach an identifier or change a Record.
 
 A crosswalk assertion is directional and immutable. It retains its source
 identifier reference, target coordinate, relation, bounded coverage and episode
-links, evidence class, source provenance, and initial lifecycle state. Later
-acceptance, dispute, rejection, and revocation are append-only lifecycle events.
+links, evidence class, acquisition route, source version, derivation root, and
+initial lifecycle state. Corroboration requires distinct known derivation roots;
+two mirrors of one upstream source count once. Later acceptance, dispute,
+rejection, and revocation are append-only lifecycle events.
 
 Only the effective `accepted` state can enter routing. An `exact` assertion can
 support compatible read and export routes. A `subset_of` assertion can support a
