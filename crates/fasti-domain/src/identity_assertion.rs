@@ -236,6 +236,11 @@ impl IdentityEpisodeLink {
         kind: IdentityEpisodeLinkKind,
         reason: Option<String>,
     ) -> Result<Self, IdentityAssertionError> {
+        if from.len() > MAX_IDENTITY_EPISODES_PER_LINK_SIDE
+            || to.len() > MAX_IDENTITY_EPISODES_PER_LINK_SIDE
+        {
+            return Err(IdentityAssertionError::InvalidEpisodeLinks);
+        }
         from.sort_unstable();
         from.dedup();
         to.sort_unstable();
@@ -252,8 +257,6 @@ impl IdentityEpisodeLink {
         if from.is_empty()
             || from.contains(&0)
             || to.contains(&0)
-            || from.len() > MAX_IDENTITY_EPISODES_PER_LINK_SIDE
-            || to.len() > MAX_IDENTITY_EPISODES_PER_LINK_SIDE
             || !reason_is_valid
             || !shape_is_valid
         {
@@ -409,6 +412,17 @@ impl IdentityAssertion {
                 | IdentityAssertionRelation::SupersetOf
                 | IdentityAssertionRelation::Overlaps
         );
+        if coverage.len() > MAX_IDENTITY_COVERAGE_SEGMENTS
+            || (relation_needs_coverage && coverage.is_empty())
+        {
+            return Err(IdentityAssertionError::InvalidCoverage);
+        }
+        if episode_links.len() > MAX_IDENTITY_EPISODE_LINKS {
+            return Err(IdentityAssertionError::InvalidEpisodeLinks);
+        }
+        if evidence.is_empty() || evidence.len() > MAX_IDENTITY_ASSERTION_EVIDENCE {
+            return Err(IdentityAssertionError::InvalidEvidence);
+        }
         let evidence_is_unique = evidence
             .iter()
             .map(|item| (item.method(), item.observed_source()))
@@ -431,18 +445,7 @@ impl IdentityAssertion {
         if source == &target {
             return Err(IdentityAssertionError::SameCoordinate);
         }
-        if coverage.len() > MAX_IDENTITY_COVERAGE_SEGMENTS
-            || (relation_needs_coverage && coverage.is_empty())
-        {
-            return Err(IdentityAssertionError::InvalidCoverage);
-        }
-        if episode_links.len() > MAX_IDENTITY_EPISODE_LINKS {
-            return Err(IdentityAssertionError::InvalidEpisodeLinks);
-        }
-        if evidence.is_empty()
-            || evidence.len() > MAX_IDENTITY_ASSERTION_EVIDENCE
-            || !evidence_is_unique
-        {
+        if !evidence_is_unique {
             return Err(IdentityAssertionError::InvalidEvidence);
         }
         if !valid_provenance_text(&id_source, MAX_IDENTITY_SOURCE_BYTES)
@@ -563,14 +566,51 @@ impl IdentityAssertion {
     pub const fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
+
+    /// Derive the effective state from this assertion's complete lifecycle.
+    ///
+    /// The caller owns loading every event for this assertion in sequence order.
+    /// A mismatched, incomplete, reordered, or invalid chain fails closed.
+    pub fn effective_status(
+        &self,
+        lifecycle_events: &[IdentityAssertionLifecycleEvent],
+    ) -> Result<IdentityAssertionStatus, IdentityAssertionLifecycleError> {
+        let mut status = self.initial_status;
+        let mut expected_sequence = 1_u32;
+        let mut prior_time = self.created_at;
+        for event in lifecycle_events {
+            if event.assertion_id() != self.assertion_id {
+                return Err(IdentityAssertionLifecycleError::AssertionMismatch);
+            }
+            if event.sequence() != expected_sequence {
+                return Err(IdentityAssertionLifecycleError::InvalidSequence);
+            }
+            if event.previous_status() != status || !status.can_transition_to(event.status()) {
+                return Err(IdentityAssertionLifecycleError::InvalidTransition);
+            }
+            if event.occurred_at() < prior_time {
+                return Err(IdentityAssertionLifecycleError::InvalidTime);
+            }
+            status = event.status();
+            prior_time = event.occurred_at();
+            expected_sequence = expected_sequence
+                .checked_add(1)
+                .ok_or(IdentityAssertionLifecycleError::InvalidSequence)?;
+        }
+        Ok(status)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum IdentityAssertionLifecycleError {
-    #[error("identity assertion lifecycle sequence must start at one")]
+    #[error("identity assertion lifecycle event references another assertion")]
+    AssertionMismatch,
+    #[error("identity assertion lifecycle sequence is incomplete or out of order")]
     InvalidSequence,
     #[error("identity assertion lifecycle transition is not permitted")]
     InvalidTransition,
+    #[error("identity assertion lifecycle event predates its assertion or prior event")]
+    InvalidTime,
     #[error("identity assertion rejection, dispute, or revocation requires evidence")]
     MissingEvidence,
 }
@@ -858,6 +898,145 @@ mod tests {
             ClientId::new_v7(),
             at(),
             None,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn effective_status_validates_the_complete_lifecycle_chain() {
+        let source = claim("mal.anime", Grain::Release, "49894");
+        let assertion = IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            ExternalIdentifierId::new_v7(),
+            &source,
+            claim("imdb.title", Grain::Release, "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![evidence(IdentityEvidenceMethod::HumanVerified)],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+            at(),
+        )
+        .expect("candidate assertion");
+        let accepted = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            at(),
+            None,
+        )
+        .expect("acceptance event");
+        assert_eq!(
+            assertion.effective_status(std::slice::from_ref(&accepted)),
+            Ok(IdentityAssertionStatus::Accepted)
+        );
+
+        let wrong_assertion = IdentityAssertionLifecycleEvent::try_new(
+            IdentityAssertionId::new_v7(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            at(),
+            None,
+        )
+        .expect("foreign event");
+        assert_eq!(
+            assertion.effective_status(&[wrong_assertion]),
+            Err(IdentityAssertionLifecycleError::AssertionMismatch)
+        );
+
+        let skipped = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            2,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            at(),
+            None,
+        )
+        .expect("individually valid skipped event");
+        assert_eq!(
+            assertion.effective_status(&[skipped]),
+            Err(IdentityAssertionLifecycleError::InvalidSequence)
+        );
+
+        let wrong_previous = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            2,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Rejected,
+            ClientId::new_v7(),
+            at(),
+            Some(Sha256Digest::from_bytes(&[1; 32])),
+        )
+        .expect("individually valid mismatched transition");
+        assert_eq!(
+            assertion.effective_status(&[accepted, wrong_previous]),
+            Err(IdentityAssertionLifecycleError::InvalidTransition)
+        );
+
+        let predating = IdentityAssertionLifecycleEvent::try_new(
+            assertion.assertion_id(),
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_799_999_999, 0)
+                    .single()
+                    .expect("earlier time"),
+            ),
+            None,
+        )
+        .expect("individually valid predating event");
+        assert_eq!(
+            assertion.effective_status(&[predating]),
+            Err(IdentityAssertionLifecycleError::InvalidTime)
+        );
+    }
+
+    #[test]
+    fn collection_bounds_fail_before_normalization() {
+        assert!(IdentityEpisodeLink::try_new(
+            vec![1; MAX_IDENTITY_EPISODES_PER_LINK_SIDE + 1],
+            vec![1],
+            IdentityEpisodeLinkKind::Merges,
+            None,
+        )
+        .is_err());
+
+        let source = claim("mal.anime", Grain::Release, "49894");
+        assert!(IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            ExternalIdentifierId::new_v7(),
+            &source,
+            claim("imdb.title", Grain::Release, "tt28254942"),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![
+                evidence(IdentityEvidenceMethod::HumanVerified);
+                MAX_IDENTITY_ASSERTION_EVIDENCE + 1
+            ],
+            "source:route",
+            None,
+            None,
+            None,
+            IdentityAssertionStatus::Candidate,
+            at(),
         )
         .is_err());
     }
