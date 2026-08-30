@@ -1,0 +1,754 @@
+use crate::{
+    ClientId, EvidenceId, ExternalIdentifierClaim, ExternalIdentifierId, IdentityAssertionId,
+    ReceivedAt, RecordId, Sha256Digest, WorkspaceId,
+};
+use chrono::{DateTime, NaiveDate, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use thiserror::Error;
+
+pub const MAX_IDENTITY_ASSERTION_EVIDENCE: usize = 16;
+pub const MAX_IDENTITY_COVERAGE_SEGMENTS: usize = 64;
+pub const MAX_IDENTITY_EPISODE_LINKS: usize = 64;
+pub const MAX_IDENTITY_EPISODES_PER_LINK_SIDE: usize = 16;
+
+const MAX_PROVENANCE_TEXT_BYTES: usize = 2_048;
+const MAX_IDENTITY_SOURCE_BYTES: usize = 256;
+const MAX_IDENTITY_REASONING_BYTES: usize = 4_096;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityAssertionRelation {
+    Exact,
+    SubsetOf,
+    SupersetOf,
+    Overlaps,
+    AlternateCutOf,
+    Related,
+    NotSameAs,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityAssertionEvidenceClass {
+    Asserted,
+    Verified,
+    Corroborated,
+    Inferred,
+    Candidate,
+    Disputed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityAssertionStatus {
+    Candidate,
+    Accepted,
+    Disputed,
+    Rejected,
+    Revoked,
+}
+
+impl IdentityAssertionStatus {
+    pub const fn can_transition_to(self, next: Self) -> bool {
+        matches!(
+            (self, next),
+            (
+                Self::Candidate,
+                Self::Accepted | Self::Disputed | Self::Rejected
+            ) | (Self::Accepted, Self::Disputed | Self::Revoked)
+                | (
+                    Self::Disputed,
+                    Self::Accepted | Self::Rejected | Self::Revoked
+                )
+        )
+    }
+
+    pub const fn can_route(self) -> bool {
+        matches!(self, Self::Accepted)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityCoverageMode {
+    Single,
+    Flat,
+    Season,
+    Absolute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityNumberingSpace {
+    Regular,
+    Special,
+    Trailer,
+    Credit,
+    Parody,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityOrdering {
+    Broadcast,
+    Chronological,
+    Intended,
+    Provider,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum IdentityAssertionError {
+    #[error("identity assertion source and target must be different coordinates")]
+    SameCoordinate,
+    #[error("identity assertion coverage is missing, unbounded, or invalid")]
+    InvalidCoverage,
+    #[error("identity assertion episode links are unbounded or invalid")]
+    InvalidEpisodeLinks,
+    #[error("identity assertion evidence is missing, unbounded, or invalid")]
+    InvalidEvidence,
+    #[error("identity assertion provenance is missing or unbounded")]
+    InvalidProvenance,
+    #[error("identity assertion relation requires explicit reasoning")]
+    MissingReasoning,
+    #[error("identity assertion evidence class does not support its status")]
+    InvalidStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdentityCoverageSegment {
+    mode: IdentityCoverageMode,
+    season: Option<u32>,
+    numbering_space: IdentityNumberingSpace,
+    ordering: IdentityOrdering,
+    source_start: u32,
+    source_end: u32,
+    offset: i32,
+    region: Option<String>,
+}
+
+impl IdentityCoverageSegment {
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        mode: IdentityCoverageMode,
+        season: Option<u32>,
+        numbering_space: IdentityNumberingSpace,
+        ordering: IdentityOrdering,
+        source_start: u32,
+        source_end: u32,
+        offset: i32,
+        region: Option<String>,
+    ) -> Result<Self, IdentityAssertionError> {
+        let target_start = i64::from(source_start) + i64::from(offset);
+        let target_end = i64::from(source_end) + i64::from(offset);
+        let region_is_valid = region.as_deref().is_none_or(|value| {
+            value == "*"
+                || (value.len() == 2 && value.bytes().all(|byte| byte.is_ascii_uppercase()))
+        });
+        if source_start == 0
+            || source_start > source_end
+            || target_start < 1
+            || target_end < target_start
+            || matches!(mode, IdentityCoverageMode::Season) != season.is_some()
+            || !region_is_valid
+        {
+            return Err(IdentityAssertionError::InvalidCoverage);
+        }
+        Ok(Self {
+            mode,
+            season,
+            numbering_space,
+            ordering,
+            source_start,
+            source_end,
+            offset,
+            region,
+        })
+    }
+
+    pub const fn mode(&self) -> IdentityCoverageMode {
+        self.mode
+    }
+
+    pub const fn season(&self) -> Option<u32> {
+        self.season
+    }
+
+    pub const fn numbering_space(&self) -> IdentityNumberingSpace {
+        self.numbering_space
+    }
+
+    pub const fn ordering(&self) -> IdentityOrdering {
+        self.ordering
+    }
+
+    pub const fn source_start(&self) -> u32 {
+        self.source_start
+    }
+
+    pub const fn source_end(&self) -> u32 {
+        self.source_end
+    }
+
+    pub const fn offset(&self) -> i32 {
+        self.offset
+    }
+
+    pub fn region(&self) -> Option<&str> {
+        self.region.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityEpisodeLinkKind {
+    Exact,
+    Expands,
+    Merges,
+    Absent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdentityEpisodeLink {
+    from: Vec<u32>,
+    to: Vec<u32>,
+    kind: IdentityEpisodeLinkKind,
+    reason: Option<String>,
+}
+
+impl IdentityEpisodeLink {
+    pub fn try_new(
+        mut from: Vec<u32>,
+        mut to: Vec<u32>,
+        kind: IdentityEpisodeLinkKind,
+        reason: Option<String>,
+    ) -> Result<Self, IdentityAssertionError> {
+        from.sort_unstable();
+        from.dedup();
+        to.sort_unstable();
+        to.dedup();
+        let reason_is_valid = reason
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_PROVENANCE_TEXT_BYTES));
+        let shape_is_valid = match kind {
+            IdentityEpisodeLinkKind::Exact => from.len() == 1 && to.len() == 1,
+            IdentityEpisodeLinkKind::Expands => from.len() == 1 && to.len() >= 2,
+            IdentityEpisodeLinkKind::Merges => from.len() >= 2 && to.len() == 1,
+            IdentityEpisodeLinkKind::Absent => to.is_empty() && reason.is_some(),
+        };
+        if from.is_empty()
+            || from.contains(&0)
+            || to.contains(&0)
+            || from.len() > MAX_IDENTITY_EPISODES_PER_LINK_SIDE
+            || to.len() > MAX_IDENTITY_EPISODES_PER_LINK_SIDE
+            || !reason_is_valid
+            || !shape_is_valid
+        {
+            return Err(IdentityAssertionError::InvalidEpisodeLinks);
+        }
+        Ok(Self {
+            from,
+            to,
+            kind,
+            reason,
+        })
+    }
+
+    pub fn from(&self) -> &[u32] {
+        &self.from
+    }
+
+    pub fn to(&self) -> &[u32] {
+        &self.to
+    }
+
+    pub const fn kind(&self) -> IdentityEpisodeLinkKind {
+        self.kind
+    }
+
+    pub fn reason(&self) -> Option<&str> {
+        self.reason.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityEvidenceMethod {
+    RightsholderAsserted,
+    HumanVerified,
+    UpstreamDeclared,
+    DerivedAirDates,
+    HeuristicTitleMatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdentityAssertionEvidence {
+    method: IdentityEvidenceMethod,
+    observed_source: String,
+    reviewer: Option<String>,
+    observed_at: NaiveDate,
+    evidence_id: Option<EvidenceId>,
+}
+
+impl IdentityAssertionEvidence {
+    pub fn try_new(
+        method: IdentityEvidenceMethod,
+        observed_source: impl Into<String>,
+        reviewer: Option<String>,
+        observed_at: NaiveDate,
+        evidence_id: Option<EvidenceId>,
+    ) -> Result<Self, IdentityAssertionError> {
+        let observed_source = observed_source.into();
+        let reviewer_is_valid = reviewer
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
+        if !valid_text(&observed_source, MAX_PROVENANCE_TEXT_BYTES) || !reviewer_is_valid {
+            return Err(IdentityAssertionError::InvalidEvidence);
+        }
+        Ok(Self {
+            method,
+            observed_source,
+            reviewer,
+            observed_at,
+            evidence_id,
+        })
+    }
+
+    pub const fn method(&self) -> IdentityEvidenceMethod {
+        self.method
+    }
+
+    pub fn observed_source(&self) -> &str {
+        &self.observed_source
+    }
+
+    pub fn reviewer(&self) -> Option<&str> {
+        self.reviewer.as_deref()
+    }
+
+    pub const fn observed_at(&self) -> NaiveDate {
+        self.observed_at
+    }
+
+    pub const fn evidence_id(&self) -> Option<EvidenceId> {
+        self.evidence_id
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdentityAssertion {
+    assertion_id: IdentityAssertionId,
+    workspace_id: WorkspaceId,
+    record_id: RecordId,
+    source_external_identifier_id: ExternalIdentifierId,
+    target: ExternalIdentifierClaim,
+    relation: IdentityAssertionRelation,
+    coverage: Vec<IdentityCoverageSegment>,
+    episode_links: Vec<IdentityEpisodeLink>,
+    evidence_class: IdentityAssertionEvidenceClass,
+    evidence: Vec<IdentityAssertionEvidence>,
+    id_source: String,
+    authority: Option<String>,
+    reasoning: Option<String>,
+    initial_status: IdentityAssertionStatus,
+    created_at: DateTime<Utc>,
+}
+
+impl IdentityAssertion {
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new(
+        assertion_id: IdentityAssertionId,
+        workspace_id: WorkspaceId,
+        record_id: RecordId,
+        source_external_identifier_id: ExternalIdentifierId,
+        source: &ExternalIdentifierClaim,
+        target: ExternalIdentifierClaim,
+        relation: IdentityAssertionRelation,
+        coverage: Vec<IdentityCoverageSegment>,
+        episode_links: Vec<IdentityEpisodeLink>,
+        evidence_class: IdentityAssertionEvidenceClass,
+        evidence: Vec<IdentityAssertionEvidence>,
+        id_source: impl Into<String>,
+        authority: Option<String>,
+        reasoning: Option<String>,
+        initial_status: IdentityAssertionStatus,
+        created_at: ReceivedAt,
+    ) -> Result<Self, IdentityAssertionError> {
+        let id_source = id_source.into();
+        let relation_needs_coverage = matches!(
+            relation,
+            IdentityAssertionRelation::SubsetOf
+                | IdentityAssertionRelation::SupersetOf
+                | IdentityAssertionRelation::Overlaps
+        );
+        let evidence_is_unique = evidence
+            .iter()
+            .map(|item| (item.method(), item.observed_source()))
+            .collect::<HashSet<_>>()
+            .len()
+            == evidence.len();
+        let authority_is_valid = authority
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
+        let reasoning_is_valid = reasoning
+            .as_deref()
+            .is_none_or(|value| valid_text(value, MAX_IDENTITY_REASONING_BYTES));
+        if source == &target {
+            return Err(IdentityAssertionError::SameCoordinate);
+        }
+        if coverage.len() > MAX_IDENTITY_COVERAGE_SEGMENTS
+            || (relation_needs_coverage && coverage.is_empty())
+        {
+            return Err(IdentityAssertionError::InvalidCoverage);
+        }
+        if episode_links.len() > MAX_IDENTITY_EPISODE_LINKS {
+            return Err(IdentityAssertionError::InvalidEpisodeLinks);
+        }
+        if evidence.is_empty()
+            || evidence.len() > MAX_IDENTITY_ASSERTION_EVIDENCE
+            || !evidence_is_unique
+        {
+            return Err(IdentityAssertionError::InvalidEvidence);
+        }
+        if !valid_text(&id_source, MAX_IDENTITY_SOURCE_BYTES) || !authority_is_valid {
+            return Err(IdentityAssertionError::InvalidProvenance);
+        }
+        if !reasoning_is_valid
+            || (matches!(relation, IdentityAssertionRelation::NotSameAs)
+                && reasoning.as_deref().is_none_or(|value| value.len() < 20))
+        {
+            return Err(IdentityAssertionError::MissingReasoning);
+        }
+        if (matches!(evidence_class, IdentityAssertionEvidenceClass::Asserted)
+            && (authority.is_none()
+                || !evidence
+                    .iter()
+                    .any(|item| item.method() == IdentityEvidenceMethod::RightsholderAsserted)))
+            || (matches!(evidence_class, IdentityAssertionEvidenceClass::Verified)
+                && !evidence.iter().any(|item| {
+                    item.method() == IdentityEvidenceMethod::HumanVerified
+                        && item.reviewer().is_some()
+                }))
+            || (matches!(evidence_class, IdentityAssertionEvidenceClass::Corroborated)
+                && evidence.len() < 2)
+            || (initial_status.can_route()
+                && matches!(
+                    evidence_class,
+                    IdentityAssertionEvidenceClass::Candidate
+                        | IdentityAssertionEvidenceClass::Disputed
+                ))
+        {
+            return Err(IdentityAssertionError::InvalidStatus);
+        }
+        Ok(Self {
+            assertion_id,
+            workspace_id,
+            record_id,
+            source_external_identifier_id,
+            target,
+            relation,
+            coverage,
+            episode_links,
+            evidence_class,
+            evidence,
+            id_source,
+            authority,
+            reasoning,
+            initial_status,
+            created_at: created_at.value(),
+        })
+    }
+
+    pub const fn assertion_id(&self) -> IdentityAssertionId {
+        self.assertion_id
+    }
+
+    pub const fn workspace_id(&self) -> WorkspaceId {
+        self.workspace_id
+    }
+
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
+    pub const fn source_external_identifier_id(&self) -> ExternalIdentifierId {
+        self.source_external_identifier_id
+    }
+
+    pub const fn target(&self) -> &ExternalIdentifierClaim {
+        &self.target
+    }
+
+    pub const fn relation(&self) -> IdentityAssertionRelation {
+        self.relation
+    }
+
+    pub fn coverage(&self) -> &[IdentityCoverageSegment] {
+        &self.coverage
+    }
+
+    pub fn episode_links(&self) -> &[IdentityEpisodeLink] {
+        &self.episode_links
+    }
+
+    pub const fn evidence_class(&self) -> IdentityAssertionEvidenceClass {
+        self.evidence_class
+    }
+
+    pub fn evidence(&self) -> &[IdentityAssertionEvidence] {
+        &self.evidence
+    }
+
+    pub fn id_source(&self) -> &str {
+        &self.id_source
+    }
+
+    pub fn authority(&self) -> Option<&str> {
+        self.authority.as_deref()
+    }
+
+    pub fn reasoning(&self) -> Option<&str> {
+        self.reasoning.as_deref()
+    }
+
+    pub const fn initial_status(&self) -> IdentityAssertionStatus {
+        self.initial_status
+    }
+
+    pub const fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum IdentityAssertionLifecycleError {
+    #[error("identity assertion lifecycle sequence must start at one")]
+    InvalidSequence,
+    #[error("identity assertion lifecycle transition is not permitted")]
+    InvalidTransition,
+    #[error("identity assertion rejection, dispute, or revocation requires evidence")]
+    MissingEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdentityAssertionLifecycleEvent {
+    assertion_id: IdentityAssertionId,
+    sequence: u32,
+    previous_status: IdentityAssertionStatus,
+    status: IdentityAssertionStatus,
+    reviewer_client_id: ClientId,
+    occurred_at: DateTime<Utc>,
+    evidence_digest: Option<Sha256Digest>,
+}
+
+impl IdentityAssertionLifecycleEvent {
+    pub fn try_new(
+        assertion_id: IdentityAssertionId,
+        sequence: u32,
+        previous_status: IdentityAssertionStatus,
+        status: IdentityAssertionStatus,
+        reviewer_client_id: ClientId,
+        occurred_at: ReceivedAt,
+        evidence_digest: Option<Sha256Digest>,
+    ) -> Result<Self, IdentityAssertionLifecycleError> {
+        if sequence == 0 {
+            return Err(IdentityAssertionLifecycleError::InvalidSequence);
+        }
+        if !previous_status.can_transition_to(status) {
+            return Err(IdentityAssertionLifecycleError::InvalidTransition);
+        }
+        if matches!(
+            status,
+            IdentityAssertionStatus::Disputed
+                | IdentityAssertionStatus::Rejected
+                | IdentityAssertionStatus::Revoked
+        ) && evidence_digest.is_none()
+        {
+            return Err(IdentityAssertionLifecycleError::MissingEvidence);
+        }
+        Ok(Self {
+            assertion_id,
+            sequence,
+            previous_status,
+            status,
+            reviewer_client_id,
+            occurred_at: occurred_at.value(),
+            evidence_digest,
+        })
+    }
+
+    pub const fn assertion_id(&self) -> IdentityAssertionId {
+        self.assertion_id
+    }
+
+    pub const fn sequence(&self) -> u32 {
+        self.sequence
+    }
+
+    pub const fn previous_status(&self) -> IdentityAssertionStatus {
+        self.previous_status
+    }
+
+    pub const fn status(&self) -> IdentityAssertionStatus {
+        self.status
+    }
+
+    pub const fn reviewer_client_id(&self) -> ClientId {
+        self.reviewer_client_id
+    }
+
+    pub const fn occurred_at(&self) -> DateTime<Utc> {
+        self.occurred_at
+    }
+
+    pub const fn evidence_digest(&self) -> Option<&Sha256Digest> {
+        self.evidence_digest.as_ref()
+    }
+}
+
+fn valid_text(value: &str, max_bytes: usize) -> bool {
+    !value.trim().is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Grain;
+    use chrono::TimeZone;
+
+    fn at() -> ReceivedAt {
+        ReceivedAt::from_application_clock(
+            Utc.timestamp_opt(1_800_000_000, 0).single().expect("time"),
+        )
+    }
+
+    fn claim(namespace: &str, grain: Grain, value: &str) -> ExternalIdentifierClaim {
+        ExternalIdentifierClaim::try_new(namespace, grain, value).expect("identifier")
+    }
+
+    fn evidence(method: IdentityEvidenceMethod) -> IdentityAssertionEvidence {
+        IdentityAssertionEvidence::try_new(
+            method,
+            "pinned source record",
+            (method == IdentityEvidenceMethod::HumanVerified).then(|| "gh:reviewer".to_owned()),
+            NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
+            None,
+        )
+        .expect("evidence")
+    }
+
+    #[test]
+    fn exact_verified_assertion_retains_direction_and_provenance() {
+        let source = claim("mal.anime", Grain::Release, "49894");
+        let target = claim("imdb.title", Grain::Release, "tt28254942");
+        let assertion = IdentityAssertion::try_new(
+            IdentityAssertionId::new_v7(),
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            ExternalIdentifierId::new_v7(),
+            &source,
+            target.clone(),
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![evidence(IdentityEvidenceMethod::HumanVerified)],
+            "anime-crosswalk-mappings:release",
+            None,
+            None,
+            IdentityAssertionStatus::Accepted,
+            at(),
+        )
+        .expect("accepted assertion");
+
+        assert_eq!(assertion.target(), &target);
+        assert_eq!(assertion.relation(), IdentityAssertionRelation::Exact);
+        assert_eq!(
+            assertion.initial_status(),
+            IdentityAssertionStatus::Accepted
+        );
+        assert_eq!(assertion.evidence().len(), 1);
+    }
+
+    #[test]
+    fn unsafe_assertion_shapes_fail_closed() {
+        let source = claim("mal.anime", Grain::Release, "49894");
+        let target = claim("tmdb.tv", Grain::Series, "1399");
+        let base = || {
+            (
+                IdentityAssertionId::new_v7(),
+                WorkspaceId::new_v7(),
+                RecordId::new_v7(),
+                ExternalIdentifierId::new_v7(),
+            )
+        };
+
+        let (assertion_id, workspace_id, record_id, source_id) = base();
+        assert!(IdentityAssertion::try_new(
+            assertion_id,
+            workspace_id,
+            record_id,
+            source_id,
+            &source,
+            target.clone(),
+            IdentityAssertionRelation::SubsetOf,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![evidence(IdentityEvidenceMethod::HumanVerified)],
+            "source:route",
+            None,
+            None,
+            IdentityAssertionStatus::Accepted,
+            at(),
+        )
+        .is_err());
+
+        let (assertion_id, workspace_id, record_id, source_id) = base();
+        assert!(IdentityAssertion::try_new(
+            assertion_id,
+            workspace_id,
+            record_id,
+            source_id,
+            &source,
+            target,
+            IdentityAssertionRelation::Exact,
+            Vec::new(),
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Candidate,
+            vec![evidence(IdentityEvidenceMethod::HeuristicTitleMatch)],
+            "source:route",
+            None,
+            None,
+            IdentityAssertionStatus::Accepted,
+            at(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn lifecycle_is_append_only_and_negative_transitions_need_evidence() {
+        let assertion_id = IdentityAssertionId::new_v7();
+        assert!(IdentityAssertionLifecycleEvent::try_new(
+            assertion_id,
+            1,
+            IdentityAssertionStatus::Candidate,
+            IdentityAssertionStatus::Accepted,
+            ClientId::new_v7(),
+            at(),
+            None,
+        )
+        .is_ok());
+        assert!(IdentityAssertionLifecycleEvent::try_new(
+            assertion_id,
+            2,
+            IdentityAssertionStatus::Accepted,
+            IdentityAssertionStatus::Revoked,
+            ClientId::new_v7(),
+            at(),
+            None,
+        )
+        .is_err());
+    }
+}

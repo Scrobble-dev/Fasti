@@ -38,6 +38,19 @@ TMDB metadata lookup and enrichment use this order:
 Title and year similarity is not an identity route. It can produce a review
 candidate, but it cannot attach an identifier or change a Record.
 
+## Crosswalk assertions
+
+A crosswalk assertion is directional and immutable. It retains its source
+identifier reference, target coordinate, relation, bounded coverage and episode
+links, evidence class, source provenance, and initial lifecycle state. Later
+acceptance, dispute, rejection, and revocation are append-only lifecycle events.
+
+Only the effective `accepted` state can enter routing. An `exact` assertion can
+support compatible read and export routes. A `subset_of` assertion can support a
+Nuvio TV-work grouping projection when it carries explicit coverage; it is not a
+general alias. `superset_of`, `overlaps`, `alternate_cut_of`, `related`, and
+`not_same_as` remain review evidence and never become outbound routes.
+
 Known provider identifiers must also match the provider's bounded wire format.
 Malformed evidence stays visible for review but cannot become an outbound
 route.

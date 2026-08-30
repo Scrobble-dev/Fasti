@@ -8,7 +8,8 @@ use crate::{ApplicationResult, RequestAccessContext};
 use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
-    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertionId, IdentityRouteEvidenceKind,
+    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertion, IdentityAssertionId,
+    IdentityAssertionRelation, IdentityAssertionStatus, IdentityRouteEvidenceKind,
     IdentityRouteKind, MetadataAttribution, MetadataCacheEntry, MetadataCacheReadState,
     MetadataFieldGroup, MetadataLocale, MetadataProjection, MetadataProjectionPolicy,
     MetadataProviderId, MetadataRegion, NamespaceDefinition, NamespaceDefinitionError,
@@ -152,14 +153,30 @@ pub fn provider_identity_mapping_for_grain(
 pub struct PurposeIdentityRoute {
     identifier: ExternalIdentifierClaim,
     kind: IdentityRouteKind,
-    accepted_assertion_ids: Vec<IdentityAssertionId>,
+    accepted_assertions: Vec<AcceptedIdentityRouteAssertion>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcceptedIdentityRouteAssertion {
+    assertion_id: IdentityAssertionId,
+    relation: IdentityAssertionRelation,
+}
+
+impl AcceptedIdentityRouteAssertion {
+    pub const fn assertion_id(self) -> IdentityAssertionId {
+        self.assertion_id
+    }
+
+    pub const fn relation(self) -> IdentityAssertionRelation {
+        self.relation
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentityRouteEvidence {
     identifier: ExternalIdentifierClaim,
     kind: IdentityRouteEvidenceKind,
-    accepted_assertion_id: Option<IdentityAssertionId>,
+    accepted_assertion: Option<AcceptedIdentityRouteAssertion>,
 }
 
 impl IdentityRouteEvidence {
@@ -167,19 +184,22 @@ impl IdentityRouteEvidence {
         Self {
             identifier,
             kind: IdentityRouteEvidenceKind::Direct,
-            accepted_assertion_id: None,
+            accepted_assertion: None,
         }
     }
 
-    pub const fn accepted_crosswalk(
-        identifier: ExternalIdentifierClaim,
-        assertion_id: IdentityAssertionId,
-    ) -> Self {
-        Self {
-            identifier,
+    pub fn accepted_crosswalk(
+        assertion: &IdentityAssertion,
+        effective_status: IdentityAssertionStatus,
+    ) -> Option<Self> {
+        effective_status.can_route().then(|| Self {
+            identifier: assertion.target().clone(),
             kind: IdentityRouteEvidenceKind::AcceptedCrosswalk,
-            accepted_assertion_id: Some(assertion_id),
-        }
+            accepted_assertion: Some(AcceptedIdentityRouteAssertion {
+                assertion_id: assertion.assertion_id(),
+                relation: assertion.relation(),
+            }),
+        })
     }
 
     pub const fn identifier(&self) -> &ExternalIdentifierClaim {
@@ -190,8 +210,8 @@ impl IdentityRouteEvidence {
         self.kind
     }
 
-    pub const fn accepted_assertion_id(&self) -> Option<IdentityAssertionId> {
-        self.accepted_assertion_id
+    pub const fn accepted_assertion(&self) -> Option<AcceptedIdentityRouteAssertion> {
+        self.accepted_assertion
     }
 }
 
@@ -204,8 +224,8 @@ impl PurposeIdentityRoute {
         self.kind
     }
 
-    pub fn accepted_assertion_ids(&self) -> &[IdentityAssertionId] {
-        &self.accepted_assertion_ids
+    pub fn accepted_assertions(&self) -> &[AcceptedIdentityRouteAssertion] {
+        &self.accepted_assertions
     }
 }
 
@@ -322,6 +342,20 @@ fn route_priority(
     }
     let namespace = identifier.namespace();
     let grain = identifier.grain();
+    if evidence.kind() == IdentityRouteEvidenceKind::AcceptedCrosswalk {
+        let assertion = evidence.accepted_assertion()?;
+        let exact = assertion.relation() == IdentityAssertionRelation::Exact;
+        let safe_tv_work_subset = assertion.relation() == IdentityAssertionRelation::SubsetOf
+            && groups_by_tv_work(anime_preference)
+            && matches!(
+                (namespace, grain),
+                ("imdb.title" | "tmdb.movie" | "tvdb.movie", Grain::Film)
+                    | ("imdb.title" | "tmdb.tv" | "tvdb.series", Grain::Series)
+            );
+        if !(exact || intent == ResolutionIntent::NuvioExport && safe_tv_work_subset) {
+            return None;
+        }
+    }
     match (intent, target_provider, namespace, grain, evidence.kind()) {
         (
             ResolutionIntent::MetadataLookup
@@ -504,8 +538,8 @@ pub fn plan_purpose_identity_route_with_evidence(
                         PurposeIdentityRoute {
                             identifier: evidence.identifier().clone(),
                             kind,
-                            accepted_assertion_ids: evidence
-                                .accepted_assertion_id()
+                            accepted_assertions: evidence
+                                .accepted_assertion()
                                 .into_iter()
                                 .collect(),
                         },
@@ -551,10 +585,12 @@ pub fn plan_purpose_identity_route_with_evidence(
                 .last_mut()
                 .expect("same coordinate requires a previous candidate");
             previous
-                .accepted_assertion_ids
-                .append(&mut route.accepted_assertion_ids);
-            previous.accepted_assertion_ids.sort_by_key(|id| id.uuid());
-            previous.accepted_assertion_ids.dedup();
+                .accepted_assertions
+                .append(&mut route.accepted_assertions);
+            previous
+                .accepted_assertions
+                .sort_by_key(|assertion| assertion.assertion_id().uuid());
+            previous.accepted_assertions.dedup();
         } else {
             merged_candidates.push((priority, route));
         }
@@ -1695,7 +1731,13 @@ pub trait MetadataProjectionPort: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fasti_domain::{ClientId, CredentialId, ProfileGrantId, ProfileId, WorkspaceId};
+    use chrono::{NaiveDate, TimeZone, Utc};
+    use fasti_domain::{
+        ClientId, CredentialId, ExternalIdentifierId, IdentityAssertionEvidence,
+        IdentityAssertionEvidenceClass, IdentityCoverageMode, IdentityCoverageSegment,
+        IdentityEvidenceMethod, IdentityNumberingSpace, IdentityOrdering, ProfileGrantId,
+        ProfileId, ReceivedAt, WorkspaceId,
+    };
 
     fn access() -> RequestAccessContext {
         RequestAccessContext::new(
@@ -1779,6 +1821,74 @@ mod tests {
         ExternalIdentifierClaim::try_new(namespace, grain, value).expect("identity fixture")
     }
 
+    fn accepted_crosswalk_fixture(
+        target: ExternalIdentifierClaim,
+        relation: IdentityAssertionRelation,
+    ) -> (IdentityRouteEvidence, IdentityAssertionId) {
+        let assertion_id = IdentityAssertionId::new_v7();
+        let coverage = matches!(
+            relation,
+            IdentityAssertionRelation::SubsetOf
+                | IdentityAssertionRelation::SupersetOf
+                | IdentityAssertionRelation::Overlaps
+        )
+        .then(|| {
+            IdentityCoverageSegment::try_new(
+                IdentityCoverageMode::Flat,
+                None,
+                IdentityNumberingSpace::Regular,
+                IdentityOrdering::Provider,
+                1,
+                1,
+                0,
+                Some("*".to_owned()),
+            )
+            .expect("coverage fixture")
+        })
+        .into_iter()
+        .collect();
+        let source = identity_claim_at("source.fixture", Grain::Release, "source");
+        let assertion = IdentityAssertion::try_new(
+            assertion_id,
+            WorkspaceId::new_v7(),
+            RecordId::new_v7(),
+            ExternalIdentifierId::new_v7(),
+            &source,
+            target,
+            relation,
+            coverage,
+            Vec::new(),
+            IdentityAssertionEvidenceClass::Verified,
+            vec![IdentityAssertionEvidence::try_new(
+                IdentityEvidenceMethod::HumanVerified,
+                "pinned fixture source",
+                Some("fixture-reviewer".to_owned()),
+                NaiveDate::from_ymd_opt(2026, 8, 30).expect("date fixture"),
+                None,
+            )
+            .expect("evidence fixture")],
+            "test-fixture",
+            None,
+            (relation == IdentityAssertionRelation::NotSameAs)
+                .then(|| "These coordinates identify different releases.".to_owned()),
+            IdentityAssertionStatus::Accepted,
+            ReceivedAt::from_application_clock(
+                Utc.timestamp_opt(1_800_000_000, 0)
+                    .single()
+                    .expect("time fixture"),
+            ),
+        )
+        .expect("identity assertion fixture");
+        (
+            IdentityRouteEvidence::accepted_crosswalk(
+                &assertion,
+                IdentityAssertionStatus::Accepted,
+            )
+            .expect("accepted crosswalk fixture"),
+            assertion_id,
+        )
+    }
+
     #[test]
     fn tmdb_metadata_uses_the_pinned_nuvio_imdb_alias_without_rekeying() {
         let identifiers = vec![
@@ -1833,10 +1943,9 @@ mod tests {
         ));
         let wikidata =
             IdentityRouteEvidence::direct(identity_claim_at("wikidata", Grain::Series, "Q23572"));
-        let assertion_id = IdentityAssertionId::new_v7();
-        let crosswalk = IdentityRouteEvidence::accepted_crosswalk(
+        let (crosswalk, assertion_id) = accepted_crosswalk_fixture(
             identity_claim_at("tmdb.tv", Grain::Series, "1399"),
-            assertion_id,
+            IdentityAssertionRelation::Exact,
         );
 
         for (evidence, namespace, kind) in [
@@ -1873,8 +1982,12 @@ mod tests {
             let expected_assertions =
                 (kind == IdentityRouteKind::AcceptedCrosswalk).then_some(assertion_id);
             assert_eq!(
-                route.accepted_assertion_ids(),
-                expected_assertions.as_slice()
+                route
+                    .accepted_assertions()
+                    .iter()
+                    .map(|assertion| assertion.assertion_id())
+                    .collect::<Vec<_>>(),
+                expected_assertions.into_iter().collect::<Vec<_>>()
             );
         }
     }
@@ -1907,10 +2020,7 @@ mod tests {
                 ResolutionIntent::MetadataLookup,
                 ProviderId::try_new("tmdb").expect("TMDB provider"),
                 AnimeGroupingPreference::Automatic,
-                &[IdentityRouteEvidence::accepted_crosswalk(
-                    identifier,
-                    IdentityAssertionId::new_v7(),
-                )],
+                &[accepted_crosswalk_fixture(identifier, IdentityAssertionRelation::Exact).0],
             );
 
             assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
@@ -2144,10 +2254,9 @@ mod tests {
 
     #[test]
     fn accepted_crosswalk_can_satisfy_a_nuvio_preference_without_hiding_direct_evidence() {
-        let assertion_id = IdentityAssertionId::new_v7();
-        let accepted_mal = IdentityRouteEvidence::accepted_crosswalk(
+        let (accepted_mal, assertion_id) = accepted_crosswalk_fixture(
             identity_claim("mal.anime", "49894"),
-            assertion_id,
+            IdentityAssertionRelation::Exact,
         );
         let direct_kitsu = IdentityRouteEvidence::direct(identity_claim("kitsu.anime", "7442"));
         let plan = plan_purpose_identity_route_with_evidence(
@@ -2159,7 +2268,12 @@ mod tests {
         let route = plan.selected_route().expect("accepted preferred route");
         assert_eq!(route.identifier().namespace(), "mal.anime");
         assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
-        assert_eq!(route.accepted_assertion_ids(), &[assertion_id]);
+        assert_eq!(route.accepted_assertions().len(), 1);
+        assert_eq!(route.accepted_assertions()[0].assertion_id(), assertion_id);
+        assert_eq!(
+            route.accepted_assertions()[0].relation(),
+            IdentityAssertionRelation::Exact
+        );
 
         let direct_mal = IdentityRouteEvidence::direct(identity_claim("mal.anime", "49894"));
         let direct_plan = plan_purpose_identity_route_with_evidence(
@@ -2178,18 +2292,73 @@ mod tests {
     }
 
     #[test]
+    fn accepted_crosswalk_relation_is_bound_to_the_resolution_intent() {
+        for relation in [
+            IdentityAssertionRelation::SupersetOf,
+            IdentityAssertionRelation::Overlaps,
+            IdentityAssertionRelation::AlternateCutOf,
+            IdentityAssertionRelation::Related,
+            IdentityAssertionRelation::NotSameAs,
+        ] {
+            let plan = plan_purpose_identity_route_with_evidence(
+                ResolutionIntent::NuvioExport,
+                ProviderId::try_new("nuvio").expect("Nuvio provider"),
+                AnimeGroupingPreference::GroupByTvWork,
+                &[accepted_crosswalk_fixture(
+                    identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+                    relation,
+                )
+                .0],
+            );
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        }
+
+        let subset = accepted_crosswalk_fixture(
+            identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+            IdentityAssertionRelation::SubsetOf,
+        )
+        .0;
+        let grouped = plan_purpose_identity_route_with_evidence(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::GroupByTvWork,
+            std::slice::from_ref(&subset),
+        );
+        assert_eq!(grouped.status(), PurposeIdentityRouteStatus::Selected);
+        assert_eq!(
+            grouped
+                .selected_route()
+                .expect("TV work subset")
+                .accepted_assertions()[0]
+                .relation(),
+            IdentityAssertionRelation::SubsetOf
+        );
+
+        let release_preference = plan_purpose_identity_route_with_evidence(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[subset],
+        );
+        assert_eq!(
+            release_preference.status(),
+            PurposeIdentityRouteStatus::Missing
+        );
+    }
+
+    #[test]
     fn anime_grouping_preview_retains_accepted_crosswalk_provenance() {
-        let assertion_id = IdentityAssertionId::new_v7();
+        let (accepted_mal, assertion_id) = accepted_crosswalk_fixture(
+            identity_claim("mal.anime", "49894"),
+            IdentityAssertionRelation::Exact,
+        );
         let preview = preview_anime_grouping_change_for_record_with_evidence(
             RecordId::new_v7(),
             AnimeGroupingPreference::GroupByTvWork,
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             &[
                 IdentityRouteEvidence::direct(identity_claim("imdb.title", "tt28254942")),
-                IdentityRouteEvidence::accepted_crosswalk(
-                    identity_claim("mal.anime", "49894"),
-                    assertion_id,
-                ),
+                accepted_mal,
             ],
         );
 
@@ -2197,24 +2366,24 @@ mod tests {
             preview
                 .proposed_route()
                 .expect("accepted MAL projection")
-                .accepted_assertion_ids(),
-            &[assertion_id]
+                .accepted_assertions()[0]
+                .assertion_id(),
+            assertion_id
         );
     }
 
     #[test]
     fn corroborating_assertions_for_one_coordinate_are_not_ambiguous() {
-        let first = IdentityAssertionId::new_v7();
-        let second = IdentityAssertionId::new_v7();
         let identifier = identity_claim("mal.anime", "49894");
+        let (first_evidence, first) =
+            accepted_crosswalk_fixture(identifier.clone(), IdentityAssertionRelation::Exact);
+        let (second_evidence, second) =
+            accepted_crosswalk_fixture(identifier, IdentityAssertionRelation::Exact);
         let plan = plan_purpose_identity_route_with_evidence(
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
-            &[
-                IdentityRouteEvidence::accepted_crosswalk(identifier.clone(), second),
-                IdentityRouteEvidence::accepted_crosswalk(identifier, first),
-            ],
+            &[second_evidence, first_evidence],
         );
 
         assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
@@ -2223,7 +2392,10 @@ mod tests {
         assert_eq!(
             plan.selected_route()
                 .expect("one corroborated coordinate")
-                .accepted_assertion_ids(),
+                .accepted_assertions()
+                .iter()
+                .map(|assertion| assertion.assertion_id())
+                .collect::<Vec<_>>(),
             expected
         );
     }
