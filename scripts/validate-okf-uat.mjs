@@ -110,6 +110,7 @@ const ALLOWED_BODIES = new Set([
   "b7",
   "b8",
   "post-b8",
+  "m1",
 ]);
 
 /**
@@ -329,7 +330,8 @@ function isDottedIdentifier(value) {
 }
 
 /**
- * Validates the OKF catalogue against repository structure and finalized B1 registry data.
+ * Validates the OKF catalogue against repository structure and finalized
+ * contract bodies that publish through the shared capability catalogue.
  * @param {object} registry - Capability registry used to verify catalogue identifiers and authorization metadata.
  * @return {Promise<{conceptCount: number}>} The number of validated concept files.
  */
@@ -444,27 +446,30 @@ async function validateOkf(registry) {
     .map((target) => resolve(okfRoot, target));
   assertSameSet(indexTargets, concepts, "OKF root index concept links");
 
-  const finalizedB1 = registry.capabilities.filter(
+  const finalizedCatalog = registry.capabilities.filter(
     ({ contract_body: contractBody, lifecycle }) =>
-      contractBody === "b1" && lifecycle.contract_state === "finalized",
+      ["b1", "m1"].includes(contractBody) &&
+      lifecycle.contract_state === "finalized",
   );
   const catalogueDefinitions = [
     {
       name: "capabilities.md",
       key: "identifiers",
-      values: finalizedB1.map(({ id }) => id),
+      values: finalizedCatalog.map(({ id }) => id),
     },
     {
       name: "problems.md",
       key: "identifiers",
       values: [
-        ...new Set(finalizedB1.flatMap(({ problems }) => problems)),
+        ...new Set(finalizedCatalog.flatMap(({ problems }) => problems)),
       ].sort(),
     },
     {
       name: "scopes.md",
       key: "identifiers",
-      values: [...new Set(finalizedB1.flatMap(({ scopes }) => scopes))].sort(),
+      values: [
+        ...new Set(finalizedCatalog.flatMap(({ scopes }) => scopes)),
+      ].sort(),
     },
     {
       name: "lifecycle.md",
@@ -527,7 +532,7 @@ async function validateOkf(registry) {
     resolve(okfRoot, "capabilities.md"),
   );
   const governedAuthorization = Object.fromEntries(
-    finalizedB1.map(({ id, authorization }) => [id, authorization]),
+    finalizedCatalog.map(({ id, authorization }) => [id, authorization]),
   );
   assertSameSet(
     capabilityCatalogue.frontmatter.authorization_postures,
@@ -537,7 +542,7 @@ async function validateOkf(registry) {
   assert.deepEqual(
     capabilityCatalogue.frontmatter.authorization_assignments,
     governedAuthorization,
-    "capabilities.md authorization assignments must exactly match finalized B1 registry capabilities",
+    "capabilities.md authorization assignments must exactly match finalized catalogue capabilities",
   );
   for (const [id, authorization] of Object.entries(governedAuthorization)) {
     // Scope the posture to the capability's own row. A global substring test

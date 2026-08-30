@@ -2,7 +2,7 @@
   import { FastiProtocolError, connectionEndpoint } from "@fasti/sdk";
   import type {
     NetworkConfiguration,
-    RecordSummary,
+    RecordPage,
     WorkbenchHost,
   } from "@fasti/ui";
   import SetupPanel, {
@@ -208,12 +208,20 @@
         testEndpointConnection: (endpoint) =>
           invoke("test_endpoint_connection", { input: { endpoint } }),
         providerCredentialStatus: () => invoke("provider_credential_status"),
-        saveProviderCredential: (provider, credential) =>
+        saveProviderCredential: (provider, capabilityId, credential) =>
           invoke("save_provider_credential", {
-            input: { provider, credential },
+            input: { provider, capability_id: capabilityId, credential },
           }),
-        deleteProviderCredential: (provider) =>
-          invoke("delete_provider_credential", { input: { provider } }),
+        deleteProviderCredential: (provider, capabilityId) =>
+          invoke("delete_provider_credential", {
+            input: { provider, capability_id: capabilityId },
+          }),
+        testProviderCredential: (provider, capabilityId) =>
+          invoke("test_provider_credential", {
+            input: { provider, capability_id: capabilityId },
+          }),
+        readProviderHealth: (provider) =>
+          invoke("read_provider_health", { input: { provider } }),
         searchProvider: (provider, query) =>
           invoke("search_provider", { input: { provider, query } }),
         trackProviderCandidate: (selection) =>
@@ -231,17 +239,22 @@
           }),
         listReviews: () => invoke("list_reviews"),
         resolveReview: (input) => invoke("resolve_review", { input }),
-        listRecords: async () =>
-          (await invoke<RecordSummary[]>("list_records")).map((record) => {
-            const { poster_asset_path: path, ...summary } = record;
-            return {
-              ...summary,
-              poster: {
-                ...record.poster,
-                value: path ? convertFileSrc(path) : null,
-              },
-            };
-          }),
+        listRecords: async () => {
+          const page = await invoke<RecordPage>("list_records");
+          return {
+            ...page,
+            records: page.records.map((record) => {
+              const { poster_asset_path: path, ...summary } = record;
+              return {
+                ...summary,
+                poster: {
+                  ...record.poster,
+                  value: path ? convertFileSrc(path) : null,
+                },
+              };
+            }),
+          };
+        },
         createRecord: (grain) => invoke("create_record", { grain }),
         attachIdentifier: (input) => invoke("attach_identifier", { input }),
         registerNamespace: (input) => invoke("register_namespace", { input }),

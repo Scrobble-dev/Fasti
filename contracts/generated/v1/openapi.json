@@ -93,6 +93,21 @@
         ],
         "type": "object"
       },
+      "ConfigureProviderCredentialRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "secret": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "type": "object"
+      },
       "CreateRecordRequest": {
         "additionalProperties": false,
         "properties": {
@@ -122,6 +137,20 @@
           "grain"
         ],
         "type": "object"
+      },
+      "CredentialRequirementDto": {
+        "enum": [
+          "none",
+          "optional_api_key",
+          "api_key",
+          "bearer_token",
+          "basic_auth",
+          "oauth2",
+          "user_agent_only",
+          "custom_header",
+          "operator_secret_mount"
+        ],
+        "type": "string"
       },
       "CredentialSchemeDto": {
         "enum": [
@@ -346,6 +375,21 @@
         },
         "required": [
           "integrations"
+        ],
+        "type": "object"
+      },
+      "ListProvidersResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderDescriptorDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
         ],
         "type": "object"
       },
@@ -755,6 +799,235 @@
           "violations"
         ],
         "type": "object"
+      },
+      "ProviderCapabilityDto": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_id": {
+            "type": "string"
+          },
+          "credential_requirement": {
+            "$ref": "#/components/schemas/CredentialRequirementDto"
+          },
+          "credential_source": {
+            "$ref": "#/components/schemas/ProviderCredentialSourceDto"
+          },
+          "credential_state": {
+            "$ref": "#/components/schemas/ProviderCredentialStateDto"
+          },
+          "credential_test": {
+            "$ref": "#/components/schemas/ProviderCheckDto"
+          },
+          "health": {
+            "$ref": "#/components/schemas/ProviderCheckDto"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProviderCapabilityStateDto"
+          },
+          "testable": {
+            "type": "boolean"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "writable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "capability_id",
+          "purpose",
+          "credential_requirement",
+          "credential_state",
+          "credential_source",
+          "state",
+          "version",
+          "writable",
+          "testable",
+          "health",
+          "credential_test"
+        ],
+        "type": "object"
+      },
+      "ProviderCapabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/ProviderCapabilityDto"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "capability"
+        ],
+        "type": "object"
+      },
+      "ProviderCapabilityStateDto": {
+        "enum": [
+          "available",
+          "degraded",
+          "unavailable",
+          "disabled"
+        ],
+        "type": "string"
+      },
+      "ProviderCheckDto": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "safe_problem_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProviderCheckStateDto"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "ProviderCheckStateDto": {
+        "enum": [
+          "never_run",
+          "passed",
+          "failed",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "ProviderCredentialSourceDto": {
+        "enum": [
+          "none",
+          "environment",
+          "credential_store",
+          "operator_secret_mount"
+        ],
+        "type": "string"
+      },
+      "ProviderCredentialStateDto": {
+        "enum": [
+          "not_required",
+          "optional",
+          "missing",
+          "stored_unverified",
+          "valid",
+          "invalid",
+          "expired",
+          "unavailable",
+          "revoked"
+        ],
+        "type": "string"
+      },
+      "ProviderDescriptorDto": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "type": "string"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            },
+            "type": "array"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "documentation_url": {
+            "type": "string"
+          },
+          "identity_namespaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "locale_support": {
+            "type": "boolean"
+          },
+          "network_hosts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "provider_kind": {
+            "$ref": "#/components/schemas/ProviderKindDto"
+          },
+          "region_support": {
+            "type": "boolean"
+          },
+          "supported_media_grains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider_id",
+          "display_name",
+          "provider_kind",
+          "documentation_url",
+          "attribution",
+          "supported_media_grains",
+          "capabilities",
+          "network_hosts",
+          "locale_support",
+          "region_support",
+          "identity_namespaces"
+        ],
+        "type": "object"
+      },
+      "ProviderHealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            },
+            "type": "array"
+          },
+          "provider_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "capabilities"
+        ],
+        "type": "object"
+      },
+      "ProviderKindDto": {
+        "enum": [
+          "metadata",
+          "ratings",
+          "catalog",
+          "tracking",
+          "identity"
+        ],
+        "type": "string"
       },
       "RecordActivityDto": {
         "additionalProperties": false,
@@ -3755,6 +4028,764 @@
         ],
         "x-fasti-required-scopes": [
           "profile_state_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "operationId": "list_providers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListProvidersResponse"
+                }
+              }
+            },
+            "description": "Provider inventory scoped to the authenticated workspace"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "provider.list.forbidden": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "provider.list",
+                      "code": "forbidden",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000031",
+                      "detail": "request is not authorized for this capability",
+                      "next_actions": [
+                        {
+                          "id": "verify_request_authorization",
+                          "label": "Verify the request context and local grant"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "not_retryable",
+                      "safe_state": "no_mutation",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "https://fasti.scrobble.dev/v1/problems/forbidden",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks provider-read scope"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "provider.list",
+        "x-fasti-example-ids": [
+          "provider.list.forbidden"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "provider_read"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/providers/{provider_id}/credentials/{capability_id}": {
+      "delete": {
+        "operationId": "remove_provider_credential",
+        "parameters": [
+          {
+            "description": "Canonical provider ID",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical provider capability ID",
+            "in": "path",
+            "name": "capability_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCapabilityResponse"
+                }
+              }
+            },
+            "description": "Provider credential grant was removed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks provider-credential-management scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "provider.credential.configure.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "provider.credential.configure",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000032",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider path is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider runtime or storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "provider.credential.configure",
+        "x-fasti-example-ids": [
+          "provider.credential.configure.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "provider_credential_invalid",
+          "provider_unavailable",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "provider_credential_manage"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      },
+      "put": {
+        "operationId": "configure_provider_credential",
+        "parameters": [
+          {
+            "description": "Canonical provider ID",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical provider capability ID",
+            "in": "path",
+            "name": "capability_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureProviderCredentialRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCapabilityResponse"
+                }
+              }
+            },
+            "description": "Write-only provider credential was stored"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Malformed JSON"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing, inactive, or rejected by the provider vault"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks provider-credential-management scope"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Content-Type is not application/json"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "provider.credential.configure.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "provider.credential.configure",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000032",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider path or body is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider runtime or storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "provider.credential.configure",
+        "x-fasti-example-ids": [
+          "provider.credential.configure.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "provider_credential_invalid",
+          "provider_unavailable",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "provider_credential_manage"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests": {
+      "post": {
+        "operationId": "test_provider_credential",
+        "parameters": [
+          {
+            "description": "Canonical provider ID",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Canonical provider capability ID",
+            "in": "path",
+            "name": "capability_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderCapabilityResponse"
+                }
+              }
+            },
+            "description": "Provider accepted the stored credential"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing, inactive, expired, or rejected"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks provider-credential-management scope"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "provider.credential.test.provider_credential_missing": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "provider.credential.test",
+                      "code": "provider_credential_missing",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000033",
+                      "detail": "this provider capability requires a stored credential",
+                      "next_actions": [
+                        {
+                          "id": "configure_provider_credential",
+                          "label": "Configure the required provider credential"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "prior_state_retained",
+                      "status": 409,
+                      "title": "Provider credential missing",
+                      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-missing",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider credential is not stored"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider route is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider rate limit was reached"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state failed an integrity check"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider returned an invalid response"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider runtime or storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "provider.credential.test",
+        "x-fasti-example-ids": [
+          "provider.credential.test.provider_credential_missing"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "provider_credential_expired",
+          "provider_credential_invalid",
+          "provider_credential_missing",
+          "provider_rate_limited",
+          "provider_response_invalid",
+          "provider_route_unavailable",
+          "provider_unavailable",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "provider_credential_manage"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/providers/{provider_id}/health": {
+      "get": {
+        "operationId": "read_provider_health",
+        "parameters": [
+          {
+            "description": "Canonical provider ID",
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderHealthResponse"
+                }
+              }
+            },
+            "description": "Live provider health scoped to configured capabilities"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks provider-read scope"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider route is unavailable"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider rate limit was reached"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider state failed an integrity check"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider returned an invalid response"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "provider.health.read.provider_unavailable": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "provider.health.read",
+                      "code": "provider_unavailable",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000034",
+                      "detail": "the provider is unavailable within the bounded request policy",
+                      "next_actions": [
+                        {
+                          "id": "retry_provider",
+                          "label": "Retry after checking provider and network status"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_safe",
+                      "safe_state": "prior_state_retained",
+                      "status": 503,
+                      "title": "Provider unavailable",
+                      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider runtime or storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "provider.health.read",
+        "x-fasti-example-ids": [
+          "provider.health.read.provider_unavailable"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "provider_rate_limited",
+          "provider_response_invalid",
+          "provider_route_unavailable",
+          "provider_unavailable",
+          "storage_unavailable"
+        ],
+        "x-fasti-required-scopes": [
+          "provider_read"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

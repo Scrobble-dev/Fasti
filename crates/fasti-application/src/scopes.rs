@@ -33,6 +33,8 @@ define_scope_keys!(
     (IdentityRead, "identity_read"),
     (ProfileStateRead, "profile_state_read"),
     (ProfileStateWrite, "profile_state_write"),
+    (ProviderRead, "provider_read"),
+    (ProviderCredentialManage, "provider_credential_manage"),
     (ReviewRead, "review_read"),
     (ReviewWrite, "review_write"),
     (CorrectionRead, "correction_read"),

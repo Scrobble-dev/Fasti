@@ -7,7 +7,6 @@ mod artwork;
 mod endpoint;
 mod network_config;
 mod nuvio_collections;
-mod outbound_http;
 mod providers;
 mod records;
 mod reviews;
@@ -17,15 +16,16 @@ mod setup;
 #[cfg(feature = "desktop-runtime")]
 use endpoint::{EndpointConnectionInput, EndpointConnectionStatus};
 #[cfg(feature = "desktop-runtime")]
-use fasti_store::SqliteKernel;
-#[cfg(feature = "desktop-runtime")]
 use fasti_domain::RecordId;
+#[cfg(feature = "desktop-runtime")]
+use fasti_store::SqliteKernel;
 #[cfg(feature = "desktop-runtime")]
 use network_config::{NetworkConfigStore, NetworkConfiguration, SaveNetworkConfigurationInput};
 #[cfg(feature = "desktop-runtime")]
 use providers::{
-    DeleteProviderCredentialInput, ProviderCandidate, ProviderCredentialStatus,
-    ProviderSearchInput, ProviderSelectionInput, SaveProviderCredentialInput,
+    DeleteProviderCredentialInput, ProviderCandidate, ProviderCapabilityInput,
+    ProviderCredentialStatusView, ProviderInput, ProviderSearchInput, ProviderSelectionInput,
+    SaveProviderCredentialInput,
 };
 #[cfg(feature = "desktop-runtime")]
 use setup::{DesktopProblem, KeyringSetupSecretStore, SetupStatus};
@@ -44,6 +44,7 @@ struct DesktopState {
     setup_gate: Mutex<()>,
     network: NetworkConfigStore,
     artwork: artwork::ArtworkCache,
+    provider_runtime: Mutex<Option<Arc<fasti_provider_runtime::ProviderRuntime>>>,
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -62,6 +63,25 @@ impl DesktopState {
             })?);
         *current = Some(Arc::clone(&kernel));
         Ok(kernel)
+    }
+
+    fn provider_runtime(
+        &self,
+        kernel: &SqliteKernel,
+    ) -> Result<Arc<fasti_provider_runtime::ProviderRuntime>, DesktopProblem> {
+        let mut current = self.provider_runtime.lock().map_err(|_| {
+            DesktopProblem::provider("The shared provider runtime lock is unavailable.")
+        })?;
+        if let Some(runtime) = current.as_ref() {
+            return Ok(Arc::clone(runtime));
+        }
+        let vault = Arc::new(fasti_provider_runtime::PlatformCredentialVault::new(
+            fasti_provider_runtime::PLATFORM_CREDENTIAL_SERVICE,
+            secure_storage::account_scope(kernel.data_root_identity()),
+        ));
+        let runtime = Arc::new(fasti_provider_runtime::ProviderRuntime::new(vault));
+        *current = Some(Arc::clone(&runtime));
+        Ok(runtime)
     }
 }
 
@@ -158,9 +178,14 @@ async fn test_endpoint_connection(
 #[tauri::command(async)]
 fn provider_credential_status(
     state: tauri::State<'_, DesktopState>,
-) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
+) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
     let kernel = state.kernel()?;
-    providers::credential_statuses(kernel.data_root_identity())
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    providers::credential_statuses(&runtime, &kernel, access.workspace_id())
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -168,9 +193,14 @@ fn provider_credential_status(
 fn save_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: SaveProviderCredentialInput,
-) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
+) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
     let kernel = state.kernel()?;
-    providers::save_credential(input, kernel.data_root_identity())
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    providers::save_credential(&runtime, &kernel, access.workspace_id(), input)
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -178,9 +208,60 @@ fn save_provider_credential(
 fn delete_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: DeleteProviderCredentialInput,
-) -> Result<Vec<ProviderCredentialStatus>, DesktopProblem> {
+) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
     let kernel = state.kernel()?;
-    providers::delete_credential(input, kernel.data_root_identity())
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    providers::delete_credential(&runtime, &kernel, access.workspace_id(), input)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn test_provider_credential(
+    state: tauri::State<'_, DesktopState>,
+    input: ProviderCapabilityInput,
+) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    providers::test_credential(
+        &runtime,
+        &kernel,
+        access.workspace_id(),
+        input,
+        configuration.outbound_policy(),
+    )
+    .await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn read_provider_health(
+    state: tauri::State<'_, DesktopState>,
+    input: ProviderInput,
+) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let configuration = state.network.load()?;
+    providers::health(
+        &runtime,
+        &kernel,
+        access.workspace_id(),
+        input,
+        configuration.outbound_policy(),
+    )
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -190,11 +271,18 @@ async fn search_provider(
     input: ProviderSearchInput,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
     let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
     let configuration = state.network.load()?;
     providers::search(
+        &runtime,
+        &kernel,
+        access.workspace_id(),
         input,
         configuration.outbound_policy(),
-        kernel.data_root_identity(),
     )
     .await
 }
@@ -208,16 +296,23 @@ async fn track_provider_candidate(
     let kernel = state.kernel()?;
     let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
     let access = records::require_access(&kernel, &store)?;
+    let runtime = state.provider_runtime(&kernel)?;
     let configuration = state.network.load()?;
     let candidate = providers::fetch_selection(
+        &runtime,
+        &kernel,
+        access.workspace_id(),
         input,
         configuration.outbound_policy(),
-        kernel.data_root_identity(),
     )
     .await?;
     state
         .artwork
-        .cache_candidate(&candidate, configuration.outbound_policy())
+        .cache_candidate(
+            &candidate,
+            configuration.outbound_policy(),
+            runtime.transport(),
+        )
         .await?;
     records::create_provider_record(&kernel, access, candidate)
 }
@@ -239,20 +334,27 @@ async fn apply_provider_metadata(
     let kernel = state.kernel()?;
     let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
     let access = records::require_access(&kernel, &store)?;
+    let runtime = state.provider_runtime(&kernel)?;
     let record_id = input
         .record_id
         .parse::<RecordId>()
         .map_err(|_| DesktopProblem::invalid_input("record_id is not a valid record identifier"))?;
     let configuration = state.network.load()?;
     let candidate = providers::fetch_selection(
+        &runtime,
+        &kernel,
+        access.workspace_id(),
         input.selection,
         configuration.outbound_policy(),
-        kernel.data_root_identity(),
     )
     .await?;
     state
         .artwork
-        .cache_candidate(&candidate, configuration.outbound_policy())
+        .cache_candidate(
+            &candidate,
+            configuration.outbound_policy(),
+            runtime.transport(),
+        )
         .await?;
     records::apply_provider_metadata(&kernel, access, record_id, candidate)
 }
@@ -261,7 +363,7 @@ async fn apply_provider_metadata(
 #[tauri::command(async)]
 fn list_records(
     state: tauri::State<'_, DesktopState>,
-) -> Result<Vec<records::RecordSummary>, DesktopProblem> {
+) -> Result<records::RecordPage, DesktopProblem> {
     let kernel = state.kernel()?;
     records::list_records(
         &kernel,
@@ -475,6 +577,7 @@ pub fn run() {
                 setup_gate: Mutex::new(()),
                 network: NetworkConfigStore::new(&config_root),
                 artwork,
+                provider_runtime: Mutex::new(None),
             });
             Ok(())
         })
@@ -490,6 +593,8 @@ pub fn run() {
             provider_credential_status,
             save_provider_credential,
             delete_provider_credential,
+            test_provider_credential,
+            read_provider_health,
             search_provider,
             track_provider_candidate,
             apply_provider_metadata,

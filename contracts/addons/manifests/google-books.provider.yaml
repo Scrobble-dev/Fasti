@@ -83,19 +83,19 @@ limits:
 
 errors:
   "400":
-    code: provider.credential_invalid
+    code: provider_credential_invalid
     user_action: Replace or remove the provider key. Fasti local data is unchanged.
   "401":
-    code: provider.credential_invalid
+    code: provider_credential_invalid
     user_action: Replace or remove the provider key. Fasti local data is unchanged.
   "403":
-    code: provider.credential_invalid
+    code: provider_credential_invalid
     user_action: Replace or remove the provider key. Fasti local data is unchanged.
   "429":
-    code: provider.rate_limited
+    code: provider_rate_limited
     user_action: Wait, then retry. Fasti local data is unchanged.
   invalid_response:
-    code: provider.invalid_response
+    code: provider_response_invalid
     user_action: Retry later. Fasti local data is unchanged.
 
 runtime:
@@ -106,6 +106,11 @@ runtime:
   transport: tauri_ipc
 
 conformance:
+  fixtures:
+    success: ../fixtures/google-books/success.json
+    empty: ../fixtures/google-books/empty.json
+    rate_limited: ../fixtures/google-books/rate-limited.json
+    invalid_response: ../fixtures/google-books/invalid-response.json
   deterministic:
     - maps-volume-to-neutral-candidate
     - bounds-provider-credentials

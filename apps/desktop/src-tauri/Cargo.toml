@@ -22,6 +22,7 @@ chrono = "0.4"
 fasti-application = { path = "../../../crates/fasti-application" }
 fasti-contracts = { path = "../../../crates/fasti-contracts" }
 fasti-domain = { path = "../../../crates/fasti-domain" }
+fasti-provider-runtime = { path = "../../../crates/fasti-provider-runtime" }
 fasti-store = { path = "../../../crates/fasti-store" }
 getrandom = "0.3.4"
 futures-util = "0.3.32"

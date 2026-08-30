@@ -24,6 +24,7 @@ mod nuvio_collections;
 mod observation;
 mod problem;
 mod profile_state;
+mod providers;
 mod records;
 
 #[cfg(feature = "conformance-fixture")]
@@ -92,6 +93,11 @@ impl Modify for ProductionSecurityAddon {
         observation::submit_observation,
         profile_state::list_tracking_dispositions,
         profile_state::set_tracking_disposition,
+        providers::list_providers,
+        providers::configure_provider_credential,
+        providers::remove_provider_credential,
+        providers::test_provider_credential,
+        providers::read_provider_health,
         records::create_record,
         records::attach_identifier,
         records::list_records,
@@ -127,6 +133,19 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::NuvioCollectionsStateDto,
         fasti_contracts::ObservationIdentifierInput,
         fasti_contracts::ObservationIngressKind,
+        fasti_contracts::ConfigureProviderCredentialRequest,
+        fasti_contracts::CredentialRequirementDto,
+        fasti_contracts::ListProvidersResponse,
+        fasti_contracts::ProviderCapabilityDto,
+        fasti_contracts::ProviderCapabilityResponse,
+        fasti_contracts::ProviderCapabilityStateDto,
+        fasti_contracts::ProviderCheckDto,
+        fasti_contracts::ProviderCheckStateDto,
+        fasti_contracts::ProviderCredentialSourceDto,
+        fasti_contracts::ProviderCredentialStateDto,
+        fasti_contracts::ProviderDescriptorDto,
+        fasti_contracts::ProviderHealthResponse,
+        fasti_contracts::ProviderKindDto,
         fasti_contracts::RecordActivityDto,
         fasti_contracts::RecordIdentifierDto,
         fasti_contracts::RecordSummaryDto,
@@ -167,6 +186,22 @@ pub fn health_router() -> Router {
 pub fn integration_router(kernel: Arc<dyn LocalKernel>) -> Router {
     let state = local::LocalApiState { kernel };
     health_router().merge(integrations::router().with_state(state))
+}
+
+/// Constructs the authenticated provider-management surface.
+///
+/// This is separate from [`integration_router`] so credentials and provider
+/// inventory are never exposed on the dedicated webhook listener.
+pub fn provider_api_router(
+    kernel: Arc<dyn LocalKernel>,
+    provider_state: Arc<dyn fasti_application::ProviderStatePort>,
+    runtime: Arc<fasti_provider_runtime::ProviderRuntime>,
+) -> Router {
+    providers::router().with_state(providers::ProviderApiState {
+        kernel,
+        provider_state,
+        runtime,
+    })
 }
 
 /// Constructs the durable local API router for fastid.
@@ -463,10 +498,14 @@ mod tests {
             "/api/v1/profile/record-tracking-dispositions",
             "/api/v1/profile/record-tracking-dispositions/{record_id}",
             "/api/v1/profile/nuvio-collections",
+            "/api/v1/providers",
+            "/api/v1/providers/{provider_id}/credentials/{capability_id}",
+            "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests",
+            "/api/v1/providers/{provider_id}/health",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 16);
+        assert_eq!(document.paths.paths.len(), 20);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));
@@ -492,6 +531,27 @@ mod tests {
         assert!(value
             .pointer("/paths/~1api~1v1~1client-enrollments/post/security")
             .is_none());
+        for (pointer, expected) in [
+            ("/paths/~1api~1v1~1providers/get/operationId", "list_providers"),
+            (
+                "/paths/~1api~1v1~1providers~1{provider_id}~1credentials~1{capability_id}/put/operationId",
+                "configure_provider_credential",
+            ),
+            (
+                "/paths/~1api~1v1~1providers~1{provider_id}~1credentials~1{capability_id}/delete/operationId",
+                "remove_provider_credential",
+            ),
+            (
+                "/paths/~1api~1v1~1providers~1{provider_id}~1credentials~1{capability_id}~1tests/post/operationId",
+                "test_provider_credential",
+            ),
+            (
+                "/paths/~1api~1v1~1providers~1{provider_id}~1health/get/operationId",
+                "read_provider_health",
+            ),
+        ] {
+            assert_eq!(value.pointer(pointer), Some(&serde_json::json!(expected)));
+        }
 
         let schemas = &document.components.expect("OpenAPI components").schemas;
         for schema in [
@@ -506,6 +566,19 @@ mod tests {
             "ClientEnrollmentResponse",
             "ObservationIdentifierInput",
             "ObservationIngressKind",
+            "ConfigureProviderCredentialRequest",
+            "CredentialRequirementDto",
+            "ListProvidersResponse",
+            "ProviderCapabilityDto",
+            "ProviderCapabilityResponse",
+            "ProviderCapabilityStateDto",
+            "ProviderCheckDto",
+            "ProviderCheckStateDto",
+            "ProviderCredentialSourceDto",
+            "ProviderCredentialStateDto",
+            "ProviderDescriptorDto",
+            "ProviderHealthResponse",
+            "ProviderKindDto",
             "SubmitObservationRequest",
             "SubmitObservationResponse",
             "IntegrationObservationRequest",

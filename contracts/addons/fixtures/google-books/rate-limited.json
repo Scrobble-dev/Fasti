@@ -1,0 +1,15 @@
+{
+  "api_version": "fasti.scrobble.dev/addons/fixture/v0.1",
+  "kind": "MetadataProviderResponse",
+  "case": "rate_limited",
+  "status": 429,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "error": {
+      "code": 429,
+      "message": "Synthetic quota response"
+    }
+  }
+}

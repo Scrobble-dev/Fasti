@@ -1,7 +1,8 @@
 use crate::setup::{self, DesktopProblem, SetupSecretStore};
 use fasti_application::{
-    ClientCredentialAdministrationPort, ClientCredentialSummary, CreateScopedClientCredentialCommand,
-    ListClientCredentialsQuery, RevokeClientCredentialCommand, ScopeKey,
+    ClientCredentialAdministrationPort, ClientCredentialSummary,
+    CreateScopedClientCredentialCommand, ListClientCredentialsQuery, RevokeClientCredentialCommand,
+    ScopeKey,
 };
 use fasti_domain::{CredentialId, RequestCorrelationId};
 use fasti_store::SqliteKernel;
@@ -85,7 +86,8 @@ pub(crate) fn list(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
 ) -> Result<Vec<ApiClientSummary>, DesktopProblem> {
-    let access = setup::authenticate(kernel, store)?.ok_or_else(DesktopProblem::not_authenticated)?;
+    let access =
+        setup::authenticate(kernel, store)?.ok_or_else(DesktopProblem::not_authenticated)?;
     kernel
         .list_client_credentials(ListClientCredentialsQuery::new(
             RequestCorrelationId::new_v7(),
@@ -100,7 +102,8 @@ pub(crate) fn create(
     store: &impl SetupSecretStore,
     input: CreateApiClientInput,
 ) -> Result<CreatedApiClient, DesktopProblem> {
-    let access = setup::authenticate(kernel, store)?.ok_or_else(DesktopProblem::not_authenticated)?;
+    let access =
+        setup::authenticate(kernel, store)?.ok_or_else(DesktopProblem::not_authenticated)?;
     let scopes = parse_scopes(input.scopes)?;
     let outcome = kernel
         .create_scoped_client_credential(CreateScopedClientCredentialCommand::new(
@@ -132,7 +135,8 @@ pub(crate) fn revoke(
     store: &impl SetupSecretStore,
     input: RevokeApiClientInput,
 ) -> Result<Vec<ApiClientSummary>, DesktopProblem> {
-    let access = setup::authenticate(kernel, store)?.ok_or_else(DesktopProblem::not_authenticated)?;
+    let access =
+        setup::authenticate(kernel, store)?.ok_or_else(DesktopProblem::not_authenticated)?;
     let credential_id = input
         .credential_id
         .parse::<CredentialId>()

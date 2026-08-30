@@ -839,6 +839,8 @@ pub(crate) fn scope_storage_key(scope: ScopeKey) -> &'static str {
         ScopeKey::IdentityRead => "identity_read",
         ScopeKey::ProfileStateRead => "profile_state_read",
         ScopeKey::ProfileStateWrite => "profile_state_write",
+        ScopeKey::ProviderRead => "provider_read",
+        ScopeKey::ProviderCredentialManage => "provider_credential_manage",
         ScopeKey::ReviewRead => "review_read",
         ScopeKey::ReviewWrite => "review_write",
         ScopeKey::CorrectionRead => "correction_read",

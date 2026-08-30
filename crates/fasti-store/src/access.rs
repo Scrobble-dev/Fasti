@@ -31,6 +31,8 @@ pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::IdentityRead,
     ScopeKey::ProfileStateRead,
     ScopeKey::ProfileStateWrite,
+    ScopeKey::ProviderRead,
+    ScopeKey::ProviderCredentialManage,
     ScopeKey::ReviewRead,
     ScopeKey::ReviewWrite,
     ScopeKey::CorrectionRead,
@@ -38,6 +40,9 @@ pub(crate) const FULL_ADMIN_SCOPES: &[ScopeKey] = &[
     ScopeKey::WorkspaceExport,
     ScopeKey::WorkspaceVerify,
 ];
+
+pub(crate) const V11_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] =
+    &[ScopeKey::ProviderRead, ScopeKey::ProviderCredentialManage];
 
 pub(crate) const V8_NODE_OWNER_SCOPE_BACKFILL: &[ScopeKey] = &[
     ScopeKey::ProfileStateRead,

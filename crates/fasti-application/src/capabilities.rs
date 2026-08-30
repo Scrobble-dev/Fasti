@@ -9,6 +9,7 @@ pub enum CapabilityBody {
     B2,
     B3,
     C1,
+    M1,
 }
 
 impl CapabilityBody {
@@ -19,6 +20,7 @@ impl CapabilityBody {
             Self::B2 => "B2",
             Self::B3 => "B3",
             Self::C1 => "C1",
+            Self::M1 => "M1",
         }
     }
 }
@@ -777,6 +779,87 @@ define_capabilities!(
             StorageUnavailable
         ]
     ),
+    (
+        ListProviders,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderRead],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ConfigureProviderCredential,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderCredentialManage],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            MalformedJson,
+            PayloadTooLarge,
+            ProviderCredentialInvalid,
+            ProviderUnavailable,
+            StorageUnavailable,
+            UnsupportedMediaType,
+            ValidationFailed
+        ],
+        []
+    ),
+    (
+        TestProviderCredential,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderCredentialManage],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            ProviderCredentialExpired,
+            ProviderCredentialInvalid,
+            ProviderCredentialMissing,
+            ProviderRateLimited,
+            ProviderResponseInvalid,
+            ProviderRouteUnavailable,
+            ProviderUnavailable,
+            StorageUnavailable
+        ],
+        []
+    ),
+    (
+        ReadProviderHealth,
+        M1,
+        M1,
+        Finalized,
+        Implemented,
+        Scoped,
+        [ProviderRead],
+        [
+            AuthenticationFailed,
+            Forbidden,
+            IntegrityFailed,
+            ProviderRateLimited,
+            ProviderResponseInvalid,
+            ProviderRouteUnavailable,
+            ProviderUnavailable,
+            StorageUnavailable
+        ],
+        []
+    ),
 );
 
 #[cfg(test)]
@@ -870,6 +953,30 @@ mod tests {
             local_operator_capabilities,
             [CapabilityKey::RestoreWorkspace]
         );
+    }
+
+    #[test]
+    fn m1_provider_capabilities_use_separate_read_and_secret_management_scopes() {
+        for capability in [
+            CapabilityKey::ListProviders,
+            CapabilityKey::ReadProviderHealth,
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M1);
+            assert_eq!(capability.runtime_body(), CapabilityBody::M1);
+            assert_eq!(capability.required_scopes(), &[ScopeKey::ProviderRead]);
+            assert!(capability.is_production_executable());
+        }
+        for capability in [
+            CapabilityKey::ConfigureProviderCredential,
+            CapabilityKey::TestProviderCredential,
+        ] {
+            assert_eq!(capability.contract_body(), CapabilityBody::M1);
+            assert_eq!(
+                capability.required_scopes(),
+                &[ScopeKey::ProviderCredentialManage]
+            );
+            assert!(capability.is_production_executable());
+        }
     }
 
     #[test]

@@ -11,17 +11,21 @@ import {
   parseClientEnrollmentResponse,
   parseCreateRecordRequest,
   parseCreateRecordResponse,
+  parseConfigureProviderCredentialRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
   parseInitializeNodeRequest,
   parseInitializeNodeResponse,
   parseListRecordsResponse,
+  parseListProvidersResponse,
   parseListTrackingDispositionsResponse,
   parseNuvioCollectionsDocumentDto,
   parseNuvioCollectionsStateDto,
   parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
+  parseProviderCapabilityResponse,
+  parseProviderHealthResponse,
   parseReceiptCommittedEvent,
   parseRegisterNamespaceRequest,
   parseRegisterNamespaceResponse,
@@ -40,18 +44,22 @@ import {
   type ClientEnrollmentResponse,
   type CreateRecordRequest,
   type CreateRecordResponse,
+  type ConfigureProviderCredentialRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
   type InitializeNodeRequest,
   type InitializeNodeResponse,
   type ListRecordsResponse,
+  type ListProvidersResponse,
   type ListTrackingDispositionsResponse,
   type NuvioCollectionsDocumentDto,
   type NuvioCollectionsStateDto,
   type NodeInitializationResponse,
   type ProblemDetails,
   type ProblemCode,
+  type ProviderCapabilityResponse,
+  type ProviderHealthResponse,
   type ReceiptCommittedEnvelope,
   type RegisterNamespaceRequest,
   type RegisterNamespaceResponse,
@@ -220,6 +228,7 @@ const MAX_SSE_EVENT_LINES = 256;
 const MAX_SSE_CURSOR_CHARACTERS = 512;
 const RECEIPT_ID = /^rcp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
 const RECORD_ID = /^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$/;
+const PROVIDER_PATH_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const HEALTH_PROBLEM_CONTRACT = {
   capabilityId: "system.health",
   problemCodes: [],
@@ -676,6 +685,110 @@ export class FastiClient {
       responseParser: parseNuvioCollectionsStateDto,
       responseLabel: "Nuvio Collections response",
       maxResponseBytes: MAX_NUVIO_COLLECTIONS_RESPONSE_BYTES,
+      options,
+    });
+  }
+
+  listProviders(options: CallOptions = {}): Promise<ListProvidersResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.listProviders;
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: parseListProvidersResponse,
+      responseLabel: "Provider list response",
+      options,
+    });
+  }
+
+  configureProviderCredential(
+    providerId: string,
+    capabilityId: string,
+    request: ConfigureProviderCredentialRequest,
+    options: CallOptions = {},
+  ): Promise<ProviderCapabilityResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.configureProviderCredential;
+    const identifiers = providerPathIdentifiers(providerId, capabilityId);
+    const body = parseOutgoing(
+      parseConfigureProviderCredentialRequest,
+      request,
+      "Configure provider credential request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: providerCapabilityParser(identifiers),
+      responseLabel: "Configured provider capability response",
+      options,
+    });
+  }
+
+  removeProviderCredential(
+    providerId: string,
+    capabilityId: string,
+    options: CallOptions = {},
+  ): Promise<ProviderCapabilityResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.removeProviderCredential;
+    const identifiers = providerPathIdentifiers(providerId, capabilityId);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: providerCapabilityParser(identifiers),
+      responseLabel: "Removed provider credential response",
+      options,
+    });
+  }
+
+  testProviderCredential(
+    providerId: string,
+    capabilityId: string,
+    options: CallOptions = {},
+  ): Promise<ProviderCapabilityResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.testProviderCredential;
+    const identifiers = providerPathIdentifiers(providerId, capabilityId);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      responseParser: providerCapabilityParser(identifiers),
+      responseLabel: "Provider credential test response",
+      options,
+    });
+  }
+
+  readProviderHealth(
+    providerId: string,
+    options: CallOptions = {},
+  ): Promise<ProviderHealthResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readProviderHealth;
+    const identifiers = providerPathIdentifiers(providerId);
+    return this.#jsonOperation({
+      method: operation.method,
+      path: providerOperationPath(operation.path, identifiers),
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseProviderHealthResponse(value);
+        if (response.provider_id !== identifiers.providerId) {
+          throw new FastiContractParseError(
+            "Provider health response does not match the requested provider",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Provider health response",
       options,
     });
   }
@@ -1555,6 +1668,66 @@ function contractPathIdentifier(
     throw new TypeError(`${label} does not match the generated contract`);
   }
   return value;
+}
+
+interface ProviderPathIdentifiers {
+  readonly providerId: string;
+  readonly capabilityId?: string;
+}
+
+function providerPathIdentifiers(
+  providerId: string,
+  capabilityId?: string,
+): ProviderPathIdentifiers {
+  return {
+    providerId: contractPathIdentifier(
+      providerId,
+      PROVIDER_PATH_ID,
+      "providerId",
+    ),
+    capabilityId:
+      capabilityId === undefined
+        ? undefined
+        : contractPathIdentifier(
+            capabilityId,
+            PROVIDER_PATH_ID,
+            "capabilityId",
+          ),
+  };
+}
+
+function providerOperationPath(
+  template: string,
+  identifiers: ProviderPathIdentifiers,
+): string {
+  let path = template.replace(
+    "{provider_id}",
+    encodeURIComponent(identifiers.providerId),
+  );
+  if (identifiers.capabilityId !== undefined) {
+    path = path.replace(
+      "{capability_id}",
+      encodeURIComponent(identifiers.capabilityId),
+    );
+  }
+  return path;
+}
+
+function providerCapabilityParser(
+  identifiers: ProviderPathIdentifiers,
+): JsonParser<ProviderCapabilityResponse> {
+  return (value) => {
+    const response = parseProviderCapabilityResponse(value);
+    if (
+      response.provider_id !== identifiers.providerId ||
+      response.capability.capability_id !== identifiers.capabilityId
+    ) {
+      throw new FastiContractParseError(
+        "Provider capability response does not match the requested path",
+      );
+    }
+    return response;
+  };
 }
 
 function positiveInteger(value: number, label: string): number {

@@ -4,6 +4,7 @@ members = [
   "apps/fastid",
   "crates/fasti-domain",
   "crates/fasti-application",
+  "crates/fasti-provider-runtime",
   "crates/fasti-contracts",
   "crates/fasti-store",
   "crates/fasti-api",
@@ -24,12 +25,14 @@ publish = false
 # Internal crates
 fasti-domain = { path = "crates/fasti-domain", version = "0.1.0" }
 fasti-application = { path = "crates/fasti-application", version = "0.1.0" }
+fasti-provider-runtime = { path = "crates/fasti-provider-runtime", version = "0.1.0" }
 fasti-contracts = { path = "crates/fasti-contracts", version = "0.1.0" }
 fasti-store = { path = "crates/fasti-store", version = "0.1.0" }
 fasti-api = { path = "crates/fasti-api", version = "0.1.0" }
 
 # Async & Runtime
 tokio = { version = "1.40", features = ["full"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["rustls", "stream"] }
 
 # Serialization & Models
 serde = { version = "1.0", features = ["derive"] }
@@ -52,6 +55,7 @@ clap = { version = "4.5", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "2.0"
+zeroize = "1.8"
 anyhow = "1.0"
 argon2 = "0.5.3"
 serde-saphyr = "1.0.1"

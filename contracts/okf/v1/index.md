@@ -2,17 +2,16 @@
 okf_version: "0.2"
 ---
 
-# Fasti B1 contract knowledge
+# Fasti contract knowledge
 
-This bundle is the local, progressive-disclosure catalogue for the B1 contract
-spine. It describes governed contract identifiers; it does not claim B2
-durability, provider behavior, a user interface, or distribution readiness.
+This bundle is the local, progressive-disclosure catalogue for finalized
+contract identifiers. Runtime claims remain explicit per capability and body.
 
 ## Contract catalogues
 
-- [Capabilities](capabilities.md) - Finalized B1 capability identifiers and their bounded contexts.
-- [Problems](problems.md) - Shared problem-code vocabulary referenced by B1 capabilities.
-- [Scopes](scopes.md) - Authorization scope identifiers attached to B1 capabilities.
+- [Capabilities](capabilities.md) - Finalized capability identifiers and their bounded contexts.
+- [Problems](problems.md) - Shared problem-code vocabulary referenced by finalized capabilities.
+- [Scopes](scopes.md) - Authorization scope identifiers attached to finalized capabilities.
 - [Lifecycle](lifecycle.md) - Contract-state, runtime-availability, and body ownership meanings.
 
 ## Governing source

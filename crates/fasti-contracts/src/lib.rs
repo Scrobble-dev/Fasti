@@ -23,6 +23,7 @@ mod nuvio_collections;
 mod observation;
 mod portability;
 mod profile_state;
+mod providers;
 mod records;
 
 pub use bootstrap::*;
@@ -33,6 +34,7 @@ pub use nuvio_collections::*;
 pub use observation::*;
 pub use portability::*;
 pub use profile_state::*;
+pub use providers::*;
 pub use records::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
