@@ -2200,8 +2200,9 @@ mod tests {
 
     #[test]
     fn anime_grouping_preview_reports_change_and_possible_regrouping() {
+        let record_id = RecordId::new_v7();
         let preview = preview_anime_grouping_change_for_record(
-            RecordId::new_v7(),
+            record_id,
             AnimeGroupingPreference::GroupByTvWork,
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             &[
@@ -2211,6 +2212,7 @@ mod tests {
         );
 
         assert!(preview.route_changed());
+        assert_eq!(preview.record_id(), record_id);
         assert!(!preview.unresolved());
         assert!(preview.possible_season_regrouping());
         assert_eq!(
