@@ -174,6 +174,8 @@ assert.match(
   "footer must contain the related Scrobble.dev link",
 );
 assert.match(home, /Read Scrobble\.dev’s scrobbling definition/u);
+assert.match(home, /href="\/deploy\/"[^>]*>Deployment planner<\/a>/u);
+assert.match(home, /href="\/search\/"[^>]*>Search<\/a>/u);
 
 const notFound = await readFile(resolve(build, "404.html"), "utf8");
 assert.match(notFound, /href="\/start\/choose-a-path\/"/u);
