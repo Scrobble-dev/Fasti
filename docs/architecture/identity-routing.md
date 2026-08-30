@@ -57,6 +57,11 @@ Kitsu, then SIMKL. The MAL preference tries MAL, Kitsu, and AniDB before the
 standard order. The Kitsu preference tries Kitsu, MAL, and AniDB before the
 standard order.
 
+A reviewed crosswalk can satisfy the selected coordinate preference. Direct
+evidence for the same coordinate wins; an accepted preferred crosswalk can win
+over a less-preferred direct fallback. Candidate or disputed mappings cannot
+enter the route planner as accepted evidence.
+
 The shared encoder keeps IMDb values bare and prefixes the other coordinate
 spaces: `tmdb:`, `tvdb:`, `mal:`, `anidb:`, `anilist:`, `kitsu:`, or `simkl:`.
 Adapters consume this encoder instead of maintaining their own prefix tables.
