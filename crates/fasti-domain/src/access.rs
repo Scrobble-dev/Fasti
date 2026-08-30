@@ -1067,12 +1067,7 @@ impl AuthCeremony {
         if !matches!(self.state, AuthCeremonyState::Pending) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
-        if at < self.created_at {
-            return Err(AccessInvariantError::InvalidTimestampOrder);
-        }
-        if at >= self.expires_at {
-            self.state = AuthCeremonyState::Expired;
-            self.terminal_at = Some(at);
+        if self.expire(at)? {
             return Err(AccessInvariantError::CeremonyExpired);
         }
         if browser_binding_digest != &self.browser_binding_digest {
@@ -1103,17 +1098,27 @@ impl AuthCeremony {
         if !matches!(self.state, AuthCeremonyState::Pending) {
             return Err(AccessInvariantError::InvalidCeremonyTransition);
         }
-        if at < self.created_at {
-            return Err(AccessInvariantError::InvalidTimestampOrder);
-        }
-        if at >= self.expires_at {
-            self.state = AuthCeremonyState::Expired;
-            self.terminal_at = Some(at);
+        if self.expire(at)? {
             return Err(AccessInvariantError::CeremonyExpired);
         }
         self.state = AuthCeremonyState::Cancelled;
         self.terminal_at = Some(at);
         Ok(())
+    }
+
+    pub fn expire(&mut self, at: DateTime<Utc>) -> Result<bool, AccessInvariantError> {
+        if !matches!(self.state, AuthCeremonyState::Pending) {
+            return Ok(false);
+        }
+        if at < self.created_at {
+            return Err(AccessInvariantError::InvalidTimestampOrder);
+        }
+        if at < self.expires_at {
+            return Ok(false);
+        }
+        self.state = AuthCeremonyState::Expired;
+        self.terminal_at = Some(at);
+        Ok(true)
     }
 
     pub fn fail(
@@ -2289,6 +2294,34 @@ mod tests {
             cancelled.cancel(at(2)),
             Err(AccessInvariantError::InvalidCeremonyTransition)
         );
+    }
+
+    #[test]
+    fn ceremony_expiry_is_explicit_boundary_safe_and_idempotent() {
+        let mut ceremony = AuthCeremony::try_new(
+            OperationId::new_v7(),
+            AuthCeremonyPurpose::SignIn,
+            AuthCeremonyProtocol::TrailBaseAuthorizationCodePkce,
+            TrailBaseInstanceId::new_v7(),
+            1,
+            Sha256Digest::from_bytes(&[2; 32]),
+            AuthCallbackPath::parse("/auth/trailbase/callback").expect("callback"),
+            AuthReturnTarget::ApplicationHome,
+            RequestCorrelationId::new_v7(),
+            at(1),
+            at(2),
+        )
+        .expect("ceremony");
+
+        assert_eq!(
+            ceremony.expire(at(0)),
+            Err(AccessInvariantError::InvalidTimestampOrder)
+        );
+        assert!(!ceremony.expire(at(1)).expect("not yet expired"));
+        assert!(ceremony.expire(at(2)).expect("expire at boundary"));
+        assert_eq!(ceremony.state(), AuthCeremonyState::Expired);
+        assert_eq!(ceremony.terminal_at(), Some(at(2)));
+        assert!(!ceremony.expire(at(3)).expect("terminal expiry is stable"));
     }
 
     #[test]
