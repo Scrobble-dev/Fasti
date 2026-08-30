@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import contextlib
 import copy
 import datetime
 import fcntl
@@ -47,7 +48,6 @@ TRAILBASE_REPOSITORY_URL = "https://github.com/trailbaseio/trailbase"
 _MANAGED_PROCESS_GROUPS: dict[int, subprocess.Popen[Any]] = {}
 _STARTING_PROCESS_GROUPS = 0
 _PENDING_TERMINATION_SIGNAL: int | None = None
-_TERMINATION_CLEANUP_INSTALLED = False
 
 
 class ReleaseError(ValueError):
@@ -95,20 +95,16 @@ def _process_group_exists(process_group: int) -> bool:
 def stop_managed_process_group(process: subprocess.Popen[Any]) -> None:
     try:
         if _process_group_exists(process.pid):
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
         if process.poll() is None:
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
         if _process_group_exists(process.pid):
-            try:
+            with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
             if process.poll() is None:
                 process.wait(timeout=5)
             deadline = time.monotonic() + 5
@@ -134,7 +130,6 @@ def _cleanup_managed_process_groups() -> None:
 def _terminate_managed_process_groups(signum: int, _frame: Any) -> None:
     global _PENDING_TERMINATION_SIGNAL
     _PENDING_TERMINATION_SIGNAL = signum
-    _cleanup_managed_process_groups()
     if _STARTING_PROCESS_GROUPS:
         return
     _PENDING_TERMINATION_SIGNAL = None
@@ -142,10 +137,8 @@ def _terminate_managed_process_groups(signum: int, _frame: Any) -> None:
 
 
 def install_termination_cleanup() -> None:
-    global _TERMINATION_CLEANUP_INSTALLED
-    if not _TERMINATION_CLEANUP_INSTALLED:
-        atexit.register(_cleanup_managed_process_groups)
-        _TERMINATION_CLEANUP_INSTALLED = True
+    atexit.unregister(_cleanup_managed_process_groups)
+    atexit.register(_cleanup_managed_process_groups)
     signal.signal(signal.SIGINT, _terminate_managed_process_groups)
     signal.signal(signal.SIGTERM, _terminate_managed_process_groups)
 
