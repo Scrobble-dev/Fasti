@@ -10,8 +10,43 @@ permissions:
   contents: read
 
 jobs:
+  ci-scope:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      runtime: ${{ steps.scope.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - run: node --test tests/js/ci-docs-routing.test.mjs
+      - name: Keep runtime gates for every non-portal path
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          PUSH_HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            git diff --name-only -z "$PR_BASE_SHA...$PR_HEAD_SHA" |
+              node scripts/classify-ci-scope.mjs >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only -z "$PUSH_BASE_SHA" "$PUSH_HEAD_SHA" |
+              node scripts/classify-ci-scope.mjs >> "$GITHUB_OUTPUT"
+          fi
+
   b1-portable-gate:
     name: Canonical B1 PR gate
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,6 +88,8 @@ jobs:
 
   rust:
     name: Rust workspace
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -70,6 +107,8 @@ jobs:
 
   javascript:
     name: Retained JavaScript packages
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -91,6 +130,7 @@ jobs:
 
   documentation:
     name: Documentation portal
+    needs: ci-scope
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -108,9 +148,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: cargo fetch --locked
       - run: cargo xtask docs package --locked
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Verify built documentation interactions
+        run: |
+          pnpm --filter @fasti/docs serve --port 4180 --no-open > /tmp/fasti-docs-serve.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4180/start/choose-a-path/ > /dev/null; then
+              FASTI_DOCS_BASE_URL=http://127.0.0.1:4180 \
+                node --test tests/js/docs-*.test.mjs
+              exit
+            fi
+            sleep 1
+          done
+          cat /tmp/fasti-docs-serve.log
+          exit 1
 
   ui-quality:
     name: Browser UI quality
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -138,6 +196,7 @@ jobs:
 
   repository-truth:
     name: B0 repository truth
+    needs: ci-scope
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -157,6 +216,8 @@ jobs:
 
   oci:
     name: Daemon and CLI OCI smoke
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -179,6 +240,8 @@ jobs:
 
   low-hardware-envelope:
     name: Low-hardware envelope (${{ matrix.arch }})
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -247,6 +310,7 @@ jobs:
 
   review-source-snapshot:
     name: Exact tracked source snapshot
+    needs: ci-scope
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -267,6 +331,8 @@ jobs:
 
   coverage:
     name: Code coverage (Rust & JS)
+    needs: ci-scope
+    if: needs.ci-scope.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
