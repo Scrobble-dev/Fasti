@@ -54,6 +54,49 @@ Gate 10 remains:
 - C is a separate, resumable first-run journey.
 - B is the shared evidence and detail pattern, not another destination.
 
+### 2.1 Frozen C1.1 domain decisions
+
+The dependency-ordered engineering review freezes these values before schema
+or route work:
+
+- `TrailBaseInstanceId` is the executable `tbi_` identifier. A TrailBase
+  subject is the exact canonical 16-byte value decoded from the pinned
+  release's URL-safe Base64 `sub`; it is not an email or a second Fasti ID.
+- A membership has a stable `MembershipId`. `Removed` is terminal and its row
+  stays unchanged. Re-invite creates a new `Invited`/`Member` aggregate with a
+  new ID, while a partial unique index permits at most one non-removed
+  membership for one subject and workspace. Re-invite restores no role,
+  approval, profile grant, or access.
+- Administrator continuity rejects only a positive-to-zero viable-
+  administrator transition. Membership mutations and subject lifecycle
+  mutations use the same continuity decision and advance the existing subject
+  epochs through one shared owner.
+- TrailBase activation is `inactive`, `active`, or `blocked`. Blockers are
+  `release_mismatch`, `physical_root_identity_mismatch`, and
+  `declared_restore`. Initial verification changes generation `0` to `1`.
+  Active-to-blocked increments once per blocking episode. Repeated observation
+  is idempotent. C1 can clear only `release_mismatch` after exact release and
+  root re-verification. A root mismatch or declared restore may replace
+  `release_mismatch`, but a non-recoverable blocker is never downgraded. Root
+  mismatch and declared restore remain blocked until C3. Generation overflow
+  fails closed. Process outage is not persisted as a blocker. Focused tests
+  cover initial activation, idempotence, blocker precedence, repair, proof
+  invalidation, outage, and overflow.
+- `OperationId` owns the ceremony identity. Purposes are `sign_in`,
+  `recent_authentication`, and `first_administrator_bootstrap`. Return targets
+  are `application_home`, `account_security`, and `first_run`, permitted only
+  in that order as fixed one-to-one pairs. No arbitrary path, URL, query,
+  fragment, encoded target, or wizard step is stored.
+- C1 authentication methods are only `trailbase_password` and
+  `trailbase_social`; both are single factor. Storage rejects
+  `trailbase_password_totp`. The exact typed unavailable reason is
+  `trailbase_password_totp_continuity_unavailable`.
+- Access audit evidence is retained for 90 days with a global 10,000-row hard
+  ceiling per data root. Each insert atomically prunes older rows, inserts the
+  event, then prunes deterministic overflow by `(occurred_at, audit_event_id)`.
+  No timer, configuration key, archive stream, per-workspace quota, secret, or
+  vendor token is added.
+
 ## 3. Exact TrailBase evidence
 
 Authority: TrailBase `v0.33.5`, tag commit
@@ -292,6 +335,27 @@ One forward migration adds only:
 - authentication provenance and recent-authentication expiry on the existing
   session owner where practical.
 
+Archive v4 remains frozen at 29 workspace streams and does not export the
+node-local Access tables. When v14 becomes current, restore must continue to
+accept a genuine archive-v4/schema-v13 manifest only with the exact frozen
+schema digest
+`sha256:e470f2e8ae2972aa05fecd5b39642b79ef739de89eda204c37bf1d3e48f892c3`.
+Archive v3/schema-v12 acceptance and its digest remain unchanged. Restoring a
+workspace archive creates no human authority; Access stays unavailable until
+the authorized local bootstrap succeeds.
+
+Migration v14 owns exactly these node-local structures:
+
+1. singleton TrailBase installation and activation;
+2. immutable TrailBase subject anchors;
+3. versioned workspace membership aggregates;
+4. durable authentication ceremonies;
+5. a one-to-one authentication-provenance companion for the existing browser
+   session owner; and
+6. append-only bounded Access audit events.
+
+Do not add workspace-revision triggers or archive entities for these tables.
+
 The migration and application invariants require:
 
 - one stable anchor per TrailBase instance and subject;
@@ -346,6 +410,8 @@ Gate: reviewed plan, clean plan commit, exact M2 handoff, no shared-file overlap
 
 ### C1.1 — Identity and authorization core
 
+- Freeze the reviewed domain vocabulary and tests before writing migration
+  v14.
 - Add the one forward migration.
 - Add activation, anchor, membership/role, ceremony, provenance, recent-auth,
   and audit domain transitions.
@@ -617,7 +683,7 @@ C1 reuses these owners. It does not rebuild them.
   - Surfaced by: architecture review; the former plan incorrectly required offline TrailBase token validation.
   - Files: C1 plan, canonical authentication plan, decision and context records.
   - Verify: document source links, exact hashes, review report, and clean diff.
-- [ ] **T2 (P1, human: ~3 days / Codex: ~1 day)** — Access domain and store — Implement activation, anchors, memberships/roles, ceremonies, provenance, recent proof, audit, first-admin bootstrap, and continuity.
+- [ ] **T2 (P1, human: ~3 days / Codex: ~1 day)** — Access domain and store — Implement the frozen activation, anchors, versioned memberships/roles, ceremonies, provenance, recent proof, audit, first-admin bootstrap, and continuity.
   - Surfaced by: code-quality and test review; the current viable-administrator count is a placeholder and no membership aggregate exists.
   - Files: Access domain/application/store modules and migration v14 after M2.
   - Verify: focused unit and SQLite integration tests, restart, migration, rollback, restore, and race proof.
@@ -642,11 +708,13 @@ C1 reuses these owners. It does not rebuild them.
 
 1. Preserve published migration v12, final migration v13, archive v3, and
    archive v4.
-2. Implement and test the single append-only v14 Access migration.
-3. Complete C1.1 domain and persistence work before mounting C1 routes.
-4. Keep one writer for shared schema, registry, generator, host, and Workbench
+2. Complete the frozen C1.1 domain transitions and focused tests.
+3. Implement and test the single append-only v14 Access migration, including
+   archive-v4/schema-v13 compatibility.
+4. Complete C1.1 persistence work before mounting C1 routes.
+5. Keep one writer for shared schema, registry, generator, host, and Workbench
    files.
-5. Do not request another premise gate.
+6. Do not request another premise gate.
 
 ## GSTACK REVIEW REPORT
 
@@ -654,7 +722,7 @@ C1 reuses these owners. It does not rebuild them.
 | ------------- | --------------------- | ------------------------------- | ---- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —               | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                               |
 | Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —               | Nested Codex review was not run. Two read-only subagents and optional AGY independently challenged D3-C.                                              |
-| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 1    | CLEAR           | 3 architecture decisions resolved; false JWKS and MFA blockers removed; complete test, failure, performance, ownership, and delivery contracts added. |
+| Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 2    | CLEAR           | C1 trust profile plus activation, membership, ceremony, audit-retention, archive-compatibility, and TOTP decisions are frozen.                       |
 | Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —               | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                       |
 | DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | PENDING RUNTIME | The live review runs after C1 has an executable path.                                                                                                 |
 

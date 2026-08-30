@@ -1286,7 +1286,11 @@ User outcome: a TrailBase-authenticated person receives a bounded Fasti session 
 
 Add:
 
-- `ExternalAuthLink`, `TrailBaseInstanceId`, membership lifecycle, roles, administrator continuity, auth epoch, recent authentication, and `TokenPolicy`;
+- `ExternalAuthLink`, `TrailBaseInstanceId`, stable membership identity,
+  membership lifecycle, roles, administrator continuity, auth epoch, recent
+  authentication, and `TokenPolicy`. Removed membership rows are immutable;
+  re-invite creates a new invited/member aggregate and restores no access or
+  administrator role;
 - the one-use `access.identity.bootstrap` operation. The trusted CLI or packaged host proves possession of the owner-only data-root `bootstrap.secret`, descriptor-root ownership, correct permissions, and the exclusive data-root lock. A loopback HTTP caller alone is unauthorized. With no existing membership, one transaction creates the first active administrator membership for one proven TrailBase anchor. Concurrent attempts have one winner and no losing side effects. It is distinct from and never reopens the consumed first-client bootstrap endpoint;
 - server-side TrailBase code exchange, instance proof, subject collision checks, refresh-session cleanup, Fasti session minting, global sign-out, and disablement handling;
 - PATs, public/confidential clients, client secrets, scopes, profile grants, consent, device/client inventories, expiry, last use, rotation, revocation, and audit;
@@ -1295,6 +1299,17 @@ Add:
 Reuse PR A's `AuthSubject`, `FastiBrowserSession`, `BrowserSessionId`, and `SessionPolicy` without a second model. Link the PR A subject to TrailBase only through the approved reset/bootstrap path. Replace `BrowserUser.is_admin` with membership and role. Do not dual-run human authentication.
 
 C1 replaces the A-only fixture journey with pinned TrailBase APIs and the real Fasti exchange. The closed-node developer bootstrap reads the owner-only data-root secret through the trusted local CLI or host, proves the descriptor-root and lock, selects and proves the TrailBase anchor, performs one transactional membership/role creation, and prints `Access ready` plus the browser session-inventory URL. It never sends the bootstrap secret to the browser or prints it. On interruption, `--status` reports whether no change occurred, the operation completed, or operator repair is required. A losing race creates no membership, role, profile, or grant and points to the winning initialized state. Test a local process that can connect to the loopback port but cannot read the data root; it must remain unauthorized.
+
+C1 freezes activation as inactive, active, or blocked with generation-bound
+proof. Release mismatch is the only C1-recoverable blocker; physical-root
+identity mismatch and declared restore remain blocked for C3, cannot be
+downgraded, and generation overflow fails closed. Its ceremonies
+use only the fixed sign-in/application-home, recent-authentication/account-
+security, and first-administrator-bootstrap/first-run pairs. C1 records only
+single-factor password or social provenance. Password-plus-TOTP continuity is
+typed unavailable until a pinned release preserves and proves the complete
+PKCE ceremony. Node-local Access audit evidence uses mutation-time 90-day and
+10,000-row bounds and is not added to the frozen workspace archive.
 
 TrailBase disable or deletion stops new sessions and moves `AuthSubject.lifecycle` to `disabled`, `deleted`, or `recovery_pending`. The durable anchor stays permanent and cannot be silently detached, replaced, or reused. The lifecycle change never cascades into Chronicle deletion. Fasti privacy erasure is a separate explicit capability with its own authorization, preview, recovery limits, and audit.
 
