@@ -1,12 +1,16 @@
 # Fasti Access C1 implementation gate
 
-Status: `APPROVED_D3_C_PENDING_M2_HANDOFF`
+Status: `C1_0_COMPLETE_C1_1_IN_PROGRESS`
 
 Recorded: 2026-08-30
 
 Planning base commit: `4546459105c8c762886b32cdbd580be3e039736c`
 
 Planning base tree: `6ccfa5d96064b51f3dcd80dfb95f00cd60ce5a55`
+
+Implementation base commit: `45fb31d906bec3f3ad2e5bf95edf2938c7c942b8`
+
+Implementation base tree: `8263411e2ba193c4b88acdcafd89f0c48905b004`
 
 Owner: Commander / Mothership
 
@@ -274,8 +278,9 @@ requirement needs one.
 
 ## 8. Persistence and transaction contract
 
-Metadata M2 owns schema migration v13. C1 uses migration v14 only after M2
-merges and hands off the exact `dev` head and tree.
+Metadata M2 owns schema migration v13. PR #117 is merged at the exact
+implementation base above. Its shared-file handoff releases migration v14 to
+C1. Published v12 and final v13 remain immutable.
 
 One forward migration adds only:
 
@@ -608,7 +613,7 @@ C1 reuses these owners. It does not rebuild them.
 
 ## 18. Implementation tasks
 
-- [ ] **T1 (P1, human: ~1 day / Codex: ~2 hours)** — Contract — Apply D3-C to the canonical programme and freeze the C1 route, policy, migration, and ownership contract.
+- [x] **T1 (P1, human: ~1 day / Codex: ~2 hours)** — Contract — Apply D3-C to the canonical programme and freeze the C1 route, policy, migration, and ownership contract.
   - Surfaced by: architecture review; the former plan incorrectly required offline TrailBase token validation.
   - Files: C1 plan, canonical authentication plan, decision and context records.
   - Verify: document source links, exact hashes, review report, and clean diff.
@@ -635,13 +640,13 @@ C1 reuses these owners. It does not rebuild them.
 
 ## 19. Safe next action
 
-1. Commit this plan correction alone.
-2. Keep C1 read-only on M2-owned files.
-3. Receive the exact merged M2 `dev` head and tree, confirm schema v13, release
-   migration v14 to C1, and hand off shared files.
-4. Rebase the isolated C1 worktree on that exact `dev`.
-5. Start C1.1 domain and persistence work with disjoint writers.
-6. Do not request another premise gate.
+1. Preserve published migration v12, final migration v13, archive v3, and
+   archive v4.
+2. Implement and test the single append-only v14 Access migration.
+3. Complete C1.1 domain and persistence work before mounting C1 routes.
+4. Keep one writer for shared schema, registry, generator, host, and Workbench
+   files.
+5. Do not request another premise gate.
 
 ## GSTACK REVIEW REPORT
 
@@ -655,6 +660,6 @@ C1 reuses these owners. It does not rebuild them.
 
 **CROSS-MODEL:** Two read-only subagents and AGY agree that direct backchannel C1 plus separate upstream hardening is the correct bounded-context design. The strongest shared objection is the upstream authorization-code and crash window, covered by one-use Fasti ceremonies and D2 fail-closed recovery.
 
-**VERDICT:** ENG CLEARED — implement C1 after the exact M2 shared-file handoff.
+**VERDICT:** C1.0 COMPLETE — exact M2 handoff verified; implement C1.1 on v14.
 
 NO UNRESOLVED DECISIONS
