@@ -56,11 +56,15 @@ function proxyBlockers(input: DeploymentInput): string[] {
     const url = new URL(input.publicUrl ?? "");
     return url.protocol === "https:" &&
       url.username === "" &&
-      url.password === ""
+      url.password === "" &&
+      url.pathname === "/" &&
+      url.search === "" &&
+      url.hash === "" &&
+      url.port !== "0"
       ? []
-      : ["Public URL must be an absolute HTTPS URL without credentials."];
+      : ["Public URL must be an absolute HTTPS origin without credentials."];
   } catch {
-    return ["Public URL must be an absolute HTTPS URL without credentials."];
+    return ["Public URL must be an absolute HTTPS origin without credentials."];
   }
 }
 
@@ -109,6 +113,8 @@ export function createDeploymentPlan(input: DeploymentInput): DeploymentPlan {
       `${input.dataRoot}:/data:Z`,
       "--env",
       "FASTI_DATA_ROOT=/data",
+      "--env",
+      "FASTI_EXTERNAL_BIND_IP=127.0.0.1",
       "fasti:b0",
     ];
   } else {
@@ -135,7 +141,7 @@ export function createDeploymentPlan(input: DeploymentInput): DeploymentPlan {
     environment,
     command,
     verification: [
-      `curl --fail --show-error http://127.0.0.1:${input.port}/health`,
+      `curl --fail --show-error http://127.0.0.1:${input.port}/api/v1/health`,
       "Confirm the capability response before using any durable route.",
     ],
     rollback: [

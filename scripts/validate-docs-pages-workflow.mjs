@@ -33,6 +33,14 @@ for (const step of steps.filter(({ uses }) => uses)) {
     `Action is not pinned: ${step.uses}`,
   );
 }
+const checkout = build.steps.find(({ uses }) =>
+  uses?.startsWith("actions/checkout@"),
+);
+assert.equal(
+  checkout?.with?.["persist-credentials"],
+  false,
+  "checkout must not retain repository credentials",
+);
 assert.ok(
   build.steps.some(({ run }) => run === "cargo xtask docs package --locked"),
   "build must use the governed package command",

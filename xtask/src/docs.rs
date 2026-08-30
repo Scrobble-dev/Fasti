@@ -69,11 +69,12 @@ pub(crate) fn verify(root: &Path) -> anyhow::Result<()> {
 }
 
 pub(crate) fn package(root: &Path, locked: bool) -> anyhow::Result<()> {
-    verify(root)?;
-    generate(root)?;
     if locked {
         run(root, "pnpm", &["install", "--frozen-lockfile"])?;
     }
+    crate::verify_contracts(root, locked)?;
+    verify(root)?;
+    generate(root)?;
     run(root, "pnpm", &["--filter", "@fasti/tokens", "build"])?;
     run(root, "pnpm", &["--filter", "@fasti/deploy-plan", "build"])?;
     run(root, "pnpm", &["--filter", "@fasti/docs", "typecheck"])?;
@@ -91,22 +92,9 @@ fn generate_to(root: &Path, output: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(&content)?;
     fs::create_dir_all(&static_root)?;
 
-    let physical_root = root.canonicalize().context("resolve repository root")?;
     for page in site.pages.iter().filter(|page| page.status == "published") {
-        let lexical = root.join(&page.source);
-        ensure!(
-            lexically_confined(Path::new(&page.source)),
-            "{} is not a confined relative source",
-            page.source
-        );
-        let physical = lexical
-            .canonicalize()
-            .with_context(|| format!("resolve {}", page.source))?;
-        ensure!(
-            physical.starts_with(&physical_root) && physical.is_file(),
-            "{} resolves outside the repository or is not a file",
-            page.source
-        );
+        let physical = confined_source(root, &page.source)?;
+        ensure!(physical.is_file(), "{} is not a file", page.source);
         let markdown = fs::read_to_string(&physical)?;
         let title = markdown
             .lines()
@@ -300,15 +288,35 @@ fn valid_slug(slug: &str) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+fn confined_source(root: &Path, source: &str) -> anyhow::Result<PathBuf> {
+    ensure!(
+        lexically_confined(Path::new(source)),
+        "{source} is not a confined relative source"
+    );
+    let physical_root = root.canonicalize().context("resolve repository root")?;
+    let physical = root
+        .join(source)
+        .canonicalize()
+        .with_context(|| format!("resolve {source}"))?;
+    ensure!(
+        physical.starts_with(&physical_root),
+        "{source} resolves outside the repository"
+    );
+    Ok(physical)
+}
+
 fn copy(root: &Path, output: &Path, source: &str, target: &str) -> anyhow::Result<()> {
+    let source_path = confined_source(root, source)?;
+    ensure!(source_path.is_file(), "{source} is not a file");
     write(
         &output.join(target),
-        &fs::read(root.join(source)).with_context(|| format!("read {source}"))?,
+        &fs::read(source_path).with_context(|| format!("read {source}"))?,
     )
 }
 
 fn copy_tree(root: &Path, output: &Path, source: &str, target: &str) -> anyhow::Result<()> {
-    let source_root = root.join(source);
+    let source_root = confined_source(root, source)?;
+    ensure!(source_root.is_dir(), "{source} is not a directory");
     for entry in walk(&source_root)? {
         let relative = entry.strip_prefix(&source_root)?;
         write(&output.join(target).join(relative), &fs::read(&entry)?)?;
@@ -319,10 +327,17 @@ fn copy_tree(root: &Path, output: &Path, source: &str, target: &str) -> anyhow::
 fn walk(root: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for entry in fs::read_dir(root)? {
-        let path = entry?.path();
-        if path.is_dir() {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        ensure!(
+            !file_type.is_symlink(),
+            "refuse symbolic link {}",
+            path.display()
+        );
+        if file_type.is_dir() {
             files.extend(walk(&path)?);
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             files.push(path);
         }
     }
@@ -390,5 +405,31 @@ mod tests {
         assert!(!lexically_confined(Path::new("docs/../SECURITY.md")));
         assert!(valid_slug("validation-failed"));
         assert!(!valid_slug("../escape"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn publication_rejects_symlink_escapes() {
+        use std::os::unix::fs::symlink;
+
+        let repository = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("private.txt"), b"private").unwrap();
+
+        symlink(
+            outside.path().join("private.txt"),
+            repository.path().join("fixed.txt"),
+        )
+        .unwrap();
+        assert!(copy(repository.path(), output.path(), "fixed.txt", "fixed.txt").is_err());
+
+        fs::create_dir(repository.path().join("tree")).unwrap();
+        symlink(
+            outside.path().join("private.txt"),
+            repository.path().join("tree/private.txt"),
+        )
+        .unwrap();
+        assert!(copy_tree(repository.path(), output.path(), "tree", "tree").is_err());
     }
 }

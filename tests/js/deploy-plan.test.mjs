@@ -27,6 +27,42 @@ test("deployment plans fail closed and keep secrets out of their contract", () =
   });
   assert.equal(proxy.available, false);
   assert.match(proxy.blockers.join(" "), /HTTPS/u);
+  for (const publicUrl of [
+    "https://fasti.internal/path",
+    "https://fasti.internal/?query=yes",
+    "https://fasti.internal/#fragment",
+    "https://fasti.internal:0",
+  ]) {
+    assert.equal(
+      createDeploymentPlan({
+        mode: "trusted-proxy",
+        port: 8420,
+        dataRoot: "/private/fasti",
+        publicUrl,
+      }).available,
+      false,
+    );
+  }
+  assert.equal(
+    createDeploymentPlan({
+      mode: "trusted-proxy",
+      port: 8420,
+      dataRoot: "/private/fasti",
+      publicUrl: "https://fasti.internal",
+    }).available,
+    true,
+  );
+
+  const podman = createDeploymentPlan({
+    mode: "podman",
+    port: 8420,
+    dataRoot: "/private/fasti",
+  });
+  assert.ok(podman.command.includes("FASTI_EXTERNAL_BIND_IP=127.0.0.1"));
+  assert.equal(
+    podman.verification[0],
+    "curl --fail --show-error http://127.0.0.1:8420/api/v1/health",
+  );
 
   const production = createDeploymentPlan({
     mode: "production",
