@@ -46,6 +46,7 @@ struct DesktopState {
     network: NetworkConfigStore,
     artwork: artwork::ArtworkCache,
     provider_runtime: Mutex<Option<Arc<fasti_provider_runtime::ProviderRuntime>>>,
+    // ponytail: one provider gate prevents credential races; split by provider if contention appears.
     provider_operation_gate: tokio::sync::Mutex<()>,
 }
 
@@ -228,6 +229,7 @@ async fn test_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: ProviderCapabilityInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -251,6 +253,7 @@ async fn read_provider_health(
     state: tauri::State<'_, DesktopState>,
     input: ProviderInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -274,6 +277,7 @@ async fn search_provider(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSearchInput,
 ) -> Result<Vec<ProviderCandidate>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -297,6 +301,7 @@ async fn track_provider_candidate(
     state: tauri::State<'_, DesktopState>,
     input: ProviderSelectionInput,
 ) -> Result<records::CreateRecordView, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
     let access = records::require_access(&kernel, &store)?;
@@ -335,6 +340,7 @@ async fn apply_provider_metadata(
     state: tauri::State<'_, DesktopState>,
     input: ApplyProviderMetadataInput,
 ) -> Result<(), DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let store = KeyringSetupSecretStore::new(kernel.data_root_identity());
     let access = records::require_access(&kernel, &store)?;

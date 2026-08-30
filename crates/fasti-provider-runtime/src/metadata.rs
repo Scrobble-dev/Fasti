@@ -51,29 +51,32 @@ impl ProviderMetadataRefreshService {
         let correlation_id = command.correlation_id();
         validate_groups(command.field_groups(), capability, correlation_id)?;
         let provider_id = command.provider_id().clone();
-        let prepared =
-            self.persistence
-                .authorize_and_prepare_refresh(PrepareMetadataRefreshCommand::new(
-                    correlation_id,
-                    *command.access(),
-                    command.record_id(),
-                    provider_id.clone(),
-                    command.field_groups().to_vec(),
-                ))?;
+        let persistence = Arc::clone(&self.persistence);
+        let prepare = PrepareMetadataRefreshCommand::new(
+            correlation_id,
+            *command.access(),
+            command.record_id(),
+            provider_id.clone(),
+            command.field_groups().to_vec(),
+        );
+        let prepared = run_blocking(capability, correlation_id, move || {
+            persistence.authorize_and_prepare_refresh(prepare)
+        })
+        .await?;
 
         let provider = ProviderId::try_new(provider_id.as_str())
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
         let read_capability = ProviderCapabilityId::try_new(READ_CAPABILITY)
             .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
-        let state = self
-            .provider_state
-            .get_provider_capability_state(
-                command.access().workspace_id(),
-                &provider,
-                &read_capability,
-            )
-            .map_err(|error| state_problem(error, capability, correlation_id))?
-            .ok_or_else(|| stale_problem(capability, correlation_id))?;
+        let provider_state = Arc::clone(&self.provider_state);
+        let workspace_id = command.access().workspace_id();
+        let state = run_blocking(capability, correlation_id, move || {
+            provider_state
+                .get_provider_capability_state(workspace_id, &provider, &read_capability)
+                .map_err(|error| state_problem(error, capability, correlation_id))?
+                .ok_or_else(|| stale_problem(capability, correlation_id))
+        })
+        .await?;
         if matches!(
             state.capability_status(),
             ProviderCapabilityStatus::Disabled | ProviderCapabilityStatus::Unavailable
@@ -103,14 +106,18 @@ impl ProviderMetadataRefreshService {
             (effective_locale.clone(), effective_region.clone()),
         )?;
         if command.mode() == MetadataRefreshMode::PreferCache {
-            if let Some(outcome) = self.persistence.authorize_and_read_cached_refresh(
-                ReadCachedMetadataRefreshCommand::new(
-                    correlation_id,
-                    *command.access(),
-                    prepared.clone(),
-                    enrichment_keys.clone(),
-                ),
-            )? {
+            let persistence = Arc::clone(&self.persistence);
+            let cached = ReadCachedMetadataRefreshCommand::new(
+                correlation_id,
+                *command.access(),
+                prepared.clone(),
+                enrichment_keys.clone(),
+            );
+            if let Some(outcome) = run_blocking(capability, correlation_id, move || {
+                persistence.authorize_and_read_cached_refresh(cached)
+            })
+            .await?
+            {
                 return Ok(outcome);
             }
         }
@@ -132,14 +139,17 @@ impl ProviderMetadataRefreshService {
         {
             Ok(candidate) => candidate,
             Err(error) if error.problem_code() == ProblemCode::ProviderUnavailable => {
-                self.persistence.authorize_and_mark_refresh_unavailable(
-                    MarkMetadataRefreshUnavailableCommand::new(
-                        correlation_id,
-                        *command.access(),
-                        prepared,
-                        provider_id,
-                    ),
-                )?;
+                let persistence = Arc::clone(&self.persistence);
+                let unavailable = MarkMetadataRefreshUnavailableCommand::new(
+                    correlation_id,
+                    *command.access(),
+                    prepared,
+                    provider_id,
+                );
+                run_blocking(capability, correlation_id, move || {
+                    persistence.authorize_and_mark_refresh_unavailable(unavailable)
+                })
+                .await?;
                 return Err(stale_problem(capability, correlation_id));
             }
             Err(error) => return Err(runtime_problem(error, capability, correlation_id)),
@@ -199,19 +209,37 @@ impl ProviderMetadataRefreshService {
             correlation_id,
         )?;
 
-        self.persistence
-            .authorize_and_commit_refresh(CommitMetadataRefreshCommand::new(
-                correlation_id,
-                *command.access(),
-                prepared,
-                provider_id,
-                state,
-                fields,
-                Vec::new(),
-                cache_entries,
-                attribution,
-            ))
+        let persistence = Arc::clone(&self.persistence);
+        let commit = CommitMetadataRefreshCommand::new(
+            correlation_id,
+            *command.access(),
+            prepared,
+            provider_id,
+            state,
+            fields,
+            Vec::new(),
+            cache_entries,
+            attribution,
+        );
+        run_blocking(capability, correlation_id, move || {
+            persistence.authorize_and_commit_refresh(commit)
+        })
+        .await
     }
+}
+
+async fn run_blocking<T, F>(
+    capability: CapabilityKey,
+    correlation_id: fasti_domain::RequestCorrelationId,
+    operation: F,
+) -> fasti_application::ApplicationResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> fasti_application::ApplicationResult<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| problem(ProblemCode::StorageUnavailable, capability, correlation_id))?
 }
 
 impl MetadataClaimRefreshService for ProviderMetadataRefreshService {
