@@ -1459,6 +1459,22 @@ mod tests {
     }
 
     #[test]
+    fn tmdb_metadata_prefers_its_native_identifier_over_an_imdb_alias() {
+        let tmdb = ExternalIdentifierClaim::try_new("tmdb.tv", Grain::Series, "42")
+            .expect("TMDB identity fixture");
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::MetadataLookup,
+            ProviderId::try_new("tmdb").expect("TMDB provider"),
+            AnimeIdPreference::Imdb,
+            &[tmdb.clone(), identity_claim("imdb.title", "tt28254942")],
+        );
+
+        let route = plan.selected_route().expect("native TMDB route");
+        assert_eq!(route.identifier(), &tmdb);
+        assert_eq!(route.kind(), IdentityRouteKind::ProviderNative);
+    }
+
+    #[test]
     fn tracker_write_uses_only_the_target_provider_native_identifier() {
         let plan = plan_purpose_identity_route(
             ResolutionIntent::TrackerWrite,
@@ -1475,6 +1491,23 @@ mod tests {
         assert_eq!(route.identifier().namespace(), "kitsu.anime");
         assert_eq!(route.kind(), IdentityRouteKind::ProviderNative);
         assert_eq!(plan.candidate_routes().len(), 1);
+    }
+
+    #[test]
+    fn tracker_write_fails_closed_without_the_target_provider_identifier() {
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::TrackerWrite,
+            ProviderId::try_new("kitsu").expect("Kitsu provider"),
+            AnimeIdPreference::Imdb,
+            &[
+                identity_claim("imdb.title", "tt28254942"),
+                identity_claim("mal.anime", "49894"),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        assert!(plan.selected_route().is_none());
+        assert!(plan.candidate_routes().is_empty());
     }
 
     #[test]
