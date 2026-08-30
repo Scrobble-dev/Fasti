@@ -38,6 +38,10 @@ TMDB metadata lookup and enrichment use this order:
 Title and year similarity is not an identity route. It can produce a review
 candidate, but it cannot attach an identifier or change a Record.
 
+Known provider identifiers must also match the provider's bounded wire format.
+Malformed evidence stays visible for review but cannot become an outbound
+route.
+
 The checked-in golden fixtures include the NuvioTV issue where `mal:49894`
 also carries IMDb identifier `tt28254942`. TMDB uses the IMDb alias. The MAL
 identifier and Fasti Record remain unchanged.
