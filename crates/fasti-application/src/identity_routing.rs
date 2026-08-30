@@ -6,7 +6,7 @@ use fasti_domain::{
     AnimeGroupingPreference, ClientId, OperationId, ProfileId, RecordId, RequestCorrelationId,
     ResolutionIntent, Sha256Digest,
 };
-use std::num::NonZeroU16;
+use std::{error::Error, fmt, num::NonZeroU16};
 
 pub const MAX_IDENTITY_IMPACT_PAGE: u16 = 100;
 
@@ -134,6 +134,26 @@ pub enum AnimeGroupingPolicyChange {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnimeGroupingPolicyChangeError;
+
+impl fmt::Display for AnimeGroupingPolicyChangeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("only a client policy can inherit the profile default")
+    }
+}
+
+impl Error for AnimeGroupingPolicyChangeError {}
+
+impl AnimeGroupingPolicyChange {
+    const fn is_valid_for(self, scope: AnimeGroupingPolicyScope) -> bool {
+        !matches!(
+            (scope, self),
+            (AnimeGroupingPolicyScope::Profile, Self::InheritProfile)
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreviewAnimeGroupingPolicyChangeQuery {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
@@ -144,22 +164,25 @@ pub struct PreviewAnimeGroupingPolicyChangeQuery {
 }
 
 impl PreviewAnimeGroupingPolicyChangeQuery {
-    pub const fn new(
+    pub fn try_new(
         correlation_id: RequestCorrelationId,
         access: RequestAccessContext,
         scope: AnimeGroupingPolicyScope,
         change: AnimeGroupingPolicyChange,
         after_record_id: Option<RecordId>,
         limit: IdentityImpactPageLimit,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, AnimeGroupingPolicyChangeError> {
+        if !change.is_valid_for(scope) {
+            return Err(AnimeGroupingPolicyChangeError);
+        }
+        Ok(Self {
             correlation_id,
             access,
             scope,
             change,
             after_record_id,
             limit,
-        }
+        })
     }
 
     pub const fn correlation_id(&self) -> RequestCorrelationId {
@@ -199,7 +222,7 @@ pub struct ApplyAnimeGroupingPolicyChangeCommand {
 }
 
 impl ApplyAnimeGroupingPolicyChangeCommand {
-    pub const fn new(
+    pub fn try_new(
         correlation_id: RequestCorrelationId,
         access: RequestAccessContext,
         scope: AnimeGroupingPolicyScope,
@@ -207,8 +230,11 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
         semantic_digest: Sha256Digest,
         expected_revision: u64,
         change: AnimeGroupingPolicyChange,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, AnimeGroupingPolicyChangeError> {
+        if !change.is_valid_for(scope) {
+            return Err(AnimeGroupingPolicyChangeError);
+        }
+        Ok(Self {
             correlation_id,
             access,
             scope,
@@ -216,7 +242,7 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
             semantic_digest,
             expected_revision,
             change,
-        }
+        })
     }
 
     pub const fn correlation_id(&self) -> RequestCorrelationId {
@@ -504,5 +530,47 @@ mod tests {
             AnimeGroupingPolicySource::ProfileDefault
         );
         assert_eq!(inherited.revision(), 4);
+    }
+
+    #[test]
+    fn profile_policy_cannot_inherit_itself() {
+        let access = RequestAccessContext::new(
+            fasti_domain::WorkspaceId::new_v7(),
+            ProfileId::new_v7(),
+            ClientId::new_v7(),
+            fasti_domain::CredentialId::new_v7(),
+            fasti_domain::ProfileGrantId::new_v7(),
+            1,
+        );
+        let limit = IdentityImpactPageLimit::try_new(1).expect("one-record preview");
+
+        assert!(PreviewAnimeGroupingPolicyChangeQuery::try_new(
+            RequestCorrelationId::new_v7(),
+            access,
+            AnimeGroupingPolicyScope::Profile,
+            AnimeGroupingPolicyChange::InheritProfile,
+            None,
+            limit,
+        )
+        .is_err());
+        assert!(PreviewAnimeGroupingPolicyChangeQuery::try_new(
+            RequestCorrelationId::new_v7(),
+            access,
+            AnimeGroupingPolicyScope::Client(ClientId::new_v7()),
+            AnimeGroupingPolicyChange::InheritProfile,
+            None,
+            limit,
+        )
+        .is_ok());
+        assert!(ApplyAnimeGroupingPolicyChangeCommand::try_new(
+            RequestCorrelationId::new_v7(),
+            access,
+            AnimeGroupingPolicyScope::Profile,
+            OperationId::new_v7(),
+            Sha256Digest::from_bytes(&[0; 32]),
+            0,
+            AnimeGroupingPolicyChange::InheritProfile,
+        )
+        .is_err());
     }
 }
