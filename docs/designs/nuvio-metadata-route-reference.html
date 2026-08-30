@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fasti metadata route references</title>
+  <style>
+    :root { --archive:#f2efe6; --paper:#fffdf8; --ink:#181716; --muted:#625e56; --action:#1e4fa3; --attention:#8c5a12; --verified:#2e6f63; --rule:#8b877f; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--archive); color:var(--ink); font:16px/1.45 "Atkinson Hyperlegible", sans-serif; }
+    header { padding:20px 24px; border-bottom:1px solid var(--rule); background:var(--paper); }
+    main { max-width:1320px; margin:auto; padding:24px; }
+    h1,h2,h3 { font-family:"Newsreader", Georgia, serif; font-weight:500; }
+    h1 { margin:0 0 6px; }
+    h2 { margin:0; }
+    p { max-width:72ch; }
+    .label { color:var(--muted); font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+    .board { display:grid; gap:24px; }
+    figure { margin:0; }
+    figcaption { margin-bottom:8px; font-weight:700; }
+    .route { min-height:300px; padding:20px; border:1px solid var(--rule); background:var(--paper); }
+    .route-head,.toolbar,.actions,.split,.fact-row { display:flex; gap:12px; align-items:center; }
+    .route-head,.fact-row { justify-content:space-between; }
+    .route-head { border-bottom:1px solid var(--rule); padding-bottom:12px; }
+    .toolbar { flex-wrap:wrap; margin:16px 0; }
+    .split { align-items:stretch; }
+    .pane { flex:1 1 0; min-width:0; border-top:1px solid var(--rule); padding-top:14px; }
+    .list { padding:0; margin:12px 0; list-style:none; border-top:1px solid var(--rule); }
+    .list li { padding:12px 0; border-bottom:1px solid var(--rule); }
+    .status { padding:10px 12px; border:1px dashed var(--attention); margin:12px 0; }
+    .status.ok { border-color:var(--verified); }
+    .evidence { font-family:"IBM Plex Mono", monospace; font-size:.85rem; }
+    button,input,select { min-height:44px; padding:8px 12px; font:inherit; }
+    button { border:1px solid var(--action); background:var(--paper); color:var(--action); }
+    button.primary { background:var(--action); color:#fff; }
+    details { border-top:1px solid var(--rule); padding-top:12px; }
+    :is(button,input,select,summary):focus-visible { outline:3px solid var(--action); outline-offset:2px; }
+    @media (max-width:700px) {
+      main { padding:16px; }
+      .route { padding:16px; }
+      .route-head,.split,.fact-row { align-items:stretch; flex-direction:column; }
+      .actions { align-items:stretch; flex-direction:column; }
+      .toolbar > * { flex:1 1 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="label">Route-level planning reference, not production markup</div>
+    <h1>Metadata, Library, Collections, and Nuvio</h1>
+    <p>Each frame shows information order, state, and actions at desktop width. The same markup becomes one ordered column at 375px.</p>
+  </header>
+  <main>
+    <div class="board">
+      <figure>
+        <figcaption>Explore Search -> candidate details</figcaption>
+        <section class="route">
+          <div class="route-head"><h2>Search metadata sources</h2><span>3 of 4 sources available</span></div>
+          <div class="toolbar"><input aria-label="Title, person, or identifier" value="Frieren"><select aria-label="Sources"><option>All configured sources</option></select><button class="primary">Search</button></div>
+          <div class="split"><div class="pane"><h3>3 candidates</h3><ul class="list"><li><strong>Frieren: Beyond Journey's End</strong><br>Likely match · TMDB, MAL, Kitsu</li><li>Frieren: The Journey Continues<br>Different year · TMDB</li></ul><div class="status">MDBList did not respond. Local and other source results remain available.</div></div><div class="pane"><h3>Candidate, not a Fasti record</h3><p>English title · 2023 · Television</p><p class="evidence">TMDB TV 209867 · MAL 52991 · Kitsu 46001</p><div class="actions"><button class="primary">Create Fasti record</button><button>Attach to existing record</button><button>Resolve later</button></div></div></div>
+        </section>
+      </figure>
+      <figure>
+        <figcaption>Record details -> chosen metadata -> evidence</figcaption>
+        <section class="route">
+          <div class="route-head"><div><span class="label">Fasti record</span><h2>Frieren: Beyond Journey's End</h2></div><span>Not saved</span></div>
+          <div class="toolbar"><button class="primary">Save to Library</button><button>Add to Collection</button><button>Update progress</button></div>
+          <h3>Chosen metadata</h3><div class="fact-row"><span>Title</span><strong>TMDB · English</strong></div><div class="fact-row"><span>Artwork</span><strong>TMDB · fresh</strong></div><div class="fact-row"><span>Anime export</span><strong>MAL grouping</strong></div>
+          <details><summary>Metadata sources and sync evidence</summary><p class="evidence">Record rec_... · claims retained · last projection 14:32</p></details>
+        </section>
+      </figure>
+      <figure>
+        <figcaption>Library -> filters -> first-use and filter-empty states</figcaption>
+        <section class="route">
+          <div class="route-head"><h2>Library</h2><span>Current profile: Ryan</span></div>
+          <div class="toolbar"><select aria-label="Library state"><option>All records</option><option>Needs review</option></select><input aria-label="Filter this Library" placeholder="Filter this Library"><button>Clear filters</button></div>
+          <div class="status ok"><strong>No saved records match these filters.</strong><br>Your records are unchanged. Clear filters or search metadata sources.</div>
+          <div class="actions"><button class="primary">Clear filters</button><button>Search metadata sources</button></div>
+        </section>
+      </figure>
+      <figure>
+        <figcaption>Collection import -> loss report -> preview -> receipt</figcaption>
+        <section class="route">
+          <div class="route-head"><h2>Preview Collection import</h2><span>3,059 source definitions checked</span></div>
+          <ol><li>Select file or source</li><li>Validate size, depth, shape, and digest</li><li>Review dependencies and possible downstream loss</li><li>Preview additions, changes, disabled sources, and removals</li><li>Choose merge, replace, or keep as reference</li></ol>
+          <div class="status"><strong>7 add-on sources need review.</strong> They remain visible and disabled. Unknown fields stay in the original document.</div>
+          <div class="actions"><button class="primary">Merge 2,778 resolved sources</button><button>Keep as reference</button><button>Cancel</button></div>
+        </section>
+      </figure>
+      <figure>
+        <figcaption>Two separate Nuvio connection directions</figcaption>
+        <section class="route">
+          <div class="split"><div class="pane"><span class="label">External account connection</span><h2>Sync this profile with Nuvio Cloud</h2><p>Merge Library, watched state, and progress for the selected Nuvio profile.</p><div class="status">Paused after token rotation. Local changes remain queued.</div><button class="primary">Reauthorize and resume</button> <button>Reconcile changes</button></div><div class="pane"><span class="label">Fasti client connection</span><h2>Connect Nuvio to this Fasti server</h2><p>Living-room NuvioTV can read Library and two Collections and update watched state and progress.</p><div class="status ok">Paired. Last sync completed 1 minute ago.</div><button class="primary">Review access and sync</button> <button>Revoke client</button></div></div>
+        </section>
+      </figure>
+      <figure>
+        <figcaption>Local sharing -> visible/private scope -> members</figcaption>
+        <section class="route">
+          <div class="route-head"><h2>Local sharing</h2><span>Active · 2 members</span></div>
+          <div class="fact-row"><span>Members can see</span><strong>Library and two Collections</strong></div><div class="fact-row"><span>Always private</span><strong>Credentials, notes, ratings, source evidence</strong></div><div class="fact-row"><span>Revoked</span><strong>1 device · no cached access</strong></div>
+          <div class="status ok">Last verified 2 minutes ago. Discovery publishes no private title or profile data.</div>
+          <div class="actions"><button class="primary">Choose what members can see</button><button>Manage members</button><button>View audit history</button></div>
+        </section>
+      </figure>
+    </div>
+  </main>
+</body>
+</html>

@@ -18,6 +18,10 @@ const uatOwnershipPath = resolve(
   repositoryRoot,
   "tests/conformance/uat-ownership.v1.json",
 );
+const nuvioMetadataPreviewPath = resolve(
+  repositoryRoot,
+  "contracts/registry/v1/nuvio-metadata-programme-preview.yaml",
+);
 const identityUatCsvPath = resolve(
   repositoryRoot,
   "tests/conformance/identity-uat-matrix.v1.csv",
@@ -43,6 +47,8 @@ const IDENTITY_UAT_HEADER = [
   "source_basis",
 ];
 const IDENTITY_UAT_ROW_COUNT = 126;
+const LEGACY_UAT_ROW_COUNT = 80;
+const NUVIO_METADATA_UAT_ROW_COUNT = 60;
 const ALLOWED_IDENTITY_CATEGORIES = new Set([
   "stable_entity",
   "partial_identity",
@@ -523,20 +529,50 @@ async function validateUat(registry) {
     "Test type",
   ]);
   const sourceRows = rows.slice(1);
-  assert.equal(sourceRows.length, 80, "source UAT matrix must contain 80 rows");
+  assert.equal(
+    sourceRows.length,
+    LEGACY_UAT_ROW_COUNT + NUVIO_METADATA_UAT_ROW_COUNT,
+    "source UAT matrix must contain 80 legacy and 60 Nuvio metadata programme rows",
+  );
   assert.ok(
     sourceRows.every((row) => row.length === rows[0].length),
     "every source UAT row must have the header field count",
   );
-  const expectedIds = Array.from(
-    { length: 80 },
+  const legacyExpectedIds = Array.from(
+    { length: LEGACY_UAT_ROW_COUNT },
     (_, index) => `ID-${String(index + 1).padStart(3, "0")}`,
+  );
+  const programmeExpectedIds = Array.from(
+    { length: NUVIO_METADATA_UAT_ROW_COUNT },
+    (_, index) => `MDN-${String(index + 1).padStart(3, "0")}`,
   );
   assert.deepEqual(
     sourceRows.map(([id]) => id),
-    expectedIds,
-    "source UAT IDs must be the complete ordered ID-001 through ID-080 set",
+    [...legacyExpectedIds, ...programmeExpectedIds],
+    "source UAT IDs must be ordered ID-001 through ID-080 then MDN-001 through MDN-060",
   );
+
+  const preview = parseYaml(await readFile(nuvioMetadataPreviewPath, "utf8"));
+  assert.equal(preview.preview_version, 1);
+  assert.equal(preview.status, "approved_for_implementation");
+  const previewCapabilities = Object.values(preview.capability_groups).flatMap(
+    ({ ids }) => ids,
+  );
+  assert.equal(previewCapabilities.length, 51);
+  assert.equal(new Set(previewCapabilities).size, previewCapabilities.length);
+  assert.ok(
+    previewCapabilities.every((id) =>
+      /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/u.test(id),
+    ),
+    "programme capability IDs must use the governed dotted identifier shape",
+  );
+  assert.equal(preview.stable_problems.length, 35);
+  assert.equal(
+    new Set(preview.stable_problems).size,
+    preview.stable_problems.length,
+  );
+  assert.equal(preview.events.length, 8);
+  assert.equal(new Set(preview.events).size, preview.events.length);
 
   const ownership = await readStrictJson(uatOwnershipPath);
   assert.match(ownership.version, /^\d+\.\d+\.\d+$/u);
@@ -547,13 +583,13 @@ async function validateUat(registry) {
   );
   assert.equal(
     ownership.cases.length,
-    80,
-    "UAT ownership must contain 80 cases",
+    LEGACY_UAT_ROW_COUNT,
+    "runtime UAT ownership must retain the 80 implemented/allocated legacy cases until programme slices promote MDN cases",
   );
   assert.deepEqual(
     ownership.cases.map(({ id }) => id),
-    expectedIds,
-    "UAT ownership must map every source ID exactly once and in source order",
+    legacyExpectedIds,
+    "runtime UAT ownership must map every legacy source ID exactly once and in source order",
   );
 
   for (const entry of ownership.cases) {
@@ -606,7 +642,8 @@ async function validateUat(registry) {
   );
 
   return {
-    caseCount: ownership.cases.length,
+    caseCount: sourceRows.length,
+    plannedCount: programmeExpectedIds.length,
     executableCount: ownership.cases.filter(
       ({ status }) => status === "executable-b1",
     ).length,
@@ -713,5 +750,5 @@ const [okf, uat, identityUat] = await Promise.all([
 ]);
 
 console.log(
-  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
+  `PASS: OKF 0.2 catalogue concepts=${okf.conceptCount}; UAT cases=${uat.caseCount} planned-nuvio-metadata=${uat.plannedCount} executable-b1=${uat.executableCount} contract-b1=${uat.contractCount} deferred=${uat.deferredCount}; identity UAT cases=${identityUat.caseCount} critical=${identityUat.criticalCount} phases=${identityUat.phaseCount}`,
 );
