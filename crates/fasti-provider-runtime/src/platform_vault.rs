@@ -1,7 +1,7 @@
 use crate::registry;
 use fasti_application::{
     CredentialReference, CredentialSecret, CredentialVaultError, CredentialVaultPort,
-    CredentialVaultSource, StoredCredential,
+    CredentialVaultSource, StoredCredential, MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 #[cfg(not(target_os = "android"))]
 use keyring::{Entry, Error as KeyringError};
@@ -176,7 +176,9 @@ impl CredentialVaultPort for PlatformCredentialVault {
 }
 
 fn valid_provider_credential(value: &[u8]) -> bool {
-    !value.is_empty() && value.len() <= 512 && value.iter().all(|byte| byte.is_ascii_graphic())
+    !value.is_empty()
+        && value.len() <= MAX_PROVIDER_CREDENTIAL_BYTES
+        && value.iter().all(|byte| byte.is_ascii_graphic())
 }
 
 #[cfg(test)]
@@ -192,5 +194,17 @@ mod tests {
             vault.account(&reference).expect("platform account"),
             "provider/tmdb/read-access-token-abc123"
         );
+    }
+
+    #[test]
+    fn provider_credential_limit_matches_the_public_contract() {
+        assert!(valid_provider_credential(
+            &vec![b'x'; MAX_PROVIDER_CREDENTIAL_BYTES]
+        ));
+        assert!(!valid_provider_credential(&vec![
+            b'x';
+            MAX_PROVIDER_CREDENTIAL_BYTES
+                + 1
+        ]));
     }
 }

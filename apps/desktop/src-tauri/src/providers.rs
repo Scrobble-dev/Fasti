@@ -4,7 +4,7 @@ use fasti_application::{
     CredentialRequirement, CredentialSecret, CredentialVaultSource, OutboundAccessPolicy,
     ProblemCode, ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
     ProviderCheckKind, ProviderCheckMetadata, ProviderCheckStatus, ProviderCredentialStatus,
-    ProviderId, ProviderStatePort,
+    ProviderId, ProviderStatePort, MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 use fasti_domain::WorkspaceId;
 use fasti_provider_runtime::{ProviderRuntime, ProviderRuntimeError, ProviderSpec};
@@ -149,11 +149,11 @@ pub(crate) fn save_credential(
     }
     let credential = input.credential.into_bytes();
     if credential.is_empty()
-        || credential.len() > 512
+        || credential.len() > MAX_PROVIDER_CREDENTIAL_BYTES
         || !credential.iter().all(|byte| byte.is_ascii_graphic())
     {
         return Err(DesktopProblem::provider_credential(
-            "A provider credential must contain 1 to 512 visible ASCII characters.",
+            "A provider credential must contain 1 to 4096 visible ASCII characters.",
         ));
     }
     let secret = CredentialSecret::try_from_bytes(credential)

@@ -13,6 +13,7 @@ use fasti_application::{
     ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus, ProviderCheckKind,
     ProviderCheckMetadata, ProviderCheckStatus, ProviderCredentialStatus, ProviderId,
     ProviderStatePort, ProviderStatePortError, RequestAccessContext, Violation,
+    MAX_PROVIDER_CREDENTIAL_BYTES,
 };
 use fasti_contracts::{
     ConfigureProviderCredentialRequest, CredentialRequirementDto, ListProvidersResponse,
@@ -168,6 +169,23 @@ fn invalid_path(capability: CapabilityKey, correlation_id: RequestCorrelationId)
     application_problem(Box::new(
         FastiProblem::validation_failed(capability, correlation_id, vec![violation])
             .expect("one provider violation is within bounds"),
+    ))
+}
+
+fn invalid_credential(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> HttpProblem {
+    let violation = Violation::try_new(
+        "invalid_provider_credential",
+        "/secret",
+        "provider credential must contain visible ASCII characters",
+        "1 to 4096 visible ASCII characters",
+    )
+    .expect("adapter-owned credential violation is valid");
+    application_problem(Box::new(
+        FastiProblem::validation_failed(capability, correlation_id, vec![violation])
+            .expect("one credential violation is within bounds"),
     ))
 }
 
@@ -559,6 +577,13 @@ pub(crate) async fn configure_provider_credential(
     let access = authorize(&state, &headers, capability, correlation_id).await?;
     let Json(request) =
         request.map_err(|rejection| json_rejection(capability, correlation_id, rejection))?;
+    let secret_bytes = request.secret.into_bytes();
+    if secret_bytes.is_empty()
+        || secret_bytes.len() > MAX_PROVIDER_CREDENTIAL_BYTES
+        || !secret_bytes.iter().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(invalid_credential(capability, correlation_id));
+    }
     let (provider, provider_capability) = resolve(
         &state.runtime,
         &provider_id,
@@ -619,7 +644,7 @@ pub(crate) async fn configure_provider_credential(
         correlation_id,
     )
     .await?;
-    let secret = CredentialSecret::try_from_bytes(request.secret.into_bytes()).map_err(|_| {
+    let secret = CredentialSecret::try_from_bytes(secret_bytes).map_err(|_| {
         application_problem(Box::new(FastiProblem::from_code(
             ProblemCode::ProviderCredentialInvalid,
             capability,
@@ -1289,6 +1314,30 @@ mod tests {
             .await
             .expect("response");
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(kernel
+            .list_provider_capability_states(workspace_id)
+            .expect("list provider state")
+            .is_empty());
+
+        let (_root, kernel, workspace_id, credential) = enrolled_kernel();
+        let invalid = router().with_state(ProviderApiState {
+            kernel: kernel.clone(),
+            provider_state: kernel.clone(),
+            runtime: Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+                CredentialVaultSource::None,
+            )))),
+        });
+        let response = invalid
+            .oneshot(
+                Request::put("/api/v1/providers/tmdb/credentials/metadata.search")
+                    .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"secret":"not visible ASCII"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert!(kernel
             .list_provider_capability_states(workspace_id)
             .expect("list provider state")

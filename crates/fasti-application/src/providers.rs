@@ -14,6 +14,8 @@ pub const MAX_PROVIDER_ID_BYTES: usize = 128;
 pub const MAX_PROVIDER_CAPABILITY_ID_BYTES: usize = 128;
 pub const MAX_CREDENTIAL_REFERENCE_BYTES: usize = 253;
 pub const MAX_CREDENTIAL_SECRET_BYTES: usize = 64 * 1024;
+/// Public provider-credential request limit shared by every adapter.
+pub const MAX_PROVIDER_CREDENTIAL_BYTES: usize = 4096;
 const CONFIGURATION_DIGEST_BYTES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

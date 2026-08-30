@@ -6,6 +6,7 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::time::Instant;
 
 const DNS_ANSWER_LIMIT: usize = 8;
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -58,14 +59,16 @@ async fn resolve_host_with<F>(
 where
     F: FnOnce(&str, u16) -> Result<Vec<SocketAddr>, &'static str> + Send + 'static,
 {
-    let permit = gate
-        .try_acquire_owned()
-        .map_err(|_| "A host name lookup is already in progress.")?;
+    let deadline = Instant::now() + timeout;
+    let permit = tokio::time::timeout_at(deadline, gate.acquire_owned())
+        .await
+        .map_err(|_| "The host name lookup timed out.")?
+        .map_err(|_| "The host name lookup gate is unavailable.")?;
     let lookup = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         resolver(&host, port)
     });
-    match tokio::time::timeout(timeout, lookup).await {
+    match tokio::time::timeout_at(deadline, lookup).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("The host name lookup did not complete."),
         Err(_) => Err("The host name lookup timed out."),
@@ -139,9 +142,10 @@ impl GovernedTransport {
         endpoint: &reqwest::Url,
     ) -> Result<AuthorizedClient, String> {
         let origin = Origin::try_from(endpoint)?;
-        let permit = Arc::clone(&self.requests)
-            .try_acquire_owned()
-            .map_err(|_| "The provider request limit is already in use.".to_owned())?;
+        let permit = tokio::time::timeout(self.timeout, Arc::clone(&self.requests).acquire_owned())
+            .await
+            .map_err(|_| "The provider request queue timed out.".to_owned())?
+            .map_err(|_| "The provider request queue is unavailable.".to_owned())?;
         let addresses = resolve_once(&origin.host, origin.port)
             .await
             .map_err(str::to_owned)?;
@@ -346,7 +350,7 @@ mod tests {
             |_, _| panic!("a second resolver must not start"),
         )
         .await;
-        assert_eq!(second, Err("A host name lookup is already in progress."));
+        assert_eq!(second, Err("The host name lookup timed out."));
 
         release.send(()).expect("release resolver");
         tokio::time::timeout(Duration::from_secs(1), async {

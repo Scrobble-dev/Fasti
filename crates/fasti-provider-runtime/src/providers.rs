@@ -5,7 +5,8 @@ use fasti_application::{
     CredentialSecret, CredentialVaultError, CredentialVaultPort, CredentialVaultSource,
     NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy, ProviderCapabilityState,
     ProviderCapabilityStatus, ProviderCheckKind, ProviderCredentialStatus, ProviderIdentityMapping,
-    ProviderMetadataField, StoredCredential, GOOGLE_BOOKS_PROVIDER_ID, TMDB_PROVIDER_ID,
+    ProviderMetadataField, StoredCredential, GOOGLE_BOOKS_PROVIDER_ID,
+    MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
     ExternalIdentifierClaim, FieldClaim, FieldKey, Grain, NamespaceDefinition, NamespaceKey,
@@ -1023,9 +1024,12 @@ fn credential_request(
     credential: &CredentialSecret,
 ) -> Result<reqwest::RequestBuilder, ProviderRuntimeError> {
     let bytes = credential.expose();
-    if bytes.is_empty() || bytes.len() > 512 || !bytes.iter().all(|byte| byte.is_ascii_graphic()) {
+    if bytes.is_empty()
+        || bytes.len() > MAX_PROVIDER_CREDENTIAL_BYTES
+        || !bytes.iter().all(|byte| byte.is_ascii_graphic())
+    {
         return Err(ProviderRuntimeError::credential(
-            "A provider credential must contain 1 to 512 visible ASCII characters.",
+            "A provider credential must contain 1 to 4096 visible ASCII characters.",
         ));
     }
     match provider {
@@ -1310,6 +1314,15 @@ mod tests {
         let url = reqwest::Url::parse(GOOGLE_BOOKS_URL).expect("provider URL");
         let valid = CredentialSecret::try_from_bytes(b"valid-key".to_vec()).expect("credential");
         assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), &valid).is_ok());
+        let maximum = CredentialSecret::try_from_bytes(vec![b'x'; MAX_PROVIDER_CREDENTIAL_BYTES])
+            .expect("maximum credential");
+        assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), &maximum).is_ok());
+        let too_long =
+            CredentialSecret::try_from_bytes(vec![b'x'; MAX_PROVIDER_CREDENTIAL_BYTES + 1])
+                .expect("general secret bound remains larger");
+        assert!(
+            credential_request(GOOGLE_BOOKS_PROVIDER, &client, url.clone(), &too_long).is_err()
+        );
         let invalid = CredentialSecret::try_from_bytes(b"key with spaces".to_vec())
             .expect("bounded credential");
         assert!(credential_request(GOOGLE_BOOKS_PROVIDER, &client, url, &invalid).is_err());
