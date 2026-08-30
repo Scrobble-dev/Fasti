@@ -609,6 +609,101 @@
       "uat": []
     },
     {
+      "authorization": "scoped",
+      "bounded_context": "metadata.claims",
+      "contract_body": "m2",
+      "examples": [
+        "metadata.claim.refresh.metadata_claim_stale"
+      ],
+      "id": "metadata.claim.refresh",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "metadata_claim_stale",
+        "payload_too_large",
+        "provider_credential_expired",
+        "provider_credential_invalid",
+        "provider_credential_missing",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "record_not_found",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_claim_refresh"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.projection",
+      "contract_body": "m2",
+      "examples": [
+        "metadata.projection.configure.validation_failed"
+      ],
+      "id": "metadata.projection.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_projection_configure"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "metadata.projection",
+      "contract_body": "m2",
+      "examples": [],
+      "id": "metadata.projection.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m2",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "record_not_found",
+        "storage_unavailable",
+        "validation_failed"
+      ],
+      "runtime_body": "m2",
+      "scopes": [
+        "metadata_projection_read"
+      ],
+      "surface_profile": "m2_metadata",
+      "uat": []
+    },
+    {
       "authorization": "bootstrap_only",
       "bounded_context": "node.administration",
       "contract_body": "b1",
@@ -1864,6 +1959,60 @@
       },
       "ui": {
         "binding": "ui:provider-settings",
+        "binding_visibility": "public",
+        "state": "required"
+      }
+    },
+    "m2_metadata": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Profile projection policy and refresh control are private operational state rather than public linked data.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-metadata",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Metadata refresh and profile projection operations are finite requests; no durable event transport exists in M2.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:metadata-provenance",
         "binding_visibility": "public",
         "state": "required"
       }

@@ -1,4 +1,25 @@
 import type { IntegrationRuntimeStatus } from "./integration-status.js";
+import type {
+  ConfigureMetadataProjectionRequest,
+  MetadataProjectionConfigurationResponse,
+  MetadataProjectionResponse,
+  RefreshMetadataClaimsRequest,
+  RefreshMetadataClaimsResponse,
+} from "@fasti/sdk";
+
+export type {
+  ConfigureMetadataProjectionRequest,
+  EnrichmentPolicyDto,
+  MetadataAttributionDto,
+  MetadataCacheEntryDto,
+  MetadataFieldGroupDto,
+  MetadataProjectedFieldDto,
+  MetadataProjectionConfigurationResponse,
+  MetadataProjectionResponse,
+  RatingClaimDto,
+  RefreshMetadataClaimsRequest,
+  RefreshMetadataClaimsResponse,
+} from "@fasti/sdk";
 
 export type MediaKind =
   | "movie"
@@ -359,6 +380,16 @@ export interface WorkbenchHost {
     document: NuvioCollectionsDocument,
   ): Promise<NuvioCollectionsState>;
   clearNuvioCollections?(): Promise<NuvioCollectionsState>;
+  readMetadataProjection?(
+    recordId: string,
+    offline?: boolean,
+  ): Promise<MetadataProjectionResponse>;
+  configureMetadataProjection?(
+    request: ConfigureMetadataProjectionRequest,
+  ): Promise<MetadataProjectionConfigurationResponse>;
+  refreshMetadataClaims?(
+    request: RefreshMetadataClaimsRequest,
+  ): Promise<RefreshMetadataClaimsResponse>;
   listIntegrations?(): Promise<IntegrationRuntimeStatus[]>;
 }
 

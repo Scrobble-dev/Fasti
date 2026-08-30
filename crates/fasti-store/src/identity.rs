@@ -1,5 +1,5 @@
 use crate::kernel::{authorize_transaction, map_sql, now, timestamp, SqliteKernel};
-use crate::metadata::{load_field_claims, load_field_override};
+use crate::metadata::{load_field_claims, load_profile_field_override, load_projection_policy};
 use fasti_application::{
     ApplicationResult, AttachIdentifierCommand, AttachIdentifierOutcome, CapabilityKey,
     CreateRecordCommand, CreateRecordOutcome, FastiProblem, IdentityPort, ListRecordsQuery,
@@ -7,8 +7,8 @@ use fasti_application::{
     RegisterNamespaceDefinitionCommand, RegisterNamespaceDefinitionOutcome,
 };
 use fasti_domain::{
-    resolve_field, ExternalIdentifierClaim, ExternalIdentifierId, FieldKey, Grain,
-    InterpretationState, NamespaceKey, OccurredAt, RecordId, RecordStatus, WorkspaceId,
+    resolve_profile_field, ExternalIdentifierClaim, ExternalIdentifierId, FieldKey, Grain,
+    InterpretationState, NamespaceKey, OccurredAt, ProfileId, RecordId, RecordStatus, WorkspaceId,
     ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY,
     TITLE_FIELD_KEY,
 };
@@ -192,6 +192,7 @@ impl IdentityPort for SqliteKernel {
         authorize_transaction(&transaction, capability, query.access(), correlation_id)?;
 
         let workspace_id = query.access().workspace_id();
+        let profile_id = query.access().profile_id();
         let mut statement = map_sql(
             transaction.prepare(
                 r#"
@@ -233,6 +234,7 @@ impl IdentityPort for SqliteKernel {
             summaries.push(load_record_summary(
                 &transaction,
                 workspace_id,
+                profile_id,
                 record_id,
                 grain,
                 capability,
@@ -247,6 +249,7 @@ impl IdentityPort for SqliteKernel {
 fn resolved_field(
     connection: &Connection,
     workspace_id: WorkspaceId,
+    profile_id: ProfileId,
     record_id: RecordId,
     field_key: &FieldKey,
     capability: CapabilityKey,
@@ -260,24 +263,24 @@ fn resolved_field(
         capability,
         correlation_id,
     )?;
-    let override_ = load_field_override(
+    let override_ = load_profile_field_override(
         connection,
         workspace_id,
+        profile_id,
         record_id,
         field_key,
         capability,
         correlation_id,
     )?;
-    // No preferred-provider configuration exists yet (that is a profile
-    // preference this task does not build); resolve_field degrades cleanly
-    // to fallback/last-known-good/empty tiers without one.
-    Ok(resolve_field(
-        override_.as_ref(),
-        &claims,
-        None,
-        None,
-        now(),
-    ))
+    let policy = load_projection_policy(
+        connection,
+        workspace_id,
+        profile_id,
+        capability,
+        correlation_id,
+    )?;
+    resolve_profile_field(override_.as_ref(), &claims, &[], &policy, now())
+        .map_err(|_| Box::new(FastiProblem::integrity_failed(capability, correlation_id)))
 }
 
 fn load_latest_activity(
@@ -354,6 +357,7 @@ fn parse_interpretation_state(
 fn load_record_summary(
     connection: &Connection,
     workspace_id: WorkspaceId,
+    profile_id: ProfileId,
     record_id: RecordId,
     grain: Grain,
     capability: CapabilityKey,
@@ -372,6 +376,7 @@ fn load_record_summary(
     let title = resolved_field(
         connection,
         workspace_id,
+        profile_id,
         record_id,
         &title_key,
         capability,
@@ -380,6 +385,7 @@ fn load_record_summary(
     let poster = resolved_field(
         connection,
         workspace_id,
+        profile_id,
         record_id,
         &poster_key,
         capability,
@@ -388,6 +394,7 @@ fn load_record_summary(
     let original_title = resolved_field(
         connection,
         workspace_id,
+        profile_id,
         record_id,
         &original_title_key,
         capability,
@@ -396,6 +403,7 @@ fn load_record_summary(
     let overview = resolved_field(
         connection,
         workspace_id,
+        profile_id,
         record_id,
         &overview_key,
         capability,
@@ -404,6 +412,7 @@ fn load_record_summary(
     let release_year = resolved_field(
         connection,
         workspace_id,
+        profile_id,
         record_id,
         &release_year_key,
         capability,

@@ -14,12 +14,17 @@ use std::path::Path;
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 use utoipa::{
-    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+    openapi::{
+        schema::{AdditionalProperties, Schema},
+        security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+        RefOr,
+    },
     Modify, OpenApi,
 };
 
 mod integrations;
 mod local;
+mod metadata;
 mod nuvio_collections;
 mod observation;
 mod problem;
@@ -77,6 +82,18 @@ impl Modify for ProductionSecurityAddon {
                         .build(),
                 ),
             );
+            let Some(RefOr::T(Schema::OneOf(override_schema))) =
+                components.schemas.get_mut("MetadataOverrideMutationDto")
+            else {
+                panic!("metadata override OpenAPI schema must remain a tagged union");
+            };
+            for variant in &mut override_schema.items {
+                let RefOr::T(Schema::Object(object)) = variant else {
+                    panic!("metadata override variants must remain object schemas");
+                };
+                object.additional_properties =
+                    Some(Box::new(AdditionalProperties::FreeForm(false)));
+            }
         }
     }
 }
@@ -107,7 +124,10 @@ impl Modify for ProductionSecurityAddon {
         integrations::tautulli_webhook,
         integrations::jellyfin_webhook,
         integrations::emby_webhook,
-        integrations::plex_webhook
+        integrations::plex_webhook,
+        metadata::refresh_metadata_claims,
+        metadata::read_metadata_projection,
+        metadata::configure_metadata_projection
     ),
     components(schemas(
         HealthResponse,
@@ -124,6 +144,32 @@ impl Modify for ProductionSecurityAddon {
         fasti_contracts::IntegrationStatusListResponse,
         fasti_contracts::ListRecordsResponse,
         fasti_contracts::ListTrackingDispositionsResponse,
+        fasti_contracts::RefreshMetadataClaimsRequest,
+        fasti_contracts::RefreshMetadataClaimsResponse,
+        fasti_contracts::MetadataClaimDto,
+        fasti_contracts::MetadataClaimProvenanceDto,
+        fasti_contracts::MetadataClaimStatusDto,
+        fasti_contracts::RatingClaimDto,
+        fasti_contracts::RatingScaleDto,
+        fasti_contracts::MetadataProjectedFieldDto,
+        fasti_contracts::MetadataProjectionTierDto,
+        fasti_contracts::MetadataProjectionResponse,
+        fasti_contracts::MetadataProjectionQueryParameters,
+        fasti_contracts::ConfigureMetadataProjectionRequest,
+        fasti_contracts::MetadataProjectionConfigurationResponse,
+        fasti_contracts::MetadataOverrideMutationDto,
+        fasti_contracts::EnrichmentPolicyDto,
+        fasti_contracts::LastKnownGoodPolicyDto,
+        fasti_contracts::MetadataFieldGroupDto,
+        fasti_contracts::MetadataRefreshModeDto,
+        fasti_contracts::MetadataCacheEntryDto,
+        fasti_contracts::MetadataCacheKeyDto,
+        fasti_contracts::MetadataCachePurposeDto,
+        fasti_contracts::MetadataCacheReadStateDto,
+        fasti_contracts::MetadataCacheInvalidationDto,
+        fasti_contracts::MetadataCacheInvalidationReasonDto,
+        fasti_contracts::MetadataDataClassificationDto,
+        fasti_contracts::MetadataAttributionDto,
         fasti_contracts::NodeInitializationResponse,
         fasti_contracts::NuvioCatalogSourceDto,
         fasti_contracts::NuvioCollectionDto,
@@ -196,11 +242,30 @@ pub fn provider_api_router(
     kernel: Arc<dyn LocalKernel>,
     provider_state: Arc<dyn fasti_application::ProviderStatePort>,
     runtime: Arc<fasti_provider_runtime::ProviderRuntime>,
+    credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
 ) -> Router {
     providers::router().with_state(providers::ProviderApiState {
         kernel,
         provider_state,
         runtime,
+        credential_operation_lock,
+    })
+}
+
+/// Constructs the authenticated M2 metadata surface. Provider refresh I/O and
+/// durable projection policy remain behind separate application ports so this
+/// HTTP adapter owns no provider or persistence policy.
+pub fn metadata_api_router(
+    kernel: Arc<dyn LocalKernel>,
+    refresh_service: Arc<dyn fasti_application::MetadataClaimRefreshService>,
+    projection_port: Arc<dyn fasti_application::MetadataProjectionPort>,
+    credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
+) -> Router {
+    metadata::router().with_state(metadata::MetadataApiState {
+        kernel,
+        refresh_service,
+        projection_port,
+        credential_operation_lock,
     })
 }
 
@@ -502,10 +567,13 @@ mod tests {
             "/api/v1/providers/{provider_id}/credentials/{capability_id}",
             "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests",
             "/api/v1/providers/{provider_id}/health",
+            "/api/v1/metadata/claims/refresh",
+            "/api/v1/records/{record_id}/metadata-projection",
+            "/api/v1/profile/metadata-projection",
         ] {
             assert!(document.paths.paths.contains_key(path), "missing {path}");
         }
-        assert_eq!(document.paths.paths.len(), 20);
+        assert_eq!(document.paths.paths.len(), 23);
 
         let serialized = serde_json::to_string(&document).expect("serializable OpenAPI document");
         assert!(serialized.contains("#/components/schemas/HealthResponse"));

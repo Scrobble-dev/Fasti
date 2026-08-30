@@ -93,6 +93,62 @@
         ],
         "type": "object"
       },
+      "ConfigureMetadataProjectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_english_fallback": {
+            "type": "boolean"
+          },
+          "enabled_field_groups": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataFieldGroupDto"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "last_known_good": {
+            "$ref": "#/components/schemas/LastKnownGoodPolicyDto"
+          },
+          "original_locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataOverrideMutationDto"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "preferred_locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferred_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "allow_english_fallback",
+          "last_known_good",
+          "enabled_field_groups",
+          "overrides"
+        ],
+        "type": "object"
+      },
       "ConfigureProviderCredentialRequest": {
         "additionalProperties": false,
         "properties": {
@@ -157,6 +213,58 @@
           "Bearer"
         ],
         "type": "string"
+      },
+      "EnrichmentPolicyDto": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_english_fallback": {
+            "type": "boolean"
+          },
+          "enabled_field_groups": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataFieldGroupDto"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "last_known_good": {
+            "$ref": "#/components/schemas/LastKnownGoodPolicyDto"
+          },
+          "original_locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferred_locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preferred_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "profile_id",
+          "allow_english_fallback",
+          "last_known_good",
+          "enabled_field_groups"
+        ],
+        "type": "object"
       },
       "EnrollFirstClientRequest": {
         "additionalProperties": false,
@@ -378,6 +486,13 @@
         ],
         "type": "object"
       },
+      "LastKnownGoodPolicyDto": {
+        "enum": [
+          "allow",
+          "deny"
+        ],
+        "type": "string"
+      },
       "ListProvidersResponse": {
         "additionalProperties": false,
         "properties": {
@@ -431,6 +546,570 @@
           "truncated"
         ],
         "type": "object"
+      },
+      "MetadataAttributionDto": {
+        "additionalProperties": false,
+        "properties": {
+          "documentation_url": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "text",
+          "documentation_url"
+        ],
+        "type": "object"
+      },
+      "MetadataCacheEntryDto": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "fresh_until": {
+            "type": "string"
+          },
+          "invalidation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataCacheInvalidationDto"
+              }
+            ]
+          },
+          "key": {
+            "$ref": "#/components/schemas/MetadataCacheKeyDto"
+          },
+          "read_state": {
+            "$ref": "#/components/schemas/MetadataCacheReadStateDto"
+          },
+          "stale_on_error_until": {
+            "type": "string"
+          },
+          "stale_while_refreshing_until": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "claim_ids",
+          "created_at",
+          "fresh_until",
+          "stale_while_refreshing_until",
+          "stale_on_error_until",
+          "read_state"
+        ],
+        "type": "object"
+      },
+      "MetadataCacheInvalidationDto": {
+        "additionalProperties": false,
+        "properties": {
+          "invalidated_at": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/MetadataCacheInvalidationReasonDto"
+          }
+        },
+        "required": [
+          "reason",
+          "invalidated_at"
+        ],
+        "type": "object"
+      },
+      "MetadataCacheInvalidationReasonDto": {
+        "enum": [
+          "provider_configuration_changed",
+          "credential_rotated",
+          "projection_policy_changed",
+          "terms_changed",
+          "explicit_retraction"
+        ],
+        "type": "string"
+      },
+      "MetadataCacheKeyDto": {
+        "additionalProperties": false,
+        "properties": {
+          "classification": {
+            "$ref": "#/components/schemas/MetadataDataClassificationDto"
+          },
+          "configuration_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "credential_reference_version": {
+            "format": "int64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "field_group": {
+            "$ref": "#/components/schemas/MetadataFieldGroupDto"
+          },
+          "grain": {
+            "type": "string"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/MetadataCachePurposeDto"
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_provider_route": {
+            "type": "string"
+          },
+          "schema_version": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "settings_fingerprint": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "source_identifier": {
+            "type": "string"
+          },
+          "source_namespace": {
+            "type": "string"
+          },
+          "terms_revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider_id",
+          "record_id",
+          "resolved_provider_route",
+          "grain",
+          "source_namespace",
+          "source_identifier",
+          "field_group",
+          "settings_fingerprint",
+          "configuration_digest",
+          "schema_version",
+          "purpose",
+          "terms_revision",
+          "classification"
+        ],
+        "type": "object"
+      },
+      "MetadataCachePurposeDto": {
+        "enum": [
+          "metadata_enrichment",
+          "display_projection",
+          "rating_lookup",
+          "offline_read"
+        ],
+        "type": "string"
+      },
+      "MetadataCacheReadStateDto": {
+        "enum": [
+          "fresh",
+          "stale_while_refreshing",
+          "stale_on_error",
+          "expired",
+          "invalidated",
+          "partition_denied"
+        ],
+        "type": "string"
+      },
+      "MetadataClaimDto": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "field_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+          },
+          "record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "value",
+          "provenance"
+        ],
+        "type": "object"
+      },
+      "MetadataClaimProvenanceDto": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "evidence_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fetched_at": {
+            "type": "string"
+          },
+          "field_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "record_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_identifier": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_namespace": {
+            "type": "string"
+          },
+          "source_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/MetadataClaimStatusDto"
+          }
+        },
+        "required": [
+          "claim_id",
+          "source_namespace",
+          "fetched_at",
+          "status"
+        ],
+        "type": "object"
+      },
+      "MetadataClaimStatusDto": {
+        "enum": [
+          "fresh",
+          "stale",
+          "invalid",
+          "revoked",
+          "superseded",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "MetadataDataClassificationDto": {
+        "enum": [
+          "public",
+          "internal",
+          "confidential",
+          "restricted"
+        ],
+        "type": "string"
+      },
+      "MetadataFieldGroupDto": {
+        "enum": [
+          "artwork",
+          "basic_info",
+          "details",
+          "release_dates",
+          "credits",
+          "production_companies",
+          "networks",
+          "episodes",
+          "season_artwork",
+          "recommendations",
+          "collections",
+          "trailers",
+          "watch_providers"
+        ],
+        "type": "string"
+      },
+      "MetadataOverrideMutationDto": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "field_key": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "set"
+                ],
+                "type": "string"
+              },
+              "record_id": {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                "type": "string"
+              },
+              "value": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]*$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id",
+              "field_key",
+              "value",
+              "operation"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "field_key": {
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "clear"
+                ],
+                "type": "string"
+              },
+              "record_id": {
+                "maxLength": 36,
+                "minLength": 36,
+                "pattern": "^rec_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "record_id",
+              "field_key",
+              "operation"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "MetadataProjectedFieldDto": {
+        "additionalProperties": false,
+        "properties": {
+          "field_key": {
+            "type": "string"
+          },
+          "is_stale": {
+            "type": "boolean"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "projected_at": {
+            "type": "string"
+          },
+          "provenance": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+              }
+            ]
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "source_namespace": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tier": {
+            "$ref": "#/components/schemas/MetadataProjectionTierDto"
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "profile_id",
+          "record_id",
+          "field_key",
+          "tier",
+          "is_stale",
+          "projected_at"
+        ],
+        "type": "object"
+      },
+      "MetadataProjectionConfigurationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "invalidated_cache_entries": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/EnrichmentPolicyDto"
+          }
+        },
+        "required": [
+          "policy",
+          "invalidated_cache_entries"
+        ],
+        "type": "object"
+      },
+      "MetadataProjectionQueryParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "offline": {
+            "description": "Permit a policy-bounded stale-on-error cache partition when the host is\nexplicitly operating offline. This never permits an expired,\ninvalidated, or classification-denied partition.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "MetadataProjectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attributions": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataAttributionDto"
+            },
+            "type": "array"
+          },
+          "cache_entries": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataCacheEntryDto"
+            },
+            "type": "array"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataProjectedFieldDto"
+            },
+            "type": "array"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/EnrichmentPolicyDto"
+          },
+          "profile_id": {
+            "type": "string"
+          },
+          "ratings": {
+            "items": {
+              "$ref": "#/components/schemas/RatingClaimDto"
+            },
+            "type": "array"
+          },
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile_id",
+          "record_id",
+          "policy",
+          "fields",
+          "ratings",
+          "cache_entries",
+          "attributions"
+        ],
+        "type": "object"
+      },
+      "MetadataProjectionTierDto": {
+        "enum": [
+          "user_override",
+          "preferred_provider_claim",
+          "fallback_provider_claim",
+          "last_known_good",
+          "empty"
+        ],
+        "type": "string"
+      },
+      "MetadataRefreshModeDto": {
+        "enum": [
+          "prefer_cache",
+          "revalidate"
+        ],
+        "type": "string"
       },
       "NodeInitializationResponse": {
         "additionalProperties": false,
@@ -1029,6 +1708,56 @@
         ],
         "type": "string"
       },
+      "RatingClaimDto": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/MetadataClaimProvenanceDto"
+          },
+          "record_id": {
+            "type": "string"
+          },
+          "scale": {
+            "$ref": "#/components/schemas/RatingScaleDto"
+          },
+          "value_millis": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "claim_id",
+          "record_id",
+          "value_millis",
+          "scale",
+          "provenance"
+        ],
+        "type": "object"
+      },
+      "RatingScaleDto": {
+        "additionalProperties": false,
+        "properties": {
+          "maximum_millis": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minimum_millis": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "minimum_millis",
+          "maximum_millis"
+        ],
+        "type": "object"
+      },
       "RecordActivityDto": {
         "additionalProperties": false,
         "properties": {
@@ -1143,6 +1872,106 @@
           "status",
           "title",
           "poster"
+        ],
+        "type": "object"
+      },
+      "RefreshMetadataClaimsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "field_groups": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataFieldGroupDto"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "locale": {
+            "maxLength": 16,
+            "minLength": 2,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/MetadataRefreshModeDto"
+          },
+          "provider_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "record_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 8,
+            "minLength": 2,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "record_id",
+          "provider_id",
+          "field_groups",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "RefreshMetadataClaimsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "attributions": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataAttributionDto"
+            },
+            "type": "array"
+          },
+          "cache_entries": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataCacheEntryDto"
+            },
+            "type": "array"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataClaimDto"
+            },
+            "type": "array"
+          },
+          "projections": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataProjectedFieldDto"
+            },
+            "type": "array"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "ratings": {
+            "items": {
+              "$ref": "#/components/schemas/RatingClaimDto"
+            },
+            "type": "array"
+          },
+          "record_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_id",
+          "provider_id",
+          "claims",
+          "ratings",
+          "projections",
+          "cache_entries",
+          "attributions"
         ],
         "type": "object"
       },
@@ -2845,6 +3674,213 @@
         "x-fasti-runtime-availability": "implemented"
       }
     },
+    "/api/v1/metadata/claims/refresh": {
+      "post": {
+        "operationId": "refresh_metadata_claims",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshMetadataClaimsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshMetadataClaimsResponse"
+                }
+              }
+            },
+            "description": "Immutable metadata and rating claims were refreshed"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request JSON is malformed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks metadata refresh scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record is not available in the authenticated workspace"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "metadata.claim.refresh.metadata_claim_stale": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "metadata.claim.refresh",
+                      "code": "metadata_claim_stale",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000036",
+                      "detail": "the provider refresh did not produce a fresh claim; the last-known-good claim remains active",
+                      "next_actions": [
+                        {
+                          "id": "retry_metadata_refresh",
+                          "label": "Retry the metadata refresh or use the labelled last-known-good value"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_safe",
+                      "safe_state": "prior_state_retained",
+                      "status": 409,
+                      "title": "Metadata claim stale",
+                      "type": "https://fasti.scrobble.dev/v1/problems/metadata-claim-stale",
+                      "violations": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider refresh failed and the last-known-good projection was retained"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded metadata transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request media type is unsupported"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Refresh request or provider route is invalid"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider rate limit was reached"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Metadata state failed an integrity check"
+          },
+          "502": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider returned an invalid response"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Provider runtime or storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "metadata"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "metadata.claim.refresh",
+        "x-fasti-example-ids": [
+          "metadata.claim.refresh.metadata_claim_stale"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "metadata_claim_stale",
+          "payload_too_large",
+          "provider_credential_expired",
+          "provider_credential_invalid",
+          "provider_credential_missing",
+          "provider_rate_limited",
+          "provider_response_invalid",
+          "provider_route_unavailable",
+          "provider_unavailable",
+          "record_not_found",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "metadata_claim_refresh"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
     "/api/v1/namespaces": {
       "post": {
         "operationId": "register_namespace",
@@ -3397,6 +4433,172 @@
         ],
         "x-fasti-required-scopes": [
           "observation_accept"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/profile/metadata-projection": {
+      "put": {
+        "operationId": "configure_metadata_projection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureMetadataProjectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataProjectionConfigurationResponse"
+                }
+              }
+            },
+            "description": "Profile metadata policy and override mutations were applied atomically"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request JSON is malformed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks metadata projection configuration scope"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request body exceeds the bounded metadata transport limit"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Request media type is unsupported"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "metadata.projection.configure.validation_failed": {
+                    "value": {
+                      "actual": null,
+                      "capability_id": "metadata.projection.configure",
+                      "code": "validation_failed",
+                      "correlation_id": "req_018f0e0e7f7b70008000000000000038",
+                      "detail": "request representation does not satisfy the governed contract",
+                      "next_actions": [
+                        {
+                          "id": "correct_request",
+                          "label": "Correct the request representation and retry"
+                        }
+                      ],
+                      "param": null,
+                      "retryability": "retry_after_correction",
+                      "safe_state": "no_mutation",
+                      "status": 422,
+                      "title": "Validation failed",
+                      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed",
+                      "violations": [
+                        {
+                          "actual": null,
+                          "code": "invalid_representation",
+                          "expected": "the documented request schema",
+                          "pointer": "/",
+                          "reason": "request JSON does not match the governed schema"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Projection policy or override mutation is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Metadata state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Metadata storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "metadata"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "metadata.projection.configure",
+        "x-fasti-example-ids": [
+          "metadata.projection.configure.validation_failed"
+        ],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "malformed_json",
+          "payload_too_large",
+          "storage_unavailable",
+          "unsupported_media_type",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "metadata_projection_configure"
         ],
         "x-fasti-runtime-availability": "implemented"
       }
@@ -5277,6 +6479,126 @@
         ],
         "x-fasti-required-scopes": [
           "identity_write"
+        ],
+        "x-fasti-runtime-availability": "implemented"
+      }
+    },
+    "/api/v1/records/{record_id}/metadata-projection": {
+      "get": {
+        "operationId": "read_metadata_projection",
+        "parameters": [
+          {
+            "description": "Canonical Fasti Record ID",
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Permit a policy-bounded stale-on-error cache partition when the host is\nexplicitly operating offline. This never permits an expired,\ninvalidated, or classification-denied partition.",
+            "in": "query",
+            "name": "offline",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataProjectionResponse"
+                }
+              }
+            },
+            "description": "Profile-selected metadata projection with provenance and offline cache state"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Credential is missing or inactive"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authenticated principal lacks metadata projection read scope"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record is not available in the authenticated workspace"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Record ID or query is invalid"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Metadata state failed an integrity check"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Metadata storage is unavailable"
+          }
+        },
+        "security": [
+          {
+            "credential_bearer": []
+          }
+        ],
+        "tags": [
+          "metadata"
+        ],
+        "x-fasti-authorization": "scoped",
+        "x-fasti-capability-id": "metadata.projection.read",
+        "x-fasti-example-ids": [],
+        "x-fasti-problem-codes": [
+          "authentication_failed",
+          "forbidden",
+          "integrity_failed",
+          "record_not_found",
+          "storage_unavailable",
+          "validation_failed"
+        ],
+        "x-fasti-required-scopes": [
+          "metadata_projection_read"
         ],
         "x-fasti-runtime-availability": "implemented"
       }

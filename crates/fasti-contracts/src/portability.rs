@@ -67,6 +67,15 @@ pub enum WorkspaceExportEntityDto {
     MetadataFieldClaims,
     MetadataFieldOverrides,
     ProfileRecordTrackingDispositions,
+    MetadataClaims,
+    MetadataClaimProvenance,
+    MetadataRatingClaims,
+    MetadataClaimLifecycleEvents,
+    MetadataProjectionPolicies,
+    MetadataProfileFieldOverrides,
+    MetadataLegacyOverrideOwnership,
+    MetadataOverrideMigrationReceipts,
+    MetadataAttributions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -96,7 +105,7 @@ pub struct WorkspaceBlobDescriptorDto {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceManifestDto {
     pub format: WorkspaceManifestFormatDto,
-    #[schemars(range(min = 1, max = 2))]
+    #[schemars(range(min = 1, max = 3))]
     pub format_version: u32,
     #[schemars(length(equal = 36), regex(pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-workspace-id"))]
     pub workspace_id: String,
@@ -112,7 +121,7 @@ pub struct WorkspaceManifestDto {
     pub migration_version: u32,
     #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
     pub migration_digest: String,
-    #[schemars(length(min = 16, max = 19))]
+    #[schemars(length(min = 16, max = 28))]
     pub streams: Vec<WorkspaceStreamDescriptorDto>,
     pub blobs: Vec<WorkspaceBlobDescriptorDto>,
 }
@@ -226,6 +235,25 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
             WorkspaceExportEntityDto::ProfileRecordTrackingDispositions => {
                 Self::ProfileRecordTrackingDispositions
             }
+            WorkspaceExportEntityDto::MetadataClaims => Self::MetadataClaims,
+            WorkspaceExportEntityDto::MetadataClaimProvenance => Self::MetadataClaimProvenance,
+            WorkspaceExportEntityDto::MetadataRatingClaims => Self::MetadataRatingClaims,
+            WorkspaceExportEntityDto::MetadataClaimLifecycleEvents => {
+                Self::MetadataClaimLifecycleEvents
+            }
+            WorkspaceExportEntityDto::MetadataProjectionPolicies => {
+                Self::MetadataProjectionPolicies
+            }
+            WorkspaceExportEntityDto::MetadataProfileFieldOverrides => {
+                Self::MetadataProfileFieldOverrides
+            }
+            WorkspaceExportEntityDto::MetadataLegacyOverrideOwnership => {
+                Self::MetadataLegacyOverrideOwnership
+            }
+            WorkspaceExportEntityDto::MetadataOverrideMigrationReceipts => {
+                Self::MetadataOverrideMigrationReceipts
+            }
+            WorkspaceExportEntityDto::MetadataAttributions => Self::MetadataAttributions,
         }
     }
 }
@@ -254,6 +282,23 @@ impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
             WorkspaceExportEntity::ProfileRecordTrackingDispositions => {
                 Self::ProfileRecordTrackingDispositions
             }
+            WorkspaceExportEntity::MetadataClaims => Self::MetadataClaims,
+            WorkspaceExportEntity::MetadataClaimProvenance => Self::MetadataClaimProvenance,
+            WorkspaceExportEntity::MetadataRatingClaims => Self::MetadataRatingClaims,
+            WorkspaceExportEntity::MetadataClaimLifecycleEvents => {
+                Self::MetadataClaimLifecycleEvents
+            }
+            WorkspaceExportEntity::MetadataProjectionPolicies => Self::MetadataProjectionPolicies,
+            WorkspaceExportEntity::MetadataProfileFieldOverrides => {
+                Self::MetadataProfileFieldOverrides
+            }
+            WorkspaceExportEntity::MetadataLegacyOverrideOwnership => {
+                Self::MetadataLegacyOverrideOwnership
+            }
+            WorkspaceExportEntity::MetadataOverrideMigrationReceipts => {
+                Self::MetadataOverrideMigrationReceipts
+            }
+            WorkspaceExportEntity::MetadataAttributions => Self::MetadataAttributions,
         }
     }
 }
@@ -486,7 +531,7 @@ impl ChecksummedWorkspaceManifestDto {
 mod tests {
     use super::*;
     use fasti_application::{
-        WORKSPACE_ARCHIVE_FORMAT_VERSION, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V1_FORMAT_VERSION, WORKSPACE_ARCHIVE_V2_FORMAT_VERSION,
     };
     use schemars::generate::SchemaSettings;
     use std::num::NonZeroU64;
@@ -589,11 +634,11 @@ mod tests {
         let expected = checked_v2_example();
         assert_eq!(
             expected.manifest.format_version,
-            WORKSPACE_ARCHIVE_FORMAT_VERSION
+            WORKSPACE_ARCHIVE_V2_FORMAT_VERSION
         );
         assert_eq!(
             expected.manifest.streams.len(),
-            WorkspaceExportEntity::ALL.len()
+            WorkspaceExportEntity::V2.len()
         );
         assert_eq!(
             expected.manifest.streams[..WorkspaceExportEntity::V1.len()],
@@ -827,7 +872,7 @@ mod tests {
     #[test]
     fn hostile_conversion_rejects_version_ids_digests_bounds_and_stream_order() {
         let mut value = checked_example();
-        value.manifest.format_version = WORKSPACE_ARCHIVE_FORMAT_VERSION + 1;
+        value.manifest.format_version = fasti_application::WORKSPACE_ARCHIVE_FORMAT_VERSION + 1;
         assert_eq!(
             value.try_into_application(limits()),
             Err(WorkspaceManifestConversionError::UnsupportedFormatVersion)

@@ -1410,7 +1410,6 @@ provider_rate_limited
 provider_response_invalid
 provider_route_unavailable
 metadata_claim_stale
-metadata_projection_unavailable
 identity_route_ambiguous
 identity_route_missing
 search_source_unavailable

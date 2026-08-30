@@ -1,10 +1,12 @@
 //! Shared governed provider registry and concrete metadata adapters.
 
+mod metadata;
 mod platform_vault;
 mod providers;
 mod transport;
 
 use fasti_application::ProblemCode;
+pub use metadata::*;
 pub use platform_vault::*;
 pub use providers::*;
 pub use transport::{

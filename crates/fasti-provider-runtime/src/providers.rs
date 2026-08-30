@@ -9,12 +9,14 @@ use fasti_application::{
     MAX_PROVIDER_CREDENTIAL_BYTES, TMDB_PROVIDER_ID,
 };
 use fasti_domain::{
-    ExternalIdentifierClaim, FieldClaim, FieldKey, Grain, NamespaceDefinition, NamespaceKey,
-    ReceivedAt, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY,
-    RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    ExternalIdentifierClaim, FieldClaim, FieldClaimProvenance, FieldClaimStatus, FieldKey, Grain,
+    MetadataClaimId, MetadataLocale, MetadataProviderId, NamespaceDefinition, NamespaceKey,
+    ReceivedAt, Sha256Digest, METADATA_FRESH_SECONDS, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY,
+    POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
 };
 use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -349,6 +351,8 @@ pub struct ProviderSelectionInput {
     pub provider: String,
     pub provider_id: String,
     pub kind: String,
+    pub locale: Option<String>,
+    pub region: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -362,6 +366,8 @@ pub struct ProviderCandidate {
     pub authors: Vec<String>,
     pub image_url: Option<String>,
     pub overview: Option<String>,
+    #[serde(skip)]
+    evidence_digest: Sha256Digest,
 }
 
 impl ProviderCandidate {
@@ -395,15 +401,27 @@ impl ProviderCandidate {
             })
     }
 
-    pub fn metadata_fields(&self) -> Result<Vec<ProviderMetadataField>, ProviderRuntimeError> {
+    pub fn metadata_fields(
+        &self,
+        locale: Option<MetadataLocale>,
+        region: Option<fasti_domain::MetadataRegion>,
+    ) -> Result<Vec<ProviderMetadataField>, ProviderRuntimeError> {
         let source = NamespaceKey::try_new(self.identity_mapping()?.namespace()).map_err(|_| {
             ProviderRuntimeError::response_invalid("The provider namespace is invalid.")
         })?;
+        let provider_id = MetadataProviderId::try_new(self.provider).map_err(|_| {
+            ProviderRuntimeError::response_invalid("The provider identity is invalid.")
+        })?;
         let fetched_at = ReceivedAt::from_application_clock(chrono::Utc::now());
         let mut fields = vec![provider_field(
+            &provider_id,
             &source,
+            &self.provider_id,
             TITLE_FIELD_KEY,
             &self.title,
+            locale.clone(),
+            region.clone(),
+            &self.evidence_digest,
             fetched_at,
         )?];
         for (key, value) in [
@@ -412,14 +430,29 @@ impl ProviderCandidate {
             (POSTER_FIELD_KEY, self.image_url.as_deref()),
         ] {
             if let Some(value) = value {
-                fields.push(provider_field(&source, key, value, fetched_at)?);
+                fields.push(provider_field(
+                    &provider_id,
+                    &source,
+                    &self.provider_id,
+                    key,
+                    value,
+                    locale.clone(),
+                    region.clone(),
+                    &self.evidence_digest,
+                    fetched_at,
+                )?);
             }
         }
         if let Some(year) = self.release_year {
             fields.push(provider_field(
+                &provider_id,
                 &source,
+                &self.provider_id,
                 RELEASE_YEAR_FIELD_KEY,
                 &year.to_string(),
+                locale,
+                region,
+                &self.evidence_digest,
                 fetched_at,
             )?);
         }
@@ -427,16 +460,42 @@ impl ProviderCandidate {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn provider_field(
+    provider_id: &MetadataProviderId,
     source: &NamespaceKey,
+    source_identifier: &str,
     key: &str,
     value: &str,
+    locale: Option<MetadataLocale>,
+    region: Option<fasti_domain::MetadataRegion>,
+    evidence_digest: &Sha256Digest,
     fetched_at: ReceivedAt,
 ) -> Result<ProviderMetadataField, ProviderRuntimeError> {
     let field_key = FieldKey::try_new(key)
         .map_err(|_| ProviderRuntimeError::provider("The provider field key is invalid."))?;
-    let claim = FieldClaim::try_new(source.clone(), value, None, fetched_at, None)
-        .map_err(|_| ProviderRuntimeError::provider("The provider field value is invalid."))?;
+    let provenance = FieldClaimProvenance::try_new(
+        provider_id.clone(),
+        source.clone(),
+        source_identifier,
+        locale,
+        region,
+        None,
+        evidence_digest.clone(),
+    )
+    .map_err(|_| ProviderRuntimeError::provider("The provider provenance is invalid."))?;
+    let expires_at = fetched_at
+        .value()
+        .checked_add_signed(chrono::Duration::seconds(METADATA_FRESH_SECONDS));
+    let claim = FieldClaim::try_new_unbound_provider(
+        MetadataClaimId::new_v7(),
+        value,
+        provenance,
+        fetched_at,
+        expires_at,
+        FieldClaimStatus::Fresh,
+    )
+    .map_err(|_| ProviderRuntimeError::provider("The provider field value is invalid."))?;
     Ok(ProviderMetadataField::new(field_key, claim))
 }
 
@@ -641,8 +700,15 @@ impl ProviderRuntime {
                     .await
             }
             TMDB_PROVIDER => {
-                self.fetch_tmdb(&input.provider_id, &input.kind, policy, state)
-                    .await
+                self.fetch_tmdb(
+                    &input.provider_id,
+                    &input.kind,
+                    input.locale.as_deref().unwrap_or("en-US"),
+                    input.region.as_deref(),
+                    policy,
+                    state,
+                )
+                .await
             }
             _ => Err(unsupported_provider()),
         }
@@ -793,11 +859,12 @@ impl ProviderRuntime {
         let volume: GoogleVolume = serde_json::from_slice(&body).map_err(|_| {
             ProviderRuntimeError::response_invalid("Google Books returned invalid JSON.")
         })?;
-        let candidate = google_candidate(volume).ok_or_else(|| {
-            ProviderRuntimeError::response_invalid(
-                "Google Books returned incomplete or unsafe metadata.",
-            )
-        })?;
+        let candidate =
+            google_candidate(volume, provider_evidence_digest(&body)).ok_or_else(|| {
+                ProviderRuntimeError::response_invalid(
+                    "Google Books returned incomplete or unsafe metadata.",
+                )
+            })?;
         verify_selected_candidate(candidate, provider_id, "book")
     }
 
@@ -805,11 +872,12 @@ impl ProviderRuntime {
         &self,
         provider_id: &str,
         kind: &str,
+        locale: &str,
+        region: Option<&str>,
         policy: &OutboundAccessPolicy,
         state: &ProviderCapabilityState,
     ) -> Result<ProviderCandidate, ProviderRuntimeError> {
-        let mut url = reqwest::Url::parse(TMDB_BASE_URL)
-            .map_err(|_| ProviderRuntimeError::provider("The TMDB endpoint is invalid."))?;
+        let url = tmdb_details_url(provider_id, kind, locale, region)?;
         let client = self
             .authorized_credential(
                 TMDB_ACCESS,
@@ -821,10 +889,6 @@ impl ProviderRuntime {
             )
             .await?;
         let credential = self.load_bound_credential(&client, TMDB_SPEC, state)?;
-        url.path_segments_mut()
-            .map_err(|_| ProviderRuntimeError::provider("The TMDB endpoint is invalid."))?
-            .extend([if kind == "show" { "tv" } else { "movie" }, provider_id]);
-        url.query_pairs_mut().append_pair("language", "en-US");
         let body = send_json(
             credential_request(TMDB_PROVIDER, &client, url, &credential)?,
             TMDB_SPEC,
@@ -832,9 +896,12 @@ impl ProviderRuntime {
         .await?;
         let item: TmdbItem = serde_json::from_slice(&body)
             .map_err(|_| ProviderRuntimeError::response_invalid("TMDB returned invalid JSON."))?;
-        let candidate = tmdb_candidate(item, Some(kind)).ok_or_else(|| {
-            ProviderRuntimeError::response_invalid("TMDB returned incomplete or unsafe metadata.")
-        })?;
+        let candidate = tmdb_candidate(item, Some(kind), provider_evidence_digest(&body))
+            .ok_or_else(|| {
+                ProviderRuntimeError::response_invalid(
+                    "TMDB returned incomplete or unsafe metadata.",
+                )
+            })?;
         verify_selected_candidate(candidate, provider_id, kind)
     }
 
@@ -885,6 +952,24 @@ impl ProviderRuntime {
         }
         Ok(spec)
     }
+}
+
+fn tmdb_details_url(
+    provider_id: &str,
+    kind: &str,
+    locale: &str,
+    region: Option<&str>,
+) -> Result<reqwest::Url, ProviderRuntimeError> {
+    let mut url = reqwest::Url::parse(TMDB_BASE_URL)
+        .map_err(|_| ProviderRuntimeError::provider("The TMDB endpoint is invalid."))?;
+    url.path_segments_mut()
+        .map_err(|_| ProviderRuntimeError::provider("The TMDB endpoint is invalid."))?
+        .extend([if kind == "show" { "tv" } else { "movie" }, provider_id]);
+    url.query_pairs_mut().append_pair("language", locale);
+    if let Some(region) = region {
+        url.query_pairs_mut().append_pair("region", region);
+    }
+    Ok(url)
 }
 
 fn verify_selected_candidate(
@@ -1107,16 +1192,20 @@ fn parse_google_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, Provid
         ProviderRuntimeError::response_invalid("Google Books returned invalid JSON.")
     })?;
     let mut seen = BTreeSet::new();
+    let evidence_digest = provider_evidence_digest(body);
     Ok(response
         .items
         .into_iter()
-        .filter_map(google_candidate)
+        .filter_map(|item| google_candidate(item, evidence_digest.clone()))
         .filter(|candidate| seen.insert(candidate.provider_id.clone()))
         .take(RESULT_LIMIT)
         .collect())
 }
 
-fn google_candidate(item: GoogleVolume) -> Option<ProviderCandidate> {
+fn google_candidate(
+    item: GoogleVolume,
+    evidence_digest: Sha256Digest,
+) -> Option<ProviderCandidate> {
     let provider_id = item.id?;
     let volume_info = item.volume_info?;
     let title = volume_info.title?;
@@ -1147,6 +1236,7 @@ fn google_candidate(item: GoogleVolume) -> Option<ProviderCandidate> {
         overview: volume_info
             .description
             .filter(|value| valid_candidate_text(value, 4096)),
+        evidence_digest,
     })
 }
 
@@ -1154,16 +1244,21 @@ fn parse_tmdb_candidates(body: &[u8]) -> Result<Vec<ProviderCandidate>, Provider
     let response: TmdbSearchResponse = serde_json::from_slice(body)
         .map_err(|_| ProviderRuntimeError::response_invalid("TMDB returned invalid JSON."))?;
     let mut seen = BTreeSet::new();
+    let evidence_digest = provider_evidence_digest(body);
     Ok(response
         .results
         .into_iter()
-        .filter_map(|item| tmdb_candidate(item, None))
+        .filter_map(|item| tmdb_candidate(item, None, evidence_digest.clone()))
         .filter(|candidate| seen.insert((candidate.kind, candidate.provider_id.clone())))
         .take(RESULT_LIMIT)
         .collect())
 }
 
-fn tmdb_candidate(item: TmdbItem, forced_kind: Option<&str>) -> Option<ProviderCandidate> {
+fn tmdb_candidate(
+    item: TmdbItem,
+    forced_kind: Option<&str>,
+    evidence_digest: Sha256Digest,
+) -> Option<ProviderCandidate> {
     if item.adult != Some(false) {
         return None;
     }
@@ -1212,7 +1307,12 @@ fn tmdb_candidate(item: TmdbItem, forced_kind: Option<&str>) -> Option<ProviderC
         authors: Vec::new(),
         image_url,
         overview,
+        evidence_digest,
     })
+}
+
+fn provider_evidence_digest(body: &[u8]) -> Sha256Digest {
+    Sha256Digest::from_bytes(&Sha256::digest(body).into())
 }
 
 fn release_year(value: &str) -> Option<u16> {
@@ -1280,6 +1380,25 @@ mod tests {
         assert_eq!(namespace.namespace().as_str(), "googlebooks.volume");
         assert_eq!(namespace.grains(), [Grain::Edition]);
         assert_eq!(namespace.id_pattern(), "[A-Za-z0-9_-]+");
+        let fields = candidates[0]
+            .metadata_fields(None, None)
+            .expect("metadata claims");
+        assert!(!fields.is_empty());
+        assert!(fields.iter().all(|field| {
+            let claim = field.claim();
+            claim.record_id().is_none()
+                && claim.field_key().is_none()
+                && claim.provenance().is_complete()
+                && claim
+                    .provenance()
+                    .provider_id()
+                    .map(MetadataProviderId::as_str)
+                    == Some(GOOGLE_BOOKS_PROVIDER)
+                && claim.provenance().source_identifier() == Some("book-0")
+                && claim.provenance().evidence_digest()
+                    == Some(&provider_evidence_digest(body.as_bytes()))
+                && claim.expires_at().is_some()
+        }));
     }
 
     #[test]
@@ -1415,6 +1534,21 @@ mod tests {
             Some("https://image.tmdb.org/t/p/w500/film.jpg")
         );
         assert_eq!(candidates[1].kind, "show");
+        let fields = candidates[0]
+            .metadata_fields(
+                Some(MetadataLocale::try_new("en-US").expect("locale")),
+                None,
+            )
+            .expect("TMDB metadata claims");
+        assert!(fields.iter().all(|field| {
+            field
+                .claim()
+                .provenance()
+                .locale()
+                .map(MetadataLocale::as_str)
+                == Some("en-us")
+                && field.claim().provenance().source_identifier() == Some("42")
+        }));
         let movie_identifier = candidates[0].identifier().expect("movie identifier");
         assert_eq!(movie_identifier.namespace(), "tmdb.movie");
         assert_eq!(movie_identifier.grain(), Grain::Film);
@@ -1425,6 +1559,20 @@ mod tests {
         assert!(verify_selected_candidate(candidates[0].clone(), "42", "movie").is_ok());
         assert!(verify_selected_candidate(candidates[0].clone(), "7", "movie").is_err());
         assert!(verify_selected_candidate(candidates[0].clone(), "42", "show").is_err());
+    }
+
+    #[test]
+    fn tmdb_details_url_preserves_requested_locale_and_region() {
+        let url =
+            tmdb_details_url("438631", "movie", "fr-FR", Some("FR")).expect("TMDB details URL");
+        assert_eq!(url.path(), "/3/movie/438631");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            vec![
+                ("language".into(), "fr-FR".into()),
+                ("region".into(), "FR".into())
+            ]
+        );
     }
 
     #[test]

@@ -52,6 +52,16 @@ metadata, but no browser HTTP operation, DTO, client method, or security
 scheme. C1 owns the `HttpOnly`, `Secure`, and `SameSite` cookie, strict CSRF,
 session inventory, and revocation contract when production activation passes.
 
+## Governed metadata projections
+
+The M2 client surface uses only generated production contracts:
+
+- `readMetadataProjection(recordId, { offline })` reads the active profile's selected fields, rating claims, provenance, attribution, and cache state. `offline` defaults to `false`; a caller must opt in explicitly.
+- `configureMetadataProjection(request)` updates the server-owned profile policy and reports how many affected cache entries Fasti invalidated. The SDK does not persist a browser copy.
+- `refreshMetadataClaims(request)` appends governed provider claims and returns their projection, attribution, and cache evidence. The transport verifies that the response record and provider match the request.
+
+These authenticated operations require the generated metadata scopes. Provider credentials, raw provider responses, and cache secrets are not part of their DTOs.
+
 ## Exercise the B1 contract
 
 The focused client test builds and starts the loopback-only Rust fixture on an ephemeral port, executes the generated SDK against it, and stops it:

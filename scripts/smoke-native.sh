@@ -151,6 +151,22 @@ def post(path, payload, bearer=None):
     connection.close()
     return response.status, body
 
+def put(path, payload, bearer):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    connection.request(
+        "PUT",
+        path,
+        body=json.dumps(payload),
+        headers={
+            "content-type": "application/json",
+            "authorization": f"Bearer {bearer}",
+        },
+    )
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
 def get(path, bearer):
     connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
     connection.request("GET", path, headers={"authorization": f"Bearer {bearer}"})
@@ -204,6 +220,92 @@ if (
 ):
     raise SystemExit("Packaged provider registry did not report the governed runtime boundary")
 
+status, created = post(
+    "/api/v1/records",
+    {"grain": "film"},
+    bearer=enrolled["credential"],
+)
+record_id = created.get("record_id")
+if status != 200 or not isinstance(record_id, str):
+    raise SystemExit("Packaged metadata smoke could not create its local Record")
+
+status, namespace = post(
+    "/api/v1/namespaces",
+    {
+        "namespace": "tmdb.movie",
+        "label": "TMDB Movie",
+        "grains": ["film"],
+        "id_pattern": "^[1-9][0-9]*$",
+        "normalization": "identity",
+        "licence_posture": "identifiers_only",
+    },
+    bearer=enrolled["credential"],
+)
+if status != 200 or namespace.get("namespace") != "tmdb.movie":
+    raise SystemExit("Packaged metadata smoke could not register its provider namespace")
+
+status, attached = post(
+    "/api/v1/records/identifiers",
+    {
+        "record_id": record_id,
+        "namespace": "tmdb.movie",
+        "grain": "film",
+        "value": "550",
+    },
+    bearer=enrolled["credential"],
+)
+if status != 200 or attached.get("record_id") != record_id:
+    raise SystemExit("Packaged metadata smoke could not attach its provider route")
+
+status, projection = get(
+    f"/api/v1/records/{record_id}/metadata-projection?offline=true",
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or projection.get("record_id") != record_id
+    or projection.get("fields") != []
+    or not projection.get("policy", {}).get("profile_id")
+):
+    raise SystemExit(
+        f"Empty metadata projection did not retain its editable profile policy: {status} {projection!r}"
+    )
+
+status, configured = put(
+    "/api/v1/profile/metadata-projection",
+    {
+        "preferred_provider_id": "tmdb",
+        "preferred_locale": "en-IE",
+        "original_locale": None,
+        "allow_english_fallback": True,
+        "last_known_good": "allow",
+        "region": "IE",
+        "enabled_field_groups": ["basic_info"],
+        "overrides": [],
+    },
+    enrolled["credential"],
+)
+if (
+    status != 200
+    or configured.get("policy", {}).get("enabled_field_groups") != ["basic_info"]
+):
+    raise SystemExit("Packaged metadata smoke could not configure its profile policy")
+
+status, refresh = post(
+    "/api/v1/metadata/claims/refresh",
+    {
+        "record_id": record_id,
+        "provider_id": "tmdb",
+        "field_groups": ["basic_info"],
+        "locale": "en-IE",
+        "region": "IE",
+        "mode": "revalidate",
+    },
+    bearer=enrolled["credential"],
+)
+if status != 409 or refresh.get("code") != "metadata_claim_stale":
+    raise SystemExit("Offline provider refresh did not retain the governed last-known-good state")
+
 status, problem = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 409 or problem.get("code") != "already_initialized":
     raise SystemExit("One-time node initialization did not close after enrollment")
@@ -228,5 +330,5 @@ if (( rss_kib > idle_limit_mib * 1024 )); then
   exit 1
 fi
 
-echo "native offline smoke: CLI guard, durable bootstrap, provider registry, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+echo "native offline smoke: CLI guard, durable bootstrap, provider registry, metadata safe states, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
 ' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"

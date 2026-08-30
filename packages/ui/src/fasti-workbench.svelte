@@ -35,6 +35,7 @@
     ActiveNavSection,
     CreateRecordResult,
     MediaRecord,
+    MetadataProjectionResponse,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
     ProviderSelection,
@@ -583,6 +584,11 @@
   let recordActionProblem = $state<string | undefined>(undefined);
   let recordActionNotice = $state<string | undefined>(undefined);
   let recordsLoaded = false;
+  let metadataProjection = $state<MetadataProjectionResponse>();
+  let metadataProjectionLoading = $state(false);
+  let metadataProjectionProblem = $state<string>();
+  let metadataProjectionRecordId = "";
+  let metadataProjectionGeneration = 0;
 
   async function loadRecords(restoreRetryFocus = false): Promise<boolean> {
     if (!host.listRecords) {
@@ -725,6 +731,80 @@
     }
   }
 
+  async function loadMetadataProjection(
+    recordId: string,
+    restoreRetryFocus = false,
+  ): Promise<void> {
+    const generation = ++metadataProjectionGeneration;
+    metadataProjectionRecordId = recordId;
+    metadataProjection = undefined;
+    metadataProjectionProblem = undefined;
+    if (!host.readMetadataProjection) {
+      metadataProjectionProblem =
+        "This host does not expose the governed metadata projection.";
+      return;
+    }
+    metadataProjectionLoading = true;
+    try {
+      const projection = await host.readMetadataProjection(recordId, false);
+      if (
+        generation === metadataProjectionGeneration &&
+        metadataProjectionRecordId === recordId
+      ) {
+        metadataProjection = projection;
+      }
+    } catch (error) {
+      if (generation === metadataProjectionGeneration) {
+        metadataProjectionProblem = hostProblemText(
+          error,
+          "Could not load metadata provenance for this record.",
+        );
+      }
+    } finally {
+      if (generation === metadataProjectionGeneration) {
+        metadataProjectionLoading = false;
+        if (restoreRetryFocus) {
+          await tick();
+          document.getElementById("retry-metadata-projection")?.focus();
+        }
+      }
+    }
+  }
+
+  async function refreshMetadataProjectionClaims(
+    providerId: string,
+  ): Promise<void> {
+    if (!host.refreshMetadataClaims || !metadataProjection) {
+      throw new Error(
+        "Governed metadata claim refresh is not available on this host.",
+      );
+    }
+    const fieldGroups = metadataProjection.policy.enabled_field_groups;
+    if (fieldGroups.length === 0) {
+      throw new Error(
+        "Enable at least one metadata field group in Settings before refreshing claims.",
+      );
+    }
+    await host.refreshMetadataClaims({
+      record_id: metadataProjection.record_id,
+      provider_id: providerId,
+      field_groups: fieldGroups,
+      locale: metadataProjection.policy.preferred_locale,
+      region: metadataProjection.policy.region,
+      mode: "revalidate",
+    });
+    await Promise.all([
+      loadMetadataProjection(metadataProjection.record_id),
+      loadRecords(),
+    ]);
+  }
+
+  function metadataPolicyChanged(): void {
+    metadataProjectionRecordId = "";
+    metadataProjection = undefined;
+    if (selectedRecord?.id) void loadMetadataProjection(selectedRecord.id);
+  }
+
   const watchingRecords = $derived(
     mediaRecords.filter((record) => record.status === "watching"),
   );
@@ -754,6 +834,14 @@
     if (!recordsLoaded) {
       recordsLoaded = true;
       void loadRecords();
+    }
+    const recordId = selectedRecord?.id;
+    if (
+      activeSection === "detail" &&
+      recordId &&
+      recordId !== metadataProjectionRecordId
+    ) {
+      void loadMetadataProjection(recordId);
     }
   });
 
@@ -953,6 +1041,7 @@
         <RuntimeSettingsView
           {host}
           {workbenchPreferences}
+          metadataPolicyRecordId={mediaRecords[0]?.id}
           canAccessProfileData={true}
           profileDataIdentity="trusted-host"
           activeTab={settingsTab}
@@ -967,6 +1056,7 @@
           }}
           onClientEndpointChanged={resetClientEndpoint}
           onProviderCredentialsChanged={invalidateDiscoverProviders}
+          onMetadataPolicyChanged={metadataPolicyChanged}
           onUpdateWorkbenchPreferences={(patch) =>
             (workbenchPreferences = { ...workbenchPreferences, ...patch })}
         />
@@ -1031,6 +1121,9 @@
         {#if selectedRecord && !recordsProblem}
           <MediaDetailView
             record={selectedRecord}
+            {metadataProjection}
+            {metadataProjectionLoading}
+            {metadataProjectionProblem}
             availableCollections={[]}
             initialTab={selectedRecordTab}
             contextMenuConfigs={workbenchPreferences.contextMenuItems}
@@ -1045,6 +1138,11 @@
               : undefined}
             onOpenProviderSettings={openProviderSettings}
             onRetryProviders={() => loadDiscover()}
+            onRetryMetadataProjection={() =>
+              loadMetadataProjection(selectedRecord.id, true)}
+            onRefreshMetadataClaims={host.refreshMetadataClaims
+              ? refreshMetadataProjectionClaims
+              : undefined}
             onSetTrackingDisposition={(recordId, disposition) =>
               void setTrackingDisposition(recordId, disposition)}
             onOpenReconciliation={() => select("reconciliation")}

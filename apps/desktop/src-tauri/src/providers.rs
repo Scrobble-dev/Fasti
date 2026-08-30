@@ -159,14 +159,19 @@ pub(crate) fn save_credential(
     }
     let secret = CredentialSecret::try_from_bytes(credential)
         .map_err(|_| DesktopProblem::provider_credential("The provider credential is invalid."))?;
-    if source == CredentialVaultSource::None {
+    mark_provider_credential_pending(runtime, kernel, workspace_id, spec)?;
+    let stored = if source == CredentialVaultSource::None {
         runtime
             .store_credential(&reference, secret)
-            .map_err(runtime_problem)?;
+            .map_err(runtime_problem)
     } else {
         runtime
             .replace_credential(&reference, secret)
-            .map_err(runtime_problem)?;
+            .map_err(runtime_problem)
+    };
+    if let Err(error) = stored {
+        reconcile_provider_with_source(runtime, kernel, workspace_id, spec, source, false)?;
+        return Err(error);
     }
     reconcile_provider(runtime, kernel, workspace_id, spec.provider, true)?;
     credential_statuses(runtime, kernel, workspace_id)
@@ -193,11 +198,50 @@ pub(crate) fn delete_credential(
             "This provider credential source is read-only on this host.",
         ));
     }
-    runtime
+    mark_provider_credential_pending(runtime, kernel, workspace_id, spec)?;
+    if let Err(error) = runtime
         .revoke_credential(&reference)
-        .map_err(runtime_problem)?;
+        .map_err(runtime_problem)
+    {
+        reconcile_provider_with_source(runtime, kernel, workspace_id, spec, source, false)?;
+        return Err(error);
+    }
     reconcile_provider(runtime, kernel, workspace_id, spec.provider, false)?;
     credential_statuses(runtime, kernel, workspace_id)
+}
+
+fn mark_provider_credential_pending(
+    runtime: &ProviderRuntime,
+    kernel: &SqliteKernel,
+    workspace_id: WorkspaceId,
+    spec: &'static ProviderSpec,
+) -> Result<(), DesktopProblem> {
+    for capability in spec.capabilities {
+        let (current, _) = reconcile_state(
+            runtime,
+            kernel,
+            workspace_id,
+            spec,
+            capability.capability_id,
+        )?;
+        let pending = ProviderCapabilityState::try_new(
+            current.provider_id().clone(),
+            current.capability_id().clone(),
+            ProviderCapabilityStatus::Disabled,
+            current.capability_version().saturating_add(1),
+            current.credential_requirement(),
+            current.credential_reference().cloned(),
+            current.credential_status(),
+            current.configuration_digest().clone(),
+            current.health().clone(),
+            current.credential_test().clone(),
+        )
+        .map_err(|_| DesktopProblem::storage("Provider pending state is invalid."))?;
+        kernel
+            .put_provider_capability_state(workspace_id, pending)
+            .map_err(|_| DesktopProblem::storage("Fasti could not save provider pending state."))?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn test_credential(
@@ -307,6 +351,17 @@ fn reconcile_provider(
     } else {
         CredentialVaultSource::None
     };
+    reconcile_provider_with_source(runtime, kernel, workspace_id, spec, source, true)
+}
+
+fn reconcile_provider_with_source(
+    runtime: &ProviderRuntime,
+    kernel: &SqliteKernel,
+    workspace_id: WorkspaceId,
+    spec: &'static ProviderSpec,
+    source: CredentialVaultSource,
+    credential_changed: bool,
+) -> Result<(), DesktopProblem> {
     for capability in spec.capabilities {
         reconcile_state_with_source(
             runtime,
@@ -315,6 +370,7 @@ fn reconcile_provider(
             spec,
             capability.capability_id,
             source,
+            credential_changed,
         )?;
     }
     Ok(())
@@ -333,8 +389,15 @@ fn reconcile_state(
     let source = runtime
         .credential_source(&reference)
         .map_err(runtime_problem)?;
-    let state =
-        reconcile_state_with_source(runtime, kernel, workspace_id, spec, capability_id, source)?;
+    let state = reconcile_state_with_source(
+        runtime,
+        kernel,
+        workspace_id,
+        spec,
+        capability_id,
+        source,
+        false,
+    )?;
     Ok((state, source))
 }
 
@@ -345,6 +408,7 @@ fn reconcile_state_with_source(
     spec: &'static ProviderSpec,
     capability_id: &str,
     source: CredentialVaultSource,
+    credential_changed: bool,
 ) -> Result<ProviderCapabilityState, DesktopProblem> {
     let capability = spec
         .capabilities
@@ -365,7 +429,8 @@ fn reconcile_state_with_source(
         .credential_reference(spec.provider)
         .map_err(runtime_problem)?;
     let present = source != CredentialVaultSource::None;
-    let unchanged_configuration = existing
+    let unchanged_configuration = !credential_changed
+        && existing
         .as_ref()
         .is_some_and(|state| state.configuration_digest() == &digest);
     let credential_status = if present && unchanged_configuration {
@@ -416,7 +481,7 @@ fn reconcile_state_with_source(
         health.clone(),
         credential_test.clone(),
     )?;
-    if existing.as_ref() == Some(&candidate) {
+    if !credential_changed && existing.as_ref() == Some(&candidate) {
         return Ok(candidate);
     }
     let next_version = existing
@@ -610,5 +675,85 @@ fn runtime_problem(error: ProviderRuntimeError) -> DesktopProblem {
 impl From<ProviderRuntimeError> for DesktopProblem {
     fn from(error: ProviderRuntimeError) -> Self {
         runtime_problem(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::records::require_access;
+    use crate::setup::{complete_setup, test_support::new_kernel, test_support::MemoryStore};
+    use fasti_application::ProviderStatePort;
+    use fasti_provider_runtime::{PlatformCredentialVault, PLATFORM_CREDENTIAL_SERVICE};
+    use std::sync::Arc;
+
+    #[test]
+    fn shared_credential_change_advances_every_capability_generation() {
+        let (_root, kernel) = new_kernel();
+        let store = MemoryStore::default();
+        complete_setup(&kernel, &store).expect("complete setup");
+        let workspace_id = require_access(&kernel, &store)
+            .expect("authenticated access")
+            .workspace_id();
+        let runtime = ProviderRuntime::new(Arc::new(PlatformCredentialVault::new(
+            PLATFORM_CREDENTIAL_SERVICE,
+            "metadata-generation-test",
+        )));
+        let spec = runtime.descriptor("tmdb").expect("TMDB descriptor");
+
+        reconcile_provider_with_source(
+            &runtime,
+            &kernel,
+            workspace_id,
+            spec,
+            CredentialVaultSource::CredentialStore,
+            false,
+        )
+        .expect("initial reconciliation");
+        mark_provider_credential_pending(&runtime, &kernel, workspace_id, spec)
+            .expect("pending credential transition");
+        let mut pending_version = None;
+        for capability in spec.capabilities {
+            let state = kernel
+                .get_provider_capability_state(
+                    workspace_id,
+                    &ProviderId::try_new(spec.provider).expect("provider ID"),
+                    &ProviderCapabilityId::try_new(capability.capability_id)
+                        .expect("capability ID"),
+                )
+                .expect("read pending state")
+                .expect("stored pending state");
+            assert_eq!(pending_version.get_or_insert(state.capability_version()), &state.capability_version());
+            assert_eq!(state.capability_status(), ProviderCapabilityStatus::Disabled);
+        }
+        reconcile_provider_with_source(
+            &runtime,
+            &kernel,
+            workspace_id,
+            spec,
+            CredentialVaultSource::CredentialStore,
+            true,
+        )
+        .expect("credential rotation reconciliation");
+
+        for capability in spec.capabilities {
+            let state = kernel
+                .get_provider_capability_state(
+                    workspace_id,
+                    &ProviderId::try_new(spec.provider).expect("provider ID"),
+                    &ProviderCapabilityId::try_new(capability.capability_id)
+                        .expect("capability ID"),
+                )
+                .expect("read state")
+                .expect("stored state");
+            assert_eq!(
+                state.capability_version(),
+                pending_version.expect("pending version") + 1
+            );
+            assert_eq!(
+                state.credential_status(),
+                ProviderCredentialStatus::StoredUnverified
+            );
+        }
     }
 }

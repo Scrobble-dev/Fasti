@@ -273,7 +273,7 @@ pub(crate) fn create_provider_record(
     register_provider_namespace(kernel, access, &candidate)?;
     let grain = candidate.grain()?;
     let identifier = candidate.identifier()?;
-    let fields = candidate.metadata_fields()?;
+    let fields = candidate.metadata_fields(None, None)?;
     let outcome = kernel
         .create_provider_record(CreateProviderRecordCommand::new(
             RequestCorrelationId::new_v7(),
@@ -297,7 +297,7 @@ pub(crate) fn apply_provider_metadata(
 ) -> Result<(), DesktopProblem> {
     register_provider_namespace(kernel, access, &candidate)?;
     let identifier = candidate.identifier()?;
-    let fields = candidate.metadata_fields()?;
+    let fields = candidate.metadata_fields(None, None)?;
     kernel
         .apply_provider_metadata(ApplyProviderMetadataCommand::new(
             RequestCorrelationId::new_v7(),

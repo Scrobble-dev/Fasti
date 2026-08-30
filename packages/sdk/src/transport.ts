@@ -12,6 +12,7 @@ import {
   parseCreateRecordRequest,
   parseCreateRecordResponse,
   parseConfigureProviderCredentialRequest,
+  parseConfigureMetadataProjectionRequest,
   parseEnrollFirstClientRequest,
   parseEnrollFirstClientResponse,
   parseHealthResponse,
@@ -20,12 +21,16 @@ import {
   parseListRecordsResponse,
   parseListProvidersResponse,
   parseListTrackingDispositionsResponse,
+  parseMetadataProjectionConfigurationResponse,
+  parseMetadataProjectionResponse,
   parseNuvioCollectionsDocumentDto,
   parseNuvioCollectionsStateDto,
   parseNodeInitializationResponse,
   parseProblemDetailsForOperation,
   parseProviderCapabilityResponse,
   parseProviderHealthResponse,
+  parseRefreshMetadataClaimsRequest,
+  parseRefreshMetadataClaimsResponse,
   parseReceiptCommittedEvent,
   parseRegisterNamespaceRequest,
   parseRegisterNamespaceResponse,
@@ -45,6 +50,7 @@ import {
   type CreateRecordRequest,
   type CreateRecordResponse,
   type ConfigureProviderCredentialRequest,
+  type ConfigureMetadataProjectionRequest,
   type EnrollFirstClientRequest,
   type EnrollFirstClientResponse,
   type HealthResponse,
@@ -53,6 +59,9 @@ import {
   type ListRecordsResponse,
   type ListProvidersResponse,
   type ListTrackingDispositionsResponse,
+  type MetadataProjectionConfigurationResponse,
+  type MetadataProjectionQueryParameters,
+  type MetadataProjectionResponse,
   type NuvioCollectionsDocumentDto,
   type NuvioCollectionsStateDto,
   type NodeInitializationResponse,
@@ -60,6 +69,8 @@ import {
   type ProblemCode,
   type ProviderCapabilityResponse,
   type ProviderHealthResponse,
+  type RefreshMetadataClaimsRequest,
+  type RefreshMetadataClaimsResponse,
   type ReceiptCommittedEnvelope,
   type RegisterNamespaceRequest,
   type RegisterNamespaceResponse,
@@ -789,6 +800,101 @@ export class FastiClient {
         return response;
       },
       responseLabel: "Provider health response",
+      options,
+    });
+  }
+
+  refreshMetadataClaims(
+    request: RefreshMetadataClaimsRequest,
+    options: CallOptions = {},
+  ): Promise<RefreshMetadataClaimsResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.refreshMetadataClaims;
+    const body = parseOutgoing(
+      parseRefreshMetadataClaimsRequest,
+      request,
+      "Refresh metadata claims request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: (value) => {
+        const response = parseRefreshMetadataClaimsResponse(value);
+        if (
+          response.record_id !== body.record_id ||
+          response.provider_id !== body.provider_id
+        ) {
+          throw new FastiContractParseError(
+            "Metadata claim refresh response does not match the requested record and provider",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Refresh metadata claims response",
+      options,
+    });
+  }
+
+  readMetadataProjection(
+    recordId: string,
+    query: MetadataProjectionQueryParameters = {},
+    options: CallOptions = {},
+  ): Promise<MetadataProjectionResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.readMetadataProjection;
+    const safeRecordId = contractPathIdentifier(
+      recordId,
+      RECORD_ID,
+      "recordId",
+    );
+    if (query.offline !== undefined && typeof query.offline !== "boolean") {
+      throw new TypeError("offline must be a boolean");
+    }
+    const path = operation.path.replace(
+      "{record_id}",
+      encodeURIComponent(safeRecordId),
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: query.offline ? `${path}?offline=true` : path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "safe",
+      responseParser: (value) => {
+        const response = parseMetadataProjectionResponse(value);
+        if (response.record_id !== safeRecordId) {
+          throw new FastiContractParseError(
+            "Metadata projection response does not match the requested record id",
+          );
+        }
+        return response;
+      },
+      responseLabel: "Metadata projection response",
+      options,
+    });
+  }
+
+  configureMetadataProjection(
+    request: ConfigureMetadataProjectionRequest,
+    options: CallOptions = {},
+  ): Promise<MetadataProjectionConfigurationResponse> {
+    const operation = LOCAL_RUNTIME_OPERATIONS.configureMetadataProjection;
+    const body = parseOutgoing(
+      parseConfigureMetadataProjectionRequest,
+      request,
+      "Configure metadata projection request",
+    );
+    return this.#jsonOperation({
+      method: operation.method,
+      path: operation.path,
+      authenticated: operation.authenticated,
+      problemContract: operation,
+      retryMode: "never",
+      body,
+      responseParser: parseMetadataProjectionConfigurationResponse,
+      responseLabel: "Configure metadata projection response",
       options,
     });
   }

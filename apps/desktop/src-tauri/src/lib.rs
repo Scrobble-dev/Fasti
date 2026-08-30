@@ -5,6 +5,7 @@
 mod api_clients;
 mod artwork;
 mod endpoint;
+mod metadata;
 mod network_config;
 mod nuvio_collections;
 mod providers;
@@ -45,6 +46,7 @@ struct DesktopState {
     network: NetworkConfigStore,
     artwork: artwork::ArtworkCache,
     provider_runtime: Mutex<Option<Arc<fasti_provider_runtime::ProviderRuntime>>>,
+    provider_operation_gate: tokio::sync::Mutex<()>,
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -189,11 +191,12 @@ fn provider_credential_status(
 }
 
 #[cfg(feature = "desktop-runtime")]
-#[tauri::command(async)]
-fn save_provider_credential(
+#[tauri::command]
+async fn save_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: SaveProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -204,11 +207,12 @@ fn save_provider_credential(
 }
 
 #[cfg(feature = "desktop-runtime")]
-#[tauri::command(async)]
-fn delete_provider_credential(
+#[tauri::command]
+async fn delete_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: DeleteProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
     let access = records::require_access(
         &kernel,
@@ -357,6 +361,51 @@ async fn apply_provider_metadata(
         )
         .await?;
     records::apply_provider_metadata(&kernel, access, record_id, candidate)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn refresh_metadata_claims(
+    state: tauri::State<'_, DesktopState>,
+    input: fasti_contracts::RefreshMetadataClaimsRequest,
+) -> Result<fasti_contracts::RefreshMetadataClaimsResponse, DesktopProblem> {
+    let _provider_guard = state.provider_operation_gate.lock().await;
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    let runtime = state.provider_runtime(&kernel)?;
+    let policy = state.network.load()?.outbound_policy().clone();
+    metadata::refresh(kernel, runtime, policy, access, input).await
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn read_metadata_projection(
+    state: tauri::State<'_, DesktopState>,
+    input: metadata::ReadMetadataProjectionInput,
+) -> Result<fasti_contracts::MetadataProjectionResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    metadata::read(&kernel, access, input)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command(async)]
+fn configure_metadata_projection(
+    state: tauri::State<'_, DesktopState>,
+    input: fasti_contracts::ConfigureMetadataProjectionRequest,
+) -> Result<fasti_contracts::MetadataProjectionConfigurationResponse, DesktopProblem> {
+    let kernel = state.kernel()?;
+    let access = records::require_access(
+        &kernel,
+        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+    )?;
+    metadata::configure(&kernel, access, input)
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -578,6 +627,9 @@ pub fn run() {
                 network: NetworkConfigStore::new(&config_root),
                 artwork,
                 provider_runtime: Mutex::new(None),
+                // ponytail: serialize provider vault mutation and metadata reads;
+                // use per-provider gates only if measured throughput needs it.
+                provider_operation_gate: tokio::sync::Mutex::new(()),
             });
             Ok(())
         })
@@ -598,6 +650,9 @@ pub fn run() {
             search_provider,
             track_provider_candidate,
             apply_provider_metadata,
+            refresh_metadata_claims,
+            read_metadata_projection,
+            configure_metadata_projection,
             list_records,
             create_record,
             attach_identifier,

@@ -18,6 +18,7 @@ identifiers:
   - invalid_identifier
   - invalid_observation
   - malformed_json
+  - metadata_claim_stale
   - payload_too_large
   - provider_credential_expired
   - provider_credential_invalid
@@ -59,6 +60,7 @@ not claim a later-body failure path is executable.
 | `invalid_identifier`          | An identifier or grain does not satisfy the governed format.               |
 | `invalid_observation`         | An observation violates the governed input contract.                       |
 | `malformed_json`              | The request body is not well-formed JSON; no mutation occurred.            |
+| `metadata_claim_stale`        | A refresh retained the labelled last-known-good claim instead of erasing it. |
 | `payload_too_large`           | The request exceeded its documented bounded body limit.                    |
 | `provider_credential_expired` | The provider credential has expired and must be replaced.                  |
 | `provider_credential_invalid` | The provider rejected the configured credential.                           |
