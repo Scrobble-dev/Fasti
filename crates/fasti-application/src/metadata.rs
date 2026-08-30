@@ -373,8 +373,17 @@ fn route_priority(
             | ResolutionIntent::MetadataEnrichment
             | ResolutionIntent::DisplayProjection,
             "tmdb",
-            "tmdb.movie" | "tmdb.tv",
-            Grain::Film | Grain::Series,
+            "tmdb.movie",
+            Grain::Film,
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "tmdb.tv",
+            Grain::Series,
             IdentityRouteEvidenceKind::AcceptedCrosswalk,
         ) => Some((3, IdentityRouteKind::AcceptedCrosswalk)),
         (
@@ -1881,6 +1890,27 @@ mod tests {
                 ProviderId::try_new("tmdb").expect("TMDB provider"),
                 AnimeGroupingPreference::Automatic,
                 &[identifier],
+            );
+
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert!(plan.selected_route().is_none());
+        }
+    }
+
+    #[test]
+    fn tmdb_crosswalk_routes_require_compatible_grains() {
+        for identifier in [
+            identity_claim_at("tmdb.movie", Grain::Series, "123"),
+            identity_claim_at("tmdb.tv", Grain::Film, "456"),
+        ] {
+            let plan = plan_purpose_identity_route_with_evidence(
+                ResolutionIntent::MetadataLookup,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &[IdentityRouteEvidence::accepted_crosswalk(
+                    identifier,
+                    IdentityAssertionId::new_v7(),
+                )],
             );
 
             assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
