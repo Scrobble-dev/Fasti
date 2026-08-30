@@ -40,6 +40,14 @@ export default function Home(): React.JSX.Element {
               Read current status
             </Link>
           </div>
+          <p className="fasti-related-guide">
+            Scrobble.dev is an independent field guide. It explains scrobbling
+            and portable media activity across projects.{" "}
+            <a href="https://scrobble.dev/learn/scrobbling/">
+              Read Scrobble.dev’s scrobbling definition
+            </a>
+            .
+          </p>
         </header>
         <section aria-labelledby="paths-heading" className="fasti-section">
           <h2 id="paths-heading">Start from the intended outcome</h2>

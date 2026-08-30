@@ -161,6 +161,36 @@ assert.ok(
   "ordinary prose pages must not load the search UI",
 );
 
+const home = await readFile(resolve(build, "index.html"), "utf8");
+assert.equal(
+  (home.match(/href="https:\/\/scrobble\.dev\/learn\/scrobbling\/"/gu) ?? [])
+    .length,
+  1,
+  "home must contain one contextual Scrobble.dev field-guide link",
+);
+assert.match(
+  home,
+  /href="https:\/\/scrobble\.dev\/"[^>]*class="footer__link-item">Scrobble\.dev independent field guide/u,
+  "footer must contain the related Scrobble.dev link",
+);
+assert.match(home, /Read Scrobble\.dev’s scrobbling definition/u);
+assert.match(home, /href="\/deploy\/"[^>]*>Deployment planner<\/a>/u);
+assert.match(home, /href="\/search\/"[^>]*>Search<\/a>/u);
+
+const notFound = await readFile(resolve(build, "404.html"), "utf8");
+assert.match(notFound, /href="\/start\/choose-a-path\/"/u);
+assert.match(notFound, /href="\/search\/"/u);
+
+const firstObservation = await readFile(
+  resolve(build, "integrate/first-observation/index.html"),
+  "utf8",
+);
+assert.match(firstObservation, /FASTI_CREDENTIAL_FILE/u);
+assert.match(firstObservation, /client\.submitObservation/u);
+assert.match(firstObservation, /source_event_id/u);
+assert.match(firstObservation, /consumption_occurrence/u);
+assert.match(firstObservation, /Replace every example value/u);
+
 console.log(
   `PASS: static documentation artifact routes=${htmlFiles.length} source_commit=${commit}`,
 );

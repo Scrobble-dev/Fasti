@@ -61,16 +61,14 @@ const config: Config = {
         },
         { to: "/status/", label: "Status", position: "left" },
         {
-          href: "pathname:///deploy/",
+          to: "/deploy/",
           label: "Deployment planner",
           position: "left",
-          target: "_self",
         },
         {
-          href: "pathname:///search/",
+          to: "/search/",
           label: "Search",
           position: "right",
-          target: "_self",
         },
         {
           href: "https://github.com/Scrobble-dev/Fasti",
@@ -101,6 +99,15 @@ const config: Config = {
             {
               label: "Fasti issues",
               href: "https://github.com/Scrobble-dev/Fasti/issues",
+            },
+          ],
+        },
+        {
+          title: "Related",
+          items: [
+            {
+              label: "Scrobble.dev independent field guide",
+              href: "https://scrobble.dev/",
             },
           ],
         },

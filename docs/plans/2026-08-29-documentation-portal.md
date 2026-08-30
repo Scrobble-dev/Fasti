@@ -796,6 +796,21 @@ Overall: 4.8/10 current, 9.0/10 planned.
 - [ ] **DX8 (P2)** - Add source-edit, issue, accessibility, security, and support
   links at the point where a developer needs them.
 
+### Two-site alignment and audit remediation
+
+The Fasti home page keeps its task paths primary. One secondary paragraph says
+that Scrobble.dev is an independent field guide and links to its scrobbling
+definition. The footer lists the independent field guide under `Related`. These
+links do not merge the two site boundaries.
+
+The same bounded change gives prose links a persistent non-color cue, gives home
+page task links a 44-pixel target, limits reduced-motion overrides to the moving
+navigation drawer, stacks deployment blockers at narrow widths, and replaces
+the generic 404 response with task, search, and issue recovery actions. The
+static build validator protects the reciprocal links, recovery paths, and safe
+SDK observation example. This removes the request-shape blocker from DX1. It
+does not close the wider health-to-first-observation or every-error-page gates.
+
 Unresolved DX decisions: none. The user authorized the recommended option at
 workflow gates, so the review selected the integration-developer persona,
 competitive TTHW target, copy-paste local magical moment, and DX POLISH mode.
