@@ -7,7 +7,7 @@ use fasti_domain::{Grain, MetadataClaimId, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 12;
+pub(crate) const SCHEMA_VERSION: i64 = 13;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -68,6 +68,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 11 {
         migrate_v12(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 12 {
+        migrate_v13(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -1770,6 +1775,84 @@ fn migrate_v12(connection: &Connection) -> Result<()> {
     transaction.commit()
 }
 
+fn migrate_v13(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE metadata_refresh_receipts (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            profile_id TEXT NOT NULL REFERENCES profiles(profile_id),
+            client_id TEXT NOT NULL REFERENCES clients(client_id),
+            operation_id TEXT NOT NULL CHECK (
+                length(operation_id) = 35
+                AND substr(operation_id, 1, 3) = 'op_'
+                AND substr(operation_id, 4) NOT GLOB '*[^0-9a-f]*'
+                AND substr(operation_id, 16, 1) = '7'
+                AND substr(operation_id, 20, 1) GLOB '[89ab]'
+            ),
+            semantic_digest TEXT NOT NULL CHECK (
+                length(semantic_digest) = 71
+                AND substr(semantic_digest, 1, 7) = 'sha256:'
+                AND substr(semantic_digest, 8) NOT GLOB '*[^0-9a-f]*'
+            ),
+            record_id TEXT NOT NULL REFERENCES records(record_id),
+            provider_id TEXT NOT NULL CHECK (
+                length(provider_id) BETWEEN 1 AND 128
+                AND provider_id = trim(provider_id)
+                AND provider_id = lower(provider_id)
+                AND provider_id NOT GLOB '*[^a-z0-9._:/-]*'
+            ),
+            response_json TEXT NOT NULL CHECK (
+                length(response_json) BETWEEN 2 AND 1048576
+                AND json_valid(response_json)
+            ),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, client_id, operation_id)
+        ) STRICT, WITHOUT ROWID;
+
+        CREATE TRIGGER metadata_refresh_receipts_scope_insert
+        BEFORE INSERT ON metadata_refresh_receipts
+        WHEN NOT EXISTS (
+            SELECT 1 FROM clients
+            WHERE client_id = NEW.client_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM profiles
+            WHERE profile_id = NEW.profile_id AND workspace_id = NEW.workspace_id
+        ) OR NOT EXISTS (
+            SELECT 1 FROM records
+            WHERE record_id = NEW.record_id AND workspace_id = NEW.workspace_id
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata refresh receipt crosses a workspace boundary');
+        END;
+
+        CREATE TRIGGER metadata_refresh_receipts_immutable_update
+        BEFORE UPDATE ON metadata_refresh_receipts
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata refresh receipts are immutable');
+        END;
+
+        CREATE TRIGGER metadata_refresh_receipts_immutable_delete
+        BEFORE DELETE ON metadata_refresh_receipts
+        BEGIN
+            SELECT RAISE(ABORT, 'metadata refresh receipts are immutable');
+        END;
+        "#,
+    )?;
+    let mut revision_sql = String::new();
+    append_revision_triggers(
+        &mut revision_sql,
+        &RevisionSource {
+            table: "metadata_refresh_receipts",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    transaction.execute_batch(&revision_sql)?;
+    transaction.pragma_update(None, "user_version", 13)?;
+    transaction.commit()
+}
+
 /// Materialize v12 companions for rows restored from archive-v2 after the
 /// archive's frozen legacy tables have been imported and coordinate-repaired.
 /// Every insert is retry-safe and the archive-owned rows remain untouched.
@@ -2437,6 +2520,11 @@ mod tests {
         migrate_v11(connection).expect("version eleven");
     }
 
+    fn migrate_to_version_twelve(connection: &Connection) {
+        migrate_to_version_eleven(connection);
+        migrate_v12(connection).expect("version twelve");
+    }
+
     fn seed_legacy_override_root(connection: &Connection, profile_count: usize) {
         connection
             .execute_batch(
@@ -2671,15 +2759,73 @@ mod tests {
         // +3 for namespace_definitions (migrate_v4), +6 for the two metadata
         // field tables (migrate_v6), +3 for profile tracking disposition
         // (migrate_v7), +3 for profile Nuvio Collections (migrate_v9), and
-        // +3 for provider capability state (migrate_v11), and +27 for the
-        // nine authoritative metadata tables (migrate_v12). Disposable
+        // +3 for provider capability state (migrate_v11), +27 for the nine
+        // authoritative metadata tables (migrate_v12), and +3 for immutable
+        // metadata refresh receipts (migrate_v13). Disposable
         // projection and cache tables do not advance the workspace revision,
         // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
         assert_eq!(
             trigger_count,
-            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27) as i64
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3 + 27 + 3) as i64
         );
+    }
+
+    #[test]
+    fn version_twelve_upgrades_to_append_only_refresh_receipts() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_twelve(&connection);
+
+        let before: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v12");
+        let receipts_before: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'metadata_refresh_receipts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("inspect v12 tables");
+        assert_eq!((before, receipts_before), (12, 0));
+
+        migrate(&connection).expect("upgrade v12 to v13");
+
+        let after: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("read v13");
+        let columns = connection
+            .prepare("PRAGMA table_info(metadata_refresh_receipts)")
+            .expect("receipt columns")
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query receipt columns")
+            .collect::<Result<Vec<_>>>()
+            .expect("collect receipt columns");
+        let triggers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'metadata_refresh_receipts'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count receipt triggers");
+        assert_eq!(after, SCHEMA_VERSION);
+        assert_eq!(
+            columns,
+            [
+                "workspace_id",
+                "profile_id",
+                "client_id",
+                "operation_id",
+                "semantic_digest",
+                "record_id",
+                "provider_id",
+                "response_json",
+                "created_at",
+            ]
+        );
+        assert_eq!(triggers, 6);
     }
 
     #[test]
@@ -3720,6 +3866,7 @@ mod tests {
                 "metadata_attributions".to_owned(),
                 "metadata_cache_entries".to_owned(),
                 "metadata_cache_claims".to_owned(),
+                "metadata_refresh_receipts".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

@@ -13,7 +13,7 @@ use fasti_contracts::{
 };
 use fasti_domain::{
     FieldKey, LastKnownGoodPolicy, MetadataLocale, MetadataProjectionPolicy, MetadataProviderId,
-    MetadataRegion, RecordId, RequestCorrelationId, MAX_FIELD_VALUE_BYTES,
+    MetadataRegion, OperationId, RecordId, RequestCorrelationId, MAX_FIELD_VALUE_BYTES,
 };
 use fasti_provider_runtime::{ProviderMetadataRefreshService, ProviderRuntime};
 use fasti_store::SqliteKernel;
@@ -59,6 +59,10 @@ pub(crate) async fn refresh(
     request: RefreshMetadataClaimsRequest,
 ) -> Result<RefreshMetadataClaimsResponse, DesktopProblem> {
     let correlation_id = RequestCorrelationId::new_v7();
+    let operation_id = request
+        .operation_id
+        .parse::<OperationId>()
+        .map_err(|_| DesktopProblem::invalid_input("operation_id is not a valid operation identifier"))?;
     let record_id = request
         .record_id
         .parse::<RecordId>()
@@ -87,6 +91,7 @@ pub(crate) async fn refresh(
         .authorize_and_refresh(RefreshMetadataClaimsCommand::new(
             correlation_id,
             access,
+            operation_id,
             record_id,
             provider_id,
             groups,
@@ -194,9 +199,19 @@ pub(crate) fn configure(
                 record_id,
                 field_key,
             },
+            Some(value) if value.is_empty() => {
+                return Err(DesktopProblem::invalid_input(
+                    "metadata override value must not be empty",
+                ));
+            }
+            Some(value) if value.len() > MAX_FIELD_VALUE_BYTES => {
+                return Err(DesktopProblem::invalid_input(
+                    "metadata override value exceeds the byte limit",
+                ));
+            }
             Some(_) => {
                 return Err(DesktopProblem::invalid_input(
-                    "metadata override operation and value do not match",
+                    "metadata override value must not contain control characters",
                 ));
             }
         };

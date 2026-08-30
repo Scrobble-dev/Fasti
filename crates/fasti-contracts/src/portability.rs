@@ -76,6 +76,7 @@ pub enum WorkspaceExportEntityDto {
     MetadataLegacyOverrideOwnership,
     MetadataOverrideMigrationReceipts,
     MetadataAttributions,
+    MetadataRefreshReceipts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -105,7 +106,7 @@ pub struct WorkspaceBlobDescriptorDto {
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceManifestDto {
     pub format: WorkspaceManifestFormatDto,
-    #[schemars(range(min = 1, max = 3))]
+    #[schemars(range(min = 1, max = 4))]
     pub format_version: u32,
     #[schemars(length(equal = 36), regex(pattern = r"^wsp_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"), extend("format" = "fasti-workspace-id"))]
     pub workspace_id: String,
@@ -121,7 +122,7 @@ pub struct WorkspaceManifestDto {
     pub migration_version: u32,
     #[schemars(length(equal = 71), regex(pattern = r"^sha256:[0-9a-f]{64}$"), extend("format" = "sha256"))]
     pub migration_digest: String,
-    #[schemars(length(min = 16, max = 28))]
+    #[schemars(length(min = 16, max = 29))]
     pub streams: Vec<WorkspaceStreamDescriptorDto>,
     pub blobs: Vec<WorkspaceBlobDescriptorDto>,
 }
@@ -254,6 +255,7 @@ impl From<WorkspaceExportEntityDto> for WorkspaceExportEntity {
                 Self::MetadataOverrideMigrationReceipts
             }
             WorkspaceExportEntityDto::MetadataAttributions => Self::MetadataAttributions,
+            WorkspaceExportEntityDto::MetadataRefreshReceipts => Self::MetadataRefreshReceipts,
         }
     }
 }
@@ -299,6 +301,7 @@ impl From<WorkspaceExportEntity> for WorkspaceExportEntityDto {
                 Self::MetadataOverrideMigrationReceipts
             }
             WorkspaceExportEntity::MetadataAttributions => Self::MetadataAttributions,
+            WorkspaceExportEntity::MetadataRefreshReceipts => Self::MetadataRefreshReceipts,
         }
     }
 }
@@ -531,7 +534,8 @@ impl ChecksummedWorkspaceManifestDto {
 mod tests {
     use super::*;
     use fasti_application::{
-        WORKSPACE_ARCHIVE_V1_FORMAT_VERSION, WORKSPACE_ARCHIVE_V2_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_FORMAT_VERSION, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
+        WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
     };
     use schemars::generate::SchemaSettings;
     use std::num::NonZeroU64;
@@ -548,6 +552,20 @@ mod tests {
             "../../../contracts/portability/v2/workspace-manifest.example.json"
         ))
         .expect("checked-in portability-v2 example")
+    }
+
+    fn checked_v3_example() -> ChecksummedWorkspaceManifestDto {
+        serde_json::from_str(include_str!(
+            "../../../contracts/portability/v3/workspace-manifest.example.json"
+        ))
+        .expect("checked-in portability-v3 example")
+    }
+
+    fn checked_v4_example() -> ChecksummedWorkspaceManifestDto {
+        serde_json::from_str(include_str!(
+            "../../../contracts/portability/v4/workspace-manifest.example.json"
+        ))
+        .expect("checked-in portability-v4 example")
     }
 
     fn limits() -> PortabilityLimits {
@@ -664,6 +682,73 @@ mod tests {
             application.manifest().clone(),
         )
         .expect("archive-v2 application manifest projects");
+        assert_eq!(projected.dto(), &expected);
+    }
+
+    #[test]
+    fn archive_v3_has_the_frozen_stream_order_and_round_trips() {
+        let expected = checked_v3_example();
+        assert_eq!(
+            expected.manifest.format_version,
+            WORKSPACE_ARCHIVE_V3_FORMAT_VERSION
+        );
+        assert_eq!(
+            expected.manifest.streams.len(),
+            WorkspaceExportEntity::V3.len()
+        );
+        assert_eq!(
+            expected.manifest.streams[..WorkspaceExportEntity::V2.len()],
+            checked_v2_example().manifest.streams
+        );
+        assert_eq!(
+            expected
+                .manifest
+                .streams
+                .iter()
+                .map(|stream| stream.entity)
+                .collect::<Vec<_>>(),
+            WorkspaceExportEntity::V3
+                .iter()
+                .copied()
+                .map(WorkspaceExportEntityDto::from)
+                .collect::<Vec<_>>()
+        );
+
+        let application = expected
+            .clone()
+            .try_into_application(limits())
+            .expect("strict archive-v3 hostile-boundary conversion");
+        let projected = CanonicalWorkspaceManifestProjection::try_from_application(
+            application.manifest().clone(),
+        )
+        .expect("archive-v3 application manifest projects");
+        assert_eq!(projected.dto(), &expected);
+    }
+
+    #[test]
+    fn archive_v4_extends_v3_with_immutable_refresh_receipts() {
+        let expected = checked_v4_example();
+        assert_eq!(
+            expected.manifest.format_version,
+            WORKSPACE_ARCHIVE_FORMAT_VERSION
+        );
+        assert_eq!(
+            expected.manifest.streams[..WorkspaceExportEntity::V3.len()],
+            checked_v3_example().manifest.streams
+        );
+        assert_eq!(
+            expected.manifest.streams.last().map(|stream| stream.entity),
+            Some(WorkspaceExportEntityDto::MetadataRefreshReceipts)
+        );
+
+        let application = expected
+            .clone()
+            .try_into_application(limits())
+            .expect("strict archive-v4 hostile-boundary conversion");
+        let projected = CanonicalWorkspaceManifestProjection::try_from_application(
+            application.manifest().clone(),
+        )
+        .expect("archive-v4 application manifest projects");
         assert_eq!(projected.dto(), &expected);
     }
 

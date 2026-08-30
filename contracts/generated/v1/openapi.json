@@ -1536,8 +1536,13 @@
       "ProviderCapabilityResponse": {
         "additionalProperties": false,
         "properties": {
-          "capability": {
-            "$ref": "#/components/schemas/ProviderCapabilityDto"
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCapabilityDto"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
           },
           "provider_id": {
             "type": "string"
@@ -1545,7 +1550,7 @@
         },
         "required": [
           "provider_id",
-          "capability"
+          "capabilities"
         ],
         "type": "object"
       },
@@ -1897,6 +1902,13 @@
           "mode": {
             "$ref": "#/components/schemas/MetadataRefreshModeDto"
           },
+          "operation_id": {
+            "format": "fasti-operation-id",
+            "maxLength": 35,
+            "minLength": 35,
+            "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            "type": "string"
+          },
           "provider_id": {
             "maxLength": 64,
             "minLength": 1,
@@ -1917,6 +1929,7 @@
           }
         },
         "required": [
+          "operation_id",
           "record_id",
           "provider_id",
           "field_groups",
@@ -3859,6 +3872,7 @@
         "x-fasti-problem-codes": [
           "authentication_failed",
           "forbidden",
+          "idempotency_conflict",
           "integrity_failed",
           "malformed_json",
           "metadata_claim_stale",
@@ -5370,7 +5384,7 @@
                 }
               }
             },
-            "description": "Provider credential grant was removed"
+            "description": "Provider credential grant was removed and every affected provider capability state is returned"
           },
           "401": {
             "content": {
@@ -5526,7 +5540,7 @@
                 }
               }
             },
-            "description": "Write-only provider credential was stored"
+            "description": "Write-only provider credential was stored and every affected provider capability state is returned"
           },
           "400": {
             "content": {
@@ -5704,7 +5718,7 @@
                 }
               }
             },
-            "description": "Provider accepted the stored credential"
+            "description": "Provider accepted the stored credential and every affected provider capability state is returned"
           },
           "401": {
             "content": {

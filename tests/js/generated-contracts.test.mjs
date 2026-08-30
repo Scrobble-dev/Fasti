@@ -43,7 +43,7 @@ test("checked-in generated contracts validate", async () => {
     capabilityCount: 46,
     conformanceOpenApiPathCount: 9,
     openApiPathCount: 23,
-    problemCount: 263,
+    problemCount: 264,
     schemaCount: 2,
   });
 });

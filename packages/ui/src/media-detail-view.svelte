@@ -73,6 +73,8 @@
     metadataProjection?: MetadataProjectionResponse;
     metadataProjectionLoading?: boolean;
     metadataProjectionProblem?: string;
+    metadataRefreshUnavailableFieldGroups?: string[];
+    metadataRefreshableFieldGroupCount?: number;
     onBack: () => void;
     onSearchMetadata?: (
       provider: string,
@@ -124,6 +126,8 @@
     metadataProjection,
     metadataProjectionLoading = false,
     metadataProjectionProblem,
+    metadataRefreshUnavailableFieldGroups = [],
+    metadataRefreshableFieldGroupCount = 0,
     onBack,
     onSearchMetadata,
     onApplyMetadata,
@@ -1438,6 +1442,15 @@
                 data-testid="refresh-metadata-claims"
               >
                 <h4>Refresh provider claims</h4>
+                {#if metadataRefreshUnavailableFieldGroups.length > 0}
+                  <div class="alert alert-info mb-0" role="status">
+                    <strong>Some policy groups are not refreshed yet.</strong>
+                    This refresh skips
+                    {metadataRefreshUnavailableFieldGroups
+                      .map((group) => group.replaceAll("_", " "))
+                      .join(", ")}. The saved profile policy is unchanged.
+                  </div>
+                {/if}
                 {#if projectionProviders.length === 0}
                   <p class="muted">
                     Choose a preferred provider in Settings before the first
@@ -1449,14 +1462,12 @@
                       type="button"
                       class="btn btn-outline-secondary"
                       disabled={!onRefreshMetadataClaims ||
-                        metadataProjection.policy.enabled_field_groups
-                          .length === 0 ||
+                        metadataRefreshableFieldGroupCount === 0 ||
                         Boolean(projectedMetadataRefreshingProvider)}
                       title={!onRefreshMetadataClaims
                         ? "Governed metadata refresh is unavailable on this host"
-                        : metadataProjection.policy.enabled_field_groups
-                              .length === 0
-                          ? "Enable at least one field group in Settings"
+                        : metadataRefreshableFieldGroupCount === 0
+                          ? "Enable at least one currently refreshable field group in Settings"
                           : undefined}
                       onclick={() => refreshProjectedMetadata(providerId)}
                     >

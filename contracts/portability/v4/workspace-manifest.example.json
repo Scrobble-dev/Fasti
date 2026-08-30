@@ -1,0 +1,199 @@
+{
+  "manifest": {
+    "archive_profile": "zstd-l3-w22",
+    "blobs": [
+      {
+        "byte_length": 21,
+        "digest": "sha256:abababababababababababababababababababababababababababababababab",
+        "evidence_id": "evd_018f0e0e7f7b70008000000000000001"
+      }
+    ],
+    "contract_version": "1.0.0",
+    "export_scope": "full_workspace",
+    "format": "fasti.workspace.manifest",
+    "format_version": 4,
+    "migration_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "migration_version": 2,
+    "recovery_grant_policy": "require_fresh_bootstrap",
+    "restore_policy": "clean_only",
+    "streams": [
+      {
+        "byte_length": 128,
+        "digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101",
+        "entity": "workspaces",
+        "row_count": 1
+      },
+      {
+        "byte_length": 128,
+        "digest": "sha256:0202020202020202020202020202020202020202020202020202020202020202",
+        "entity": "profiles",
+        "row_count": 1
+      },
+      {
+        "byte_length": 128,
+        "digest": "sha256:0303030303030303030303030303030303030303030303030303030303030303",
+        "entity": "clients",
+        "row_count": 1
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:0404040404040404040404040404040404040404040404040404040404040404",
+        "entity": "records",
+        "row_count": 0
+      },
+      {
+        "byte_length": 160,
+        "digest": "sha256:0505050505050505050505050505050505050505050505050505050505050505",
+        "entity": "namespaces",
+        "row_count": 1
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:0606060606060606060606060606060606060606060606060606060606060606",
+        "entity": "external_identifiers",
+        "row_count": 0
+      },
+      {
+        "byte_length": 192,
+        "digest": "sha256:0707070707070707070707070707070707070707070707070707070707070707",
+        "entity": "evidence",
+        "row_count": 1
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:0808080808080808080808080808080808080808080808080808080808080808",
+        "entity": "observations",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:0909090909090909090909090909090909090909090909090909090909090909",
+        "entity": "observation_clues",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1010101010101010101010101010101010101010101010101010101010101010",
+        "entity": "occurrences",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "entity": "interpretations",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1212121212121212121212121212121212121212121212121212121212121212",
+        "entity": "review_items",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1313131313131313131313131313131313131313131313131313131313131313",
+        "entity": "review_candidates",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1414141414141414141414141414141414141414141414141414141414141414",
+        "entity": "corrections",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1515151515151515151515151515151515151515151515151515151515151515",
+        "entity": "receipts",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:1616161616161616161616161616161616161616161616161616161616161616",
+        "entity": "operations",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_field_claims",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_field_overrides",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "profile_record_tracking_dispositions",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_claims",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_claim_provenance",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_rating_claims",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_claim_lifecycle_events",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_projection_policies",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_profile_field_overrides",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_legacy_override_ownership",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_override_migration_receipts",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_attributions",
+        "row_count": 0
+      },
+      {
+        "byte_length": 0,
+        "digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "entity": "metadata_refresh_receipts",
+        "row_count": 0
+      }
+    ],
+    "workspace_id": "wsp_018f0e0e7f7b70008000000000000000",
+    "workspace_revision": 1
+  },
+  "manifest_digest": "sha256:49e2b5309b5509f743ba12e7ef185ff53d76c33cb4e11ef94828e233d9cc0869"
+}

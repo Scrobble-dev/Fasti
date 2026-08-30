@@ -1,18 +1,21 @@
 use crate::{ProviderRuntime, ProviderRuntimeError, ProviderSelectionInput};
 use fasti_application::{
-    metadata_field_group, CapabilityKey, CommitMetadataRefreshCommand, FastiProblem,
-    MarkMetadataRefreshUnavailableCommand, MetadataClaimRefreshService, MetadataRefreshFuture,
-    MetadataRefreshMode, MetadataRefreshPersistencePort, OutboundAccessPolicy,
-    PrepareMetadataRefreshCommand, ProblemCode, ProviderCapabilityId, ProviderCapabilityState,
-    ProviderCapabilityStatus, ProviderId, ProviderMetadataField, ProviderStatePort,
-    ProviderStatePortError, ReadCachedMetadataRefreshCommand, RefreshMetadataClaimsCommand,
+    metadata_field_group, CapabilityKey, CommitMetadataRefreshCommand,
+    CommitMetadataRefreshReceiptCommand, FastiProblem, MarkMetadataRefreshUnavailableCommand,
+    MetadataClaimRefreshService, MetadataRefreshFuture, MetadataRefreshMode,
+    MetadataRefreshPersistencePort, OutboundAccessPolicy, PrepareMetadataRefreshCommand,
+    ProblemCode, ProviderCapabilityId, ProviderCapabilityState, ProviderCapabilityStatus,
+    ProviderId, ProviderMetadataField, ProviderStatePort, ProviderStatePortError,
+    ReadCachedMetadataRefreshCommand, ReadMetadataRefreshReceiptCommand,
+    RefreshMetadataClaimsCommand,
 };
 use fasti_domain::{
     MetadataAttribution, MetadataCacheEntry, MetadataCacheKey, MetadataCachePurpose,
-    MetadataDataClassification, MetadataFieldGroup, NamespaceKey, ReceivedAt, Sha256Digest,
-    METADATA_FRESH_SECONDS, METADATA_STALE_ON_ERROR_SECONDS,
+    MetadataDataClassification, MetadataFieldGroup, MetadataLocale, MetadataRegion, NamespaceKey,
+    ReceivedAt, Sha256Digest, METADATA_FRESH_SECONDS, METADATA_STALE_ON_ERROR_SECONDS,
     METADATA_STALE_WHILE_REFRESHING_SECONDS,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 
 const READ_CAPABILITY: &str = "metadata.read";
@@ -51,6 +54,23 @@ impl ProviderMetadataRefreshService {
         let correlation_id = command.correlation_id();
         validate_groups(command.field_groups(), capability, correlation_id)?;
         let provider_id = command.provider_id().clone();
+        let semantic_digest = refresh_semantic_digest(&command, correlation_id)?;
+        let persistence = Arc::clone(&self.persistence);
+        let receipt = ReadMetadataRefreshReceiptCommand::new(
+            correlation_id,
+            *command.access(),
+            command.operation_id(),
+            semantic_digest.clone(),
+            command.record_id(),
+            provider_id.clone(),
+        );
+        if let Some(outcome) = run_blocking(capability, correlation_id, move || {
+            persistence.authorize_and_read_refresh_receipt(receipt)
+        })
+        .await?
+        {
+            return Ok(outcome);
+        }
         let persistence = Arc::clone(&self.persistence);
         let prepare = PrepareMetadataRefreshCommand::new(
             correlation_id,
@@ -105,6 +125,15 @@ impl ProviderMetadataRefreshService {
             MetadataCachePurpose::MetadataEnrichment,
             (effective_locale.clone(), effective_region.clone()),
         )?;
+        let offline_keys = cache_keys(
+            &command,
+            &prepared,
+            &state,
+            mapping.kind(),
+            descriptor.licence_and_terms,
+            MetadataCachePurpose::OfflineRead,
+            (effective_locale.clone(), effective_region.clone()),
+        )?;
         if command.mode() == MetadataRefreshMode::PreferCache {
             let persistence = Arc::clone(&self.persistence);
             let cached = ReadCachedMetadataRefreshCommand::new(
@@ -118,7 +147,20 @@ impl ProviderMetadataRefreshService {
             })
             .await?
             {
-                return Ok(outcome);
+                let persistence = Arc::clone(&self.persistence);
+                let receipt = CommitMetadataRefreshReceiptCommand::new(
+                    correlation_id,
+                    *command.access(),
+                    command.operation_id(),
+                    semantic_digest.clone(),
+                    command.record_id(),
+                    provider_id.clone(),
+                    outcome,
+                );
+                return run_blocking(capability, correlation_id, move || {
+                    persistence.authorize_and_commit_refresh_receipt(receipt)
+                })
+                .await;
             }
         }
         let selection = ProviderSelectionInput {
@@ -152,7 +194,7 @@ impl ProviderMetadataRefreshService {
                 .await?;
                 return Err(stale_problem(capability, correlation_id));
             }
-            Err(error) => return Err(runtime_problem(error, capability, correlation_id)),
+            Err(error) => return Err(fetch_problem(error, capability, correlation_id)),
         };
         if candidate.identifier().map_err(|_| {
             problem(
@@ -194,15 +236,6 @@ impl ProviderMetadataRefreshService {
             descriptor.docs_url,
         )
         .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
-        let offline_keys = cache_keys(
-            &command,
-            &prepared,
-            &state,
-            mapping.kind(),
-            descriptor.licence_and_terms,
-            MetadataCachePurpose::OfflineRead,
-            (effective_locale, effective_region),
-        )?;
         let cache_entries = cache_entries(
             enrichment_keys.into_iter().chain(offline_keys),
             &fields,
@@ -213,6 +246,8 @@ impl ProviderMetadataRefreshService {
         let commit = CommitMetadataRefreshCommand::new(
             correlation_id,
             *command.access(),
+            command.operation_id(),
+            semantic_digest,
             prepared,
             provider_id,
             state,
@@ -226,6 +261,27 @@ impl ProviderMetadataRefreshService {
         })
         .await
     }
+}
+
+fn refresh_semantic_digest(
+    command: &RefreshMetadataClaimsCommand,
+    correlation_id: fasti_domain::RequestCorrelationId,
+) -> fasti_application::ApplicationResult<Sha256Digest> {
+    let capability = CapabilityKey::RefreshMetadataClaims;
+    let mode = match command.mode() {
+        MetadataRefreshMode::PreferCache => "prefer_cache",
+        MetadataRefreshMode::Revalidate => "revalidate",
+    };
+    let encoded = serde_json::to_vec(&(
+        command.record_id().to_string(),
+        command.provider_id().as_str(),
+        command.field_groups(),
+        command.locale().map(MetadataLocale::as_str),
+        command.region().map(MetadataRegion::as_str),
+        mode,
+    ))
+    .map_err(|_| problem(ProblemCode::IntegrityFailed, capability, correlation_id))?;
+    Ok(Sha256Digest::from_bytes(&Sha256::digest(encoded).into()))
 }
 
 async fn run_blocking<T, F>(
@@ -411,7 +467,6 @@ fn runtime_problem(
     problem(error.problem_code(), capability, correlation_id)
 }
 
-#[cfg(test)]
 fn fetch_problem(
     error: ProviderRuntimeError,
     capability: CapabilityKey,
@@ -573,6 +628,7 @@ mod tests {
         let command = RefreshMetadataClaimsCommand::new(
             fasti_domain::RequestCorrelationId::new_v7(),
             access,
+            fasti_domain::OperationId::new_v7(),
             record_id,
             provider_id.clone(),
             vec![MetadataFieldGroup::BasicInfo],
@@ -616,5 +672,46 @@ mod tests {
             key.locale().map(MetadataLocale::as_str) == Some("fr-fr")
                 && key.region().map(MetadataRegion::as_str) == Some("FR")
         }));
+    }
+
+    #[test]
+    fn refresh_digest_uses_only_canonical_request_semantics() {
+        let record_id = RecordId::new_v7();
+        let provider_id = MetadataProviderId::try_new("tmdb").expect("provider");
+        let locale = MetadataLocale::try_new("fr-FR").expect("locale");
+        let region = MetadataRegion::try_new("FR").expect("region");
+        let command = |mode| {
+            RefreshMetadataClaimsCommand::new(
+                fasti_domain::RequestCorrelationId::new_v7(),
+                fasti_application::RequestAccessContext::new(
+                    WorkspaceId::new_v7(),
+                    ProfileId::new_v7(),
+                    ClientId::new_v7(),
+                    CredentialId::new_v7(),
+                    ProfileGrantId::new_v7(),
+                    7,
+                ),
+                fasti_domain::OperationId::new_v7(),
+                record_id,
+                provider_id.clone(),
+                vec![MetadataFieldGroup::BasicInfo],
+                Some(locale.clone()),
+                Some(region.clone()),
+                mode,
+            )
+        };
+        let first = command(MetadataRefreshMode::PreferCache);
+        let retry = command(MetadataRefreshMode::PreferCache);
+        let revalidate = command(MetadataRefreshMode::Revalidate);
+
+        assert_eq!(
+            refresh_semantic_digest(&first, first.correlation_id()).expect("first digest"),
+            refresh_semantic_digest(&retry, retry.correlation_id()).expect("retry digest")
+        );
+        assert_ne!(
+            refresh_semantic_digest(&first, first.correlation_id()).expect("first digest"),
+            refresh_semantic_digest(&revalidate, revalidate.correlation_id())
+                .expect("revalidate digest")
+        );
     }
 }

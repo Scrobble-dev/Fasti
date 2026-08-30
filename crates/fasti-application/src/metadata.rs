@@ -327,6 +327,7 @@ pub enum MetadataRefreshMode {
 pub struct RefreshMetadataClaimsCommand {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
+    operation_id: fasti_domain::OperationId,
     record_id: RecordId,
     provider_id: MetadataProviderId,
     field_groups: Vec<MetadataFieldGroup>,
@@ -340,6 +341,7 @@ impl RefreshMetadataClaimsCommand {
     pub fn new(
         correlation_id: RequestCorrelationId,
         access: RequestAccessContext,
+        operation_id: fasti_domain::OperationId,
         record_id: RecordId,
         provider_id: MetadataProviderId,
         mut field_groups: Vec<MetadataFieldGroup>,
@@ -352,6 +354,7 @@ impl RefreshMetadataClaimsCommand {
         Self {
             correlation_id,
             access,
+            operation_id,
             record_id,
             provider_id,
             field_groups,
@@ -367,6 +370,10 @@ impl RefreshMetadataClaimsCommand {
 
     pub const fn access(&self) -> &RequestAccessContext {
         &self.access
+    }
+
+    pub const fn operation_id(&self) -> fasti_domain::OperationId {
+        self.operation_id
     }
 
     pub const fn record_id(&self) -> RecordId {
@@ -618,6 +625,8 @@ impl PrepareMetadataRefreshCommand {
 pub struct CommitMetadataRefreshCommand {
     correlation_id: RequestCorrelationId,
     access: RequestAccessContext,
+    operation_id: fasti_domain::OperationId,
+    semantic_digest: fasti_domain::Sha256Digest,
     prepared: PreparedMetadataRefresh,
     provider_id: MetadataProviderId,
     expected_provider_state: ProviderCapabilityState,
@@ -633,6 +642,27 @@ pub struct ReadCachedMetadataRefreshCommand {
     access: RequestAccessContext,
     prepared: PreparedMetadataRefresh,
     cache_keys: Vec<fasti_domain::MetadataCacheKey>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReadMetadataRefreshReceiptCommand {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+    operation_id: fasti_domain::OperationId,
+    semantic_digest: fasti_domain::Sha256Digest,
+    record_id: RecordId,
+    provider_id: MetadataProviderId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommitMetadataRefreshReceiptCommand {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+    operation_id: fasti_domain::OperationId,
+    semantic_digest: fasti_domain::Sha256Digest,
+    record_id: RecordId,
+    provider_id: MetadataProviderId,
+    outcome: RefreshMetadataClaimsOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -701,11 +731,97 @@ impl ReadCachedMetadataRefreshCommand {
     }
 }
 
+impl ReadMetadataRefreshReceiptCommand {
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        access: RequestAccessContext,
+        operation_id: fasti_domain::OperationId,
+        semantic_digest: fasti_domain::Sha256Digest,
+        record_id: RecordId,
+        provider_id: MetadataProviderId,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access,
+            operation_id,
+            semantic_digest,
+            record_id,
+            provider_id,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+    pub const fn operation_id(&self) -> fasti_domain::OperationId {
+        self.operation_id
+    }
+    pub const fn semantic_digest(&self) -> &fasti_domain::Sha256Digest {
+        &self.semantic_digest
+    }
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+    pub const fn provider_id(&self) -> &MetadataProviderId {
+        &self.provider_id
+    }
+}
+
+impl CommitMetadataRefreshReceiptCommand {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        correlation_id: RequestCorrelationId,
+        access: RequestAccessContext,
+        operation_id: fasti_domain::OperationId,
+        semantic_digest: fasti_domain::Sha256Digest,
+        record_id: RecordId,
+        provider_id: MetadataProviderId,
+        outcome: RefreshMetadataClaimsOutcome,
+    ) -> Self {
+        Self {
+            correlation_id,
+            access,
+            operation_id,
+            semantic_digest,
+            record_id,
+            provider_id,
+            outcome,
+        }
+    }
+
+    pub const fn correlation_id(&self) -> RequestCorrelationId {
+        self.correlation_id
+    }
+    pub const fn access(&self) -> &RequestAccessContext {
+        &self.access
+    }
+    pub const fn operation_id(&self) -> fasti_domain::OperationId {
+        self.operation_id
+    }
+    pub const fn semantic_digest(&self) -> &fasti_domain::Sha256Digest {
+        &self.semantic_digest
+    }
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+    pub const fn provider_id(&self) -> &MetadataProviderId {
+        &self.provider_id
+    }
+    pub const fn outcome(&self) -> &RefreshMetadataClaimsOutcome {
+        &self.outcome
+    }
+}
+
 impl CommitMetadataRefreshCommand {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         correlation_id: RequestCorrelationId,
         access: RequestAccessContext,
+        operation_id: fasti_domain::OperationId,
+        semantic_digest: fasti_domain::Sha256Digest,
         prepared: PreparedMetadataRefresh,
         provider_id: MetadataProviderId,
         expected_provider_state: ProviderCapabilityState,
@@ -717,6 +833,8 @@ impl CommitMetadataRefreshCommand {
         Self {
             correlation_id,
             access,
+            operation_id,
+            semantic_digest,
             prepared,
             provider_id,
             expected_provider_state,
@@ -732,6 +850,12 @@ impl CommitMetadataRefreshCommand {
     }
     pub const fn access(&self) -> &RequestAccessContext {
         &self.access
+    }
+    pub const fn operation_id(&self) -> fasti_domain::OperationId {
+        self.operation_id
+    }
+    pub const fn semantic_digest(&self) -> &fasti_domain::Sha256Digest {
+        &self.semantic_digest
     }
     pub const fn prepared(&self) -> &PreparedMetadataRefresh {
         &self.prepared
@@ -775,6 +899,16 @@ pub trait MetadataRefreshPersistencePort: Send + Sync {
         &self,
         command: ReadCachedMetadataRefreshCommand,
     ) -> ApplicationResult<Option<RefreshMetadataClaimsOutcome>>;
+
+    fn authorize_and_read_refresh_receipt(
+        &self,
+        command: ReadMetadataRefreshReceiptCommand,
+    ) -> ApplicationResult<Option<RefreshMetadataClaimsOutcome>>;
+
+    fn authorize_and_commit_refresh_receipt(
+        &self,
+        command: CommitMetadataRefreshReceiptCommand,
+    ) -> ApplicationResult<RefreshMetadataClaimsOutcome>;
 
     fn authorize_and_mark_refresh_unavailable(
         &self,
@@ -1096,6 +1230,7 @@ mod tests {
         let command = RefreshMetadataClaimsCommand::new(
             RequestCorrelationId::new_v7(),
             access(),
+            fasti_domain::OperationId::new_v7(),
             RecordId::new_v7(),
             MetadataProviderId::try_new("tmdb").expect("provider"),
             vec![

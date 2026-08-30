@@ -583,7 +583,7 @@ pub(crate) async fn list_providers(
     ),
     request_body = ConfigureProviderCredentialRequest,
     responses(
-        (status = 200, description = "Write-only provider credential was stored", body = ProviderCapabilityResponse),
+        (status = 200, description = "Write-only provider credential was stored and every affected provider capability state is returned", body = ProviderCapabilityResponse),
         (status = 400, description = "Malformed JSON", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Credential is missing, inactive, or rejected by the provider vault", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Authenticated principal lacks provider-credential-management scope", body = ProblemDetails, content_type = "application/problem+json"),
@@ -612,7 +612,7 @@ pub(crate) async fn configure_provider_credential(
     {
         return Err(invalid_credential(capability, correlation_id));
     }
-    let (provider, provider_capability) = resolve(
+    let (provider, _) = resolve(
         &state.runtime,
         &provider_id,
         &capability_id,
@@ -736,20 +736,19 @@ pub(crate) async fn configure_provider_credential(
         .await?;
         final_states.push((spec, available));
     }
-    let selected = final_states
-        .iter()
-        .find(|(spec, _)| spec.capability_id == capability_id)
-        .map(|(_, state)| state)
-        .ok_or_else(|| invalid_path(capability, correlation_id))?;
-
     Ok(Json(ProviderCapabilityResponse {
         provider_id,
-        capability: capability_dto(
-            &state.runtime,
-            provider.runtime_available,
-            provider_capability,
-            Some(selected),
-        ),
+        capabilities: final_states
+            .iter()
+            .map(|(spec, value)| {
+                capability_dto(
+                    &state.runtime,
+                    provider.runtime_available,
+                    spec,
+                    Some(value),
+                )
+            })
+            .collect(),
     }))
 }
 
@@ -764,7 +763,7 @@ pub(crate) async fn configure_provider_credential(
         ("capability_id" = String, Path, description = "Canonical provider capability ID")
     ),
     responses(
-        (status = 200, description = "Provider credential grant was removed", body = ProviderCapabilityResponse),
+        (status = 200, description = "Provider credential grant was removed and every affected provider capability state is returned", body = ProviderCapabilityResponse),
         (status = 401, description = "Credential is missing or inactive", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Authenticated principal lacks provider-credential-management scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "Provider path is invalid", body = ProblemDetails, content_type = "application/problem+json"),
@@ -780,7 +779,7 @@ pub(crate) async fn remove_provider_credential(
     let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ConfigureProviderCredential;
     let access = authorize(&state, &headers, capability, correlation_id).await?;
-    let (provider, provider_capability) = resolve(
+    let (provider, _) = resolve(
         &state.runtime,
         &provider_id,
         &capability_id,
@@ -895,20 +894,19 @@ pub(crate) async fn remove_provider_credential(
         .await?;
         removed.push((spec, value));
     }
-    let selected = removed
-        .iter()
-        .find(|(spec, _)| spec.capability_id == capability_id)
-        .map(|(_, state)| state)
-        .ok_or_else(|| invalid_path(capability, correlation_id))?;
-
     Ok(Json(ProviderCapabilityResponse {
         provider_id,
-        capability: capability_dto(
-            &state.runtime,
-            provider.runtime_available,
-            provider_capability,
-            Some(selected),
-        ),
+        capabilities: removed
+            .iter()
+            .map(|(spec, value)| {
+                capability_dto(
+                    &state.runtime,
+                    provider.runtime_available,
+                    spec,
+                    Some(value),
+                )
+            })
+            .collect(),
     }))
 }
 
@@ -1022,7 +1020,7 @@ async fn execute_check(
         ("capability_id" = String, Path, description = "Canonical provider capability ID")
     ),
     responses(
-        (status = 200, description = "Provider accepted the stored credential", body = ProviderCapabilityResponse),
+        (status = 200, description = "Provider accepted the stored credential and every affected provider capability state is returned", body = ProviderCapabilityResponse),
         (status = 401, description = "Credential is missing, inactive, expired, or rejected", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Authenticated principal lacks provider-credential-management scope", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "Provider credential is not stored", body = ProblemDetails, content_type = "application/problem+json"),
@@ -1048,7 +1046,8 @@ pub(crate) async fn test_provider_credential(
         capability,
         correlation_id,
     )?;
-    let updated = execute_check(
+    let _credential_guard = state.credential_operation_lock.lock().await;
+    execute_check(
         &state,
         access.workspace_id(),
         &provider_id,
@@ -1058,14 +1057,27 @@ pub(crate) async fn test_provider_credential(
         correlation_id,
     )
     .await?;
+    let states = provider_states(
+        &state,
+        access.workspace_id(),
+        provider,
+        capability,
+        correlation_id,
+    )
+    .await?;
     Ok(Json(ProviderCapabilityResponse {
         provider_id,
-        capability: capability_dto(
-            &state.runtime,
-            provider.runtime_available,
-            spec,
-            Some(&updated),
-        ),
+        capabilities: states
+            .iter()
+            .map(|(item, value)| {
+                capability_dto(
+                    &state.runtime,
+                    provider.runtime_available,
+                    item,
+                    Some(value),
+                )
+            })
+            .collect(),
     }))
 }
 
@@ -1106,6 +1118,7 @@ pub(crate) async fn read_provider_health(
             correlation_id,
         ))));
     }
+    let _credential_guard = state.credential_operation_lock.lock().await;
     let mut capabilities = Vec::with_capacity(provider.capabilities.len());
     for spec in provider.capabilities {
         let updated = execute_check(
@@ -1166,6 +1179,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
         Mutex,
     };
+    use std::time::Duration;
     use tower::ServiceExt;
 
     struct MemoryVault {
@@ -1319,6 +1333,38 @@ mod tests {
         assert_eq!(state.0.load(Ordering::SeqCst), 0);
     }
 
+    #[tokio::test]
+    async fn provider_checks_wait_for_the_shared_credential_operation_lock() {
+        let (_root, kernel, _workspace_id, credential) = enrolled_kernel();
+        let operation_lock = Arc::new(tokio::sync::Mutex::new(()));
+        let app = router().with_state(ProviderApiState {
+            kernel: kernel.clone(),
+            provider_state: kernel,
+            runtime: Arc::new(ProviderRuntime::new(Arc::new(MemoryVault::new(
+                CredentialVaultSource::None,
+            )))),
+            credential_operation_lock: operation_lock.clone(),
+        });
+
+        for request in [
+            Request::post("/api/v1/providers/tmdb/credentials/metadata.read/tests")
+                .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                .body(Body::empty())
+                .expect("credential-test request"),
+            Request::get("/api/v1/providers/tmdb/health")
+                .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                .body(Body::empty())
+                .expect("provider-health request"),
+        ] {
+            let guard = operation_lock.lock().await;
+            let result =
+                tokio::time::timeout(Duration::from_millis(200), app.clone().oneshot(request))
+                    .await;
+            assert!(result.is_err(), "provider check bypassed the shared lock");
+            drop(guard);
+        }
+    }
+
     #[test]
     fn environment_credentials_are_visible_and_read_only() {
         let runtime = ProviderRuntime::new(Arc::new(MemoryVault::new(
@@ -1385,10 +1431,13 @@ mod tests {
             .any(|value| value == b"do-not-return"));
         let configured: serde_json::Value =
             serde_json::from_slice(&body).expect("provider response JSON");
-        assert_eq!(
-            configured.pointer("/capability/credential_source"),
-            Some(&serde_json::json!("credential_store"))
-        );
+        let configured_capabilities = configured["capabilities"]
+            .as_array()
+            .expect("provider capabilities");
+        assert!(!configured_capabilities.is_empty());
+        assert!(configured_capabilities.iter().all(|capability| {
+            capability["credential_source"] == serde_json::json!("credential_store")
+        }));
         let states = kernel
             .list_provider_capability_states(workspace_id)
             .expect("configured provider states");

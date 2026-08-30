@@ -873,6 +873,7 @@ define_capabilities!(
         [
             AuthenticationFailed,
             Forbidden,
+            IdempotencyConflict,
             IntegrityFailed,
             MalformedJson,
             MetadataClaimStale,

@@ -178,17 +178,35 @@ async fn test_endpoint_connection(
 }
 
 #[cfg(feature = "desktop-runtime")]
-#[tauri::command(async)]
-fn provider_credential_status(
+async fn run_blocking_provider_operation<T, F>(
+    gate: &tokio::sync::Mutex<()>,
+    operation: F,
+) -> Result<T, DesktopProblem>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, DesktopProblem> + Send + 'static,
+{
+    let _provider_guard = gate.lock().await;
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|_| DesktopProblem::storage("The provider operation task did not complete."))?
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+async fn provider_credential_status(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
     let kernel = state.kernel()?;
-    let access = records::require_access(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-    )?;
     let runtime = state.provider_runtime(&kernel)?;
-    providers::credential_statuses(&runtime, &kernel, access.workspace_id())
+    run_blocking_provider_operation(&state.provider_operation_gate, move || {
+        let access = records::require_access(
+            &kernel,
+            &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        )?;
+        providers::credential_statuses(&runtime, &kernel, access.workspace_id())
+    })
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -197,14 +215,16 @@ async fn save_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: SaveProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
-    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
-    let access = records::require_access(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-    )?;
     let runtime = state.provider_runtime(&kernel)?;
-    providers::save_credential(&runtime, &kernel, access.workspace_id(), input)
+    run_blocking_provider_operation(&state.provider_operation_gate, move || {
+        let access = records::require_access(
+            &kernel,
+            &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        )?;
+        providers::save_credential(&runtime, &kernel, access.workspace_id(), input)
+    })
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -213,14 +233,16 @@ async fn delete_provider_credential(
     state: tauri::State<'_, DesktopState>,
     input: DeleteProviderCredentialInput,
 ) -> Result<Vec<ProviderCredentialStatusView>, DesktopProblem> {
-    let _provider_guard = state.provider_operation_gate.lock().await;
     let kernel = state.kernel()?;
-    let access = records::require_access(
-        &kernel,
-        &KeyringSetupSecretStore::new(kernel.data_root_identity()),
-    )?;
     let runtime = state.provider_runtime(&kernel)?;
-    providers::delete_credential(&runtime, &kernel, access.workspace_id(), input)
+    run_blocking_provider_operation(&state.provider_operation_gate, move || {
+        let access = records::require_access(
+            &kernel,
+            &KeyringSetupSecretStore::new(kernel.data_root_identity()),
+        )?;
+        providers::delete_credential(&runtime, &kernel, access.workspace_id(), input)
+    })
+    .await
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -633,8 +655,8 @@ pub fn run() {
                 network: NetworkConfigStore::new(&config_root),
                 artwork,
                 provider_runtime: Mutex::new(None),
-                // ponytail: serialize provider vault mutation and metadata reads;
-                // use per-provider gates only if measured throughput needs it.
+                // ponytail: serialize provider vault mutation and metadata claim
+                // refresh; use per-provider gates only if measured throughput needs it.
                 provider_operation_gate: tokio::sync::Mutex::new(()),
             });
             Ok(())
@@ -678,6 +700,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
 
     #[test]
     fn desktop_requires_an_explicit_non_empty_data_root() {
@@ -708,5 +733,30 @@ mod tests {
                 .expect("platform sandbox"),
             PathBuf::from("/sandbox/fasti")
         );
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    #[tokio::test]
+    async fn blocking_provider_operations_wait_for_the_shared_gate() {
+        let gate = tokio::sync::Mutex::new(());
+        let held = gate.lock().await;
+        let started = Arc::new(AtomicBool::new(false));
+        let operation_started = Arc::clone(&started);
+        let operation = run_blocking_provider_operation(&gate, move || {
+            operation_started.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+        tokio::pin!(operation);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut operation)
+                .await
+                .is_err()
+        );
+        assert!(!started.load(Ordering::SeqCst));
+
+        drop(held);
+        operation.await.expect("serialized provider operation");
+        assert!(started.load(Ordering::SeqCst));
     }
 }

@@ -3,6 +3,7 @@
 contracts/generated/
 contracts/portability/v2/
 contracts/portability/v3/
+contracts/portability/v4/
 packages/schemas/schemas/
 contracts/examples/v1/system.capabilities.success.json
 packages/sdk/src/generated.ts

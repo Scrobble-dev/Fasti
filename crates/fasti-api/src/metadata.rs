@@ -1,8 +1,8 @@
 use crate::local::{authenticate_request, request_authentication};
 use crate::problem::{application_problem, json_rejection, HttpProblem};
 use axum::{
-    extract::{rejection::JsonRejection, DefaultBodyLimit, Path, Query, State},
-    http::HeaderMap,
+    extract::{rejection::JsonRejection, DefaultBodyLimit, FromRequestParts, Path, Query, State},
+    http::{request::Parts, HeaderMap},
     routing::{get, post, put},
     Json, Router,
 };
@@ -21,7 +21,7 @@ use fasti_contracts::{
 };
 use fasti_domain::{
     FieldKey, LastKnownGoodPolicy, MetadataFieldGroup, MetadataLocale, MetadataProjectionPolicy,
-    MetadataProviderId, MetadataRegion, ProfileId, RecordId, RequestCorrelationId,
+    MetadataProviderId, MetadataRegion, OperationId, ProfileId, RecordId, RequestCorrelationId,
     MAX_FIELD_VALUE_BYTES,
 };
 use std::{collections::HashSet, sync::Arc};
@@ -36,6 +36,60 @@ pub(crate) struct MetadataApiState {
     pub(crate) refresh_service: Arc<dyn MetadataClaimRefreshService>,
     pub(crate) projection_port: Arc<dyn MetadataProjectionPort>,
     pub(crate) credential_operation_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+pub(crate) struct RefreshMetadataAccess {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+}
+
+impl FromRequestParts<MetadataApiState> for RefreshMetadataAccess {
+    type Rejection = HttpProblem;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &MetadataApiState,
+    ) -> Result<Self, Self::Rejection> {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let access = authorize(
+            state,
+            &parts.headers,
+            CapabilityKey::RefreshMetadataClaims,
+            correlation_id,
+        )
+        .await?;
+        Ok(Self {
+            correlation_id,
+            access,
+        })
+    }
+}
+
+pub(crate) struct ConfigureMetadataAccess {
+    correlation_id: RequestCorrelationId,
+    access: RequestAccessContext,
+}
+
+impl FromRequestParts<MetadataApiState> for ConfigureMetadataAccess {
+    type Rejection = HttpProblem;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &MetadataApiState,
+    ) -> Result<Self, Self::Rejection> {
+        let correlation_id = RequestCorrelationId::new_v7();
+        let access = authorize(
+            state,
+            &parts.headers,
+            CapabilityKey::ConfigureMetadataProjection,
+            correlation_id,
+        )
+        .await?;
+        Ok(Self {
+            correlation_id,
+            access,
+        })
+    }
 }
 
 async fn authorize(
@@ -148,15 +202,25 @@ fn parse_field_groups(
 )]
 pub(crate) async fn refresh_metadata_claims(
     State(state): State<MetadataApiState>,
-    headers: HeaderMap,
+    RefreshMetadataAccess {
+        correlation_id,
+        access,
+    }: RefreshMetadataAccess,
     body: Result<Json<RefreshMetadataClaimsRequest>, JsonRejection>,
 ) -> HttpResult<RefreshMetadataClaimsResponse> {
-    let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::RefreshMetadataClaims;
     let request = body
         .map_err(|error| json_rejection(capability, correlation_id, error))?
         .0;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
+    let operation_id = request.operation_id.parse::<OperationId>().map_err(|_| {
+        invalid_input(
+            capability,
+            correlation_id,
+            "/operation_id",
+            "operation ID is invalid",
+            "a canonical op_ UUIDv7",
+        )
+    })?;
     let record_id = request.record_id.parse::<RecordId>().map_err(|_| {
         invalid_input(
             capability,
@@ -210,6 +274,7 @@ pub(crate) async fn refresh_metadata_claims(
         .authorize_and_refresh(RefreshMetadataClaimsCommand::new(
             correlation_id,
             access,
+            operation_id,
             record_id,
             provider_id,
             field_groups,
@@ -402,15 +467,16 @@ fn parse_overrides(
 )]
 pub(crate) async fn configure_metadata_projection(
     State(state): State<MetadataApiState>,
-    headers: HeaderMap,
+    ConfigureMetadataAccess {
+        correlation_id,
+        access,
+    }: ConfigureMetadataAccess,
     body: Result<Json<ConfigureMetadataProjectionRequest>, JsonRejection>,
 ) -> HttpResult<MetadataProjectionConfigurationResponse> {
-    let correlation_id = RequestCorrelationId::new_v7();
     let capability = CapabilityKey::ConfigureMetadataProjection;
     let request = body
         .map_err(|error| json_rejection(capability, correlation_id, error))?
         .0;
-    let access = authorize(&state, &headers, capability, correlation_id).await?;
     let profile_id: ProfileId = access.profile_id();
     let preferred_provider_id = request
         .preferred_provider_id
@@ -523,6 +589,42 @@ pub(crate) fn router() -> Router<MetadataApiState> {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
+    use axum::{
+        body::Body,
+        http::{header, Request, StatusCode},
+    };
+    #[cfg(target_os = "linux")]
+    use fasti_store::SqliteKernel;
+    #[cfg(target_os = "linux")]
+    use tower::ServiceExt;
+
+    #[cfg(target_os = "linux")]
+    struct NeverRefresh;
+
+    #[cfg(target_os = "linux")]
+    impl MetadataClaimRefreshService for NeverRefresh {
+        fn authorize_and_refresh(
+            &self,
+            _command: RefreshMetadataClaimsCommand,
+        ) -> fasti_application::MetadataRefreshFuture<'_> {
+            Box::pin(async { panic!("unauthenticated request reached metadata refresh") })
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn unauthenticated_test_router() -> (tempfile::TempDir, Router) {
+        let root = tempfile::tempdir().expect("temporary data root");
+        let kernel = Arc::new(SqliteKernel::open(root.path()).expect("SQLite kernel"));
+        let app = router().with_state(MetadataApiState {
+            kernel: kernel.clone(),
+            refresh_service: Arc::new(NeverRefresh),
+            projection_port: kernel,
+            credential_operation_lock: Arc::new(tokio::sync::Mutex::new(())),
+        });
+        (root, app)
+    }
+
     #[test]
     fn duplicate_refresh_groups_are_rejected_before_provider_io() {
         let result = parse_field_groups(
@@ -556,5 +658,39 @@ mod tests {
             RequestCorrelationId::new_v7(),
         );
         assert!(result.is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn refresh_authentication_rejects_before_malformed_json() {
+        let (_root, app) = unauthenticated_test_router();
+        let response = app
+            .oneshot(
+                Request::post("/api/v1/metadata/claims/refresh")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn configure_authentication_rejects_before_malformed_json() {
+        let (_root, app) = unauthenticated_test_router();
+        let response = app
+            .oneshot(
+                Request::put("/api/v1/profile/metadata-projection")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

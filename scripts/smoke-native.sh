@@ -294,6 +294,7 @@ if (
 status, refresh = post(
     "/api/v1/metadata/claims/refresh",
     {
+        "operation_id": "op_018f0e0e7f7b70008000000000000005",
         "record_id": record_id,
         "provider_id": "tmdb",
         "field_groups": ["basic_info"],

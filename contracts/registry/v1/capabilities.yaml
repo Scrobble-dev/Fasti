@@ -1567,6 +1567,7 @@ capabilities:
       [
         authentication_failed,
         forbidden,
+        idempotency_conflict,
         integrity_failed,
         malformed_json,
         metadata_claim_stale,

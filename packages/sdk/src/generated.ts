@@ -1602,8 +1602,13 @@ const PRODUCTION_SCHEMAS = {
   "ProviderCapabilityResponse": {
     "additionalProperties": false,
     "properties": {
-      "capability": {
-        "$ref": "#/components/schemas/ProviderCapabilityDto"
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
       },
       "provider_id": {
         "type": "string"
@@ -1611,7 +1616,7 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "provider_id",
-      "capability"
+      "capabilities"
     ],
     "type": "object"
   },
@@ -1963,6 +1968,13 @@ const PRODUCTION_SCHEMAS = {
       "mode": {
         "$ref": "#/components/schemas/MetadataRefreshModeDto"
       },
+      "operation_id": {
+        "format": "fasti-operation-id",
+        "maxLength": 35,
+        "minLength": 35,
+        "pattern": "^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        "type": "string"
+      },
       "provider_id": {
         "maxLength": 64,
         "minLength": 1,
@@ -1983,6 +1995,7 @@ const PRODUCTION_SCHEMAS = {
       }
     },
     "required": [
+      "operation_id",
       "record_id",
       "provider_id",
       "field_groups",
@@ -2626,7 +2639,7 @@ export interface ConfigureProviderCredentialRequest {
 }
 
 export interface ProviderCapabilityResponse {
-  readonly capability: ProviderCapabilityDto;
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
   readonly provider_id: string;
 }
 
@@ -2639,6 +2652,7 @@ export interface RefreshMetadataClaimsRequest {
   readonly field_groups: ReadonlyArray<MetadataFieldGroupDto>;
   readonly locale?: null | string;
   readonly mode: MetadataRefreshModeDto;
+  readonly operation_id: string;
   readonly provider_id: string;
   readonly record_id: string;
   readonly region?: null | string;
@@ -2810,7 +2824,7 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   removeProviderCredential: { operationId: "remove_provider_credential", method: "DELETE", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
   testProviderCredential: { operationId: "test_provider_credential", method: "POST", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests", capabilityId: "provider.credential.test", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.credential.test.provider_credential_missing"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
   readProviderHealth: { operationId: "read_provider_health", method: "GET", path: "/api/v1/providers/{provider_id}/health", capabilityId: "provider.health.read", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.health.read.provider_unavailable"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderHealthResponse" },
-  refreshMetadataClaims: { operationId: "refresh_metadata_claims", method: "POST", path: "/api/v1/metadata/claims/refresh", capabilityId: "metadata.claim.refresh", authorization: "scoped", requiredScopes: ["metadata_claim_refresh"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","metadata_claim_stale","payload_too_large","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.claim.refresh.metadata_claim_stale"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "RefreshMetadataClaimsRequest", responseSchema: "RefreshMetadataClaimsResponse" },
+  refreshMetadataClaims: { operationId: "refresh_metadata_claims", method: "POST", path: "/api/v1/metadata/claims/refresh", capabilityId: "metadata.claim.refresh", authorization: "scoped", requiredScopes: ["metadata_claim_refresh"], problemCodes: ["authentication_failed","forbidden","idempotency_conflict","integrity_failed","malformed_json","metadata_claim_stale","payload_too_large","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","record_not_found","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.claim.refresh.metadata_claim_stale"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "RefreshMetadataClaimsRequest", responseSchema: "RefreshMetadataClaimsResponse" },
   readMetadataProjection: { operationId: "read_metadata_projection", method: "GET", path: "/api/v1/records/{record_id}/metadata-projection", capabilityId: "metadata.projection.read", authorization: "scoped", requiredScopes: ["metadata_projection_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","record_not_found","storage_unavailable","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "MetadataProjectionResponse" },
   configureMetadataProjection: { operationId: "configure_metadata_projection", method: "PUT", path: "/api/v1/profile/metadata-projection", capabilityId: "metadata.projection.configure", authorization: "scoped", requiredScopes: ["metadata_projection_configure"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["metadata.projection.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureMetadataProjectionRequest", responseSchema: "MetadataProjectionConfigurationResponse" },
 } as const;
@@ -5015,6 +5029,7 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "problems": [
         "authentication_failed",
         "forbidden",
+        "idempotency_conflict",
         "integrity_failed",
         "malformed_json",
         "metadata_claim_stale",
@@ -8809,6 +8824,24 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "status": 403,
       "title": "Forbidden",
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
     },
     {
       "capability_id": "metadata.claim.refresh",

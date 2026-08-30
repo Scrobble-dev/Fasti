@@ -28,6 +28,9 @@ const PORTABILITY_V2_EXAMPLE_PATH: &str =
 const PORTABILITY_V3_SCHEMA_PATH: &str = "contracts/portability/v3/workspace-manifest.schema.json";
 const PORTABILITY_V3_EXAMPLE_PATH: &str =
     "contracts/portability/v3/workspace-manifest.example.json";
+const PORTABILITY_V4_SCHEMA_PATH: &str = "contracts/portability/v4/workspace-manifest.schema.json";
+const PORTABILITY_V4_EXAMPLE_PATH: &str =
+    "contracts/portability/v4/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
 const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
@@ -415,7 +418,7 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 23] = [
         authenticated: true,
         request: Some("RefreshMetadataClaimsRequest"),
         response: Some("RefreshMetadataClaimsResponse"),
-        retry: "never",
+        retry: "stable_body_operation_id",
     },
     ConformanceOperation {
         alias: "readMetadataProjection",
@@ -527,6 +530,8 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let portability_v2_example = portability_v2_example(workspace_root)?;
     let portability_v3_schema = portability_v3_schema()?;
     let portability_v3_example = portability_v3_example(workspace_root)?;
+    let portability_v4_schema = portability_v4_schema()?;
+    let portability_v4_example = portability_v4_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
     let mut production_openapi = serde_json::to_value(fasti_api::openapi())
         .context("production OpenAPI is not serializable")?;
@@ -612,6 +617,16 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &mut artifacts,
         PORTABILITY_V3_EXAMPLE_PATH,
         portability_v3_example,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V4_SCHEMA_PATH,
+        portability_v4_schema,
+    )?;
+    insert(
+        &mut artifacts,
+        PORTABILITY_V4_EXAMPLE_PATH,
+        portability_v4_example,
     )?;
     insert_bytes(&mut artifacts, SDK_GENERATED_PATH, sdk_source.into_bytes())?;
     insert_bytes(
@@ -783,7 +798,11 @@ fn portability_v3_schema() -> anyhow::Result<Value> {
         .context("generated portability schema omits format_version")? = serde_json::json!({
         "const": 3
     });
-    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
+    let entities = WorkspaceExportEntity::V3.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceExportEntityDto/enum")
+        .context("generated portability schema omits export entity enum")? =
+        serde_json::to_value(entities)?;
     *schema
         .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
         .context("generated portability schema omits streams")? = serde_json::json!({
@@ -816,7 +835,7 @@ fn portability_v3_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .and_then(Value::as_array_mut)
         .context("archive-v2 example omits streams")?;
     let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
-    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V2.len()..]
+    for entity in WorkspaceExportEntity::V3[WorkspaceExportEntity::V2.len()..]
         .iter()
         .map(|entity| entity.as_str())
     {
@@ -832,6 +851,94 @@ fn portability_v3_example(workspace_root: &Path) -> anyhow::Result<Value> {
         .context("archive-v2 example omits manifest")?;
     let canonical = serde_json_canonicalizer::to_vec(manifest)
         .context("archive-v3 example manifest is not canonicalizable")?;
+    example["manifest_digest"] = Value::String(format!(
+        "sha256:{}",
+        crate::evidence::sha256_bytes(&canonical)
+    ));
+    Ok(example)
+}
+
+fn portability_v4_schema() -> anyhow::Result<Value> {
+    let mut schema = draft_2020_12_schema::<ChecksummedWorkspaceManifestDto>()?;
+    let root = schema
+        .as_object_mut()
+        .context("portability schema root must be an object")?;
+    root.insert(
+        "$id".to_owned(),
+        Value::String(
+            "https://fasti.scrobble.dev/schemas/internal-staged/portability/v4/workspace-manifest.json"
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "title".to_owned(),
+        Value::String("InternalStagedChecksummedWorkspaceManifestV4".to_owned()),
+    );
+    root.insert(
+        "$comment".to_owned(),
+        Value::String(
+            "Internal staged B3 archive v4. It extends the frozen v3 stream prefix with immutable metadata refresh receipts."
+                .to_owned(),
+        ),
+    );
+    root.insert(
+        "x-fasti-contract-state".to_owned(),
+        Value::String("internal_staged_archive_v4".to_owned()),
+    );
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/format_version")
+        .context("generated portability schema omits format_version")? = serde_json::json!({
+        "const": 4
+    });
+    let entities = WorkspaceExportEntity::ALL.map(WorkspaceExportEntity::as_str);
+    *schema
+        .pointer_mut("/$defs/WorkspaceManifestDto/properties/streams")
+        .context("generated portability schema omits streams")? = serde_json::json!({
+        "type": "array",
+        "minItems": entities.len(),
+        "maxItems": entities.len(),
+        "prefixItems": entities.map(|entity| serde_json::json!({
+            "allOf": [
+                { "$ref": "#/$defs/WorkspaceStreamDescriptorDto" },
+                {
+                    "type": "object",
+                    "properties": { "entity": { "const": entity } }
+                }
+            ]
+        })),
+        "items": false
+    });
+    Ok(schema)
+}
+
+fn portability_v4_example(workspace_root: &Path) -> anyhow::Result<Value> {
+    let source = fs::read(workspace_root.join(PORTABILITY_V3_EXAMPLE_PATH))?;
+    let mut example: Value =
+        serde_json::from_slice(&source).context("archive-v3 manifest example is not valid JSON")?;
+    *example
+        .pointer_mut("/manifest/format_version")
+        .context("archive-v3 example omits format_version")? = serde_json::json!(4);
+    let streams = example
+        .pointer_mut("/manifest/streams")
+        .and_then(Value::as_array_mut)
+        .context("archive-v3 example omits streams")?;
+    let empty_digest = format!("sha256:{}", crate::evidence::sha256_bytes(&[]));
+    for entity in WorkspaceExportEntity::ALL[WorkspaceExportEntity::V3.len()..]
+        .iter()
+        .map(|entity| entity.as_str())
+    {
+        streams.push(serde_json::json!({
+            "entity": entity,
+            "row_count": 0,
+            "byte_length": 0,
+            "digest": empty_digest,
+        }));
+    }
+    let manifest = example
+        .get("manifest")
+        .context("archive-v3 example omits manifest")?;
+    let canonical = serde_json_canonicalizer::to_vec(manifest)
+        .context("archive-v4 example manifest is not canonicalizable")?;
     example["manifest_digest"] = Value::String(format!(
         "sha256:{}",
         crate::evidence::sha256_bytes(&canonical)
@@ -1762,6 +1869,7 @@ fn resolve_required_binding(
                 let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
                 ensure!(
                     smoke.contains("/api/v1/metadata/claims/refresh")
+                        && smoke.contains("\"operation_id\"")
                         && smoke.contains("/api/v1/records/")
                         && smoke.contains("/metadata-projection")
                         && smoke.contains("metadata_claim_stale")
@@ -3993,6 +4101,8 @@ mod tests {
             Path::new(PORTABILITY_V2_EXAMPLE_PATH),
             Path::new(PORTABILITY_V3_SCHEMA_PATH),
             Path::new(PORTABILITY_V3_EXAMPLE_PATH),
+            Path::new(PORTABILITY_V4_SCHEMA_PATH),
+            Path::new(PORTABILITY_V4_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
             Path::new(RUST_CAPABILITY_IDS_PATH),
         ]
@@ -4021,6 +4131,30 @@ mod tests {
             .map(|entity| Value::String(entity.as_str().to_owned()))
             .collect::<Vec<_>>();
         assert_eq!(actual, &expected);
+    }
+
+    #[test]
+    fn archive_v3_and_v4_entity_enums_preserve_their_frozen_prefixes() {
+        for (schema, entities) in [
+            (
+                portability_v3_schema().expect("archive-v3 schema"),
+                WorkspaceExportEntity::V3.as_slice(),
+            ),
+            (
+                portability_v4_schema().expect("archive-v4 schema"),
+                WorkspaceExportEntity::ALL.as_slice(),
+            ),
+        ] {
+            let actual = schema
+                .pointer("/$defs/WorkspaceExportEntityDto/enum")
+                .and_then(Value::as_array)
+                .expect("archive entity enum");
+            let expected = entities
+                .iter()
+                .map(|entity| Value::String(entity.as_str().to_owned()))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, &expected);
+        }
     }
 
     #[cfg(unix)]

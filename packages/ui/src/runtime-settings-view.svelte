@@ -373,11 +373,15 @@
     const groups = new Set(metadataPolicyDraft.enabled_field_groups);
     if (enabled) groups.add(group);
     else groups.delete(group);
+    const orderedGroups = [
+      ...metadataFieldGroups,
+      ...metadataPolicyDraft.enabled_field_groups.filter(
+        (item) => !metadataFieldGroups.includes(item),
+      ),
+    ];
     metadataPolicyDraft = {
       ...metadataPolicyDraft,
-      enabled_field_groups: metadataFieldGroups.filter((item) =>
-        groups.has(item),
-      ),
+      enabled_field_groups: orderedGroups.filter((item) => groups.has(item)),
     };
   }
 
@@ -1462,7 +1466,7 @@
       {:else if active === "preferences"}
         <section aria-labelledby="preferences-settings-title">
           <h2 id="preferences-settings-title">Preferences & Metadata</h2>
-          <div
+          <section
             class="card metadata-policy-card"
             data-testid="metadata-projection-policy"
             aria-labelledby="metadata-policy-title"
@@ -1679,7 +1683,7 @@
                 <p class="problem" role="alert">{metadataPolicyProblem}</p>
               {/if}
             </div>
-          </div>
+          </section>
 
           <h3 class="legacy-preferences-title">Legacy display preferences</h3>
           <p id="preferences-inactive" class="inactive-note" role="note">

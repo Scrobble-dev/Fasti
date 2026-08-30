@@ -46,6 +46,18 @@ pub enum MetadataRefreshModeDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RefreshMetadataClaimsRequest {
+    #[schemars(
+        length(equal = 35),
+        regex(pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$"),
+        extend("format" = "fasti-operation-id")
+    )]
+    #[schema(
+        min_length = 35,
+        max_length = 35,
+        pattern = r"^op_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+        format = "fasti-operation-id"
+    )]
+    pub operation_id: String,
     #[schemars(length(min = 1, max = 64))]
     #[schema(min_length = 1, max_length = 64)]
     pub record_id: String,

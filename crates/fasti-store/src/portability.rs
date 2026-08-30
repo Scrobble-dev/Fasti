@@ -1713,6 +1713,16 @@ const EXPORT_SECTIONS: &[ExportSection] = &[
         count_sql: "SELECT COUNT(*) FROM metadata_attributions WHERE workspace_id = ?1",
         cursor_columns: &[CursorColumn::Text(1)],
     },
+    ExportSection {
+        entity: WorkspaceExportEntity::MetadataRefreshReceipts,
+        sql: "SELECT workspace_id, profile_id, client_id, operation_id, semantic_digest, \
+                     record_id, provider_id, response_json, created_at \
+              FROM metadata_refresh_receipts \
+              WHERE workspace_id = ?1 AND (client_id, operation_id) > (?2, ?3) \
+              ORDER BY client_id, operation_id LIMIT ?4",
+        count_sql: "SELECT COUNT(*) FROM metadata_refresh_receipts WHERE workspace_id = ?1",
+        cursor_columns: &[CursorColumn::Text(2), CursorColumn::Text(3)],
+    },
 ];
 
 /// The migration version and a digest of the actual SQLite schema in a frozen

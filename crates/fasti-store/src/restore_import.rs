@@ -33,7 +33,7 @@ use chrono::{DateTime, Utc};
 use fasti_application::{
     CancellationSignal, CapabilityKey, FastiProblem, PortabilityLimits, ReadSeek,
     WorkspaceExportEntity, MAX_CORRECTION_REASON_BYTES, WORKSPACE_ARCHIVE_V1_FORMAT_VERSION,
-    WORKSPACE_ARCHIVE_V2_FORMAT_VERSION,
+    WORKSPACE_ARCHIVE_V2_FORMAT_VERSION, WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
 };
 use fasti_contracts::VerifiedInboundWorkspaceManifest;
 use fasti_domain::{
@@ -821,6 +821,7 @@ fn accepted_archive_schema(
 ) -> bool {
     if (format_version == WORKSPACE_ARCHIVE_V1_FORMAT_VERSION && version <= 11)
         || (format_version == WORKSPACE_ARCHIVE_V2_FORMAT_VERSION && (7..=11).contains(&version))
+        || (format_version == WORKSPACE_ARCHIVE_V3_FORMAT_VERSION && version == 12)
     {
         // Continue to the exact historical fingerprint match below.
     } else if version == u32::try_from(SCHEMA_VERSION).unwrap_or(u32::MAX) {
@@ -841,6 +842,7 @@ fn accepted_archive_schema(
             9 => "sha256:4e0b16c5d4148d1b5e75a176ac1f3e58f6a31c569c0cfb5c6bb7c1de5d11584e",
             10 => "sha256:7c7c93de4419d8a56db8fd2dfb5c239fd3ffa994218b2ec583ec371c463726dd",
             11 => "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
+            12 => "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
             _ => return false,
         }
 }
@@ -970,6 +972,7 @@ fn verify_sql_counts(
         "metadata_legacy_override_ownership",
         "metadata_override_migration_receipts",
         "metadata_attributions",
+        "metadata_refresh_receipts",
     ];
     for (index, table) in TABLES.iter().enumerate() {
         let count: i64 = transaction
@@ -1209,6 +1212,7 @@ fn verify_import_domain_invariants(
                        event.previous_status,
                        event.status,
                        event.occurred_at,
+                       initial.claim_id AS initial_claim_id,
                        initial.initial_status,
                        initial.initial_at,
                        ROW_NUMBER() OVER (
@@ -1221,12 +1225,13 @@ fn verify_import_domain_invariants(
                            PARTITION BY event.claim_id ORDER BY event.sequence
                        ) AS prior_occurred_at
                 FROM metadata_claim_lifecycle_events event
-                JOIN initial ON initial.claim_id = event.claim_id
+                LEFT JOIN initial ON initial.claim_id = event.claim_id
                 WHERE event.workspace_id = ?1
             )
             SELECT COUNT(*)
             FROM ordered
-            WHERE sequence <> expected_sequence
+            WHERE initial_claim_id IS NULL
+               OR sequence <> expected_sequence
                OR previous_status <> COALESCE(prior_status, initial_status)
                OR occurred_at < COALESCE(prior_occurred_at, initial_at)
             "#,
@@ -2167,6 +2172,34 @@ fn import_row(
             )?;
             Ok(RowKey::One(row.provider_id))
         }
+        WorkspaceExportEntity::MetadataRefreshReceipts => {
+            let row: MetadataRefreshReceiptRow = decode_row(line, path)?;
+            require_workspace(row.workspace_id, workspace_id)?;
+            validate_timestamp(&row.created_at)?;
+            let provider_id = MetadataProviderId::try_new(row.provider_id.clone())
+                .map_err(|_| RestoreImportError::DomainInvariant)?;
+            crate::metadata::decode_refresh_receipt_outcome(
+                &row.response_json,
+                row.record_id,
+                &provider_id,
+                row.profile_id,
+                CapabilityKey::RefreshMetadataClaims,
+                RequestCorrelationId::new_v7(),
+            )
+            .map_err(|_| RestoreImportError::DomainInvariant)?;
+            insert_row(
+                transaction,
+                entity,
+                transaction.execute(
+                    "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![row.workspace_id.to_string(), row.profile_id.to_string(), row.client_id.to_string(), row.operation_id.to_string(), row.semantic_digest.to_string(), row.record_id.to_string(), row.provider_id, row.response_json, row.created_at],
+                ),
+            )?;
+            Ok(RowKey::Two(
+                row.client_id.to_string(),
+                row.operation_id.to_string(),
+            ))
+        }
     }
 }
 
@@ -2683,6 +2716,17 @@ archive_row!(MetadataAttributionRow {
     updated_at: String,
     workspace_id: WorkspaceId,
 });
+archive_row!(MetadataRefreshReceiptRow {
+    client_id: ClientId,
+    created_at: String,
+    operation_id: OperationId,
+    profile_id: ProfileId,
+    provider_id: String,
+    record_id: RecordId,
+    response_json: String,
+    semantic_digest: Sha256Digest,
+    workspace_id: WorkspaceId,
+});
 
 #[cfg(target_os = "linux")]
 fn descriptor_child_path(directory: &File, name: &str) -> PathBuf {
@@ -2955,11 +2999,11 @@ mod tests {
         CancellationSignal, CompleteRecoveryBootstrapRequest, CorrectionPort, CorrectionTarget,
         CreateRecordCommand, ExportWorkspaceQuery, ExportWorkspaceRequest, IdentityPort,
         ObservationAcceptancePort, PrepareRecoveryBootstrapRequest, ProfileRecordStatePort,
-        RecoveryBootstrapPort, RegisterNamespaceDefinitionCommand, ResolveReviewCommand,
-        RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget, ScopeKey, SecretMaterial,
-        SetTrackingDispositionCommand, VerifyWorkspaceQuery, WorkspaceArchiveDestination,
-        WorkspaceManifest, WorkspaceRestorePort, WorkspaceStreamDescriptor,
-        WorkspaceVerificationPort,
+        RecoveryBootstrapPort, RefreshMetadataClaimsOutcome, RegisterNamespaceDefinitionCommand,
+        ResolveReviewCommand, RestoreWorkspaceRequest, ReviewPort, ReviewResolutionTarget,
+        ScopeKey, SecretMaterial, SetTrackingDispositionCommand, VerifyWorkspaceQuery,
+        WorkspaceArchiveDestination, WorkspaceManifest, WorkspaceRestorePort,
+        WorkspaceStreamDescriptor, WorkspaceVerificationPort,
     };
     use fasti_contracts::CanonicalWorkspaceManifestProjection;
     use fasti_domain::{
@@ -3255,6 +3299,7 @@ mod tests {
         first_profile_id: ProfileId,
         second_profile_id: ProfileId,
         record_id: RecordId,
+        operation_id: OperationId,
     }
 
     fn metadata_v3_fixture() -> MetadataV3Fixture {
@@ -3262,6 +3307,7 @@ mod tests {
         let workspace_id = node.access.workspace_id();
         let first_profile_id = node.access.profile_id();
         let second_profile_id = ProfileId::new_v7();
+        let operation_id = OperationId::new_v7();
         let record_id = {
             let connection = node
                 .kernel
@@ -3441,6 +3487,27 @@ mod tests {
                 RequestCorrelationId::new_v7(),
             )
             .expect("attribution");
+            let provider_id = MetadataProviderId::try_new("tmdb").expect("provider");
+            let response_json = crate::metadata::encode_refresh_receipt_outcome(
+                record_id,
+                &provider_id,
+                &RefreshMetadataClaimsOutcome::new(
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                CapabilityKey::ExportWorkspace,
+                RequestCorrelationId::new_v7(),
+            )
+            .expect("receipt response");
+            connection
+                .execute(
+                    "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![workspace_id.to_string(), first_profile_id.to_string(), node.access.client_id().to_string(), operation_id.to_string(), evidence_digest.to_string(), record_id.to_string(), provider_id.as_str(), response_json, timestamp(Utc::now())],
+                )
+                .expect("metadata refresh receipt");
         }
 
         let destination = Arc::new(Mutex::new(DestinationState::default()));
@@ -3462,6 +3529,7 @@ mod tests {
             first_profile_id,
             second_profile_id,
             record_id,
+            operation_id,
         }
     }
 
@@ -3706,6 +3774,52 @@ mod tests {
                 .expect("append archive-v2 entry");
         }
         writer.finish().expect("finish archive-v2 fixture")
+    }
+
+    fn archive_v3_from_v4(archive: &[u8]) -> Vec<u8> {
+        let mut entries = archive_entries(archive);
+        let manifest_bytes = entries.pop().expect("manifest entry").1;
+        let verified =
+            VerifiedInboundWorkspaceManifest::try_from_canonical_json(&manifest_bytes, limits())
+                .expect("verified fixture manifest");
+        entries.retain(|(entry_path, _)| {
+            entry_path
+                != &format!(
+                    "{}.ndjson",
+                    WorkspaceExportEntity::MetadataRefreshReceipts.as_str()
+                )
+        });
+        let manifest = verified.manifest();
+        let rebuilt = WorkspaceManifest::try_new_for_format(
+            WORKSPACE_ARCHIVE_V3_FORMAT_VERSION,
+            manifest.workspace_id(),
+            manifest.workspace_revision(),
+            manifest.contract_version().to_owned(),
+            12,
+            Sha256Digest::parse(
+                "sha256:eea7d899b8c257b7bafa359a540bd25ba2cdc4d9ddb7f50ce0ec8f80e251cfb9",
+            )
+            .expect("published v12 schema digest"),
+            manifest.streams()[..WorkspaceExportEntity::V3.len()].to_vec(),
+            manifest.blobs().to_vec(),
+        )
+        .expect("rebuilt archive-v3 application manifest");
+        let projection = CanonicalWorkspaceManifestProjection::try_from_application(rebuilt)
+            .expect("rebuilt archive-v3 wire manifest");
+        entries.push((
+            "manifest.json".to_owned(),
+            projection.canonical_json_bytes().to_vec(),
+        ));
+        let archive_limits =
+            ArchiveLimits::new(64 * 1024 * 1024, 128, 16 * 1024 * 1024, 64 * 1024 * 1024)
+                .expect("archive limits");
+        let mut writer = ArchiveWriter::new(Vec::new(), archive_limits).expect("archive writer");
+        for (entry_path, bytes) in entries {
+            writer
+                .append(&entry_path, bytes.len() as u64, Cursor::new(bytes))
+                .expect("append archive-v3 entry");
+        }
+        writer.finish().expect("finish archive-v3 fixture")
     }
 
     fn rewrite_manifest_schema(archive: &[u8], version: u32, digest: &str) -> Vec<u8> {
@@ -4112,12 +4226,13 @@ mod tests {
     #[test]
     fn archive_v3_round_trips_two_profile_metadata_without_identity_loss() {
         let fixture = metadata_v3_fixture();
+        let archive = archive_v3_from_v4(&fixture.archive);
         let restore_root = tempfile::tempdir().expect("restore root");
         let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
         let attempt_id = RestoreAttemptId::new_v7();
         let staged = stage_workspace_archive_pass_two(
             &lock,
-            &mut Cursor::new(fixture.archive),
+            &mut Cursor::new(archive),
             attempt_id,
             RequestCorrelationId::new_v7(),
             limits(),
@@ -4235,6 +4350,60 @@ mod tests {
         );
 
         drop(database);
+        staged.cleanup().expect("remove staged attempt");
+        assert_attempt_removed(restore_root.path(), attempt_id);
+    }
+
+    #[test]
+    fn archive_v4_round_trips_immutable_metadata_refresh_receipts() {
+        let fixture = metadata_v3_fixture();
+        let restore_root = tempfile::tempdir().expect("restore root");
+        let lock = LockedDataRoot::acquire(restore_root.path()).expect("exclusive restore root");
+        let attempt_id = RestoreAttemptId::new_v7();
+        let staged = stage_workspace_archive_pass_two(
+            &lock,
+            &mut Cursor::new(fixture.archive),
+            attempt_id,
+            RequestCorrelationId::new_v7(),
+            limits(),
+            &CancellationSignal::new(),
+        )
+        .expect("stage metadata-v4 archive");
+        let database = Connection::open_with_flags(
+            staged.database_path(),
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open staged database");
+        let response_json: String = database
+            .query_row(
+                "SELECT response_json FROM metadata_refresh_receipts WHERE operation_id = ?1",
+                [fixture.operation_id.to_string()],
+                |row| row.get(0),
+            )
+            .expect("restored receipt response");
+        crate::metadata::decode_refresh_receipt_outcome(
+            &response_json,
+            fixture.record_id,
+            &MetadataProviderId::try_new("tmdb").expect("provider"),
+            fixture.first_profile_id,
+            CapabilityKey::ExportWorkspace,
+            RequestCorrelationId::new_v7(),
+        )
+        .expect("restored exact outcome");
+        assert!(database
+            .execute(
+                "UPDATE metadata_refresh_receipts SET provider_id = 'mdblist' WHERE operation_id = ?1",
+                [fixture.operation_id.to_string()],
+            )
+            .is_err());
+        assert!(database
+            .execute(
+                "DELETE FROM metadata_refresh_receipts WHERE operation_id = ?1",
+                [fixture.operation_id.to_string()],
+            )
+            .is_err());
+        drop(database);
+
         staged.cleanup().expect("remove staged attempt");
         assert_attempt_removed(restore_root.path(), attempt_id);
     }
@@ -4371,8 +4540,9 @@ mod tests {
     #[test]
     fn archive_v3_cannot_claim_a_pre_v3_schema_fingerprint() {
         let fixture = metadata_v3_fixture();
+        let archive = archive_v3_from_v4(&fixture.archive);
         let hostile = rewrite_manifest_schema(
-            &fixture.archive,
+            &archive,
             11,
             "sha256:c833fb634b64d0b9680e4734b22684e8eab36710fca5c95d4315f3141491687a",
         );
@@ -4420,6 +4590,11 @@ mod tests {
                     *bytes = serde_json::to_vec(&row).expect("status mutation");
                     bytes.push(b'\n');
                 },
+            ),
+            rewrite_stream(
+                &fixture.archive,
+                WorkspaceExportEntity::MetadataClaimProvenance,
+                Vec::clear,
             ),
         ] {
             let restore_root = tempfile::tempdir().expect("restore root");

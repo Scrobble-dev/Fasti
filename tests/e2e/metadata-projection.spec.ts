@@ -16,6 +16,15 @@ const policy = {
   enabled_field_groups: ["basic_info", "details"],
 } as const;
 
+const policyWithUnimplementedGroups = {
+  ...policy,
+  enabled_field_groups: [
+    ...policy.enabled_field_groups,
+    "credits",
+    "future_group",
+  ],
+};
+
 const provenance = {
   claim_id: "claim-title",
   record_id: recordId,
@@ -145,6 +154,7 @@ test("injected browser credential authorizes every metadata operation", async ({
         overrides: [],
       });
       const refreshed = await host.refreshMetadataClaims?.({
+        operation_id: "op_018f0e0e7f7b70008000000000000004",
         record_id: recordId,
         provider_id: "tmdb",
         field_groups: ["basic_info", "details"],
@@ -200,11 +210,16 @@ test("saving profile metadata policy refreshes an already selected Record projec
       let currentPolicy = policy;
       const browserWindow = window as typeof window & {
         __METADATA_PROJECTION_READS__?: number;
+        __METADATA_REFRESH_OPERATION_IDS__?: string[];
+        __METADATA_REFRESH_FIELD_GROUPS__?: string[][];
+        __METADATA_CONFIGURED_FIELD_GROUPS__?: string[];
         __TAURI_INTERNALS__: {
           invoke: (command: string, arguments_?: unknown) => Promise<unknown>;
         };
       };
       browserWindow.__METADATA_PROJECTION_READS__ = 0;
+      browserWindow.__METADATA_REFRESH_OPERATION_IDS__ = [];
+      browserWindow.__METADATA_REFRESH_FIELD_GROUPS__ = [];
       browserWindow.__TAURI_INTERNALS__ = {
         invoke: async (command, arguments_) => {
           switch (command) {
@@ -314,6 +329,9 @@ test("saving profile metadata policy refreshes an already selected Record projec
               const request = arguments_ as {
                 input?: typeof policy;
               };
+              browserWindow.__METADATA_CONFIGURED_FIELD_GROUPS__ = [
+                ...(request.input?.enabled_field_groups ?? []),
+              ];
               currentPolicy = {
                 ...currentPolicy,
                 ...request.input,
@@ -321,13 +339,44 @@ test("saving profile metadata policy refreshes an already selected Record projec
               };
               return { policy: currentPolicy, invalidated_cache_entries: 1 };
             }
+            case "refresh_metadata_claims": {
+              const request = arguments_ as {
+                input?: {
+                  operation_id?: string;
+                  field_groups?: string[];
+                };
+              };
+              browserWindow.__METADATA_REFRESH_OPERATION_IDS__?.push(
+                request.input?.operation_id ?? "",
+              );
+              browserWindow.__METADATA_REFRESH_FIELD_GROUPS__?.push([
+                ...(request.input?.field_groups ?? []),
+              ]);
+              if (
+                browserWindow.__METADATA_REFRESH_OPERATION_IDS__?.length === 1
+              ) {
+                throw {
+                  detail: "The refresh response was lost after commit.",
+                  next_action: "Retry the same refresh operation.",
+                };
+              }
+              return {
+                record_id: recordId,
+                provider_id: "tmdb",
+                claims: [],
+                ratings: [],
+                projections: [],
+                cache_entries: [],
+                attributions: [],
+              };
+            }
             default:
               throw new Error(`Unexpected trusted-host command: ${command}`);
           }
         },
       };
     },
-    { recordId, profileId, policy },
+    { recordId, profileId, policy: policyWithUnimplementedGroups },
   );
 
   await page.goto(`/records/${recordId}`);
@@ -336,24 +385,51 @@ test("saving profile metadata policy refreshes an already selected Record projec
   ).toBeVisible();
   await page.getByRole("button", { name: /Sources & Identity/ }).click();
   await expect(
+    page.getByTestId("refresh-metadata-claims").getByRole("status"),
+  ).toContainText("This refresh skips credits, future group.");
+  await expect(
     page.getByRole("button", { name: "Refresh TMDB" }),
   ).toBeEnabled();
+  await page.getByRole("button", { name: "Refresh TMDB" }).click();
+  await expect(
+    page.getByText("The refresh response was lost after commit."),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Refresh TMDB" }).click();
+  await expect(
+    page.getByText("Refreshed governed claims from TMDB."),
+  ).toBeVisible();
+  const refreshRequests = await page.evaluate(() => {
+    const browserWindow = window as typeof window & {
+      __METADATA_REFRESH_OPERATION_IDS__?: string[];
+      __METADATA_REFRESH_FIELD_GROUPS__?: string[][];
+    };
+    return {
+      operationIds: browserWindow.__METADATA_REFRESH_OPERATION_IDS__,
+      fieldGroups: browserWindow.__METADATA_REFRESH_FIELD_GROUPS__,
+    };
+  });
+  expect(refreshRequests.operationIds).toHaveLength(2);
+  expect(refreshRequests.operationIds?.[0]).toMatch(/^op_[0-9a-f]{32}$/);
+  expect(refreshRequests.operationIds?.[1]).toBe(
+    refreshRequests.operationIds?.[0],
+  );
+  expect(refreshRequests.fieldGroups).toEqual([
+    ["basic_info", "details"],
+    ["basic_info", "details"],
+  ]);
   await page.getByRole("link", { name: "Settings", exact: true }).click();
   await page
     .getByRole("navigation", { name: "Settings sections" })
     .getByRole("link", { name: "Preferences & Metadata" })
     .click();
   await expect(page.getByTestId("metadata-projection-policy")).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as typeof window & { __METADATA_PROJECTION_READS__?: number })
-            .__METADATA_PROJECTION_READS__,
-      ),
-    )
-    .toBe(2);
+  const readsBeforeSave = await page.evaluate(
+    () =>
+      (window as typeof window & { __METADATA_PROJECTION_READS__?: number })
+        .__METADATA_PROJECTION_READS__ ?? 0,
+  );
 
+  await page.getByLabel("details").uncheck();
   await page.getByLabel("Preferred provider").selectOption("");
   await page.getByTestId("configure-metadata-projection").click();
   await expect(page.getByRole("status")).toContainText(
@@ -367,7 +443,17 @@ test("saving profile metadata policy refreshes an already selected Record projec
             .__METADATA_PROJECTION_READS__,
       ),
     )
-    .toBe(3);
+    .toBeGreaterThan(readsBeforeSave);
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as typeof window & {
+            __METADATA_CONFIGURED_FIELD_GROUPS__?: string[];
+          }
+        ).__METADATA_CONFIGURED_FIELD_GROUPS__,
+    ),
+  ).toEqual(["basic_info", "credits", "future_group"]);
 
   const firstFieldGroup = page
     .getByRole("group", { name: "Enabled field groups" })
@@ -376,5 +462,14 @@ test("saving profile metadata policy refreshes an already selected Record projec
   expect((await firstFieldGroup.boundingBox())?.height).toBeGreaterThanOrEqual(
     44,
   );
+
+  await page.getByRole("link", { name: "Media Detail" }).click();
+  await page.getByRole("button", { name: /Sources & Identity/ }).click();
+  await expect(
+    page.getByText(
+      "Choose a preferred provider in Settings before the first refresh.",
+    ),
+  ).toBeVisible();
+
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

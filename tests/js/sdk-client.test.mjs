@@ -20,6 +20,7 @@ import {
   parseHealthResponse,
   parseListRecordsResponse,
   parseConfigureMetadataProjectionRequest,
+  parseRefreshMetadataClaimsRequest,
   parseReceiptCommittedEvent,
   PUBLIC_CAPABILITY_REGISTRY,
   RECEIPT_STREAM_CONTRACT,
@@ -49,6 +50,27 @@ const contractIds = {
   evidence: v7("evd", "7"),
   record: v7("rec", "8"),
 };
+
+test("metadata refresh parser enforces canonical operation IDs", () => {
+  const request = {
+    operation_id: contractIds.operation,
+    record_id: contractIds.record,
+    provider_id: "tmdb",
+    field_groups: ["basic_info"],
+    locale: "en-ie",
+    region: "IE",
+    mode: "prefer_cache",
+  };
+  assert.deepEqual(parseRefreshMetadataClaimsRequest(request), request);
+  assert.throws(
+    () =>
+      parseRefreshMetadataClaimsRequest({
+        ...request,
+        operation_id: "x".repeat(35),
+      }),
+    FastiContractParseError,
+  );
+});
 
 test("browser authentication SDK methods are absent until C1", () => {
   const client = new FastiClient({
@@ -1219,14 +1241,16 @@ test("mutation retries require stable idempotency and preserve exact serialized 
   );
 });
 
-test("metadata mutations remain single-attempt after an ambiguous response", async (context) => {
-  for (const [name, method, path, invoke] of [
+test("metadata retries require a stable operation ID", async (context) => {
+  for (const [name, method, path, attempts, invoke] of [
     [
       "claim refresh",
       "POST",
       "/api/v1/metadata/claims/refresh",
+      3,
       (client) =>
         client.refreshMetadataClaims({
+          operation_id: "op_018f0e0e7f7b70008000000000000004",
           record_id: contractIds.record,
           provider_id: "tmdb",
           field_groups: ["basic_info"],
@@ -1239,6 +1263,7 @@ test("metadata mutations remain single-attempt after an ambiguous response", asy
       "projection configuration",
       "PUT",
       "/api/v1/profile/metadata-projection",
+      1,
       (client) =>
         client.configureMetadataProjection({
           preferred_provider_id: "tmdb",
@@ -1254,12 +1279,14 @@ test("metadata mutations remain single-attempt after an ambiguous response", asy
   ]) {
     await context.test(name, async () => {
       let requests = 0;
+      const bodies = [];
       const client = new FastiClient({
         baseUrl: "http://127.0.0.1:8420",
         credential: "metadata-writer",
         retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
         fetch: async (url, init) => {
           requests += 1;
+          bodies.push(init?.body);
           assert.equal(init?.method, method);
           assert.equal(new URL(url).pathname, path);
           return new Response(
@@ -1274,7 +1301,8 @@ test("metadata mutations remain single-attempt after an ambiguous response", asy
       });
 
       await assert.rejects(invoke(client), FastiTransportError);
-      assert.equal(requests, 1);
+      assert.equal(requests, attempts);
+      assert.equal(new Set(bodies).size, 1);
     });
   }
 });

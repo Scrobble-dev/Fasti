@@ -35,6 +35,7 @@
     ActiveNavSection,
     CreateRecordResult,
     MediaRecord,
+    MetadataFieldGroupDto,
     MetadataProjectionResponse,
     ProviderCredentialStatus,
     ProviderSearchCandidate,
@@ -62,8 +63,21 @@
     | "calendar"
     | "detail";
 
+  // Mirrors the M2 provider-runtime transport boundary. Replace this with
+  // provider capability data when field-group support becomes host-declared.
+  const refreshableMetadataFieldGroups = new Set<MetadataFieldGroupDto>([
+    "artwork",
+    "basic_info",
+    "details",
+    "release_dates",
+  ]);
+
   let { host, onOpenStatus }: Props = $props();
   let credentialTarget = $state("");
+  let failedMetadataRefresh = $state<{
+    requestKey: string;
+    operationId: string;
+  }>();
 
   const credentialAdministration = $derived(
     Boolean(
@@ -779,24 +793,57 @@
         "Governed metadata claim refresh is not available on this host.",
       );
     }
-    const fieldGroups = metadataProjection.policy.enabled_field_groups;
+    const fieldGroups = metadataProjection.policy.enabled_field_groups.filter(
+      (group) => refreshableMetadataFieldGroups.has(group),
+    );
     if (fieldGroups.length === 0) {
       throw new Error(
-        "Enable at least one metadata field group in Settings before refreshing claims.",
+        "Enable at least one currently refreshable metadata field group in Settings before refreshing claims.",
       );
     }
-    await host.refreshMetadataClaims({
-      record_id: metadataProjection.record_id,
-      provider_id: providerId,
-      field_groups: fieldGroups,
-      locale: metadataProjection.policy.preferred_locale,
-      region: metadataProjection.policy.region,
-      mode: "revalidate",
-    });
-    await Promise.all([
-      loadMetadataProjection(metadataProjection.record_id),
-      loadRecords(),
+    const requestKey = JSON.stringify([
+      metadataProjection.record_id,
+      providerId,
+      fieldGroups,
+      metadataProjection.policy.preferred_locale,
+      metadataProjection.policy.region,
+      "revalidate",
     ]);
+    const operationId =
+      failedMetadataRefresh?.requestKey === requestKey
+        ? failedMetadataRefresh.operationId
+        : newOperationId();
+    try {
+      await host.refreshMetadataClaims({
+        operation_id: operationId,
+        record_id: metadataProjection.record_id,
+        provider_id: providerId,
+        field_groups: fieldGroups,
+        locale: metadataProjection.policy.preferred_locale,
+        region: metadataProjection.policy.region,
+        mode: "revalidate",
+      });
+      await Promise.all([
+        loadMetadataProjection(metadataProjection.record_id),
+        loadRecords(),
+      ]);
+      failedMetadataRefresh = undefined;
+    } catch (error) {
+      failedMetadataRefresh = { requestKey, operationId };
+      throw error;
+    }
+  }
+
+  function newOperationId(): string {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    let timestamp = Date.now();
+    for (let index = 5; index >= 0; index -= 1) {
+      bytes[index] = timestamp & 0xff;
+      timestamp = Math.floor(timestamp / 256);
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    return `op_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
   }
 
   function metadataPolicyChanged(): void {
@@ -1124,6 +1171,12 @@
             {metadataProjection}
             {metadataProjectionLoading}
             {metadataProjectionProblem}
+            metadataRefreshUnavailableFieldGroups={metadataProjection?.policy.enabled_field_groups.filter(
+              (group) => !refreshableMetadataFieldGroups.has(group),
+            ) ?? []}
+            metadataRefreshableFieldGroupCount={metadataProjection?.policy.enabled_field_groups.filter(
+              (group) => refreshableMetadataFieldGroups.has(group),
+            ).length ?? 0}
             availableCollections={[]}
             initialTab={selectedRecordTab}
             contextMenuConfigs={workbenchPreferences.contextMenuItems}

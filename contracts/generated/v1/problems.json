@@ -2398,6 +2398,24 @@
     },
     {
       "capability_id": "metadata.claim.refresh",
+      "code": "idempotency_conflict",
+      "detail": "operation ID was already used with different request semantics",
+      "next_actions": [
+        {
+          "id": "use_new_operation_id",
+          "label": "Use a new operation ID for a distinct observation"
+        }
+      ],
+      "param": "/operation_id",
+      "param_policy": "fixed",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Idempotency conflict",
+      "type": "https://fasti.scrobble.dev/v1/problems/idempotency-conflict"
+    },
+    {
+      "capability_id": "metadata.claim.refresh",
       "code": "integrity_failed",
       "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
       "next_actions": [

@@ -819,7 +819,7 @@ export class FastiClient {
       path: operation.path,
       authenticated: operation.authenticated,
       problemContract: operation,
-      retryMode: "never",
+      retryMode: "stable-idempotency",
       body,
       responseParser: (value) => {
         const response = parseRefreshMetadataClaimsResponse(value);
@@ -1826,7 +1826,9 @@ function providerCapabilityParser(
     const response = parseProviderCapabilityResponse(value);
     if (
       response.provider_id !== identifiers.providerId ||
-      response.capability.capability_id !== identifiers.capabilityId
+      !response.capabilities.some(
+        (capability) => capability.capability_id === identifiers.capabilityId,
+      )
     ) {
       throw new FastiContractParseError(
         "Provider capability response does not match the requested path",

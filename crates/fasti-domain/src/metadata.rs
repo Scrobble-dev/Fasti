@@ -875,6 +875,52 @@ pub struct ResolvedField {
 }
 
 impl ResolvedField {
+    pub fn try_from_snapshot(
+        tier: FieldResolutionTier,
+        value: Option<String>,
+        source: Option<NamespaceKey>,
+        is_stale: bool,
+        claim: Option<(&FieldClaim, FieldClaimStatus)>,
+    ) -> Result<Self, FieldResolutionError> {
+        let valid = match (tier, value.as_deref(), source.as_ref(), is_stale, claim) {
+            (FieldResolutionTier::Empty, None, None, false, None) => true,
+            (FieldResolutionTier::UserOverride, Some(value), None, false, None) => {
+                validate_field_value(value).is_ok()
+            }
+            (
+                FieldResolutionTier::PreferredProviderClaim
+                | FieldResolutionTier::FallbackProviderClaim,
+                Some(value),
+                Some(source),
+                false,
+                Some((claim, FieldClaimStatus::Fresh)),
+            ) => claim.value() == value && claim.source() == source,
+            (
+                FieldResolutionTier::LastKnownGood,
+                Some(value),
+                Some(source),
+                true,
+                Some((claim, status)),
+            ) => {
+                status.can_project_last_known_good()
+                    && claim.value() == value
+                    && claim.source() == source
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err(FieldResolutionError::InvalidSnapshot);
+        }
+        Ok(Self {
+            tier,
+            value,
+            source,
+            is_stale,
+            provenance: claim
+                .map(|(claim, status)| ResolvedFieldProvenance::from_claim(claim, status)),
+        })
+    }
+
     pub const fn tier(&self) -> FieldResolutionTier {
         self.tier
     }
@@ -1025,6 +1071,8 @@ pub fn resolve_field(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum FieldResolutionError {
+    #[error("stored field resolution snapshot is inconsistent")]
+    InvalidSnapshot,
     #[error("field claim IDs must be unique within one resolution input")]
     DuplicateClaimId,
     #[error("field claims in one resolution input must have one record and field target")]

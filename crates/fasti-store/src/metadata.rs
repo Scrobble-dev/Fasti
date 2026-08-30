@@ -13,13 +13,22 @@ use crate::kernel::{
 use fasti_application::{
     metadata_field_group, provider_identity_mapping_for_grain, ApplicationResult,
     ApplyProviderMetadataCommand, CapabilityKey, CommitMetadataRefreshCommand,
-    ConfigureMetadataProjectionCommand, ConfigureMetadataProjectionOutcome,
-    CreateProviderRecordCommand, CreateProviderRecordOutcome, FastiProblem,
-    MarkMetadataRefreshUnavailableCommand, MetadataCacheReadView, MetadataOverrideMutation,
-    MetadataProjectionPort, MetadataProjectionView, MetadataRefreshPersistencePort,
-    PrepareMetadataRefreshCommand, PreparedMetadataRefresh, ProblemCode, ProviderCapabilityState,
-    ProviderMetadataField, ProviderMetadataPort, RatingClaimView, ReadCachedMetadataRefreshCommand,
-    ReadMetadataProjectionQuery, RefreshMetadataClaimsOutcome, MAX_PROVIDER_METADATA_FIELDS,
+    CommitMetadataRefreshReceiptCommand, ConfigureMetadataProjectionCommand,
+    ConfigureMetadataProjectionOutcome, CreateProviderRecordCommand, CreateProviderRecordOutcome,
+    FastiProblem, FieldClaimView, MarkMetadataRefreshUnavailableCommand, MetadataCacheReadView,
+    MetadataOverrideMutation, MetadataProjectionPort, MetadataProjectionView,
+    MetadataRefreshPersistencePort, PrepareMetadataRefreshCommand, PreparedMetadataRefresh,
+    ProblemCode, ProviderCapabilityState, ProviderMetadataField, ProviderMetadataPort,
+    RatingClaimView, ReadCachedMetadataRefreshCommand, ReadMetadataProjectionQuery,
+    ReadMetadataRefreshReceiptCommand, RefreshMetadataClaimsOutcome, MAX_PROVIDER_METADATA_FIELDS,
+};
+use fasti_contracts::{
+    metadata_field_group as metadata_field_group_from_dto, refresh_metadata_claims_response,
+    MetadataAttributionDto, MetadataCacheEntryDto, MetadataCacheInvalidationReasonDto,
+    MetadataCacheKeyDto, MetadataCachePurposeDto, MetadataCacheReadStateDto, MetadataClaimDto,
+    MetadataClaimProvenanceDto, MetadataClaimStatusDto, MetadataDataClassificationDto,
+    MetadataProjectedFieldDto, MetadataProjectionTierDto, RatingClaimDto,
+    RefreshMetadataClaimsResponse,
 };
 use fasti_domain::{
     resolve_profile_field, EnrichmentPolicy, FieldClaim, FieldClaimError, FieldClaimLifecycleEvent,
@@ -29,12 +38,13 @@ use fasti_domain::{
     MetadataDataClassification, MetadataFieldGroup, MetadataLocale, MetadataProjection,
     MetadataProjectionPolicy, MetadataProviderId, MetadataRegion, NamespaceKey,
     ProfileFieldOverride, ProfileId, RatingClaim, RatingScale, ReceivedAt, RecordId,
-    RequestCorrelationId, Sha256Digest, WorkspaceId,
+    RequestCorrelationId, ResolvedField, Sha256Digest, WorkspaceId,
 };
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
 use std::collections::{BTreeSet, HashMap};
 
 const MAX_EFFECTIVE_FIELD_CLAIMS: i64 = 256;
+const MAX_REFRESH_RECEIPT_JSON_BYTES: usize = 1024 * 1024;
 
 fn claim_status(value: FieldClaimStatus) -> &'static str {
     match value {
@@ -181,6 +191,493 @@ fn parse_invalidation_reason(value: &str) -> Option<MetadataCacheInvalidationRea
         "explicit_retraction" => Some(MetadataCacheInvalidationReason::ExplicitRetraction),
         _ => None,
     }
+}
+
+fn receipt_integrity(
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> Box<FastiProblem> {
+    Box::new(FastiProblem::integrity_failed(capability, correlation_id))
+}
+
+const fn receipt_status(value: MetadataClaimStatusDto) -> FieldClaimStatus {
+    match value {
+        MetadataClaimStatusDto::Fresh => FieldClaimStatus::Fresh,
+        MetadataClaimStatusDto::Stale => FieldClaimStatus::Stale,
+        MetadataClaimStatusDto::Invalid => FieldClaimStatus::Invalid,
+        MetadataClaimStatusDto::Revoked => FieldClaimStatus::Revoked,
+        MetadataClaimStatusDto::Superseded => FieldClaimStatus::Superseded,
+        MetadataClaimStatusDto::Unavailable => FieldClaimStatus::Unavailable,
+    }
+}
+
+fn receipt_provenance(
+    value: &MetadataClaimProvenanceDto,
+    claim_id: MetadataClaimId,
+    record_id: RecordId,
+    field_key: Option<&FieldKey>,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<(
+    FieldClaimProvenance,
+    ReceivedAt,
+    Option<chrono::DateTime<chrono::Utc>>,
+    FieldClaimStatus,
+)> {
+    if value.claim_id != claim_id.to_string()
+        || value.record_id.as_deref() != Some(record_id.to_string().as_str())
+        || value.field_key.as_deref() != field_key.map(FieldKey::as_str)
+    {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    let provenance = FieldClaimProvenance::try_new(
+        MetadataProviderId::try_new(
+            value
+                .provider_id
+                .clone()
+                .ok_or_else(|| receipt_integrity(capability, correlation_id))?,
+        )
+        .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        NamespaceKey::try_new(value.source_namespace.clone())
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value
+            .source_identifier
+            .clone()
+            .ok_or_else(|| receipt_integrity(capability, correlation_id))?,
+        value
+            .locale
+            .clone()
+            .map(MetadataLocale::try_new)
+            .transpose()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value
+            .region
+            .clone()
+            .map(MetadataRegion::try_new)
+            .transpose()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value.source_version.clone(),
+        value
+            .evidence_digest
+            .as_deref()
+            .ok_or_else(|| receipt_integrity(capability, correlation_id))?
+            .parse()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let fetched_at = parse_timestamp(&value.fetched_at, capability, correlation_id)?;
+    let expires_at = value
+        .expires_at
+        .as_deref()
+        .map(|value| parse_timestamp(value, capability, correlation_id))
+        .transpose()?;
+    Ok((
+        provenance,
+        ReceivedAt::from_application_clock(fetched_at),
+        expires_at,
+        receipt_status(value.status),
+    ))
+}
+
+fn receipt_field_claim(
+    value: &MetadataClaimDto,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<FieldClaimView> {
+    let claim_id = value
+        .claim_id
+        .parse::<MetadataClaimId>()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let record_id = value
+        .record_id
+        .as_deref()
+        .ok_or_else(|| receipt_integrity(capability, correlation_id))?
+        .parse::<RecordId>()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let field_key = FieldKey::try_new(
+        value
+            .field_key
+            .clone()
+            .ok_or_else(|| receipt_integrity(capability, correlation_id))?,
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let (provenance, fetched_at, expires_at, status) = receipt_provenance(
+        &value.provenance,
+        claim_id,
+        record_id,
+        Some(&field_key),
+        capability,
+        correlation_id,
+    )?;
+    let claim = FieldClaim::try_new_provider(
+        claim_id,
+        record_id,
+        field_key,
+        value.value.clone(),
+        provenance,
+        fetched_at,
+        expires_at,
+        status,
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    Ok(FieldClaimView::new(claim, status))
+}
+
+fn receipt_rating_claim(
+    value: &RatingClaimDto,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<RatingClaimView> {
+    let claim_id = value
+        .claim_id
+        .parse::<MetadataClaimId>()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let record_id = value
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let (provenance, fetched_at, expires_at, status) = receipt_provenance(
+        &value.provenance,
+        claim_id,
+        record_id,
+        None,
+        capability,
+        correlation_id,
+    )?;
+    let scale = RatingScale::try_new(value.scale.minimum_millis, value.scale.maximum_millis)
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let claim = RatingClaim::try_new(
+        claim_id,
+        record_id,
+        value.value_millis,
+        scale,
+        provenance,
+        fetched_at,
+        expires_at,
+        status,
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    Ok(RatingClaimView::new(claim, status))
+}
+
+fn receipt_cache_key(
+    value: &MetadataCacheKeyDto,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<MetadataCacheKey> {
+    MetadataCacheKey::try_new(
+        MetadataProviderId::try_new(value.provider_id.clone())
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value.credential_reference_version,
+        value
+            .record_id
+            .parse()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value.resolved_provider_route.clone(),
+        value
+            .grain
+            .parse()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        NamespaceKey::try_new(value.source_namespace.clone())
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value.source_identifier.clone(),
+        value
+            .locale
+            .clone()
+            .map(MetadataLocale::try_new)
+            .transpose()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value
+            .region
+            .clone()
+            .map(MetadataRegion::try_new)
+            .transpose()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        metadata_field_group_from_dto(value.field_group),
+        value
+            .settings_fingerprint
+            .parse()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value
+            .configuration_digest
+            .parse()
+            .map_err(|_| receipt_integrity(capability, correlation_id))?,
+        value.schema_version,
+        match value.purpose {
+            MetadataCachePurposeDto::MetadataEnrichment => MetadataCachePurpose::MetadataEnrichment,
+            MetadataCachePurposeDto::DisplayProjection => MetadataCachePurpose::DisplayProjection,
+            MetadataCachePurposeDto::RatingLookup => MetadataCachePurpose::RatingLookup,
+            MetadataCachePurposeDto::OfflineRead => MetadataCachePurpose::OfflineRead,
+        },
+        value.terms_revision.clone(),
+        match value.classification {
+            MetadataDataClassificationDto::Public => MetadataDataClassification::Public,
+            MetadataDataClassificationDto::Internal => MetadataDataClassification::Internal,
+            MetadataDataClassificationDto::Confidential => MetadataDataClassification::Confidential,
+            MetadataDataClassificationDto::Restricted => MetadataDataClassification::Restricted,
+        },
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))
+}
+
+fn receipt_cache_entry(
+    value: &MetadataCacheEntryDto,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<MetadataCacheReadView> {
+    let key = receipt_cache_key(&value.key, capability, correlation_id)?;
+    let claim_ids = value
+        .claim_ids
+        .iter()
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|_| receipt_integrity(capability, correlation_id))
+        })
+        .collect::<ApplicationResult<Vec<MetadataClaimId>>>()?;
+    let created_at = parse_timestamp(&value.created_at, capability, correlation_id)?;
+    let mut entry = MetadataCacheEntry::try_new(
+        key,
+        claim_ids,
+        ReceivedAt::from_application_clock(created_at),
+        parse_timestamp(&value.fresh_until, capability, correlation_id)?,
+        parse_timestamp(
+            &value.stale_while_refreshing_until,
+            capability,
+            correlation_id,
+        )?,
+        parse_timestamp(&value.stale_on_error_until, capability, correlation_id)?,
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    if let Some(invalidation) = &value.invalidation {
+        entry = entry
+            .invalidated(
+                match invalidation.reason {
+                    MetadataCacheInvalidationReasonDto::ProviderConfigurationChanged => {
+                        MetadataCacheInvalidationReason::ProviderConfigurationChanged
+                    }
+                    MetadataCacheInvalidationReasonDto::CredentialRotated => {
+                        MetadataCacheInvalidationReason::CredentialRotated
+                    }
+                    MetadataCacheInvalidationReasonDto::ProjectionPolicyChanged => {
+                        MetadataCacheInvalidationReason::ProjectionPolicyChanged
+                    }
+                    MetadataCacheInvalidationReasonDto::TermsChanged => {
+                        MetadataCacheInvalidationReason::TermsChanged
+                    }
+                    MetadataCacheInvalidationReasonDto::ExplicitRetraction => {
+                        MetadataCacheInvalidationReason::ExplicitRetraction
+                    }
+                },
+                ReceivedAt::from_application_clock(parse_timestamp(
+                    &invalidation.invalidated_at,
+                    capability,
+                    correlation_id,
+                )?),
+            )
+            .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    }
+    let state = match value.read_state {
+        MetadataCacheReadStateDto::Fresh => MetadataCacheReadState::Fresh,
+        MetadataCacheReadStateDto::StaleWhileRefreshing => {
+            MetadataCacheReadState::StaleWhileRefreshing
+        }
+        MetadataCacheReadStateDto::StaleOnError => MetadataCacheReadState::StaleOnError,
+        MetadataCacheReadStateDto::Expired => MetadataCacheReadState::Expired,
+        MetadataCacheReadStateDto::Invalidated => MetadataCacheReadState::Invalidated,
+        MetadataCacheReadStateDto::PartitionDenied => MetadataCacheReadState::PartitionDenied,
+    };
+    Ok(MetadataCacheReadView::new(entry, state))
+}
+
+fn receipt_projection(
+    value: &MetadataProjectedFieldDto,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<MetadataProjection> {
+    let profile_id = value
+        .profile_id
+        .parse::<ProfileId>()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let record_id = value
+        .record_id
+        .parse::<RecordId>()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let field_key = FieldKey::try_new(value.field_key.clone())
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let tier = match value.tier {
+        MetadataProjectionTierDto::UserOverride => FieldResolutionTier::UserOverride,
+        MetadataProjectionTierDto::PreferredProviderClaim => {
+            FieldResolutionTier::PreferredProviderClaim
+        }
+        MetadataProjectionTierDto::FallbackProviderClaim => {
+            FieldResolutionTier::FallbackProviderClaim
+        }
+        MetadataProjectionTierDto::LastKnownGood => FieldResolutionTier::LastKnownGood,
+        MetadataProjectionTierDto::Empty => FieldResolutionTier::Empty,
+    };
+    let source = value
+        .source_namespace
+        .clone()
+        .map(NamespaceKey::try_new)
+        .transpose()
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    let projected_claim = value
+        .provenance
+        .as_ref()
+        .map(|provenance| {
+            let claim_id = provenance
+                .claim_id
+                .parse::<MetadataClaimId>()
+                .map_err(|_| receipt_integrity(capability, correlation_id))?;
+            let (claim_provenance, fetched_at, expires_at, status) = receipt_provenance(
+                provenance,
+                claim_id,
+                record_id,
+                Some(&field_key),
+                capability,
+                correlation_id,
+            )?;
+            let claim = FieldClaim::try_new_provider(
+                claim_id,
+                record_id,
+                field_key.clone(),
+                value
+                    .value
+                    .clone()
+                    .ok_or_else(|| receipt_integrity(capability, correlation_id))?,
+                claim_provenance,
+                fetched_at,
+                expires_at,
+                status,
+            )
+            .map_err(|_| receipt_integrity(capability, correlation_id))?;
+            Ok::<_, Box<FastiProblem>>((claim, status))
+        })
+        .transpose()?;
+    let resolved = ResolvedField::try_from_snapshot(
+        tier,
+        value.value.clone(),
+        source,
+        value.is_stale,
+        projected_claim
+            .as_ref()
+            .map(|(claim, status)| (claim, *status)),
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    MetadataProjection::try_new(
+        profile_id,
+        record_id,
+        field_key,
+        resolved,
+        ReceivedAt::from_application_clock(parse_timestamp(
+            &value.projected_at,
+            capability,
+            correlation_id,
+        )?),
+    )
+    .map_err(|_| receipt_integrity(capability, correlation_id))
+}
+
+pub(crate) fn encode_refresh_receipt_outcome(
+    record_id: RecordId,
+    provider_id: &MetadataProviderId,
+    outcome: &RefreshMetadataClaimsOutcome,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<String> {
+    let response = refresh_metadata_claims_response(record_id, provider_id.as_str(), outcome);
+    let encoded = serde_json::to_string(&response)
+        .map_err(|_| receipt_integrity(capability, correlation_id))?;
+    if encoded.len() > MAX_REFRESH_RECEIPT_JSON_BYTES {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    Ok(encoded)
+}
+
+pub(crate) fn decode_refresh_receipt_outcome(
+    encoded: &str,
+    expected_record_id: RecordId,
+    expected_provider_id: &MetadataProviderId,
+    expected_profile_id: ProfileId,
+    capability: CapabilityKey,
+    correlation_id: RequestCorrelationId,
+) -> ApplicationResult<RefreshMetadataClaimsOutcome> {
+    if encoded.len() > MAX_REFRESH_RECEIPT_JSON_BYTES {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    let response: RefreshMetadataClaimsResponse =
+        serde_json::from_str(encoded).map_err(|_| receipt_integrity(capability, correlation_id))?;
+    if serde_json::to_string(&response)
+        .map_err(|_| receipt_integrity(capability, correlation_id))?
+        != encoded
+        || response.record_id != expected_record_id.to_string()
+        || response.provider_id != expected_provider_id.as_str()
+        || response.claims.len() > MAX_PROVIDER_METADATA_FIELDS
+        || response.ratings.len() > 256
+        || response.projections.len() > MAX_PROVIDER_METADATA_FIELDS
+        || response.cache_entries.len() > 256
+        || response.attributions.len() > 64
+    {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    let field_claims = response
+        .claims
+        .iter()
+        .map(|value| receipt_field_claim(value, capability, correlation_id))
+        .collect::<ApplicationResult<Vec<_>>>()?;
+    let rating_claims = response
+        .ratings
+        .iter()
+        .map(|value| receipt_rating_claim(value, capability, correlation_id))
+        .collect::<ApplicationResult<Vec<_>>>()?;
+    let projections = response
+        .projections
+        .iter()
+        .map(|value| receipt_projection(value, capability, correlation_id))
+        .collect::<ApplicationResult<Vec<_>>>()?;
+    let cache_entries = response
+        .cache_entries
+        .iter()
+        .map(|value| receipt_cache_entry(value, capability, correlation_id))
+        .collect::<ApplicationResult<Vec<_>>>()?;
+    let attributions = response
+        .attributions
+        .iter()
+        .map(|value: &MetadataAttributionDto| {
+            MetadataAttribution::try_new(
+                MetadataProviderId::try_new(value.provider_id.clone())
+                    .map_err(|_| receipt_integrity(capability, correlation_id))?,
+                value.text.clone(),
+                value.documentation_url.clone(),
+            )
+            .map_err(|_| receipt_integrity(capability, correlation_id))
+        })
+        .collect::<ApplicationResult<Vec<_>>>()?;
+    if field_claims.iter().any(|value| {
+        value.claim().record_id() != Some(expected_record_id)
+            || value.claim().provenance().provider_id() != Some(expected_provider_id)
+    }) || rating_claims.iter().any(|value| {
+        value.claim().record_id() != expected_record_id
+            || value.claim().provenance().provider_id() != Some(expected_provider_id)
+    }) || projections.iter().any(|value| {
+        value.record_id() != expected_record_id || value.profile_id() != expected_profile_id
+    }) || cache_entries.iter().any(|value| {
+        value.entry().key().record_id() != expected_record_id
+            || value.entry().key().provider_id() != expected_provider_id
+    }) || attributions
+        .iter()
+        .any(|value| value.provider_id() != expected_provider_id)
+    {
+        return Err(receipt_integrity(capability, correlation_id));
+    }
+    Ok(RefreshMetadataClaimsOutcome::new(
+        field_claims,
+        rating_claims,
+        projections,
+        cache_entries,
+        attributions,
+    ))
 }
 
 fn cache_storage_key(key: &MetadataCacheKey) -> Result<String, serde_json::Error> {
@@ -2895,6 +3392,169 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
         )))
     }
 
+    fn authorize_and_read_refresh_receipt(
+        &self,
+        command: ReadMetadataRefreshReceiptCommand,
+    ) -> ApplicationResult<Option<RefreshMetadataClaimsOutcome>> {
+        let capability = CapabilityKey::RefreshMetadataClaims;
+        let correlation_id = command.correlation_id();
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Deferred),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let stored = map_sql(
+            transaction
+                .query_row(
+                    r#"
+                    SELECT semantic_digest, response_json, profile_id, record_id, provider_id
+                    FROM metadata_refresh_receipts
+                    WHERE workspace_id = ?1 AND client_id = ?2 AND operation_id = ?3
+                    "#,
+                    params![
+                        command.access().workspace_id().to_string(),
+                        command.access().client_id().to_string(),
+                        command.operation_id().to_string()
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .optional(),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        let Some((stored_digest, response_json, profile_id, record_id, provider_id)) = stored
+        else {
+            return Ok(None);
+        };
+        if stored_digest != command.semantic_digest().to_string()
+            || profile_id != command.access().profile_id().to_string()
+            || record_id != command.record_id().to_string()
+            || provider_id != command.provider_id().as_str()
+        {
+            return Err(Box::new(FastiProblem::idempotency_conflict(
+                capability,
+                correlation_id,
+            )));
+        }
+        decode_refresh_receipt_outcome(
+            &response_json,
+            command.record_id(),
+            command.provider_id(),
+            command.access().profile_id(),
+            capability,
+            correlation_id,
+        )
+        .map(Some)
+    }
+
+    fn authorize_and_commit_refresh_receipt(
+        &self,
+        command: CommitMetadataRefreshReceiptCommand,
+    ) -> ApplicationResult<RefreshMetadataClaimsOutcome> {
+        let capability = CapabilityKey::RefreshMetadataClaims;
+        let correlation_id = command.correlation_id();
+        let read = ReadMetadataRefreshReceiptCommand::new(
+            correlation_id,
+            *command.access(),
+            command.operation_id(),
+            command.semantic_digest().clone(),
+            command.record_id(),
+            command.provider_id().clone(),
+        );
+        if let Some(outcome) = self.authorize_and_read_refresh_receipt(read.clone())? {
+            return Ok(outcome);
+        }
+        let response_json = encode_refresh_receipt_outcome(
+            command.record_id(),
+            command.provider_id(),
+            command.outcome(),
+            capability,
+            correlation_id,
+        )?;
+        let outcome = decode_refresh_receipt_outcome(
+            &response_json,
+            command.record_id(),
+            command.provider_id(),
+            command.access().profile_id(),
+            capability,
+            correlation_id,
+        )?;
+        let mut connection = self.lock_connection(capability, correlation_id)?;
+        let transaction = map_sql(
+            connection.transaction_with_behavior(TransactionBehavior::Immediate),
+            capability,
+            correlation_id,
+        )?;
+        authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let stored = map_sql(
+            transaction
+                .query_row(
+                    "SELECT semantic_digest, response_json, profile_id, record_id, provider_id FROM metadata_refresh_receipts WHERE workspace_id = ?1 AND client_id = ?2 AND operation_id = ?3",
+                    params![
+                        command.access().workspace_id().to_string(),
+                        command.access().client_id().to_string(),
+                        command.operation_id().to_string()
+                    ],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?)),
+                )
+                .optional(),
+            capability,
+            correlation_id,
+        )?;
+        if let Some((stored_digest, stored_response, profile_id, record_id, provider_id)) = stored {
+            if stored_digest != command.semantic_digest().to_string()
+                || profile_id != command.access().profile_id().to_string()
+                || record_id != command.record_id().to_string()
+                || provider_id != command.provider_id().as_str()
+            {
+                return Err(Box::new(FastiProblem::idempotency_conflict(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            map_sql(transaction.commit(), capability, correlation_id)?;
+            return decode_refresh_receipt_outcome(
+                &stored_response,
+                command.record_id(),
+                command.provider_id(),
+                command.access().profile_id(),
+                capability,
+                correlation_id,
+            );
+        }
+        map_sql(
+            transaction.execute(
+                "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    command.access().workspace_id().to_string(),
+                    command.access().profile_id().to_string(),
+                    command.access().client_id().to_string(),
+                    command.operation_id().to_string(),
+                    command.semantic_digest().to_string(),
+                    command.record_id().to_string(),
+                    command.provider_id().as_str(),
+                    response_json,
+                    timestamp(now())
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(outcome)
+    }
+
     fn authorize_and_mark_refresh_unavailable(
         &self,
         command: MarkMetadataRefreshUnavailableCommand,
@@ -2922,7 +3582,7 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             return Err(immutable_claim_conflict(capability, correlation_id));
         }
         let mut after_claim_id = String::new();
-        let mut transitions = Vec::new();
+        let occurred_at = ReceivedAt::from_application_clock(now());
         loop {
             let mut statement = map_sql(
                 transaction.prepare(
@@ -3004,39 +3664,30 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 let status = parse_claim_status(&status)
                     .ok_or_else(|| immutable_claim_conflict(capability, correlation_id))?;
                 if matches!(status, FieldClaimStatus::Fresh | FieldClaimStatus::Stale) {
-                    transitions.push((
-                        claim_id
-                            .parse::<MetadataClaimId>()
-                            .map_err(|_| immutable_claim_conflict(capability, correlation_id))?,
-                        u32::try_from(
-                            sequence.checked_add(1).ok_or_else(|| {
+                    let event =
+                        FieldClaimLifecycleEvent::try_new(
+                            claim_id.parse::<MetadataClaimId>().map_err(|_| {
                                 immutable_claim_conflict(capability, correlation_id)
                             })?,
+                            u32::try_from(sequence.checked_add(1).ok_or_else(|| {
+                                immutable_claim_conflict(capability, correlation_id)
+                            })?)
+                            .map_err(|_| immutable_claim_conflict(capability, correlation_id))?,
+                            status,
+                            FieldClaimStatus::Unavailable,
+                            occurred_at,
+                            None,
                         )
-                        .map_err(|_| immutable_claim_conflict(capability, correlation_id))?,
-                        status,
-                    ));
+                        .map_err(|_| immutable_claim_conflict(capability, correlation_id))?;
+                    append_field_claim_lifecycle_event(
+                        &transaction,
+                        workspace_id,
+                        &event,
+                        capability,
+                        correlation_id,
+                    )?;
                 }
             }
-        }
-        let occurred_at = ReceivedAt::from_application_clock(now());
-        for (claim_id, sequence, previous_status) in transitions {
-            let event = FieldClaimLifecycleEvent::try_new(
-                claim_id,
-                sequence,
-                previous_status,
-                FieldClaimStatus::Unavailable,
-                occurred_at,
-                None,
-            )
-            .map_err(|_| immutable_claim_conflict(capability, correlation_id))?;
-            append_field_claim_lifecycle_event(
-                &transaction,
-                workspace_id,
-                &event,
-                capability,
-                correlation_id,
-            )?;
         }
         map_sql(transaction.commit(), capability, correlation_id)?;
         Ok(())
@@ -3048,6 +3699,17 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
     ) -> ApplicationResult<RefreshMetadataClaimsOutcome> {
         let capability = CapabilityKey::RefreshMetadataClaims;
         let correlation_id = command.correlation_id();
+        let receipt = ReadMetadataRefreshReceiptCommand::new(
+            correlation_id,
+            *command.access(),
+            command.operation_id(),
+            command.semantic_digest().clone(),
+            command.prepared().record_id(),
+            command.provider_id().clone(),
+        );
+        if let Some(outcome) = self.authorize_and_read_refresh_receipt(receipt.clone())? {
+            return Ok(outcome);
+        }
         let mut connection = self.lock_connection(capability, correlation_id)?;
         let transaction = map_sql(
             connection.transaction_with_behavior(TransactionBehavior::Immediate),
@@ -3055,6 +3717,56 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             correlation_id,
         )?;
         authorize_transaction(&transaction, capability, command.access(), correlation_id)?;
+        let concurrent = map_sql(
+            transaction
+                .query_row(
+                    r#"
+                    SELECT semantic_digest, response_json, profile_id, record_id, provider_id
+                    FROM metadata_refresh_receipts
+                    WHERE workspace_id = ?1 AND client_id = ?2 AND operation_id = ?3
+                    "#,
+                    params![
+                        command.access().workspace_id().to_string(),
+                        command.access().client_id().to_string(),
+                        command.operation_id().to_string()
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .optional(),
+            capability,
+            correlation_id,
+        )?;
+        if let Some((concurrent_digest, response_json, profile_id, record_id, provider_id)) =
+            concurrent
+        {
+            if concurrent_digest != command.semantic_digest().to_string()
+                || profile_id != command.access().profile_id().to_string()
+                || record_id != command.prepared().record_id().to_string()
+                || provider_id != command.provider_id().as_str()
+            {
+                return Err(Box::new(FastiProblem::idempotency_conflict(
+                    capability,
+                    correlation_id,
+                )));
+            }
+            map_sql(transaction.commit(), capability, correlation_id)?;
+            return decode_refresh_receipt_outcome(
+                &response_json,
+                command.prepared().record_id(),
+                command.provider_id(),
+                command.access().profile_id(),
+                capability,
+                correlation_id,
+            );
+        }
         let workspace_id = command.access().workspace_id();
         let profile_id = command.access().profile_id();
         let current = prepare_metadata_refresh(
@@ -3096,7 +3808,7 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 capability,
                 correlation_id,
             )?;
-            field_views.push(fasti_application::FieldClaimView::new(
+            field_views.push(FieldClaimView::new(
                 field.claim().clone(),
                 field.claim().status_at(write_at),
             ));
@@ -3162,15 +3874,19 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
                 capability,
                 correlation_id,
             )?;
-            cache_views.push(MetadataCacheReadView::new(
-                entry.clone(),
-                entry.read_state(
-                    write_at,
-                    entry.key().purpose(),
-                    MetadataDataClassification::Internal,
-                    false,
-                ),
-            ));
+            if entry.key().purpose() == MetadataCachePurpose::MetadataEnrichment
+                && entry.key().classification() == MetadataDataClassification::Public
+            {
+                cache_views.push(MetadataCacheReadView::new(
+                    entry.clone(),
+                    entry.read_state(
+                        write_at,
+                        MetadataCachePurpose::MetadataEnrichment,
+                        MetadataDataClassification::Public,
+                        false,
+                    ),
+                ));
+            }
         }
         write_metadata_attribution(
             &transaction,
@@ -3179,15 +3895,45 @@ impl MetadataRefreshPersistencePort for SqliteKernel {
             capability,
             correlation_id,
         )?;
-        let attribution = command.attribution().clone();
-        map_sql(transaction.commit(), capability, correlation_id)?;
-        Ok(RefreshMetadataClaimsOutcome::new(
+        let outcome = RefreshMetadataClaimsOutcome::new(
             field_views,
             rating_views,
             projections,
             cache_views,
-            vec![attribution],
-        ))
+            vec![command.attribution().clone()],
+        );
+        let response_json = encode_refresh_receipt_outcome(
+            current.record_id(),
+            command.provider_id(),
+            &outcome,
+            capability,
+            correlation_id,
+        )?;
+        map_sql(
+            transaction.execute(
+                r#"
+                INSERT INTO metadata_refresh_receipts(
+                    workspace_id, profile_id, client_id, operation_id,
+                    semantic_digest, record_id, provider_id, response_json, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                "#,
+                params![
+                    workspace_id.to_string(),
+                    profile_id.to_string(),
+                    command.access().client_id().to_string(),
+                    command.operation_id().to_string(),
+                    command.semantic_digest().to_string(),
+                    current.record_id().to_string(),
+                    command.provider_id().as_str(),
+                    response_json,
+                    timestamp(write_at),
+                ],
+            ),
+            capability,
+            correlation_id,
+        )?;
+        map_sql(transaction.commit(), capability, correlation_id)?;
+        Ok(outcome)
     }
 }
 
@@ -3656,6 +4402,20 @@ mod tests {
                 params![
                     node.access.workspace_id().to_string(),
                     node.access.profile_id().to_string(),
+                    other_record.to_string(),
+                    timestamp(now())
+                ],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "INSERT INTO metadata_refresh_receipts(workspace_id, profile_id, client_id, operation_id, semantic_digest, record_id, provider_id, response_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'tmdb', '{}', ?7)",
+                params![
+                    other_workspace.to_string(),
+                    other_profile.to_string(),
+                    node.access.client_id().to_string(),
+                    fasti_domain::OperationId::new_v7().to_string(),
+                    digest("a").to_string(),
                     other_record.to_string(),
                     timestamp(now())
                 ],
@@ -5135,6 +5895,8 @@ mod tests {
             .authorize_and_commit_refresh(CommitMetadataRefreshCommand::new(
                 RequestCorrelationId::new_v7(),
                 node.access,
+                fasti_domain::OperationId::new_v7(),
+                digest("c"),
                 prepared,
                 provider_id,
                 expected,
@@ -5156,6 +5918,238 @@ mod tests {
             )
             .expect("claim count");
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn refresh_operation_replay_returns_the_first_receipt_without_duplicate_claims() {
+        use chrono::Duration;
+
+        let node = TestNode::new();
+        let (record_id, provider_id, prepared) = refresh_fixture(&node);
+        let expected = provider_state(1);
+        node.kernel
+            .put_provider_capability_state(node.access.workspace_id(), expected.clone())
+            .expect("provider state");
+        let operation_id = fasti_domain::OperationId::new_v7();
+        let semantic_digest = digest("d");
+        let fetched_at = ReceivedAt::from_application_clock(now());
+        let cache_key = MetadataCacheKey::try_new(
+            provider_id.clone(),
+            Some(expected.capability_version()),
+            record_id,
+            "metadata/movie",
+            prepared.grain(),
+            ns(prepared.identifier().namespace()),
+            prepared.identifier().value(),
+            Some(MetadataLocale::try_new("en-US").expect("locale")),
+            None,
+            MetadataFieldGroup::BasicInfo,
+            prepared.settings_fingerprint().clone(),
+            digest("a"),
+            1,
+            MetadataCachePurpose::MetadataEnrichment,
+            "tmdb_attribution_required",
+            MetadataDataClassification::Public,
+        )
+        .expect("cache key");
+        let attribution = MetadataAttribution::try_new(
+            provider_id.clone(),
+            "Metadata supplied by TMDB",
+            "https://developer.themoviedb.org/",
+        )
+        .expect("attribution");
+        let command = |claim_id: MetadataClaimId, value: &str, digest_value: Sha256Digest| {
+            let field = ProviderMetadataField::new(
+                field_key(TITLE_FIELD_KEY),
+                FieldClaim::try_new_provider(
+                    claim_id,
+                    record_id,
+                    field_key(TITLE_FIELD_KEY),
+                    value,
+                    FieldClaimProvenance::try_new(
+                        provider_id.clone(),
+                        ns("tmdb.movie"),
+                        "438631",
+                        Some(MetadataLocale::try_new("en-US").expect("locale")),
+                        None,
+                        Some("v3".to_owned()),
+                        digest("a"),
+                    )
+                    .expect("provenance"),
+                    fetched_at,
+                    Some(fetched_at.value() + Duration::hours(1)),
+                    FieldClaimStatus::Fresh,
+                )
+                .expect("field claim"),
+            );
+            let cache = MetadataCacheEntry::try_new(
+                cache_key.clone(),
+                vec![claim_id],
+                fetched_at,
+                fetched_at.value() + Duration::hours(1),
+                fetched_at.value() + Duration::hours(2),
+                fetched_at.value() + Duration::days(2),
+            )
+            .expect("cache entry");
+            CommitMetadataRefreshCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                operation_id,
+                digest_value,
+                prepared.clone(),
+                provider_id.clone(),
+                expected.clone(),
+                vec![field],
+                Vec::new(),
+                vec![cache],
+                attribution.clone(),
+            )
+        };
+
+        let first_claim = MetadataClaimId::new_v7();
+        let first = node
+            .kernel
+            .authorize_and_commit_refresh(command(
+                first_claim,
+                "First title",
+                semantic_digest.clone(),
+            ))
+            .expect("first refresh");
+        let second_claim = MetadataClaimId::new_v7();
+        let replay = node
+            .kernel
+            .authorize_and_commit_refresh(command(
+                second_claim,
+                "Changed upstream title",
+                semantic_digest,
+            ))
+            .expect("receipt replay");
+
+        assert_eq!(replay, first);
+        let connection = node.kernel.inner.connection.lock().expect("connection");
+        let claim_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM metadata_claims WHERE claim_id IN (?1, ?2)",
+                params![first_claim.to_string(), second_claim.to_string()],
+                |row| row.get(0),
+            )
+            .expect("claim count");
+        assert_eq!(claim_count, 1);
+        assert!(connection
+            .execute(
+                "UPDATE metadata_refresh_receipts SET semantic_digest = ?1 WHERE workspace_id = ?2 AND client_id = ?3 AND operation_id = ?4",
+                params![
+                    digest("e").to_string(),
+                    node.access.workspace_id().to_string(),
+                    node.access.client_id().to_string(),
+                    operation_id.to_string()
+                ],
+            )
+            .is_err());
+        assert!(connection
+            .execute(
+                "DELETE FROM metadata_refresh_receipts WHERE workspace_id = ?1 AND client_id = ?2 AND operation_id = ?3",
+                params![
+                    node.access.workspace_id().to_string(),
+                    node.access.client_id().to_string(),
+                    operation_id.to_string()
+                ],
+            )
+            .is_err());
+        connection
+            .execute(
+                "DELETE FROM metadata_cache_claims WHERE workspace_id = ?1",
+                [node.access.workspace_id().to_string()],
+            )
+            .expect("remove mutable cache references");
+        connection
+            .execute(
+                "DELETE FROM metadata_cache_entries WHERE workspace_id = ?1",
+                [node.access.workspace_id().to_string()],
+            )
+            .expect("remove mutable cache entries");
+        drop(connection);
+
+        let durable_replay = node
+            .kernel
+            .authorize_and_read_refresh_receipt(ReadMetadataRefreshReceiptCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                operation_id,
+                digest("d"),
+                record_id,
+                provider_id.clone(),
+            ))
+            .expect("read durable receipt")
+            .expect("receipt remains");
+        assert_eq!(durable_replay, first);
+
+        let conflict = node.kernel.authorize_and_commit_refresh(command(
+            MetadataClaimId::new_v7(),
+            "Different operation semantics",
+            digest("e"),
+        ));
+        assert!(matches!(
+            conflict,
+            Err(problem) if problem.code() == ProblemCode::IdempotencyConflict
+        ));
+    }
+
+    #[test]
+    fn cache_hit_outcome_is_committed_as_an_exact_idempotency_receipt() {
+        let node = TestNode::new();
+        let (record_id, provider_id, _) = refresh_fixture(&node);
+        let operation_id = fasti_domain::OperationId::new_v7();
+        let outcome = RefreshMetadataClaimsOutcome::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let committed = node
+            .kernel
+            .authorize_and_commit_refresh_receipt(CommitMetadataRefreshReceiptCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                operation_id,
+                digest("f"),
+                record_id,
+                provider_id.clone(),
+                outcome.clone(),
+            ))
+            .expect("commit cache-hit receipt");
+        assert_eq!(committed, outcome);
+
+        let replay = node
+            .kernel
+            .authorize_and_read_refresh_receipt(ReadMetadataRefreshReceiptCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                operation_id,
+                digest("f"),
+                record_id,
+                provider_id.clone(),
+            ))
+            .expect("read cache-hit receipt")
+            .expect("cache-hit receipt exists");
+        assert_eq!(replay, outcome);
+
+        let conflict = node.kernel.authorize_and_commit_refresh_receipt(
+            CommitMetadataRefreshReceiptCommand::new(
+                RequestCorrelationId::new_v7(),
+                node.access,
+                operation_id,
+                digest("e"),
+                record_id,
+                provider_id,
+                outcome,
+            ),
+        );
+        assert!(matches!(
+            conflict,
+            Err(problem) if problem.code() == ProblemCode::IdempotencyConflict
+        ));
     }
 
     #[test]
