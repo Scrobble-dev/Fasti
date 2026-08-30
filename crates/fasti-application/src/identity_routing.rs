@@ -143,11 +143,17 @@ pub enum AnimeGroupingPolicyChange {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AnimeGroupingPolicyChangeError;
+pub enum AnimeGroupingPolicyChangeError {
+    ProfileCannotInherit,
+    SelfRollback,
+}
 
 impl fmt::Display for AnimeGroupingPolicyChangeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("only a client policy can inherit the profile default")
+        formatter.write_str(match self {
+            Self::ProfileCannotInherit => "only a client policy can inherit the profile default",
+            Self::SelfRollback => "a policy operation cannot roll itself back",
+        })
     }
 }
 
@@ -193,7 +199,7 @@ impl PreviewAnimeGroupingPolicyChangeQuery {
         limit: IdentityImpactPageLimit,
     ) -> Result<Self, AnimeGroupingPolicyChangeError> {
         if !change.is_valid_for(scope) {
-            return Err(AnimeGroupingPolicyChangeError);
+            return Err(AnimeGroupingPolicyChangeError::ProfileCannotInherit);
         }
         Ok(Self {
             correlation_id,
@@ -252,7 +258,15 @@ impl ApplyAnimeGroupingPolicyChangeCommand {
         change: AnimeGroupingPolicyChange,
     ) -> Result<Self, AnimeGroupingPolicyChangeError> {
         if !change.is_valid_for(scope) {
-            return Err(AnimeGroupingPolicyChangeError);
+            return Err(AnimeGroupingPolicyChangeError::ProfileCannotInherit);
+        }
+        if matches!(
+            change,
+            AnimeGroupingPolicyChange::Rollback {
+                applied_operation_id
+            } if applied_operation_id == operation_id
+        ) {
+            return Err(AnimeGroupingPolicyChangeError::SelfRollback);
         }
         Ok(Self {
             correlation_id,
@@ -702,5 +716,27 @@ mod tests {
             Some(operation_id),
         )
         .is_err());
+
+        assert_eq!(
+            ApplyAnimeGroupingPolicyChangeCommand::try_new(
+                RequestCorrelationId::new_v7(),
+                RequestAccessContext::new(
+                    fasti_domain::WorkspaceId::new_v7(),
+                    ProfileId::new_v7(),
+                    ClientId::new_v7(),
+                    fasti_domain::CredentialId::new_v7(),
+                    fasti_domain::ProfileGrantId::new_v7(),
+                    1,
+                ),
+                AnimeGroupingPolicyScope::Profile,
+                operation_id,
+                Sha256Digest::from_bytes(&[0; 32]),
+                1,
+                AnimeGroupingPolicyChange::Rollback {
+                    applied_operation_id: operation_id,
+                },
+            ),
+            Err(AnimeGroupingPolicyChangeError::SelfRollback)
+        );
     }
 }

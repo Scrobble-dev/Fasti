@@ -1,6 +1,7 @@
 use fasti_application::{plan_purpose_identity_route, ProviderId, PurposeIdentityRouteStatus};
 use fasti_domain::{
-    AnimeGroupingPreference, ExternalIdentifierClaim, Grain, IdentityRouteKind, ResolutionIntent,
+    AnimeGroupingPreference, ExternalIdentifierClaim, Grain, IdentityRouteKind, RecordId,
+    ResolutionIntent,
 };
 use serde::Deserialize;
 
@@ -36,6 +37,7 @@ fn pinned_nuvio_anime_routes_use_imdb_for_tmdb_without_rekeying() {
         let identifiers = vec![primary.clone(), imdb];
 
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::MetadataEnrichment,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
             AnimeGroupingPreference::Automatic,

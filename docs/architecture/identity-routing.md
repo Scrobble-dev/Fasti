@@ -52,6 +52,8 @@ support compatible read and export routes. A `subset_of` assertion can support a
 Nuvio TV-work grouping projection when it carries explicit coverage; it is not a
 general alias. `superset_of`, `overlaps`, `alternate_cut_of`, `related`, and
 `not_same_as` remain review evidence and never become outbound routes.
+The planner also requires the assertion owner to match the requested `RecordId`;
+evidence from another Record stays visible but cannot become a candidate route.
 
 Known provider identifiers must also match the provider's bounded wire format.
 Malformed evidence stays visible for review but cannot become an outbound

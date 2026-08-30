@@ -316,11 +316,11 @@ impl IdentityAssertionEvidence {
         let observed_source = observed_source.into();
         let derivation_root_is_valid = derivation_root
             .as_deref()
-            .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
+            .is_none_or(|value| valid_provenance_text(value, MAX_IDENTITY_SOURCE_BYTES));
         let reviewer_is_valid = reviewer
             .as_deref()
             .is_none_or(|value| valid_text(value, MAX_IDENTITY_SOURCE_BYTES));
-        if !valid_text(&observed_source, MAX_PROVENANCE_TEXT_BYTES)
+        if !valid_provenance_text(&observed_source, MAX_PROVENANCE_TEXT_BYTES)
             || !derivation_root_is_valid
             || !reviewer_is_valid
         {
@@ -445,7 +445,7 @@ impl IdentityAssertion {
         {
             return Err(IdentityAssertionError::InvalidEvidence);
         }
-        if !valid_text(&id_source, MAX_IDENTITY_SOURCE_BYTES)
+        if !valid_provenance_text(&id_source, MAX_IDENTITY_SOURCE_BYTES)
             || !source_version_is_valid
             || !authority_is_valid
         {
@@ -453,7 +453,9 @@ impl IdentityAssertion {
         }
         if !reasoning_is_valid
             || (matches!(relation, IdentityAssertionRelation::NotSameAs)
-                && reasoning.as_deref().is_none_or(|value| value.len() < 20))
+                && reasoning
+                    .as_deref()
+                    .is_none_or(|value| value.chars().count() < 20))
         {
             return Err(IdentityAssertionError::MissingReasoning);
         }
@@ -653,6 +655,10 @@ fn valid_text(value: &str, max_bytes: usize) -> bool {
     !value.trim().is_empty() && value.len() <= max_bytes && !value.chars().any(char::is_control)
 }
 
+fn valid_provenance_text(value: &str, max_bytes: usize) -> bool {
+    value.chars().count() >= 3 && valid_text(value, max_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,6 +733,16 @@ mod tests {
                 ExternalIdentifierId::new_v7(),
             )
         };
+
+        assert!(IdentityAssertionEvidence::try_new(
+            IdentityEvidenceMethod::UpstreamDeclared,
+            "x",
+            Some("root".to_owned()),
+            None,
+            NaiveDate::from_ymd_opt(2026, 8, 30).expect("date"),
+            None,
+        )
+        .is_err());
 
         let (assertion_id, workspace_id, record_id, source_id) = base();
         assert!(IdentityAssertion::try_new(

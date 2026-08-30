@@ -159,12 +159,17 @@ pub struct PurposeIdentityRoute {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AcceptedIdentityRouteAssertion {
     assertion_id: IdentityAssertionId,
+    record_id: RecordId,
     relation: IdentityAssertionRelation,
 }
 
 impl AcceptedIdentityRouteAssertion {
     pub const fn assertion_id(self) -> IdentityAssertionId {
         self.assertion_id
+    }
+
+    pub const fn record_id(self) -> RecordId {
+        self.record_id
     }
 
     pub const fn relation(self) -> IdentityAssertionRelation {
@@ -197,6 +202,7 @@ impl IdentityRouteEvidence {
             kind: IdentityRouteEvidenceKind::AcceptedCrosswalk,
             accepted_assertion: Some(AcceptedIdentityRouteAssertion {
                 assertion_id: assertion.assertion_id(),
+                record_id: assertion.record_id(),
                 relation: assertion.relation(),
             }),
         })
@@ -238,6 +244,7 @@ pub enum PurposeIdentityRouteStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PurposeIdentityRoutePlan {
+    record_id: RecordId,
     intent: ResolutionIntent,
     target_provider: ProviderId,
     status: PurposeIdentityRouteStatus,
@@ -247,6 +254,10 @@ pub struct PurposeIdentityRoutePlan {
 }
 
 impl PurposeIdentityRoutePlan {
+    pub const fn record_id(&self) -> RecordId {
+        self.record_id
+    }
+
     pub const fn intent(&self) -> ResolutionIntent {
         self.intent
     }
@@ -496,6 +507,7 @@ fn route_priority(
 /// Unsupported identifiers remain visible in `known_identifiers`. Multiple
 /// identifiers at the best accepted priority fail closed as ambiguous.
 pub fn plan_purpose_identity_route(
+    record_id: RecordId,
     intent: ResolutionIntent,
     target_provider: ProviderId,
     anime_preference: AnimeGroupingPreference,
@@ -506,10 +518,17 @@ pub fn plan_purpose_identity_route(
         .cloned()
         .map(IdentityRouteEvidence::direct)
         .collect::<Vec<_>>();
-    plan_purpose_identity_route_with_evidence(intent, target_provider, anime_preference, &evidence)
+    plan_purpose_identity_route_with_evidence(
+        record_id,
+        intent,
+        target_provider,
+        anime_preference,
+        &evidence,
+    )
 }
 
 pub fn plan_purpose_identity_route_with_evidence(
+    record_id: RecordId,
     intent: ResolutionIntent,
     target_provider: ProviderId,
     anime_preference: AnimeGroupingPreference,
@@ -530,6 +549,10 @@ pub fn plan_purpose_identity_route_with_evidence(
 
     let mut candidates = evidence
         .iter()
+        .filter(|item| {
+            item.accepted_assertion()
+                .is_none_or(|assertion| assertion.record_id() == record_id)
+        })
         .filter_map(|evidence| {
             route_priority(intent, target_provider.as_str(), anime_preference, evidence).map(
                 |(priority, kind)| {
@@ -613,6 +636,7 @@ pub fn plan_purpose_identity_route_with_evidence(
     };
 
     PurposeIdentityRoutePlan {
+        record_id,
         intent,
         target_provider,
         status,
@@ -702,12 +726,14 @@ pub fn preview_anime_grouping_change_for_record_with_evidence(
 ) -> AnimeGroupingRecordPreview {
     let nuvio = ProviderId::try_new("nuvio").expect("the fixed Nuvio provider ID is valid");
     let previous = plan_purpose_identity_route_with_evidence(
+        record_id,
         ResolutionIntent::NuvioExport,
         nuvio.clone(),
         previous_preference,
         evidence,
     );
     let proposed = plan_purpose_identity_route_with_evidence(
+        record_id,
         ResolutionIntent::NuvioExport,
         nuvio,
         proposed_preference,
@@ -1822,6 +1848,7 @@ mod tests {
     }
 
     fn accepted_crosswalk_fixture(
+        record_id: RecordId,
         target: ExternalIdentifierClaim,
         relation: IdentityAssertionRelation,
     ) -> (IdentityRouteEvidence, IdentityAssertionId) {
@@ -1851,7 +1878,7 @@ mod tests {
         let assertion = IdentityAssertion::try_new(
             assertion_id,
             WorkspaceId::new_v7(),
-            RecordId::new_v7(),
+            record_id,
             ExternalIdentifierId::new_v7(),
             &source,
             target,
@@ -1898,6 +1925,7 @@ mod tests {
             identity_claim("imdb.title", "tt28254942"),
         ];
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
@@ -1920,6 +1948,7 @@ mod tests {
         let tmdb = ExternalIdentifierClaim::try_new("tmdb.tv", Grain::Series, "42")
             .expect("TMDB identity fixture");
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
             AnimeGroupingPreference::GroupByTvWork,
@@ -1933,6 +1962,7 @@ mod tests {
 
     #[test]
     fn tmdb_metadata_routes_aliases_before_an_accepted_crosswalk() {
+        let record_id = RecordId::new_v7();
         let imdb = IdentityRouteEvidence::direct(identity_claim_at(
             "imdb.title",
             Grain::Series,
@@ -1946,6 +1976,7 @@ mod tests {
         let wikidata =
             IdentityRouteEvidence::direct(identity_claim_at("wikidata", Grain::Series, "Q23572"));
         let (crosswalk, assertion_id) = accepted_crosswalk_fixture(
+            record_id,
             identity_claim_at("tmdb.tv", Grain::Series, "1399"),
             IdentityAssertionRelation::Exact,
         );
@@ -1973,6 +2004,7 @@ mod tests {
             ),
         ] {
             let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
                 ResolutionIntent::MetadataEnrichment,
                 ProviderId::try_new("tmdb").expect("TMDB provider"),
                 AnimeGroupingPreference::Automatic,
@@ -2001,6 +2033,7 @@ mod tests {
             identity_claim_at("tvdb.series", Grain::Film, "123"),
         ] {
             let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
                 ResolutionIntent::MetadataLookup,
                 ProviderId::try_new("tmdb").expect("TMDB provider"),
                 AnimeGroupingPreference::Automatic,
@@ -2018,11 +2051,18 @@ mod tests {
             identity_claim_at("tmdb.movie", Grain::Series, "123"),
             identity_claim_at("tmdb.tv", Grain::Film, "456"),
         ] {
+            let record_id = RecordId::new_v7();
             let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
                 ResolutionIntent::MetadataLookup,
                 ProviderId::try_new("tmdb").expect("TMDB provider"),
                 AnimeGroupingPreference::Automatic,
-                &[accepted_crosswalk_fixture(identifier, IdentityAssertionRelation::Exact).0],
+                &[accepted_crosswalk_fixture(
+                    record_id,
+                    identifier,
+                    IdentityAssertionRelation::Exact,
+                )
+                .0],
             );
 
             assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
@@ -2033,6 +2073,7 @@ mod tests {
     #[test]
     fn tracker_write_uses_only_the_target_provider_native_identifier() {
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::TrackerWrite,
             ProviderId::try_new("kitsu").expect("Kitsu provider"),
             AnimeGroupingPreference::GroupByTvWork,
@@ -2052,6 +2093,7 @@ mod tests {
     #[test]
     fn tracker_write_fails_closed_without_the_target_provider_identifier() {
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::TrackerWrite,
             ProviderId::try_new("kitsu").expect("Kitsu provider"),
             AnimeGroupingPreference::GroupByTvWork,
@@ -2069,6 +2111,7 @@ mod tests {
     #[test]
     fn equally_ranked_aliases_fail_closed_as_ambiguous() {
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
             AnimeGroupingPreference::GroupByTvWork,
@@ -2093,6 +2136,7 @@ mod tests {
             identity_claim("mal.anime", "1/2"),
         ] {
             let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
                 ResolutionIntent::NuvioExport,
                 ProviderId::try_new("nuvio").expect("Nuvio provider"),
                 AnimeGroupingPreference::Automatic,
@@ -2124,6 +2168,7 @@ mod tests {
             ),
         ] {
             let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
                 ResolutionIntent::NuvioExport,
                 ProviderId::try_new("nuvio").expect("Nuvio provider"),
                 preference,
@@ -2146,6 +2191,7 @@ mod tests {
     #[test]
     fn tv_work_grouping_accepts_a_series_grained_coordinate() {
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::GroupByTvWork,
@@ -2163,6 +2209,7 @@ mod tests {
     #[test]
     fn nuvio_tv_work_grouping_uses_its_pinned_imdb_first_order() {
         let plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::Automatic,
@@ -2195,6 +2242,7 @@ mod tests {
         let nuvio = ProviderId::try_new("nuvio").expect("Nuvio provider");
 
         let mal = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::NuvioExport,
             nuvio.clone(),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
@@ -2209,6 +2257,7 @@ mod tests {
         );
 
         let kitsu = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::NuvioExport,
             nuvio,
             AnimeGroupingPreference::KeepKitsuReleasesSeparate,
@@ -2237,6 +2286,7 @@ mod tests {
             ("simkl.anime", Grain::Release, "60001", "simkl:60001"),
         ] {
             let plan = plan_purpose_identity_route(
+                RecordId::new_v7(),
                 ResolutionIntent::NuvioExport,
                 ProviderId::try_new("nuvio").expect("Nuvio provider"),
                 AnimeGroupingPreference::Automatic,
@@ -2246,6 +2296,7 @@ mod tests {
         }
 
         let metadata_plan = plan_purpose_identity_route(
+            RecordId::new_v7(),
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
             AnimeGroupingPreference::Automatic,
@@ -2256,12 +2307,15 @@ mod tests {
 
     #[test]
     fn accepted_crosswalk_can_satisfy_a_nuvio_preference_without_hiding_direct_evidence() {
+        let record_id = RecordId::new_v7();
         let (accepted_mal, assertion_id) = accepted_crosswalk_fixture(
+            record_id,
             identity_claim("mal.anime", "49894"),
             IdentityAssertionRelation::Exact,
         );
         let direct_kitsu = IdentityRouteEvidence::direct(identity_claim("kitsu.anime", "7442"));
         let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
@@ -2279,6 +2333,7 @@ mod tests {
 
         let direct_mal = IdentityRouteEvidence::direct(identity_claim("mal.anime", "49894"));
         let direct_plan = plan_purpose_identity_route_with_evidence(
+            record_id,
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
@@ -2294,6 +2349,31 @@ mod tests {
     }
 
     #[test]
+    fn accepted_crosswalk_cannot_route_for_another_record() {
+        let assertion_record_id = RecordId::new_v7();
+        let requested_record_id = RecordId::new_v7();
+        let accepted = accepted_crosswalk_fixture(
+            assertion_record_id,
+            identity_claim("mal.anime", "49894"),
+            IdentityAssertionRelation::Exact,
+        )
+        .0;
+
+        let plan = plan_purpose_identity_route_with_evidence(
+            requested_record_id,
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[accepted],
+        );
+
+        assert_eq!(plan.record_id(), requested_record_id);
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+        assert!(plan.selected_route().is_none());
+        assert!(plan.candidate_routes().is_empty());
+    }
+
+    #[test]
     fn accepted_crosswalk_relation_is_bound_to_the_resolution_intent() {
         for relation in [
             IdentityAssertionRelation::SupersetOf,
@@ -2302,11 +2382,14 @@ mod tests {
             IdentityAssertionRelation::Related,
             IdentityAssertionRelation::NotSameAs,
         ] {
+            let record_id = RecordId::new_v7();
             let plan = plan_purpose_identity_route_with_evidence(
+                record_id,
                 ResolutionIntent::NuvioExport,
                 ProviderId::try_new("nuvio").expect("Nuvio provider"),
                 AnimeGroupingPreference::GroupByTvWork,
                 &[accepted_crosswalk_fixture(
+                    record_id,
                     identity_claim_at("tmdb.tv", Grain::Series, "1399"),
                     relation,
                 )
@@ -2315,12 +2398,15 @@ mod tests {
             assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
         }
 
+        let record_id = RecordId::new_v7();
         let subset = accepted_crosswalk_fixture(
+            record_id,
             identity_claim_at("tmdb.tv", Grain::Series, "1399"),
             IdentityAssertionRelation::SubsetOf,
         )
         .0;
         let grouped = plan_purpose_identity_route_with_evidence(
+            record_id,
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::GroupByTvWork,
@@ -2337,6 +2423,7 @@ mod tests {
         );
 
         let release_preference = plan_purpose_identity_route_with_evidence(
+            record_id,
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
@@ -2350,12 +2437,14 @@ mod tests {
 
     #[test]
     fn anime_grouping_preview_retains_accepted_crosswalk_provenance() {
+        let record_id = RecordId::new_v7();
         let (accepted_mal, assertion_id) = accepted_crosswalk_fixture(
+            record_id,
             identity_claim("mal.anime", "49894"),
             IdentityAssertionRelation::Exact,
         );
         let preview = preview_anime_grouping_change_for_record_with_evidence(
-            RecordId::new_v7(),
+            record_id,
             AnimeGroupingPreference::GroupByTvWork,
             AnimeGroupingPreference::KeepMalReleasesSeparate,
             &[
@@ -2376,12 +2465,17 @@ mod tests {
 
     #[test]
     fn corroborating_assertions_for_one_coordinate_are_not_ambiguous() {
+        let record_id = RecordId::new_v7();
         let identifier = identity_claim("mal.anime", "49894");
-        let (first_evidence, first) =
-            accepted_crosswalk_fixture(identifier.clone(), IdentityAssertionRelation::Exact);
+        let (first_evidence, first) = accepted_crosswalk_fixture(
+            record_id,
+            identifier.clone(),
+            IdentityAssertionRelation::Exact,
+        );
         let (second_evidence, second) =
-            accepted_crosswalk_fixture(identifier, IdentityAssertionRelation::Exact);
+            accepted_crosswalk_fixture(record_id, identifier, IdentityAssertionRelation::Exact);
         let plan = plan_purpose_identity_route_with_evidence(
+            record_id,
             ResolutionIntent::NuvioExport,
             ProviderId::try_new("nuvio").expect("Nuvio provider"),
             AnimeGroupingPreference::KeepMalReleasesSeparate,
