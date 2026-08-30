@@ -78,6 +78,11 @@ enter the route planner as accepted evidence.
 The shared encoder keeps IMDb values bare and prefixes the other coordinate
 spaces: `tmdb:`, `tvdb:`, `mal:`, `anidb:`, `anilist:`, `kitsu:`, or `simkl:`.
 Adapters consume this encoder instead of maintaining their own prefix tables.
+The independent Scrob implementation at the pinned programme revision also
+uses a validated bare IMDb identifier for outbound Nuvio library items and
+skips an item when it cannot resolve a safe identifier. Fasti uses that as
+behavioral corroboration, not as a code source or a reason to discard other
+verified Nuvio-compatible identifiers.
 
 The preference can change outward catalog identifiers, grouping, deep links,
 and safe provider routes. It cannot change:
@@ -112,3 +117,4 @@ does not delete the original receipt or rewrite media history.
 - [NuvioTV issue 2742](https://github.com/NuvioMedia/NuvioTV/issues/2742)
 - [TMDB Find by ID](https://developer.themoviedb.org/reference/find-by-id)
 - [Electric Town anime crosswalk doctrine](https://github.com/Electric-Town/anime-crosswalk-mappings/tree/dee4c1f4808d656b7ca71da584a8af95a2653277)
+- [Scrob pinned Nuvio identifier benchmark](https://github.com/ellite/scrob/blob/1c4d775b70f489ca0531376b2c3de6a8c3de2a2b/backend/routers/sync.py#L554-L643)
