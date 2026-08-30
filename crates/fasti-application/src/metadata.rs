@@ -7,7 +7,7 @@
 use crate::{ApplicationResult, RequestAccessContext};
 use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
-    AnimeIdPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
+    AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
     FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityRouteKind, MetadataAttribution,
     MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup, MetadataLocale,
     MetadataProjection, MetadataProjectionPolicy, MetadataProviderId, MetadataRegion,
@@ -210,32 +210,40 @@ impl PurposeIdentityRoutePlan {
 fn route_priority(
     intent: ResolutionIntent,
     target_provider: &str,
-    anime_preference: AnimeIdPreference,
+    anime_preference: AnimeGroupingPreference,
     identifier: &ExternalIdentifierClaim,
 ) -> Option<(u8, IdentityRouteKind)> {
     let namespace = identifier.namespace();
     let grain = identifier.grain();
     match (intent, target_provider, namespace, grain) {
         (
-            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
             "tmdb",
             "tmdb.movie",
             Grain::Film,
         )
         | (
-            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
             "tmdb",
             "tmdb.tv",
             Grain::Series,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
         (
-            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
             "tmdb",
             "imdb.title",
             Grain::Film | Grain::Series | Grain::Release,
         ) => Some((1, IdentityRouteKind::VerifiedAlias)),
         (
-            ResolutionIntent::MetadataLookup | ResolutionIntent::DisplayProjection,
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
             "google-books",
             "googlebooks.volume",
             Grain::Edition,
@@ -252,16 +260,29 @@ fn route_priority(
             "kitsu.anime",
             Grain::Release,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
-        (ResolutionIntent::ExportProjection, "nuvio", _, Grain::Release) => {
+        (ResolutionIntent::NuvioExport, "nuvio", _, Grain::Release) => {
             let priority = match (anime_preference, namespace) {
-                (AnimeIdPreference::Imdb, "imdb.title")
-                | (AnimeIdPreference::Mal, "mal.anime")
-                | (AnimeIdPreference::Kitsu, "kitsu.anime") => 0,
-                (AnimeIdPreference::Imdb, "mal.anime")
-                | (AnimeIdPreference::Mal, "kitsu.anime")
-                | (AnimeIdPreference::Kitsu, "mal.anime") => 1,
-                (AnimeIdPreference::Imdb, "kitsu.anime")
-                | (AnimeIdPreference::Mal | AnimeIdPreference::Kitsu, "imdb.title") => 2,
+                (
+                    AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
+                    "imdb.title" | "tmdb.tv" | "tvdb.series",
+                )
+                | (AnimeGroupingPreference::KeepMalReleasesSeparate, "mal.anime")
+                | (AnimeGroupingPreference::KeepKitsuReleasesSeparate, "kitsu.anime") => 0,
+                (
+                    AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
+                    "mal.anime",
+                )
+                | (AnimeGroupingPreference::KeepMalReleasesSeparate, "kitsu.anime")
+                | (AnimeGroupingPreference::KeepKitsuReleasesSeparate, "mal.anime") => 1,
+                (
+                    AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic,
+                    "kitsu.anime",
+                )
+                | (
+                    AnimeGroupingPreference::KeepMalReleasesSeparate
+                    | AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+                    "imdb.title" | "tmdb.tv" | "tvdb.series",
+                ) => 2,
                 _ => return None,
             };
             Some((priority, IdentityRouteKind::ProviderNative))
@@ -277,7 +298,7 @@ fn route_priority(
 pub fn plan_purpose_identity_route(
     intent: ResolutionIntent,
     target_provider: ProviderId,
-    anime_preference: AnimeIdPreference,
+    anime_preference: AnimeGroupingPreference,
     identifiers: &[ExternalIdentifierClaim],
 ) -> PurposeIdentityRoutePlan {
     let mut known_identifiers = identifiers.to_vec();
@@ -1443,7 +1464,7 @@ mod tests {
         let plan = plan_purpose_identity_route(
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
-            AnimeIdPreference::Mal,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
             &identifiers,
         );
 
@@ -1465,7 +1486,7 @@ mod tests {
         let plan = plan_purpose_identity_route(
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
-            AnimeIdPreference::Imdb,
+            AnimeGroupingPreference::GroupByTvWork,
             &[tmdb.clone(), identity_claim("imdb.title", "tt28254942")],
         );
 
@@ -1479,7 +1500,7 @@ mod tests {
         let plan = plan_purpose_identity_route(
             ResolutionIntent::TrackerWrite,
             ProviderId::try_new("kitsu").expect("Kitsu provider"),
-            AnimeIdPreference::Imdb,
+            AnimeGroupingPreference::GroupByTvWork,
             &[
                 identity_claim("imdb.title", "tt28254942"),
                 identity_claim("mal.anime", "49894"),
@@ -1498,7 +1519,7 @@ mod tests {
         let plan = plan_purpose_identity_route(
             ResolutionIntent::TrackerWrite,
             ProviderId::try_new("kitsu").expect("Kitsu provider"),
-            AnimeIdPreference::Imdb,
+            AnimeGroupingPreference::GroupByTvWork,
             &[
                 identity_claim("imdb.title", "tt28254942"),
                 identity_claim("mal.anime", "49894"),
@@ -1515,7 +1536,7 @@ mod tests {
         let plan = plan_purpose_identity_route(
             ResolutionIntent::MetadataLookup,
             ProviderId::try_new("tmdb").expect("TMDB provider"),
-            AnimeIdPreference::Imdb,
+            AnimeGroupingPreference::GroupByTvWork,
             &[
                 identity_claim("imdb.title", "tt0000001"),
                 identity_claim("imdb.title", "tt0000002"),
@@ -1535,12 +1556,19 @@ mod tests {
             identity_claim("kitsu.anime", "7442"),
         ];
         for (preference, namespace) in [
-            (AnimeIdPreference::Imdb, "imdb.title"),
-            (AnimeIdPreference::Mal, "mal.anime"),
-            (AnimeIdPreference::Kitsu, "kitsu.anime"),
+            (AnimeGroupingPreference::GroupByTvWork, "imdb.title"),
+            (AnimeGroupingPreference::Automatic, "imdb.title"),
+            (
+                AnimeGroupingPreference::KeepMalReleasesSeparate,
+                "mal.anime",
+            ),
+            (
+                AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+                "kitsu.anime",
+            ),
         ] {
             let plan = plan_purpose_identity_route(
-                ResolutionIntent::ExportProjection,
+                ResolutionIntent::NuvioExport,
                 ProviderId::try_new("nuvio").expect("Nuvio provider"),
                 preference,
                 &identifiers,

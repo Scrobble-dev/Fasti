@@ -381,47 +381,50 @@ pub enum IdentityResolution {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolutionIntent {
-    MetadataLookup,
     MetadataSearch,
+    MetadataLookup,
+    MetadataEnrichment,
+    RatingLookup,
+    CatalogLookup,
+    DisplayProjection,
+    NuvioExport,
+    NuvioImportAttachment,
     TrackerRead,
     TrackerWrite,
-    PlayHandoff,
     SegmentTranslation,
-    Deduplication,
-    ImportAttachment,
-    ExportProjection,
-    CalendarSchedule,
-    DisplayProjection,
+    DeduplicationReview,
 }
 
 impl ResolutionIntent {
     pub const ALL: &'static [Self] = &[
-        Self::MetadataLookup,
         Self::MetadataSearch,
+        Self::MetadataLookup,
+        Self::MetadataEnrichment,
+        Self::RatingLookup,
+        Self::CatalogLookup,
+        Self::DisplayProjection,
+        Self::NuvioExport,
+        Self::NuvioImportAttachment,
         Self::TrackerRead,
         Self::TrackerWrite,
-        Self::PlayHandoff,
         Self::SegmentTranslation,
-        Self::Deduplication,
-        Self::ImportAttachment,
-        Self::ExportProjection,
-        Self::CalendarSchedule,
-        Self::DisplayProjection,
+        Self::DeduplicationReview,
     ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::MetadataLookup => "metadata_lookup",
             Self::MetadataSearch => "metadata_search",
+            Self::MetadataLookup => "metadata_lookup",
+            Self::MetadataEnrichment => "metadata_enrichment",
+            Self::RatingLookup => "rating_lookup",
+            Self::CatalogLookup => "catalog_lookup",
+            Self::DisplayProjection => "display_projection",
+            Self::NuvioExport => "nuvio_export",
+            Self::NuvioImportAttachment => "nuvio_import_attachment",
             Self::TrackerRead => "tracker_read",
             Self::TrackerWrite => "tracker_write",
-            Self::PlayHandoff => "play_handoff",
             Self::SegmentTranslation => "segment_translation",
-            Self::Deduplication => "deduplication",
-            Self::ImportAttachment => "import_attachment",
-            Self::ExportProjection => "export_projection",
-            Self::CalendarSchedule => "calendar_schedule",
-            Self::DisplayProjection => "display_projection",
+            Self::DeduplicationReview => "deduplication_review",
         }
     }
 
@@ -438,24 +441,33 @@ pub enum IdentityRouteKind {
     VerifiedAlias,
 }
 
-/// A profile's anime grouping and export preference.
+/// A profile or connection's anime grouping and export preference.
 ///
 /// This value selects an outward projection only. It never identifies or
 /// re-keys a Fasti Record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AnimeIdPreference {
-    Imdb,
-    Mal,
-    Kitsu,
+pub enum AnimeGroupingPreference {
+    GroupByTvWork,
+    KeepMalReleasesSeparate,
+    KeepKitsuReleasesSeparate,
+    Automatic,
 }
 
-impl AnimeIdPreference {
-    pub const fn namespace(self) -> &'static str {
+impl AnimeGroupingPreference {
+    pub const ALL: &'static [Self] = &[
+        Self::GroupByTvWork,
+        Self::KeepMalReleasesSeparate,
+        Self::KeepKitsuReleasesSeparate,
+        Self::Automatic,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Imdb => "imdb.title",
-            Self::Mal => "mal.anime",
-            Self::Kitsu => "kitsu.anime",
+            Self::GroupByTvWork => "group_by_tv_work",
+            Self::KeepMalReleasesSeparate => "keep_mal_releases_separate",
+            Self::KeepKitsuReleasesSeparate => "keep_kitsu_releases_separate",
+            Self::Automatic => "automatic",
         }
     }
 }
@@ -566,19 +578,27 @@ mod tests {
 
     #[test]
     fn resolution_intents_keep_read_aliases_out_of_tracker_writes() {
-        assert_eq!(ResolutionIntent::ALL.len(), 11);
+        assert_eq!(ResolutionIntent::ALL.len(), 12);
         assert!(ResolutionIntent::TrackerWrite.requires_provider_native_route());
         assert!(!ResolutionIntent::MetadataLookup.requires_provider_native_route());
-        assert_eq!(
-            ResolutionIntent::ExportProjection.as_str(),
-            "export_projection"
-        );
+        assert_eq!(ResolutionIntent::NuvioExport.as_str(), "nuvio_export");
     }
 
     #[test]
-    fn anime_preference_namespaces_are_projection_coordinates() {
-        assert_eq!(AnimeIdPreference::Imdb.namespace(), "imdb.title");
-        assert_eq!(AnimeIdPreference::Mal.namespace(), "mal.anime");
-        assert_eq!(AnimeIdPreference::Kitsu.namespace(), "kitsu.anime");
+    fn anime_grouping_preferences_use_the_approved_public_vocabulary() {
+        assert_eq!(AnimeGroupingPreference::ALL.len(), 4);
+        assert_eq!(
+            AnimeGroupingPreference::GroupByTvWork.as_str(),
+            "group_by_tv_work"
+        );
+        assert_eq!(
+            AnimeGroupingPreference::KeepMalReleasesSeparate.as_str(),
+            "keep_mal_releases_separate"
+        );
+        assert_eq!(
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate.as_str(),
+            "keep_kitsu_releases_separate"
+        );
+        assert_eq!(AnimeGroupingPreference::Automatic.as_str(), "automatic");
     }
 }
