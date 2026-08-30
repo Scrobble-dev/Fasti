@@ -1608,8 +1608,10 @@ fn resolve_required_binding(
                 ensure!(
                     smoke.contains("/api/v1/providers")
                         && smoke.contains("len(provider_rows) != 12")
-                        && smoke.contains("provider_states.get(\"tmdb\")")
-                        && smoke.contains("provider_states.get(\"google-books\")"),
+                        && smoke.contains("active_providers = {\"tmdb\", \"google-books\"}")
+                        && smoke.contains("capability.get(\"credential_state\")")
+                        && smoke.contains("capability.get(\"writable\")")
+                        && smoke.contains("capability.get(\"testable\")"),
                     "production provider smoke is absent"
                 );
             }
