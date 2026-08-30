@@ -128,7 +128,8 @@ isolated `FASTI_DATA_ROOT`, launch `--desktop`, and verify these facts:
 
 - the Fasti window renders and closes cleanly;
 - the launcher did not start `fastid` or Vite;
-- browser mode still rejects provider secrets and provider execution;
+- browser mode sends provider credentials only to the authenticated Fasti API
+  over a loopback or HTTPS endpoint and never stores or reads them back;
 - the trusted host accepts a configured provider search and creates one Record
   through `track_provider_candidate`;
 - the success status shows the exact returned Fasti Record ID.

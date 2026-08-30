@@ -1,10 +1,10 @@
 use crate::network_config::parse_origin;
-use crate::outbound_http::{bounded_body, pinned_client, resolve_once};
 use crate::setup::DesktopProblem;
 use fasti_application::{
     authorize_outbound, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
 };
 use fasti_contracts::HealthResponse;
+use fasti_provider_runtime::{bounded_body, pinned_client, resolve_once};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

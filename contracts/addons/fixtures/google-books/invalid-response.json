@@ -1,0 +1,12 @@
+{
+  "api_version": "fasti.scrobble.dev/addons/fixture/v0.1",
+  "kind": "MetadataProviderResponse",
+  "case": "invalid_response",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "items": "not-an-array"
+  }
+}

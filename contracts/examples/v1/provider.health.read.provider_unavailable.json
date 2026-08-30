@@ -1,0 +1,20 @@
+{
+  "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable",
+  "title": "Provider unavailable",
+  "status": 503,
+  "detail": "the provider is unavailable within the bounded request policy",
+  "code": "provider_unavailable",
+  "capability_id": "provider.health.read",
+  "safe_state": "prior_state_retained",
+  "retryability": "retry_safe",
+  "next_actions": [
+    {
+      "id": "retry_provider",
+      "label": "Retry after checking provider and network status"
+    }
+  ],
+  "correlation_id": "req_018f0e0e7f7b70008000000000000034",
+  "param": null,
+  "actual": null,
+  "violations": []
+}

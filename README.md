@@ -151,10 +151,12 @@ The production daemon deliberately exposes only behavior it can prove:
 
 The feature-gated B1 fixture exists to execute contract semantics without pretending to be the local kernel. Its state is bounded, in-memory, and discarded when the fixture process exits. It is not mounted by `fastid` and is not a persistence or production-readiness claim.
 
-The trusted desktop review host can store data-root-scoped Google Books and
-TMDB credentials and return bounded neutral search candidates. Provider search
-is local Tauri IPC, not a daemon HTTP route. The browser does not accept secrets
-or execute provider requests. See [network configuration](docs/network-configuration.md#provider-network-policy).
+The shared governed provider runtime supports Google Books and TMDB. Desktop
+uses a data-root-scoped platform credential store. The authenticated Fasti API
+exposes capability-scoped provider inventory, write-only credential
+configuration/removal/test, and health routes; browser code never stores or
+reads a provider secret back. Ten additional providers remain visible and
+explicitly unavailable. See [network configuration](docs/network-configuration.md#provider-network-policy).
 
 The B2 review implementation adds local access, SQLite persistence, content-addressed evidence, review state, and durable receipts behind application ports. Node initialization and first-client enrollment remain limited to direct loopback or an explicitly declared loopback-only container port forward. Observation acceptance, identity records, identifiers, namespaces, profile tracking disposition, and profile-scoped Nuvio custom Collections configuration are available through the production composition root with scoped bearer client credentials. The PR A browser-session foundation remains dormant. The remaining paths (human accounts and sessions, evidence, receipts, and identity review) stay unavailable through production HTTP until their owning package activates them. Their problems stay staged until the owning public surfaces are activated.
 
@@ -359,7 +361,8 @@ The pre-production Workbench is the active B4 interface over the headless contra
 - **B2: Local kernel** — observation acceptance, identity records/identifiers/namespaces, profile tracking state, and profile-scoped Nuvio custom Collections configuration are activated on durable local and governed remote surfaces; bootstrap stays loopback-only; browser sessions are dormant until C1; evidence, receipts, and identity review remain behind internal ports for review.
 - **B3: Corrections and portability** — internal append-only correction, deterministic export, clean restore, equality verification, crash recovery, and credential re-bootstrap are implemented for review; public activation and milestone evidence remain open.
 - **B4: Product experience** — the Tabler Workbench, truthful unavailable Account and security structure, global search, configurable record actions, profile-owned tracking disposition, Nuvio custom Collections file interchange, trusted-host Google Books/TMDB metadata selection and refresh, and bounded local poster delivery are active pre-production work; C1 owns browser-account activation and full release evidence remains open.
-- **B5 and later** — implement provider patterns, packaging, hardware qualification, and release readiness in gated bodies.
+- **M1: Provider foundation** — activate the shared provider registry, governed Google Books/TMDB runtime, capability-scoped credential state, provider health, manifest schema, authenticated API/SDK, and Tabler settings surface.
+- **B5 and later** — implement packaging, hardware qualification, and release readiness in gated bodies.
 
 Nuvio tracking, pairing, and synchronization remain behind the B7 provider gate, applicable B8 evidence, and maintainer agreement. The B2 custom Collections file interchange is profile catalog configuration only; it does not create a Nuvio client, use Nuvio provider identifiers as Fasti identity, or activate tracking sync. See [ROADMAP.md](ROADMAP.md) for the dependency order.
 

@@ -1,0 +1,461 @@
+{
+  "$defs": {
+    "Authentication": {
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "secret_ref": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/CredentialSource"
+          },
+          "type": "array"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "header",
+        "secret_ref",
+        "required",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "CandidateNormalization": {
+      "additionalProperties": false,
+      "properties": {
+        "authors": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "provider_id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "provider_id",
+        "title",
+        "kind",
+        "authors"
+      ],
+      "type": "object"
+    },
+    "Compatibility": {
+      "additionalProperties": false,
+      "properties": {
+        "fasti": {
+          "type": "string"
+        },
+        "manifest_schema": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fasti",
+        "manifest_schema"
+      ],
+      "type": "object"
+    },
+    "Conformance": {
+      "additionalProperties": false,
+      "properties": {
+        "deterministic": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fixtures": {
+          "$ref": "#/$defs/FixtureReferences"
+        },
+        "live_smoke": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fixtures",
+        "deterministic",
+        "live_smoke"
+      ],
+      "type": "object"
+    },
+    "CredentialSource": {
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "environment"
+      ],
+      "type": "object"
+    },
+    "ErrorMapping": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "user_action": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "user_action"
+      ],
+      "type": "object"
+    },
+    "FixtureReferences": {
+      "additionalProperties": false,
+      "properties": {
+        "empty": {
+          "type": "string"
+        },
+        "invalid_response": {
+          "type": "string"
+        },
+        "rate_limited": {
+          "type": "string"
+        },
+        "success": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success",
+        "empty",
+        "rate_limited",
+        "invalid_response"
+      ],
+      "type": "object"
+    },
+    "Limits": {
+      "additionalProperties": false,
+      "properties": {
+        "denied_network_classes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "max_query_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_response_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_results": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "redirects": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_results",
+        "max_query_bytes",
+        "max_response_bytes",
+        "timeout_seconds",
+        "redirects",
+        "denied_network_classes"
+      ],
+      "type": "object"
+    },
+    "NetworkPermission": {
+      "additionalProperties": false,
+      "properties": {
+        "classes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "methods": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "schemes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hosts",
+        "schemes",
+        "methods",
+        "classes"
+      ],
+      "type": "object"
+    },
+    "Normalization": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate": {
+          "$ref": "#/$defs/CandidateNormalization"
+        },
+        "local_record_write": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate",
+        "local_record_write"
+      ],
+      "type": "object"
+    },
+    "Permissions": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkPermission"
+        },
+        "secrets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "writes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "network",
+        "secrets",
+        "capabilities",
+        "writes"
+      ],
+      "type": "object"
+    },
+    "ProviderMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "licence": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "status",
+        "description",
+        "licence",
+        "sources"
+      ],
+      "type": "object"
+    },
+    "ProviderOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "items_path": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "query": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "method",
+        "path",
+        "query",
+        "headers",
+        "items_path"
+      ],
+      "type": "object"
+    },
+    "RecordSupport": {
+      "additionalProperties": false,
+      "properties": {
+        "record_type": {
+          "type": "string"
+        },
+        "result_kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_type",
+        "result_kind"
+      ],
+      "type": "object"
+    },
+    "Runtime": {
+      "additionalProperties": false,
+      "properties": {
+        "browser_enabled": {
+          "type": "boolean"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "trusted_hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "trusted_hosts",
+        "browser_enabled",
+        "transport"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "type": "string"
+    },
+    "authentication": {
+      "$ref": "#/$defs/Authentication"
+    },
+    "compatibility": {
+      "$ref": "#/$defs/Compatibility"
+    },
+    "conformance": {
+      "$ref": "#/$defs/Conformance"
+    },
+    "errors": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ErrorMapping"
+      },
+      "type": "object"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "limits": {
+      "$ref": "#/$defs/Limits"
+    },
+    "metadata": {
+      "$ref": "#/$defs/ProviderMetadata"
+    },
+    "normalization": {
+      "$ref": "#/$defs/Normalization"
+    },
+    "operations": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProviderOperation"
+      },
+      "type": "object"
+    },
+    "permissions": {
+      "$ref": "#/$defs/Permissions"
+    },
+    "record_support": {
+      "items": {
+        "$ref": "#/$defs/RecordSupport"
+      },
+      "type": "array"
+    },
+    "runtime": {
+      "$ref": "#/$defs/Runtime"
+    }
+  },
+  "required": [
+    "api_version",
+    "kind",
+    "metadata",
+    "compatibility",
+    "permissions",
+    "authentication",
+    "record_support",
+    "operations",
+    "normalization",
+    "limits",
+    "errors",
+    "runtime",
+    "conformance"
+  ],
+  "title": "ProviderManifest",
+  "type": "object"
+}

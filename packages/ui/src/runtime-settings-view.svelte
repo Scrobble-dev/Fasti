@@ -107,7 +107,11 @@
 
   let showPassword = $state<Record<string, boolean>>({});
   let testingProvider = $state<string>();
+  let healthProvider = $state<string>();
   let testResults = $state<
+    Record<string, { ok: boolean; message: string } | undefined>
+  >({});
+  let healthResults = $state<
     Record<string, { ok: boolean; message: string } | undefined>
   >({});
 
@@ -139,38 +143,84 @@
     return "Provider credential";
   }
 
-  async function testProviderSearch(providerId: string) {
+  function providerRowKey(provider: ProviderCredentialStatus): string {
+    return `${provider.provider}:${provider.capability_id}`;
+  }
+
+  function hasStoredCredential(provider: ProviderCredentialStatus): boolean {
+    return ["stored_unverified", "valid", "invalid", "expired"].includes(
+      provider.credential_state,
+    );
+  }
+
+  function credentialStateLabel(provider: ProviderCredentialStatus): string {
+    return provider.credential_state.replaceAll("_", " ");
+  }
+
+  async function testProviderCredential(provider: ProviderCredentialStatus) {
     if (credentialOperationBusy) return;
-    testingProvider = providerId;
-    testResults = { ...testResults, [providerId]: undefined };
+    const key = providerRowKey(provider);
+    testingProvider = key;
+    testResults = { ...testResults, [key]: undefined };
     try {
-      const testQuery =
-        providerId === "tmdb" || providerId === "tvdb"
-          ? "Inception"
-          : providerId === "google-books" || providerId === "open-library"
-            ? "Dune"
-            : "Cowboy Bebop";
-      const results = await host.searchProvider(providerId, testQuery);
+      providers = await host.testProviderCredential(
+        provider.provider,
+        provider.capability_id,
+      );
       testResults = {
         ...testResults,
-        [providerId]: {
+        [key]: {
           ok: true,
-          message: `Search succeeded. ${results.length} ${results.length === 1 ? "candidate" : "candidates"} returned.`,
+          message: "Credential test passed.",
         },
       };
     } catch (error: unknown) {
       testResults = {
         ...testResults,
-        [providerId]: {
+        [key]: {
           ok: false,
           message: hostProblemText(
             error,
-            "Search failed. Verify the credential and network policy.",
+            "Credential test failed. Verify the credential and network policy.",
           ),
         },
       };
     } finally {
       testingProvider = undefined;
+    }
+  }
+
+  async function readProviderHealth(provider: ProviderCredentialStatus) {
+    if (credentialOperationBusy) return;
+    healthProvider = provider.provider;
+    healthResults = { ...healthResults, [provider.provider]: undefined };
+    try {
+      providers = await host.readProviderHealth(provider.provider);
+      healthResults = {
+        ...healthResults,
+        [provider.provider]: {
+          ok: true,
+          message: "Provider health check passed.",
+        },
+      };
+    } catch (error: unknown) {
+      try {
+        providers = await host.providerCredentialStatus();
+      } catch {
+        // Preserve the health failure. The regular Refresh action remains available.
+      }
+      healthResults = {
+        ...healthResults,
+        [provider.provider]: {
+          ok: false,
+          message: hostProblemText(
+            error,
+            "Provider health check failed. Verify the credential and network policy.",
+          ),
+        },
+      };
+    } finally {
+      healthProvider = undefined;
     }
   }
   let network = $state<NetworkConfiguration>();
@@ -183,7 +233,10 @@
   let editing = $state<Record<string, string>>({});
   let busyProvider = $state<string>();
   const credentialOperationBusy = $derived(
-    providerLoading || Boolean(busyProvider) || Boolean(testingProvider),
+    providerLoading ||
+      Boolean(busyProvider) ||
+      Boolean(testingProvider) ||
+      Boolean(healthProvider),
   );
   let nuvioDocument = $state<NuvioCollectionsDocument | null>(null);
   let nuvioFile = $state<File>();
@@ -542,9 +595,7 @@
     try {
       const loaded = await host.providerCredentialStatus();
       const writable = new Set(
-        loaded
-          .filter((provider) => provider.writable)
-          .map((provider) => provider.provider),
+        loaded.filter((provider) => provider.writable).map(providerRowKey),
       );
       editing = Object.fromEntries(
         Object.entries(editing).filter(([provider]) => writable.has(provider)),
@@ -565,35 +616,46 @@
     }
   }
 
-  async function saveProvider(provider: string): Promise<void> {
-    const credential = editing[provider]?.trim();
+  async function saveProvider(
+    provider: ProviderCredentialStatus,
+  ): Promise<void> {
+    const key = providerRowKey(provider);
+    const credential = editing[key]?.trim();
     if (!credential || credentialOperationBusy) return;
-    showPassword = { ...showPassword, [provider]: false };
-    busyProvider = provider;
+    showPassword = { ...showPassword, [key]: false };
+    busyProvider = key;
     providerProblem = undefined;
     providerNotice = undefined;
     try {
-      providers = await host.saveProviderCredential(provider, credential);
-      editing = { ...editing, [provider]: "" };
-      testResults = { ...testResults, [provider]: undefined };
+      providers = await host.saveProviderCredential(
+        provider.provider,
+        provider.capability_id,
+        credential,
+      );
+      testResults = { ...testResults, [key]: undefined };
       providerNotice = "Credential saved in the platform credential store.";
+      editing = { ...editing, [key]: "" };
       onProviderCredentialsChanged?.();
     } catch (error) {
       providerProblem = hostProblemText(
         error,
         "Fasti rejected the provider credential.",
       );
+      busyProvider = undefined;
+      await tick();
+      document.getElementById(`provider-${key}`)?.focus();
     } finally {
-      showPassword = { ...showPassword, [provider]: false };
+      showPassword = { ...showPassword, [key]: false };
       busyProvider = undefined;
     }
   }
 
-  async function deleteProvider(provider: string): Promise<void> {
+  async function deleteProvider(
+    provider: ProviderCredentialStatus,
+  ): Promise<void> {
     if (credentialOperationBusy) return;
-    const label =
-      providers.find((candidate) => candidate.provider === provider)?.label ??
-      provider;
+    const key = providerRowKey(provider);
+    const label = provider.label;
     if (
       !globalThis.confirm(
         `Remove the ${label} credential? You will need to enter it again to restore provider access.`,
@@ -601,15 +663,18 @@
     ) {
       return;
     }
-    busyProvider = provider;
+    busyProvider = key;
     providerProblem = undefined;
     providerNotice = undefined;
     let removed = false;
     try {
-      providers = await host.deleteProviderCredential(provider);
-      editing = { ...editing, [provider]: "" };
-      showPassword = { ...showPassword, [provider]: false };
-      testResults = { ...testResults, [provider]: undefined };
+      providers = await host.deleteProviderCredential(
+        provider.provider,
+        provider.capability_id,
+      );
+      editing = { ...editing, [key]: "" };
+      showPassword = { ...showPassword, [key]: false };
+      testResults = { ...testResults, [key]: undefined };
       providerNotice = "Credential removed from the platform credential store.";
       onProviderCredentialsChanged?.();
       removed = true;
@@ -623,7 +688,7 @@
     }
     if (removed) {
       await tick();
-      document.getElementById(`provider-${provider}`)?.focus();
+      document.getElementById(`provider-${key}`)?.focus();
     }
   }
 
@@ -748,7 +813,9 @@
         : undefined,
       providers: providers.map((p) => ({
         provider: p.provider,
-        configured: p.configured,
+        capability: p.capability_id,
+        credentialState: p.credential_state,
+        capabilityState: p.state,
         source: p.source,
       })),
     };
@@ -1033,164 +1100,213 @@
             </button>
           </div>
 
-          <div class="provider-list">
-            {#each providers as provider (provider.provider)}
-              <article class="provider-card">
-                <div class="provider-heading">
-                  <div>
-                    <div class="provider-title-row">
-                      <h3>{provider.label}</h3>
-                      <span class="category-pill"
+          <div class="table-responsive provider-list">
+            <table class="table table-vcenter">
+              <caption class="visually-hidden">
+                Metadata provider capability and credential status
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Provider</th>
+                  <th scope="col">Capability</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Credential</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each providers as provider (providerRowKey(provider))}
+                  {@const key = providerRowKey(provider)}
+                  <tr>
+                    <th scope="row">
+                      <span class="provider-name">{provider.label}</span>
+                      <span class="badge bg-secondary-lt"
                         >{providerCategory(provider.provider).label}</span
                       >
-                      {#if provider.configured}
-                        <span class="status-badge configured" role="status">
-                          <IconCheck size={14} aria-hidden="true" /> Configured
-                        </span>
-                      {:else}
-                        <span class="status-badge not-configured"
-                          >Not configured</span
-                        >
-                      {/if}
-                    </div>
-                    <p>
-                      {provider.configured
-                        ? `Configured from ${provider.source.replace("_", " ")}.`
-                        : "No credential is configured."}
-                    </p>
-                  </div>
-                  <a
-                    href={provider.docs_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="docs-link"
-                  >
-                    Documentation <IconExternalLink
-                      size={14}
-                      aria-hidden="true"
-                    />
-                  </a>
-                </div>
-
-                {#if provider.writable}
-                  <form
-                    class="credential-form"
-                    onsubmit={(event) => {
-                      event.preventDefault();
-                      void saveProvider(provider.provider);
-                    }}
-                  >
-                    <label for={`provider-${provider.provider}`}>
-                      {providerCredentialLabel(provider.provider)}
-                    </label>
-                    <div class="credential-input-row">
-                      <div class="secret-field-wrap">
-                        <input
-                          id={`provider-${provider.provider}`}
-                          type={showPassword[provider.provider]
-                            ? "text"
-                            : "password"}
-                          autocomplete="off"
-                          placeholder={`Enter ${providerCredentialLabel(provider.provider)}`}
-                          value={editing[provider.provider] ?? ""}
-                          oninput={(event) =>
-                            (editing = {
-                              ...editing,
-                              [provider.provider]: event.currentTarget.value,
-                            })}
-                          disabled={credentialOperationBusy}
-                        />
-                        <button
-                          type="button"
-                          class="toggle-reveal-btn"
-                          title={showPassword[provider.provider]
-                            ? "Hide secret"
-                            : "Show secret"}
-                          aria-label={showPassword[provider.provider]
-                            ? "Hide secret"
-                            : "Show secret"}
-                          onclick={() =>
-                            (showPassword = {
-                              ...showPassword,
-                              [provider.provider]:
-                                !showPassword[provider.provider],
-                            })}
-                        >
-                          {#if showPassword[provider.provider]}
-                            <IconEyeOff size={16} aria-hidden="true" />
-                          {:else}
-                            <IconEye size={16} aria-hidden="true" />
-                          {/if}
-                        </button>
-                      </div>
-
-                      <button
-                        type="submit"
-                        class="primary"
-                        disabled={!editing[provider.provider]?.trim() ||
-                          credentialOperationBusy}
+                      <a
+                        href={provider.docs_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="docs-link"
                       >
-                        <IconKey size={18} aria-hidden="true" /> Save
-                      </button>
-                      {#if provider.configured}
+                        Documentation <IconExternalLink
+                          size={14}
+                          aria-hidden="true"
+                        />
+                      </a>
+                    </th>
+                    <td>
+                      <code>{provider.capability_id}</code>
+                      <span class="capability-purpose">{provider.purpose}</span>
+                    </td>
+                    <td>
+                      <span
+                        class="badge"
+                        class:bg-success-lt={provider.state === "available"}
+                        class:bg-secondary-lt={provider.state !== "available"}
+                        >{provider.state}</span
+                      >
+                    </td>
+                    <td>
+                      <span
+                        class="badge"
+                        class:bg-success-lt={hasStoredCredential(provider)}
+                        class:bg-secondary-lt={!hasStoredCredential(provider)}
+                        >{credentialStateLabel(provider)}</span
+                      >
+                      <span class="credential-source">
+                        {provider.source.replaceAll("_", " ")}
+                      </span>
+                    </td>
+                    <td class="provider-actions">
+                      {#if provider.writable}
+                        <form
+                          class="credential-form"
+                          onsubmit={(event) => {
+                            event.preventDefault();
+                            void saveProvider(provider);
+                          }}
+                        >
+                          <label
+                            class="visually-hidden"
+                            for={`provider-${key}`}
+                          >
+                            {providerCredentialLabel(provider.provider)} for
+                            {provider.capability_id}
+                          </label>
+                          <div class="credential-input-row">
+                            <div class="secret-field-wrap">
+                              <input
+                                id={`provider-${key}`}
+                                class="form-control"
+                                type={showPassword[key] ? "text" : "password"}
+                                autocomplete="new-password"
+                                maxlength="4096"
+                                placeholder={providerCredentialLabel(
+                                  provider.provider,
+                                )}
+                                value={editing[key] ?? ""}
+                                oninput={(event) =>
+                                  (editing = {
+                                    ...editing,
+                                    [key]: event.currentTarget.value,
+                                  })}
+                                disabled={credentialOperationBusy}
+                              />
+                              <button
+                                type="button"
+                                class="toggle-reveal-btn"
+                                title={showPassword[key]
+                                  ? "Hide secret"
+                                  : "Show secret"}
+                                aria-label={showPassword[key]
+                                  ? "Hide secret"
+                                  : "Show secret"}
+                                onclick={() =>
+                                  (showPassword = {
+                                    ...showPassword,
+                                    [key]: !showPassword[key],
+                                  })}
+                              >
+                                {#if showPassword[key]}
+                                  <IconEyeOff size={16} aria-hidden="true" />
+                                {:else}
+                                  <IconEye size={16} aria-hidden="true" />
+                                {/if}
+                              </button>
+                            </div>
+                            <button
+                              type="submit"
+                              class="btn btn-primary primary"
+                              disabled={!editing[key]?.trim() ||
+                                credentialOperationBusy}
+                            >
+                              <IconKey size={18} aria-hidden="true" /> Save
+                            </button>
+                            {#if hasStoredCredential(provider)}
+                              <button
+                                type="button"
+                                class="btn btn-outline-danger danger"
+                                onclick={() => void deleteProvider(provider)}
+                                disabled={credentialOperationBusy}
+                                >Remove</button
+                              >
+                            {/if}
+                          </div>
+                        </form>
+                      {:else}
+                        <p class="managed-note">
+                          {provider.source === "environment"
+                            ? "Managed by the process environment."
+                            : provider.state === "unavailable"
+                              ? "This capability is unavailable in this runtime."
+                              : "This host cannot write this credential."}
+                        </p>
+                      {/if}
+
+                      {#if provider.testable && hasStoredCredential(provider)}
                         <button
                           type="button"
-                          class="danger"
-                          onclick={() => void deleteProvider(provider.provider)}
+                          class="btn btn-outline-secondary secondary test-conn-btn"
+                          onclick={() => void testProviderCredential(provider)}
                           disabled={credentialOperationBusy}
                         >
-                          Remove
+                          {testingProvider === key
+                            ? "Testing…"
+                            : "Test credential"}
                         </button>
                       {/if}
-                    </div>
-                  </form>
-                {:else}
-                  <p class="managed-note">
-                    {provider.source === "environment"
-                      ? "This credential is managed by the process environment and is read-only in Settings."
-                      : "This host does not accept or store provider credentials. Open Fasti Desktop to configure one."}
-                  </p>
-                {/if}
-
-                {#if provider.configured}
-                  <div class="provider-test-row">
-                    <button
-                      type="button"
-                      class="secondary test-conn-btn"
-                      onclick={() => void testProviderSearch(provider.provider)}
-                      disabled={credentialOperationBusy}
-                    >
-                      {#if testingProvider === provider.provider}
-                        <IconRefresh
-                          size={16}
-                          class="spinning"
-                          aria-hidden="true"
-                        /> Testing…
-                      {:else}
-                        Test search
+                      {#if provider.capability_id === "metadata.search" && provider.testable && hasStoredCredential(provider)}
+                        <button
+                          type="button"
+                          class="btn btn-outline-secondary secondary test-conn-btn"
+                          onclick={() => void readProviderHealth(provider)}
+                          disabled={credentialOperationBusy}
+                        >
+                          {healthProvider === provider.provider
+                            ? "Checking…"
+                            : "Check provider health"}
+                        </button>
                       {/if}
-                    </button>
-                  </div>
-                  {#if testResults[provider.provider]}
-                    <div
-                      class="test-result-alert"
-                      class:success={testResults[provider.provider]?.ok}
-                      class:failure={!testResults[provider.provider]?.ok}
-                      role={testResults[provider.provider]?.ok
-                        ? "status"
-                        : "alert"}
-                    >
-                      {#if testResults[provider.provider]?.ok}
-                        <IconCheck size={16} aria-hidden="true" />
-                      {:else}
-                        <IconAlertCircle size={16} aria-hidden="true" />
+                      {#if testResults[key]}
+                        <div
+                          class="test-result-alert"
+                          class:success={testResults[key]?.ok}
+                          class:failure={!testResults[key]?.ok}
+                          role={testResults[key]?.ok ? "status" : "alert"}
+                        >
+                          {#if testResults[key]?.ok}
+                            <IconCheck size={16} aria-hidden="true" />
+                          {:else}
+                            <IconAlertCircle size={16} aria-hidden="true" />
+                          {/if}
+                          <span>{testResults[key]?.message}</span>
+                        </div>
                       {/if}
-                      <span>{testResults[provider.provider]?.message}</span>
-                    </div>
-                  {/if}
-                {/if}
-              </article>
-            {/each}
+                      {#if provider.capability_id === "metadata.search" && healthResults[provider.provider]}
+                        <div
+                          class="test-result-alert"
+                          class:success={healthResults[provider.provider]?.ok}
+                          class:failure={!healthResults[provider.provider]?.ok}
+                          role={healthResults[provider.provider]?.ok
+                            ? "status"
+                            : "alert"}
+                        >
+                          {#if healthResults[provider.provider]?.ok}
+                            <IconCheck size={16} aria-hidden="true" />
+                          {:else}
+                            <IconAlertCircle size={16} aria-hidden="true" />
+                          {/if}
+                          <span
+                            >{healthResults[provider.provider]?.message}</span
+                          >
+                        </div>
+                      {/if}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
           </div>
 
           {#if providerNotice}<p class="notice" role="status">
@@ -1961,8 +2077,7 @@
   }
 
   header p,
-  section > p,
-  .provider-card p {
+  section > p {
     color: var(--fasti-text-muted);
   }
 
@@ -2018,7 +2133,6 @@
   }
 
   .section-heading,
-  .provider-heading,
   .credential-form > div {
     display: flex;
     align-items: flex-start;
@@ -2026,62 +2140,11 @@
     gap: 12px;
   }
 
-  .provider-title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 4px;
-  }
-
-  .provider-title-row h3 {
-    margin-bottom: 0;
-  }
-
-  .category-pill {
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 9999px;
-    background: var(--fasti-surface-raised, rgba(125, 125, 125, 0.1));
-    color: var(--fasti-text-muted);
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    padding: 2px 8px;
-    border-radius: calc(4px * var(--tblr-border-radius-scale, 1));
-  }
-
-  .status-badge.configured {
-    background: color-mix(
-      in srgb,
-      var(--fasti-state-success, #2fb344) 15%,
-      transparent
-    );
-    color: var(--fasti-text-primary);
-    border: 1px solid
-      color-mix(in srgb, var(--fasti-state-success, #2fb344) 40%, transparent);
-  }
-
-  .status-badge.not-configured {
-    background: color-mix(in srgb, var(--fasti-text-muted) 15%, transparent);
-    color: var(--fasti-text-muted);
-  }
-
   .credential-input-row {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
-  }
-
-  .provider-test-row {
-    margin-top: 10px;
   }
 
   .secret-field-wrap {
@@ -2163,25 +2226,33 @@
   }
 
   .provider-list {
-    display: grid;
-    gap: 12px;
     margin-top: 20px;
-  }
-
-  .provider-card {
     border: 1px solid
       var(--fasti-border, color-mix(in srgb, currentColor 18%, transparent));
-    border-radius: calc(7px * var(--tblr-border-radius-scale, 1));
-    padding: 16px;
-    background: var(--fasti-surface-paper);
   }
 
-  .provider-card h3,
-  .provider-card p {
+  .provider-list table {
+    margin-bottom: 0;
+  }
+
+  .provider-name,
+  .capability-purpose,
+  .credential-source {
+    display: block;
+  }
+
+  .provider-name {
     margin-bottom: 4px;
   }
 
-  .provider-heading a {
+  .capability-purpose,
+  .credential-source {
+    margin-top: 4px;
+    color: var(--fasti-text-muted);
+    font-size: 0.82rem;
+  }
+
+  .docs-link {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
@@ -2189,6 +2260,10 @@
     color: var(--fasti-text-primary);
     text-decoration: underline;
     text-underline-offset: 0.15em;
+  }
+
+  .provider-actions {
+    min-width: min(32rem, 45vw);
   }
 
   .credential-form {
@@ -2676,7 +2751,6 @@
     }
 
     .section-heading,
-    .provider-heading,
     .credential-form > div,
     .status-list div {
       grid-template-columns: 1fr;

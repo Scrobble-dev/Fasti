@@ -14,6 +14,7 @@ chrono = { workspace = true }
 fasti-application = { workspace = true }
 fasti-contracts = { workspace = true }
 fasti-domain = { workspace = true }
+fasti-provider-runtime = { workspace = true }
 getrandom = { workspace = true, optional = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

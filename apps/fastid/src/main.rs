@@ -1,10 +1,16 @@
 use anyhow::{Context, Result};
 use fasti_api::{
-    api_router, health_router, integration_router, remote_api_router, with_static_fallback,
+    api_router, health_router, integration_router, provider_api_router, remote_api_router,
+    with_static_fallback,
+};
+use fasti_provider_runtime::{
+    PlatformCredentialVault, ProviderRuntime, PLATFORM_CREDENTIAL_SERVICE,
 };
 use fasti_store::SqliteKernel;
+use sha2::{Digest, Sha256};
 use std::env;
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr};
@@ -186,6 +192,19 @@ fn data_root() -> Result<Option<PathBuf>> {
     parse_data_root(env::var_os("FASTI_DATA_ROOT"))
 }
 
+fn provider_runtime(kernel: &SqliteKernel) -> Result<Arc<ProviderRuntime>> {
+    PlatformCredentialVault::initialize()
+        .map_err(|error| anyhow::anyhow!("provider credential store is unavailable: {error}"))?;
+    let digest = Sha256::digest(kernel.data_root_identity().as_bytes());
+    let mut scope = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        write!(scope, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    Ok(Arc::new(ProviderRuntime::new(Arc::new(
+        PlatformCredentialVault::new(PLATFORM_CREDENTIAL_SERVICE, scope),
+    ))))
+}
+
 /// `FASTI_STATIC_DIR` reuses the same "unset -> None, empty -> error" shape
 /// as `FASTI_DATA_ROOT` -- see `parse_data_root`. It names a pre-built web
 /// UI bundle (e.g. `apps/web`'s `vite build` output) for fastid to serve
@@ -259,9 +278,14 @@ async fn main() -> Result<()> {
                 .map(Arc::new)
         })
         .transpose()?;
+    let providers = kernel.as_deref().map(provider_runtime).transpose()?;
 
     let app = match (&configured_data_root, &kernel) {
         (Some(data_root), Some(kernel)) => {
+            let providers = providers
+                .as_ref()
+                .expect("a durable kernel has a provider runtime")
+                .clone();
             if remote_listener {
                 anyhow::ensure!(
                     remote_proxy_is_trusted()?,
@@ -274,7 +298,11 @@ async fn main() -> Result<()> {
                     "Fasti durable remote listener starting behind the trusted HTTPS proxy on http://{} with data root {:?}",
                     addr, data_root
                 );
-                remote_api_router(kernel.clone(), addr, data_root)
+                remote_api_router(kernel.clone(), addr, data_root).merge(provider_api_router(
+                    kernel.clone(),
+                    kernel.clone(),
+                    providers,
+                ))
             } else {
                 info!(
                     "Fasti durable local listener starting on http://{} with data root {:?}",
@@ -285,6 +313,11 @@ async fn main() -> Result<()> {
                     local_api_addr.expect("configured durable local routes require local exposure"),
                     data_root,
                 )
+                .merge(provider_api_router(
+                    kernel.clone(),
+                    kernel.clone(),
+                    providers,
+                ))
             }
         }
         _ => {

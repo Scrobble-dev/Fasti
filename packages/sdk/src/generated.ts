@@ -159,6 +159,21 @@ const PRODUCTION_SCHEMAS = {
     ],
     "type": "object"
   },
+  "ConfigureProviderCredentialRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "secret": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string",
+        "writeOnly": true
+      }
+    },
+    "required": [
+      "secret"
+    ],
+    "type": "object"
+  },
   "CreateRecordRequest": {
     "additionalProperties": false,
     "properties": {
@@ -188,6 +203,20 @@ const PRODUCTION_SCHEMAS = {
       "grain"
     ],
     "type": "object"
+  },
+  "CredentialRequirementDto": {
+    "enum": [
+      "none",
+      "optional_api_key",
+      "api_key",
+      "bearer_token",
+      "basic_auth",
+      "oauth2",
+      "user_agent_only",
+      "custom_header",
+      "operator_secret_mount"
+    ],
+    "type": "string"
   },
   "CredentialSchemeDto": {
     "enum": [
@@ -412,6 +441,21 @@ const PRODUCTION_SCHEMAS = {
     },
     "required": [
       "integrations"
+    ],
+    "type": "object"
+  },
+  "ListProvidersResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "providers": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderDescriptorDto"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "providers"
     ],
     "type": "object"
   },
@@ -821,6 +865,235 @@ const PRODUCTION_SCHEMAS = {
       "violations"
     ],
     "type": "object"
+  },
+  "ProviderCapabilityDto": {
+    "additionalProperties": false,
+    "properties": {
+      "capability_id": {
+        "type": "string"
+      },
+      "credential_requirement": {
+        "$ref": "#/components/schemas/CredentialRequirementDto"
+      },
+      "credential_source": {
+        "$ref": "#/components/schemas/ProviderCredentialSourceDto"
+      },
+      "credential_state": {
+        "$ref": "#/components/schemas/ProviderCredentialStateDto"
+      },
+      "credential_test": {
+        "$ref": "#/components/schemas/ProviderCheckDto"
+      },
+      "health": {
+        "$ref": "#/components/schemas/ProviderCheckDto"
+      },
+      "purpose": {
+        "type": "string"
+      },
+      "state": {
+        "$ref": "#/components/schemas/ProviderCapabilityStateDto"
+      },
+      "testable": {
+        "type": "boolean"
+      },
+      "version": {
+        "format": "int64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "writable": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "capability_id",
+      "purpose",
+      "credential_requirement",
+      "credential_state",
+      "credential_source",
+      "state",
+      "version",
+      "writable",
+      "testable",
+      "health",
+      "credential_test"
+    ],
+    "type": "object"
+  },
+  "ProviderCapabilityResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "capability": {
+        "$ref": "#/components/schemas/ProviderCapabilityDto"
+      },
+      "provider_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "capability"
+    ],
+    "type": "object"
+  },
+  "ProviderCapabilityStateDto": {
+    "enum": [
+      "available",
+      "degraded",
+      "unavailable",
+      "disabled"
+    ],
+    "type": "string"
+  },
+  "ProviderCheckDto": {
+    "additionalProperties": false,
+    "properties": {
+      "checked_at": {
+        "format": "date-time",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "safe_problem_code": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "state": {
+        "$ref": "#/components/schemas/ProviderCheckStateDto"
+      }
+    },
+    "required": [
+      "state"
+    ],
+    "type": "object"
+  },
+  "ProviderCheckStateDto": {
+    "enum": [
+      "never_run",
+      "passed",
+      "failed",
+      "unavailable"
+    ],
+    "type": "string"
+  },
+  "ProviderCredentialSourceDto": {
+    "enum": [
+      "none",
+      "environment",
+      "credential_store",
+      "operator_secret_mount"
+    ],
+    "type": "string"
+  },
+  "ProviderCredentialStateDto": {
+    "enum": [
+      "not_required",
+      "optional",
+      "missing",
+      "stored_unverified",
+      "valid",
+      "invalid",
+      "expired",
+      "unavailable",
+      "revoked"
+    ],
+    "type": "string"
+  },
+  "ProviderDescriptorDto": {
+    "additionalProperties": false,
+    "properties": {
+      "attribution": {
+        "type": "string"
+      },
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "type": "array"
+      },
+      "display_name": {
+        "type": "string"
+      },
+      "documentation_url": {
+        "type": "string"
+      },
+      "identity_namespaces": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "locale_support": {
+        "type": "boolean"
+      },
+      "network_hosts": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      },
+      "provider_kind": {
+        "$ref": "#/components/schemas/ProviderKindDto"
+      },
+      "region_support": {
+        "type": "boolean"
+      },
+      "supported_media_grains": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "provider_id",
+      "display_name",
+      "provider_kind",
+      "documentation_url",
+      "attribution",
+      "supported_media_grains",
+      "capabilities",
+      "network_hosts",
+      "locale_support",
+      "region_support",
+      "identity_namespaces"
+    ],
+    "type": "object"
+  },
+  "ProviderHealthResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "capabilities": {
+        "items": {
+          "$ref": "#/components/schemas/ProviderCapabilityDto"
+        },
+        "type": "array"
+      },
+      "provider_id": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "provider_id",
+      "capabilities"
+    ],
+    "type": "object"
+  },
+  "ProviderKindDto": {
+    "enum": [
+      "metadata",
+      "ratings",
+      "catalog",
+      "tracking",
+      "identity"
+    ],
+    "type": "string"
   },
   "RecordActivityDto": {
     "additionalProperties": false,
@@ -1304,6 +1577,24 @@ export type TrackingDispositionDto = "dropped" | "on_hold" | "watching";
 // prettier-ignore
 export type TrackingDispositionUpdateDto = "dropped" | "on_hold" | "unset" | "watching";
 
+// prettier-ignore
+export type ProviderKindDto = "catalog" | "identity" | "metadata" | "ratings" | "tracking";
+
+// prettier-ignore
+export type CredentialRequirementDto = "api_key" | "basic_auth" | "bearer_token" | "custom_header" | "none" | "oauth2" | "operator_secret_mount" | "optional_api_key" | "user_agent_only";
+
+// prettier-ignore
+export type ProviderCredentialStateDto = "expired" | "invalid" | "missing" | "not_required" | "optional" | "revoked" | "stored_unverified" | "unavailable" | "valid";
+
+// prettier-ignore
+export type ProviderCredentialSourceDto = "credential_store" | "environment" | "none" | "operator_secret_mount";
+
+// prettier-ignore
+export type ProviderCapabilityStateDto = "available" | "degraded" | "disabled" | "unavailable";
+
+// prettier-ignore
+export type ProviderCheckStateDto = "failed" | "never_run" | "passed" | "unavailable";
+
 // The Nuvio wire document intentionally preserves extension fields.
 export type NuvioCollectionsDocumentDto = ReadonlyArray<Record<string, unknown>>;
 
@@ -1436,6 +1727,58 @@ export interface NuvioCollectionsStateDto {
   readonly document?: NuvioCollectionsDocumentDto | null;
 }
 
+export interface ProviderCheckDto {
+  readonly checked_at?: null | string;
+  readonly safe_problem_code?: null | string;
+  readonly state: ProviderCheckStateDto;
+}
+
+export interface ProviderCapabilityDto {
+  readonly capability_id: string;
+  readonly credential_requirement: CredentialRequirementDto;
+  readonly credential_source: ProviderCredentialSourceDto;
+  readonly credential_state: ProviderCredentialStateDto;
+  readonly credential_test: ProviderCheckDto;
+  readonly health: ProviderCheckDto;
+  readonly purpose: string;
+  readonly state: ProviderCapabilityStateDto;
+  readonly testable: boolean;
+  readonly version: number;
+  readonly writable: boolean;
+}
+
+export interface ProviderDescriptorDto {
+  readonly attribution: string;
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
+  readonly display_name: string;
+  readonly documentation_url: string;
+  readonly identity_namespaces: ReadonlyArray<string>;
+  readonly locale_support: boolean;
+  readonly network_hosts: ReadonlyArray<string>;
+  readonly provider_id: string;
+  readonly provider_kind: ProviderKindDto;
+  readonly region_support: boolean;
+  readonly supported_media_grains: ReadonlyArray<string>;
+}
+
+export interface ListProvidersResponse {
+  readonly providers: ReadonlyArray<ProviderDescriptorDto>;
+}
+
+export interface ConfigureProviderCredentialRequest {
+  readonly secret: string;
+}
+
+export interface ProviderCapabilityResponse {
+  readonly capability: ProviderCapabilityDto;
+  readonly provider_id: string;
+}
+
+export interface ProviderHealthResponse {
+  readonly capabilities: ReadonlyArray<ProviderCapabilityDto>;
+  readonly provider_id: string;
+}
+
 // prettier-ignore
 export const LOCAL_RUNTIME_OPERATIONS = {
   submitObservation: { operationId: "submit_observation", method: "POST", path: "/api/v1/observations", capabilityId: "observation.accept", authorization: "scoped", requiredScopes: ["observation_accept"], problemCodes: ["authentication_failed","capacity_exceeded","forbidden","idempotency_conflict","integrity_failed","invalid_observation","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["observation.accept.capacity_exceeded","observation.accept.receipt","observation.accept.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "stable_body_operation_id", requestSchema: "SubmitObservationRequest", responseSchema: "SubmitObservationResponse" },
@@ -1453,6 +1796,11 @@ export const LOCAL_RUNTIME_OPERATIONS = {
   getNuvioCollections: { operationId: "get_nuvio_collections", method: "GET", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.get", authorization: "scoped", requiredScopes: ["profile_state_read"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
   replaceNuvioCollections: { operationId: "replace_nuvio_collections", method: "PUT", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.replace", authorization: "scoped", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","integrity_failed","malformed_json","payload_too_large","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: "NuvioCollectionsDocumentDto", responseSchema: "NuvioCollectionsStateDto" },
   clearNuvioCollections: { operationId: "clear_nuvio_collections", method: "DELETE", path: "/api/v1/profile/nuvio-collections", capabilityId: "profile.nuvio_collections.clear", authorization: "scoped", requiredScopes: ["profile_state_write"], problemCodes: ["authentication_failed","capability_unavailable","forbidden","integrity_failed","storage_unavailable"], exampleIds: [], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "NuvioCollectionsStateDto" },
+  listProviders: { operationId: "list_providers", method: "GET", path: "/api/v1/providers", capabilityId: "provider.list", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","storage_unavailable"], exampleIds: ["provider.list.forbidden"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ListProvidersResponse" },
+  configureProviderCredential: { operationId: "configure_provider_credential", method: "PUT", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: "ConfigureProviderCredentialRequest", responseSchema: "ProviderCapabilityResponse" },
+  removeProviderCredential: { operationId: "remove_provider_credential", method: "DELETE", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}", capabilityId: "provider.credential.configure", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","malformed_json","payload_too_large","provider_credential_invalid","provider_unavailable","storage_unavailable","unsupported_media_type","validation_failed"], exampleIds: ["provider.credential.configure.validation_failed"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
+  testProviderCredential: { operationId: "test_provider_credential", method: "POST", path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests", capabilityId: "provider.credential.test", authorization: "scoped", requiredScopes: ["provider_credential_manage"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_credential_expired","provider_credential_invalid","provider_credential_missing","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.credential.test.provider_credential_missing"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "never", requestSchema: null, responseSchema: "ProviderCapabilityResponse" },
+  readProviderHealth: { operationId: "read_provider_health", method: "GET", path: "/api/v1/providers/{provider_id}/health", capabilityId: "provider.health.read", authorization: "scoped", requiredScopes: ["provider_read"], problemCodes: ["authentication_failed","forbidden","integrity_failed","provider_rate_limited","provider_response_invalid","provider_route_unavailable","provider_unavailable","storage_unavailable"], exampleIds: ["provider.health.read.provider_unavailable"], authenticated: true, runtimeAvailability: "implemented", durability: "durable", retry: "safe", requestSchema: null, responseSchema: "ProviderHealthResponse" },
 } as const;
 
 // prettier-ignore
@@ -1525,6 +1873,26 @@ export function parseNuvioCollectionsStateDto(value: unknown): NuvioCollectionsS
   return parseProductionDto("NuvioCollectionsStateDto", value);
 }
 
+// prettier-ignore
+export function parseConfigureProviderCredentialRequest(value: unknown): ConfigureProviderCredentialRequest {
+  return parseProductionDto("ConfigureProviderCredentialRequest", value);
+}
+
+// prettier-ignore
+export function parseListProvidersResponse(value: unknown): ListProvidersResponse {
+  return parseProductionDto("ListProvidersResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderCapabilityResponse(value: unknown): ProviderCapabilityResponse {
+  return parseProductionDto("ProviderCapabilityResponse", value);
+}
+
+// prettier-ignore
+export function parseProviderHealthResponse(value: unknown): ProviderHealthResponse {
+  return parseProductionDto("ProviderHealthResponse", value);
+}
+
 export interface AcceptObservationRequest {
   readonly evidence: EvidenceReferenceDto;
   readonly observed_at: ObservedTimeDto;
@@ -1541,14 +1909,14 @@ export interface AcceptObservationResponse {
 export interface CapabilityDescriptorDto {
   readonly authorization: "bootstrap_only" | "browser_session" | "local_operator" | "scoped" | "unauthenticated";
   readonly bounded_context: string;
-  readonly contract_body: "b1" | "b2" | "b3" | "c1";
-  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
-  readonly id: "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
+  readonly contract_body: "b1" | "b2" | "b3" | "c1" | "m1";
+  readonly examples: ReadonlyArray<"client.enroll.forbidden" | "credential.revoke.capability_unavailable" | "credential.rotate.capability_unavailable" | "identity.identifier.attach.validation_failed" | "identity.namespace.register.validation_failed" | "identity.record.create.validation_failed" | "identity.record.list.forbidden" | "integration.status.success" | "listener.configure.capability_unavailable" | "node.initialize.validation_failed" | "observation.accept.capacity_exceeded" | "observation.accept.receipt" | "observation.accept.validation_failed" | "profile.record.tracking_disposition.list.forbidden" | "profile.record.tracking_disposition.set.validation_failed" | "profile.select.capability_unavailable" | "provider.credential.configure.validation_failed" | "provider.credential.test.provider_credential_missing" | "provider.health.read.provider_unavailable" | "provider.list.forbidden" | "receipt.replay.receipt_not_found" | "receipt.stream.event" | "receipt.stream.receipt_not_found" | "system.capabilities.forbidden" | "system.capabilities.success" | "system.health.success">;
+  readonly id: "browser.session.create" | "browser.session.end" | "browser.session.profile.select" | "browser.session.read" | "browser.session.revoke" | "browser.session.rotate" | "browser.sessions.list" | "browser.sessions.revoke_all" | "browser.sessions.revoke_others" | "client.enroll" | "correction.chain.append" | "correction.chain.inspect" | "credential.revoke" | "credential.rotate" | "identity.identifier.attach" | "identity.namespace.register" | "identity.record.create" | "identity.record.list" | "identity.review.defer" | "identity.review.inspect" | "identity.review.resolve" | "identity.review.resume" | "integration.status" | "listener.configure" | "node.initialize" | "observation.accept" | "portability.workspace.export" | "portability.workspace.restore" | "portability.workspace.verify" | "profile.nuvio_collections.clear" | "profile.nuvio_collections.get" | "profile.nuvio_collections.replace" | "profile.record.tracking_disposition.list" | "profile.record.tracking_disposition.set" | "profile.select" | "provider.credential.configure" | "provider.credential.test" | "provider.health.read" | "provider.list" | "receipt.replay" | "receipt.stream" | "system.capabilities.discover" | "system.health";
   readonly lifecycle: CapabilityLifecycleDto;
-  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
-  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1";
-  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
-  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_browser_session_foundation" | "health" | "later_b2" | "later_b3";
+  readonly problems: ReadonlyArray<"already_initialized" | "authentication_failed" | "bootstrap_closed" | "browser_session_expired" | "browser_session_revoked" | "capability_unavailable" | "capacity_exceeded" | "forbidden" | "idempotency_conflict" | "identity_conflict" | "integrity_failed" | "invalid_identifier" | "invalid_observation" | "malformed_json" | "payload_too_large" | "provider_credential_expired" | "provider_credential_invalid" | "provider_credential_missing" | "provider_rate_limited" | "provider_response_invalid" | "provider_route_unavailable" | "provider_unavailable" | "receipt_not_found" | "record_not_found" | "session_policy_changed" | "storage_unavailable" | "unsupported_media_type" | "validation_failed">;
+  readonly runtime_body: "b0" | "b1" | "b2" | "b3" | "c1" | "m1";
+  readonly scopes: ReadonlyArray<"capability_read" | "client_enroll" | "correction_read" | "correction_write" | "credential_manage" | "identity_read" | "identity_write" | "listener_configure" | "observation_accept" | "profile_select" | "profile_state_read" | "profile_state_write" | "provider_credential_manage" | "provider_read" | "receipt_read" | "review_read" | "review_write" | "workspace_export" | "workspace_verify">;
+  readonly surface_profile: "b1_durable_bootstrap" | "b1_http_fixture" | "b1_integration_status" | "b1_observation_accept" | "b1_receipt_replay" | "b1_receipt_stream" | "b1_records" | "b2_profile_state" | "c1_browser_session_foundation" | "health" | "later_b2" | "later_b3" | "m1_providers";
   readonly uat: ReadonlyArray<CapabilityUatDto>;
 }
 
@@ -1562,7 +1930,7 @@ export interface CapabilityDiscoveryResponse {
 
 export interface CapabilityLifecycleDto {
   readonly contract_state: "finalized" | "reserved";
-  readonly introduced_in: "b0" | "b1" | "b2" | "c1";
+  readonly introduced_in: "b0" | "b1" | "b2" | "c1" | "m1";
   readonly runtime_availability: "fixture_only" | "guarded" | "implemented" | "later_body";
 }
 
@@ -1754,7 +2122,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1",
           "b2",
           "b3",
-          "c1"
+          "c1",
+          "m1"
         ],
         "type": "string"
       },
@@ -1777,6 +2146,10 @@ const B1_CONFORMANCE_SCHEMAS = {
             "profile.record.tracking_disposition.list.forbidden",
             "profile.record.tracking_disposition.set.validation_failed",
             "profile.select.capability_unavailable",
+            "provider.credential.configure.validation_failed",
+            "provider.credential.test.provider_credential_missing",
+            "provider.health.read.provider_unavailable",
+            "provider.list.forbidden",
             "receipt.replay.receipt_not_found",
             "receipt.stream.event",
             "receipt.stream.receipt_not_found",
@@ -1826,6 +2199,10 @@ const B1_CONFORMANCE_SCHEMAS = {
           "profile.record.tracking_disposition.list",
           "profile.record.tracking_disposition.set",
           "profile.select",
+          "provider.credential.configure",
+          "provider.credential.test",
+          "provider.health.read",
+          "provider.list",
           "receipt.replay",
           "receipt.stream",
           "system.capabilities.discover",
@@ -1855,6 +2232,13 @@ const B1_CONFORMANCE_SCHEMAS = {
             "invalid_observation",
             "malformed_json",
             "payload_too_large",
+            "provider_credential_expired",
+            "provider_credential_invalid",
+            "provider_credential_missing",
+            "provider_rate_limited",
+            "provider_response_invalid",
+            "provider_route_unavailable",
+            "provider_unavailable",
             "receipt_not_found",
             "record_not_found",
             "session_policy_changed",
@@ -1873,7 +2257,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b1",
           "b2",
           "b3",
-          "c1"
+          "c1",
+          "m1"
         ],
         "type": "string"
       },
@@ -1892,6 +2277,8 @@ const B1_CONFORMANCE_SCHEMAS = {
             "profile_select",
             "profile_state_read",
             "profile_state_write",
+            "provider_credential_manage",
+            "provider_read",
             "receipt_read",
             "review_read",
             "review_write",
@@ -1916,7 +2303,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "c1_browser_session_foundation",
           "health",
           "later_b2",
-          "later_b3"
+          "later_b3",
+          "m1_providers"
         ],
         "type": "string"
       },
@@ -1949,8 +2337,8 @@ const B1_CONFORMANCE_SCHEMAS = {
         "items": {
           "$ref": "#/components/schemas/CapabilityDescriptorDto"
         },
-        "maxItems": 39,
-        "minItems": 39,
+        "maxItems": 43,
+        "minItems": 43,
         "type": "array",
         "uniqueItems": true
       },
@@ -1988,8 +2376,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           },
           "type": "object"
         },
-        "maxProperties": 12,
-        "minProperties": 12,
+        "maxProperties": 13,
+        "minProperties": 13,
         "propertyNames": {
           "enum": [
             "b1_durable_bootstrap",
@@ -2003,7 +2391,8 @@ const B1_CONFORMANCE_SCHEMAS = {
             "c1_browser_session_foundation",
             "health",
             "later_b2",
-            "later_b3"
+            "later_b3",
+            "m1_providers"
           ],
           "type": "string"
         },
@@ -2034,7 +2423,8 @@ const B1_CONFORMANCE_SCHEMAS = {
           "b0",
           "b1",
           "b2",
-          "c1"
+          "c1",
+          "m1"
         ],
         "type": "string"
       },
@@ -2877,6 +3267,10 @@ export type CapabilityId =
   | "profile.record.tracking_disposition.list"
   | "profile.record.tracking_disposition.set"
   | "profile.select"
+  | "provider.credential.configure"
+  | "provider.credential.test"
+  | "provider.health.read"
+  | "provider.list"
   | "receipt.replay"
   | "receipt.stream"
   | "system.capabilities.discover"
@@ -2888,7 +3282,8 @@ export type CapabilityBody =
   | "b1"
   | "b2"
   | "b3"
-  | "c1";
+  | "c1"
+  | "m1";
 
 // prettier-ignore
 export type ContractState =
@@ -2919,6 +3314,13 @@ export type ProblemCode =
   | "invalid_observation"
   | "malformed_json"
   | "payload_too_large"
+  | "provider_credential_expired"
+  | "provider_credential_invalid"
+  | "provider_credential_missing"
+  | "provider_rate_limited"
+  | "provider_response_invalid"
+  | "provider_route_unavailable"
+  | "provider_unavailable"
   | "receipt_not_found"
   | "record_not_found"
   | "session_policy_changed"
@@ -3861,6 +4263,127 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
     },
     {
       "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.credential.configure.validation_failed"
+      ],
+      "id": "provider.credential.configure",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "malformed_json",
+        "payload_too_large",
+        "provider_credential_invalid",
+        "provider_unavailable",
+        "storage_unavailable",
+        "unsupported_media_type",
+        "validation_failed"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_credential_manage"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.credential.test.provider_credential_missing"
+      ],
+      "id": "provider.credential.test",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "provider_credential_expired",
+        "provider_credential_invalid",
+        "provider_credential_missing",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "storage_unavailable"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_credential_manage"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.health.read.provider_unavailable"
+      ],
+      "id": "provider.health.read",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "provider_rate_limited",
+        "provider_response_invalid",
+        "provider_route_unavailable",
+        "provider_unavailable",
+        "storage_unavailable"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_read"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
+      "bounded_context": "connections.providers",
+      "contract_body": "m1",
+      "examples": [
+        "provider.list.forbidden"
+      ],
+      "id": "provider.list",
+      "lifecycle": {
+        "contract_state": "finalized",
+        "introduced_in": "m1",
+        "runtime_availability": "implemented"
+      },
+      "problems": [
+        "authentication_failed",
+        "forbidden",
+        "integrity_failed",
+        "storage_unavailable"
+      ],
+      "runtime_body": "m1",
+      "scopes": [
+        "provider_read"
+      ],
+      "surface_profile": "m1_providers",
+      "uat": []
+    },
+    {
+      "authorization": "scoped",
       "bounded_context": "observation.receipts",
       "contract_body": "b1",
       "examples": [
@@ -4620,6 +5143,60 @@ export const PUBLIC_CAPABILITY_REGISTRY = {
       "ui": {
         "reason": "Fasti is headless through B3.",
         "state": "not_applicable"
+      }
+    },
+    "m1_providers": {
+      "cli": {
+        "binding": "cli:capability-discovery",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "domain_application": {
+        "binding_visibility": "internal",
+        "state": "required"
+      },
+      "http_openapi": {
+        "binding": "openapi:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "json_ld": {
+        "reason": "Provider configuration and health are private operational state rather than linked domain evidence.",
+        "state": "not_applicable"
+      },
+      "json_schema": {
+        "binding": "schema:production-openapi-operation:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "knowledge": {
+        "binding": "knowledge:problem-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "okf": {
+        "binding": "okf:capability-catalog",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "package_smoke": {
+        "binding": "package-smoke:production-providers",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sdk": {
+        "binding": "sdk:{capability_id}",
+        "binding_visibility": "public",
+        "state": "required"
+      },
+      "sse_asyncapi": {
+        "reason": "Provider registry credential and health operations are finite requests with no event channel.",
+        "state": "not_applicable"
+      },
+      "ui": {
+        "binding": "ui:provider-settings",
+        "binding_visibility": "public",
+        "state": "required"
       }
     }
   }
@@ -8123,6 +8700,600 @@ export const PUBLIC_PROBLEM_CATALOG = {
       "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
     },
     {
+      "capability_id": "provider.credential.configure",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "malformed_json",
+      "detail": "request JSON is malformed",
+      "next_actions": [
+        {
+          "id": "correct_json",
+          "label": "Correct the JSON syntax and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 400,
+      "title": "Malformed JSON",
+      "type": "https://fasti.scrobble.dev/v1/problems/malformed-json"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "payload_too_large",
+      "detail": "request body exceeds the bounded transport limit",
+      "next_actions": [
+        {
+          "id": "reduce_request_body",
+          "label": "Reduce the request body and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 413,
+      "title": "Payload too large",
+      "type": "https://fasti.scrobble.dev/v1/problems/payload-too-large"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "provider_credential_invalid",
+      "detail": "the provider rejected the configured credential",
+      "next_actions": [
+        {
+          "id": "replace_provider_credential",
+          "label": "Replace the provider credential and test it again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-invalid"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "unsupported_media_type",
+      "detail": "request media type is unsupported",
+      "next_actions": [
+        {
+          "id": "use_supported_media_type",
+          "label": "Use the documented media type and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 415,
+      "title": "Unsupported media type",
+      "type": "https://fasti.scrobble.dev/v1/problems/unsupported-media-type"
+    },
+    {
+      "capability_id": "provider.credential.configure",
+      "code": "validation_failed",
+      "detail": "request representation does not satisfy the governed contract",
+      "next_actions": [
+        {
+          "id": "correct_request",
+          "label": "Correct the request representation and retry"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "no_mutation",
+      "status": 422,
+      "title": "Validation failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/validation-failed"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_credential_expired",
+      "detail": "the configured provider credential has expired",
+      "next_actions": [
+        {
+          "id": "reauthorize_provider",
+          "label": "Reauthorize the provider connection"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential expired",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-expired"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_credential_invalid",
+      "detail": "the provider rejected the configured credential",
+      "next_actions": [
+        {
+          "id": "replace_provider_credential",
+          "label": "Replace the provider credential and test it again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 401,
+      "title": "Provider credential invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-invalid"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_credential_missing",
+      "detail": "this provider capability requires a stored credential",
+      "next_actions": [
+        {
+          "id": "configure_provider_credential",
+          "label": "Configure the required provider credential"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 409,
+      "title": "Provider credential missing",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-credential-missing"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_rate_limited",
+      "detail": "the provider request budget is temporarily exhausted",
+      "next_actions": [
+        {
+          "id": "retry_after_provider_limit",
+          "label": "Retry after the provider limit resets"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 429,
+      "title": "Provider rate limited",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-rate-limited"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_response_invalid",
+      "detail": "the provider response did not satisfy the bounded response contract",
+      "next_actions": [
+        {
+          "id": "inspect_provider_health",
+          "label": "Inspect provider health before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "Provider response invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-response-invalid"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_route_unavailable",
+      "detail": "no verified provider route is available for this capability",
+      "next_actions": [
+        {
+          "id": "review_provider_route",
+          "label": "Review the provider capability and identity route"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 422,
+      "title": "Provider route unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-route-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "provider.credential.test",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_rate_limited",
+      "detail": "the provider request budget is temporarily exhausted",
+      "next_actions": [
+        {
+          "id": "retry_after_provider_limit",
+          "label": "Retry after the provider limit resets"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 429,
+      "title": "Provider rate limited",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-rate-limited"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_response_invalid",
+      "detail": "the provider response did not satisfy the bounded response contract",
+      "next_actions": [
+        {
+          "id": "inspect_provider_health",
+          "label": "Inspect provider health before retrying"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 502,
+      "title": "Provider response invalid",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-response-invalid"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_route_unavailable",
+      "detail": "no verified provider route is available for this capability",
+      "next_actions": [
+        {
+          "id": "review_provider_route",
+          "label": "Review the provider capability and identity route"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_after_correction",
+      "safe_state": "prior_state_retained",
+      "status": 422,
+      "title": "Provider route unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-route-unavailable"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "provider_unavailable",
+      "detail": "the provider is unavailable within the bounded request policy",
+      "next_actions": [
+        {
+          "id": "retry_provider",
+          "label": "Retry after checking provider and network status"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "prior_state_retained",
+      "status": 503,
+      "title": "Provider unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/provider-unavailable"
+    },
+    {
+      "capability_id": "provider.health.read",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "authentication_failed",
+      "detail": "the presented local credential is not active",
+      "next_actions": [
+        {
+          "id": "use_active_credential",
+          "label": "Use an active local credential or enroll again"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 401,
+      "title": "Authentication failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/authentication-failed"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "forbidden",
+      "detail": "request is not authorized for this capability",
+      "next_actions": [
+        {
+          "id": "verify_request_authorization",
+          "label": "Verify the request context and local grant"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "no_mutation",
+      "status": 403,
+      "title": "Forbidden",
+      "type": "https://fasti.scrobble.dev/v1/problems/forbidden"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "integrity_failed",
+      "detail": "stored evidence or durable state did not satisfy its recorded digest and reference invariants",
+      "next_actions": [
+        {
+          "id": "run_local_integrity_check",
+          "label": "Stop the mutation and run the local integrity check"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "not_retryable",
+      "safe_state": "prior_state_retained",
+      "status": 500,
+      "title": "Integrity check failed",
+      "type": "https://fasti.scrobble.dev/v1/problems/integrity-failed"
+    },
+    {
+      "capability_id": "provider.list",
+      "code": "storage_unavailable",
+      "detail": "the local durability boundary is temporarily unavailable",
+      "next_actions": [
+        {
+          "id": "retry_local_operation",
+          "label": "Check local storage and retry the same safe operation"
+        }
+      ],
+      "param": null,
+      "param_policy": "none",
+      "retryability": "retry_safe",
+      "safe_state": "no_mutation",
+      "status": 503,
+      "title": "Storage unavailable",
+      "type": "https://fasti.scrobble.dev/v1/problems/storage-unavailable"
+    },
+    {
       "capability_id": "receipt.replay",
       "code": "forbidden",
       "detail": "request is not authorized for this capability",
@@ -8247,9 +9418,9 @@ type JsonObject = Record<string, unknown>;
 const HEALTH_ALLOWED = ["status", "version"] as const;
 const HEALTH_REQUIRED = ["status", "version"] as const;
 // prettier-ignore
-const CAPABILITY_IDS = ["browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
+const CAPABILITY_IDS = ["browser.session.create", "browser.session.end", "browser.session.profile.select", "browser.session.read", "browser.session.revoke", "browser.session.rotate", "browser.sessions.list", "browser.sessions.revoke_all", "browser.sessions.revoke_others", "client.enroll", "correction.chain.append", "correction.chain.inspect", "credential.revoke", "credential.rotate", "identity.identifier.attach", "identity.namespace.register", "identity.record.create", "identity.record.list", "identity.review.defer", "identity.review.inspect", "identity.review.resolve", "identity.review.resume", "integration.status", "listener.configure", "node.initialize", "observation.accept", "portability.workspace.export", "portability.workspace.restore", "portability.workspace.verify", "profile.nuvio_collections.clear", "profile.nuvio_collections.get", "profile.nuvio_collections.replace", "profile.record.tracking_disposition.list", "profile.record.tracking_disposition.set", "profile.select", "provider.credential.configure", "provider.credential.test", "provider.health.read", "provider.list", "receipt.replay", "receipt.stream", "system.capabilities.discover", "system.health"] as const;
 // prettier-ignore
-const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
+const PROBLEM_CODES = ["already_initialized", "authentication_failed", "bootstrap_closed", "browser_session_expired", "browser_session_revoked", "capability_unavailable", "capacity_exceeded", "forbidden", "idempotency_conflict", "identity_conflict", "integrity_failed", "invalid_identifier", "invalid_observation", "malformed_json", "payload_too_large", "provider_credential_expired", "provider_credential_invalid", "provider_credential_missing", "provider_rate_limited", "provider_response_invalid", "provider_route_unavailable", "provider_unavailable", "receipt_not_found", "record_not_found", "session_policy_changed", "storage_unavailable", "unsupported_media_type", "validation_failed"] as const;
 // prettier-ignore
 const PROBLEM_ALLOWED = ["actual", "capability_id", "code", "correlation_id", "detail", "next_actions", "param", "retryability", "safe_state", "status", "title", "type", "violations"] as const;
 // prettier-ignore

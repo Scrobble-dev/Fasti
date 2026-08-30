@@ -1,9 +1,8 @@
 use crate::network_config::replace_file;
-use crate::outbound_http::{bounded_body, pinned_client, resolve_once};
-use crate::providers::{ProviderCandidate, GOOGLE_BOOKS_PROVIDER, TMDB_PROVIDER};
 use crate::setup::DesktopProblem;
-use fasti_application::{
-    authorize_outbound, NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy,
+use fasti_application::{NetworkClass, OutboundAccessDeclaration, OutboundAccessPolicy};
+use fasti_provider_runtime::{
+    bounded_body, GovernedTransport, ProviderCandidate, GOOGLE_BOOKS_PROVIDER, TMDB_PROVIDER,
 };
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use sha2::{Digest, Sha256};
@@ -12,7 +11,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 const ARTWORK_CAPABILITY: &str = "metadata.artwork";
 const TMDB_IMAGE_HOST: &str = "image.tmdb.org";
@@ -22,7 +21,6 @@ const ARTWORK_HEADER_LIMIT: u64 = 64 * 1024;
 const ARTWORK_DIMENSION_LIMIT: u32 = 4096;
 const ARTWORK_PIXEL_LIMIT: u64 = 16_000_000;
 const CACHE_FILE_LIMIT: usize = 128;
-const ARTWORK_TIMEOUT: Duration = Duration::from_secs(15);
 static TEMPORARY_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const TMDB_ARTWORK_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccessDeclaration {
@@ -41,7 +39,6 @@ const GOOGLE_ARTWORK_ACCESS: OutboundAccessDeclaration<'static> = OutboundAccess
 
 struct ArtworkTarget {
     url: reqwest::Url,
-    host: &'static str,
     access: OutboundAccessDeclaration<'static>,
 }
 
@@ -70,32 +67,19 @@ impl ArtworkCache {
         &self,
         candidate: &ProviderCandidate,
         policy: &OutboundAccessPolicy,
+        transport: &GovernedTransport,
     ) -> Result<(), DesktopProblem> {
         let Some(url) = candidate.image_url.as_deref() else {
             return Ok(());
         };
         let target = artwork_target(candidate.provider, url)?;
-        let addresses = resolve_once(target.host, 443)
+        let client = transport
+            .authorize(target.access, policy, ARTWORK_CAPABILITY, &target.url)
             .await
-            .map_err(DesktopProblem::provider)?;
-        let address_values = addresses.iter().map(|value| value.ip()).collect::<Vec<_>>();
-        authorize_outbound(
-            target.access,
-            policy,
-            ARTWORK_CAPABILITY,
-            target.host,
-            &address_values,
-        )
-        .map_err(|denial| {
-            DesktopProblem::provider(format!(
-                "The outbound policy denied the provider artwork {}.",
-                denial.dimension()
-            ))
-        })?;
-        let client = pinned_client(target.host, &addresses, ARTWORK_TIMEOUT)
             .map_err(DesktopProblem::provider)?;
         let response = client
             .get(target.url.clone())
+            .map_err(DesktopProblem::provider)?
             .header(ACCEPT, "image/jpeg, image/png, image/webp")
             .send()
             .await
@@ -216,23 +200,23 @@ fn artwork_target(provider: &str, value: &str) -> Result<ArtworkTarget, DesktopP
         return Err(unsafe_artwork_url());
     }
     let parsed_host = url.host_str().ok_or_else(unsafe_artwork_url)?;
-    let (host, access) = match provider {
+    let access = match provider {
         TMDB_PROVIDER
             if parsed_host == TMDB_IMAGE_HOST
                 && url.path().starts_with("/t/p/w500/")
                 && url.query().is_none() =>
         {
-            (TMDB_IMAGE_HOST, TMDB_ARTWORK_ACCESS)
+            TMDB_ARTWORK_ACCESS
         }
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[0] => {
-            (GOOGLE_IMAGE_HOSTS[0], GOOGLE_ARTWORK_ACCESS)
+            GOOGLE_ARTWORK_ACCESS
         }
         GOOGLE_BOOKS_PROVIDER if parsed_host == GOOGLE_IMAGE_HOSTS[1] => {
-            (GOOGLE_IMAGE_HOSTS[1], GOOGLE_ARTWORK_ACCESS)
+            GOOGLE_ARTWORK_ACCESS
         }
         _ => return Err(unsafe_artwork_url()),
     };
-    Ok(ArtworkTarget { url, host, access })
+    Ok(ArtworkTarget { url, access })
 }
 
 fn unsafe_artwork_url() -> DesktopProblem {

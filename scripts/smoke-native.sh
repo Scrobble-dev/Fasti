@@ -151,6 +151,14 @@ def post(path, payload, bearer=None):
     connection.close()
     return response.status, body
 
+def get(path, bearer):
+    connection = http.client.HTTPConnection("127.0.0.1", 8420, timeout=5)
+    connection.request("GET", path, headers={"authorization": f"Bearer {bearer}"})
+    response = connection.getresponse()
+    body = json.loads(response.read())
+    connection.close()
+    return response.status, body
+
 status, initialized = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 200 or not re.fullmatch(r"[0-9a-f]{64}", initialized.get("initialization_proof", "")):
     raise SystemExit("Durable node initialization failed")
@@ -165,6 +173,36 @@ if (
     or not re.fullmatch(r"[0-9a-f]{64}", enrolled.get("credential", ""))
 ):
     raise SystemExit("Durable first-client enrollment failed")
+
+status, providers = get("/api/v1/providers", enrolled["credential"])
+provider_rows = providers.get("providers", [])
+provider_capabilities = {
+    row.get("provider_id"): row.get("capabilities", [])
+    for row in provider_rows
+}
+active_providers = {"tmdb", "google-books"}
+if (
+    status != 200
+    or len(provider_rows) != 12
+    or any(
+        len(capabilities) != 2
+        or {capability.get("state") for capability in capabilities} != {"unavailable"}
+        or any(capability.get("credential_state") != "missing" for capability in capabilities)
+        or any(not capability.get("writable") for capability in capabilities)
+        or any(not capability.get("testable") for capability in capabilities)
+        for provider_id, capabilities in provider_capabilities.items()
+        if provider_id in active_providers
+    )
+    or any(
+        len(capabilities) != 2
+        or {capability.get("state") for capability in capabilities} != {"unavailable"}
+        or any(capability.get("writable") for capability in capabilities)
+        or any(capability.get("testable") for capability in capabilities)
+        for provider_id, capabilities in provider_capabilities.items()
+        if provider_id not in active_providers
+    )
+):
+    raise SystemExit("Packaged provider registry did not report the governed runtime boundary")
 
 status, problem = post("/api/v1/node/initialization", {}, bearer=bootstrap_secret)
 if status != 409 or problem.get("code") != "already_initialized":
@@ -190,5 +228,5 @@ if (( rss_kib > idle_limit_mib * 1024 )); then
   exit 1
 fi
 
-echo "native offline smoke: CLI guard, durable bootstrap, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
+echo "native offline smoke: CLI guard, durable bootstrap, provider registry, daemon health, and ${rss_mib} MiB idle memory all pass with no network"
 ' _ "$work_dir" "$(realpath "$daemon")" "$(realpath "$cli")" "$idle_limit_mib"

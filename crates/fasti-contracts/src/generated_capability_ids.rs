@@ -10,6 +10,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::AttachIdentifier => "identity.identifier.attach",
         CapabilityKey::ClearNuvioCollections => "profile.nuvio_collections.clear",
         CapabilityKey::ConfigureListener => "listener.configure",
+        CapabilityKey::ConfigureProviderCredential => "provider.credential.configure",
         CapabilityKey::CreateBrowserSession => "browser.session.create",
         CapabilityKey::CreateRecord => "identity.record.create",
         CapabilityKey::DeferReview => "identity.review.defer",
@@ -23,9 +24,11 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::InspectReview => "identity.review.inspect",
         CapabilityKey::IntegrationStatus => "integration.status",
         CapabilityKey::ListBrowserSessions => "browser.sessions.list",
+        CapabilityKey::ListProviders => "provider.list",
         CapabilityKey::ListRecords => "identity.record.list",
         CapabilityKey::ListTrackingDispositions => "profile.record.tracking_disposition.list",
         CapabilityKey::ReadBrowserSession => "browser.session.read",
+        CapabilityKey::ReadProviderHealth => "provider.health.read",
         CapabilityKey::RegisterNamespace => "identity.namespace.register",
         CapabilityKey::ReplaceNuvioCollections => "profile.nuvio_collections.replace",
         CapabilityKey::ReplayReceipt => "receipt.replay",
@@ -43,6 +46,7 @@ pub const fn public_capability_id(key: CapabilityKey) -> &'static str {
         CapabilityKey::SetTrackingDisposition => "profile.record.tracking_disposition.set",
         CapabilityKey::StreamReceipts => "receipt.stream",
         CapabilityKey::SystemHealth => "system.health",
+        CapabilityKey::TestProviderCredential => "provider.credential.test",
         CapabilityKey::VerifyWorkspace => "portability.workspace.verify",
     }
 }

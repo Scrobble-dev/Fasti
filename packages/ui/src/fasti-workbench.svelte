@@ -600,10 +600,14 @@
             return { states: [], truncated: false };
           })
         : Promise.resolve({ states: [], truncated: false });
-      const [summaries, statePage] = await Promise.all([
+      const [recordPage, statePage] = await Promise.all([
         host.listRecords(),
         statesPromise,
       ]);
+      if (recordPage.truncated) {
+        recordActionProblem =
+          "Only the first 500 records are shown. Additional records remain stored.";
+      }
       if (statePage.truncated) {
         recordActionProblem =
           "Only the first 500 profile tracking states are shown. Additional states remain stored.";
@@ -611,7 +615,7 @@
       const dispositions = new Map(
         statePage.states.map((state) => [state.record_id, state.disposition]),
       );
-      mediaRecords = summaries.map((summary) =>
+      mediaRecords = recordPage.records.map((summary) =>
         projectRecordSummary(summary, dispositions.get(summary.record_id)),
       );
     } catch (error) {

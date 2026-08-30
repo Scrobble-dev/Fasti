@@ -71,6 +71,12 @@ pub(crate) struct RecordSummary {
     latest_activity: Option<RecordActivityView>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RecordPage {
+    records: Vec<RecordSummary>,
+    truncated: bool,
+}
+
 pub(crate) fn require_access(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
@@ -82,13 +88,15 @@ pub(crate) fn list_records(
     kernel: &SqliteKernel,
     store: &impl SetupSecretStore,
     artwork: &ArtworkCache,
-) -> Result<Vec<RecordSummary>, DesktopProblem> {
+) -> Result<RecordPage, DesktopProblem> {
     let access = require_access(kernel, store)?;
     let correlation_id = fasti_domain::RequestCorrelationId::new_v7();
     let summaries = kernel
         .list_records(ListRecordsQuery::new(correlation_id, access))
         .map_err(|problem| DesktopProblem::application(&problem))?;
-    Ok(summaries
+    let truncated = summaries.truncated();
+    let records = summaries
+        .into_records()
         .into_iter()
         .map(|summary| {
             let poster_asset_path = summary
@@ -123,7 +131,8 @@ pub(crate) fn list_records(
                     }),
             }
         })
-        .collect())
+        .collect();
+    Ok(RecordPage { records, truncated })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -396,7 +405,8 @@ mod tests {
         complete_setup(&kernel, &store).expect("complete setup");
 
         let records = list_records(&kernel, &store, &artwork).expect("list records");
-        assert!(records.is_empty());
+        assert!(records.records.is_empty());
+        assert!(!records.truncated);
     }
 
     #[test]
@@ -421,8 +431,9 @@ mod tests {
         assert_eq!(created.grain, Grain::Film);
 
         let records = list_records(&kernel, &store, &artwork).expect("list records");
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].record_id, created.record_id);
+        assert_eq!(records.records.len(), 1);
+        assert_eq!(records.records[0].record_id, created.record_id);
+        assert!(!records.truncated);
     }
 
     #[test]

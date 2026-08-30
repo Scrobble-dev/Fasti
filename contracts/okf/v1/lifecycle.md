@@ -7,7 +7,7 @@ tags: [fasti, b1, contracts, lifecycle]
 status: draft
 contract_states: [finalized, reserved]
 runtime_availabilities: [fixture_only, guarded, implemented, later_body]
-body_ids: [b0, b1, b2, b3, c1]
+body_ids: [b0, b1, b2, b3, c1, m1]
 sources:
   - id: fasti-capability-registry
     resource: ../../registry/v1/capabilities.yaml
@@ -41,6 +41,7 @@ remain fixture-only until B2 supplies durable implementation evidence.
 `b0` is the truthful baseline, `b1` the executable contract spine, `b2` the
 local durable kernel, and `b3` correction and portability. `c1` owns the
 TrailBase-backed browser-session runtime. Its finalized capability metadata can
-remain `later_body` until that runtime and its public surfaces exist. Consult
-[capabilities](capabilities.md), [problems](problems.md), and [scopes](scopes.md)
+remain `later_body` until that runtime and its public surfaces exist. `m1` owns
+the provider registry, governed credential state, and provider health surface.
+Consult [capabilities](capabilities.md), [problems](problems.md), and [scopes](scopes.md)
 as one linked contract catalogue.

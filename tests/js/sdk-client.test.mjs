@@ -496,6 +496,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "attachIdentifier",
           "clearNuvioCollections",
           "configureListener",
+          "configureProviderCredential",
           "constructor",
           "createRecord",
           "discoverCapabilities",
@@ -506,10 +507,13 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "initializeDurableNode",
           "initializeNode",
           "listIntegrations",
+          "listProviders",
           "listRecords",
           "listTrackingDispositions",
+          "readProviderHealth",
           "receiptEvents",
           "registerNamespace",
+          "removeProviderCredential",
           "replaceNuvioCollections",
           "replayReceipt",
           "revokeCredential",
@@ -517,6 +521,7 @@ test("credentials are header-only on authenticated surfaces and no offline queue
           "selectProfile",
           "setTrackingDisposition",
           "submitObservation",
+          "testProviderCredential",
         ]);
       },
     );
@@ -687,6 +692,87 @@ test("client.listRecords() surfaces the truncated flag through the transport", a
   });
 });
 
+test("provider SDK keeps reads retry-safe and credential mutations single-attempt", async (context) => {
+  await context.test("provider list retries a transient response", async () => {
+    let attempts = 0;
+    const client = new FastiClient({
+      baseUrl: "http://127.0.0.1:8420",
+      credential: "provider-reader",
+      retryPolicy: { maxAttempts: 2, baseDelayMs: 0, maxDelayMs: 0 },
+      fetch: async (_url, init) => {
+        attempts += 1;
+        assert.equal(init?.method, "GET");
+        if (attempts === 1) return new Response(null, { status: 503 });
+        return new Response(JSON.stringify(providerListResponse()), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    assert.equal(
+      (await client.listProviders()).providers[0].provider_id,
+      "tmdb",
+    );
+    assert.equal(attempts, 2);
+  });
+
+  for (const [name, invoke, method] of [
+    [
+      "configure",
+      (client) =>
+        client.configureProviderCredential("tmdb", "metadata.search", {
+          secret: "write-only-token",
+        }),
+      "PUT",
+    ],
+    [
+      "remove",
+      (client) => client.removeProviderCredential("tmdb", "metadata.search"),
+      "DELETE",
+    ],
+    [
+      "test",
+      (client) => client.testProviderCredential("tmdb", "metadata.search"),
+      "POST",
+    ],
+  ]) {
+    await context.test(`${name} is never retried`, async () => {
+      let attempts = 0;
+      const client = new FastiClient({
+        baseUrl: "http://127.0.0.1:8420",
+        credential: "provider-writer",
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+        fetch: async (url, init) => {
+          attempts += 1;
+          assert.equal(init?.method, method);
+          assert.match(
+            String(url),
+            /\/api\/v1\/providers\/tmdb\/credentials\/metadata\.search/,
+          );
+          return new Response(null, { status: 503 });
+        },
+      });
+      await assert.rejects(invoke(client), FastiTransportError);
+      assert.equal(attempts, 1);
+    });
+  }
+});
+
+test("provider SDK rejects ambiguous path identifiers before transport", () => {
+  let called = false;
+  const client = new FastiClient({
+    baseUrl: "http://127.0.0.1:8420",
+    fetch: async () => {
+      called = true;
+      return new Response();
+    },
+  });
+  assert.throws(
+    () => client.readProviderHealth("tmdb/other"),
+    /providerId does not match/,
+  );
+  assert.equal(called, false);
+});
+
 test("base URL semantics reject application paths instead of silently discarding them", () => {
   assert.throws(
     () => new FastiClient({ baseUrl: "http://127.0.0.1:8420/fasti" }),
@@ -731,10 +817,10 @@ test("connection endpoints reject unsafe origins", () => {
   }
 });
 test("generated public metadata preserves complete registry and surface dispositions", () => {
-  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 39);
+  assert.equal(PUBLIC_CAPABILITY_REGISTRY.capabilities.length, 43);
   assert.equal(
     Object.keys(PUBLIC_CAPABILITY_REGISTRY.surface_profiles).length,
-    12,
+    13,
   );
   const stream = PUBLIC_CAPABILITY_REGISTRY.capabilities.find(
     (capability) => capability.id === "receipt.stream",
@@ -1129,7 +1215,7 @@ test("mutation retries require stable idempotency and preserve exact serialized 
   );
 });
 
-test("all implemented B1 SDK routes complete against the loopback Rust fixture", async () => {
+test("all implemented contract routes complete against the loopback Rust fixture", async () => {
   await withRustFixture(async (baseUrl) => {
     const bootstrap = new FastiClient({ baseUrl });
     const initialized = await bootstrap.initializeNode();
@@ -1162,7 +1248,7 @@ test("all implemented B1 SDK routes complete against the loopback Rust fixture",
       discovery.surface_profiles,
       PUBLIC_CAPABILITY_REGISTRY.surface_profiles,
     );
-    assert.equal(discovery.capabilities.length, 39);
+    assert.equal(discovery.capabilities.length, 43);
     assert.ok(
       discovery.capabilities.some(
         (capability) =>
@@ -1290,6 +1376,47 @@ function streamClient(body) {
 
 function sse(id, payload) {
   return `id: ${id}\nevent: receiptCommitted\ndata: ${JSON.stringify(payload)}\n\n`;
+}
+
+function providerListResponse() {
+  const passed = {
+    state: "passed",
+    checked_at: "2026-08-30T12:00:00Z",
+    safe_problem_code: null,
+  };
+  return {
+    providers: [
+      {
+        provider_id: "tmdb",
+        display_name: "The Movie Database (TMDB)",
+        provider_kind: "metadata",
+        documentation_url:
+          "https://developer.themoviedb.org/docs/authentication-application",
+        attribution:
+          "This product uses the TMDB API but is not endorsed or certified by TMDB.",
+        supported_media_grains: ["film", "series"],
+        capabilities: [
+          {
+            capability_id: "metadata.search",
+            purpose: "Search provider metadata",
+            credential_requirement: "bearer_token",
+            credential_state: "valid",
+            credential_source: "credential_store",
+            state: "available",
+            version: 1,
+            writable: true,
+            testable: true,
+            health: passed,
+            credential_test: passed,
+          },
+        ],
+        network_hosts: ["api.themoviedb.org"],
+        locale_support: true,
+        region_support: true,
+        identity_namespaces: ["tmdb.movie", "tmdb.tv"],
+      },
+    ],
+  };
 }
 
 function json(response, status, body) {

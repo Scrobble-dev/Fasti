@@ -1,12 +1,15 @@
 mod docs;
 mod evidence;
 mod generate;
+mod integration;
 mod orchestration;
 mod registry;
 mod verify;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 #[derive(Parser)]
 #[command(name = "cargo xtask")]
@@ -37,6 +40,21 @@ enum Command {
     Evidence {
         #[command(subcommand)]
         command: EvidenceCommand,
+    },
+    /// Focused, offline integration contract checks
+    Integration {
+        #[command(subcommand)]
+        command: IntegrationCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum IntegrationCommand {
+    /// Validate one authored provider manifest and its four deterministic fixtures
+    Check {
+        path: PathBuf,
+        #[arg(long, value_enum, default_value = "human")]
+        output: integration::OutputFormat,
     },
 }
 
@@ -119,23 +137,89 @@ enum ContractCommand {
 /// # Ok(())
 /// # }
 /// ```
-fn main() -> anyhow::Result<()> {
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    let root = workspace_root()?;
+    let root = match workspace_root() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("Error: {error:#}");
+            return ExitCode::FAILURE;
+        }
+    };
     match cli.command {
+        Command::Integration {
+            command: IntegrationCommand::Check { path, output },
+        } => match integration::check(&root, &path) {
+            Ok(report) => match integration::render_success(&report, output) {
+                Ok(rendered) => match write_result(&rendered, false) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(error) => {
+                        eprintln!("Error: failed to write integration check output: {error}");
+                        ExitCode::FAILURE
+                    }
+                },
+                Err(error) => {
+                    eprintln!("Error: {error:#}");
+                    ExitCode::FAILURE
+                }
+            },
+            Err(failure @ integration::CheckFailure::Validation(_)) => {
+                let exit_code = ExitCode::from(failure.exit_code());
+                let integration::CheckFailure::Validation(problem) = failure else {
+                    unreachable!("matched validation failure")
+                };
+                match integration::render_validation_failure(&problem, output) {
+                    Ok(rendered) => match write_result(&rendered, true) {
+                        Ok(()) => exit_code,
+                        Err(error) => {
+                            eprintln!("Error: failed to write integration check output: {error}");
+                            ExitCode::FAILURE
+                        }
+                    },
+                    Err(error) => {
+                        eprintln!("Error: {error:#}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            Err(integration::CheckFailure::Tool(error)) => {
+                eprintln!("Error: integration check could not run: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
+        command => match run_existing(command, &root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("Error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
+    }
+}
+
+fn write_result(rendered: &str, stderr: bool) -> std::io::Result<()> {
+    if stderr {
+        std::io::stderr().write_all(rendered.as_bytes())
+    } else {
+        std::io::stdout().write_all(rendered.as_bytes())
+    }
+}
+
+fn run_existing(command: Command, root: &std::path::Path) -> anyhow::Result<()> {
+    match command {
         Command::Docs {
             command: DocsCommand::Generate,
-        } => docs::generate(&root).map(|_| ()),
+        } => docs::generate(root).map(|_| ()),
         Command::Docs {
             command: DocsCommand::Verify { locked },
-        } => docs::verify(&root, locked),
+        } => docs::verify(root, locked),
         Command::Docs {
             command: DocsCommand::Package { locked },
-        } => docs::package(&root, locked),
+        } => docs::package(root, locked),
         Command::Contract {
             command: ContractCommand::ValidateRegistry,
         } => {
-            let summary = registry::validate(&root)?;
+            let summary = registry::validate(root)?;
             println!(
                 "PASS: contract_version={} capabilities={} surface_profiles={}",
                 summary.contract_version, summary.capability_count, summary.surface_profile_count
@@ -145,28 +229,29 @@ fn main() -> anyhow::Result<()> {
         Command::Contract {
             command: ContractCommand::Generate,
         } => {
-            let artifacts = generate::generate_checked_in(&root)?;
+            let artifacts = generate::generate_checked_in(root)?;
             println!("PASS: generated {} contract artifacts", artifacts.len());
             Ok(())
         }
         Command::Contract {
             command: ContractCommand::Verify { locked },
-        } => verify_contracts(&root, locked),
+        } => verify_contracts(root, locked),
         Command::Test {
             command: TestCommand::Pr,
-        } => run_pr(&root),
+        } => run_pr(root),
         Command::Test {
             command: TestCommand::Deep,
-        } => run_deep(&root),
+        } => run_deep(root),
         Command::Test {
             command: TestCommand::Milestone { body, manifest },
-        } => run_milestone(&root, body, manifest),
+        } => run_milestone(root, body, manifest),
         Command::Evidence {
             command: EvidenceCommand::Schema,
         } => evidence::print_schema(),
         Command::Evidence {
             command: EvidenceCommand::Verify { manifest },
-        } => evidence::verify(&root, &manifest).map(|_| ()),
+        } => evidence::verify(root, &manifest).map(|_| ()),
+        Command::Integration { .. } => unreachable!("integration checks return before dispatch"),
     }
 }
 

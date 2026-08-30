@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::registry;
+use crate::{integration, registry};
 
 pub(crate) type Artifacts = BTreeMap<PathBuf, Vec<u8>>;
 
@@ -27,11 +27,16 @@ const PORTABILITY_V2_EXAMPLE_PATH: &str =
     "contracts/portability/v2/workspace-manifest.example.json";
 const SDK_GENERATED_PATH: &str = "packages/sdk/src/generated.ts";
 const RUST_CAPABILITY_IDS_PATH: &str = "crates/fasti-contracts/src/generated_capability_ids.rs";
+const PROVIDER_MANIFEST_SCHEMA_PATH: &str =
+    "contracts/addons/generated/v0.1/provider-manifest.schema.json";
 const ASYNCAPI_PATH: &str = "contracts/asyncapi/v1/transport.yaml";
 const EXAMPLES_DIRECTORY: &str = "contracts/examples/v1";
 const DOCUMENTATION_BASE: &str = "https://fasti.scrobble.dev";
-const GENERATED_ONLY_DIRECTORIES: [&str; 2] =
-    ["contracts/generated/v1", "packages/schemas/schemas"];
+const GENERATED_ONLY_DIRECTORIES: [&str; 3] = [
+    "contracts/generated/v1",
+    "packages/schemas/schemas",
+    "contracts/addons/generated",
+];
 
 #[derive(Clone, Copy)]
 struct ConformanceOperation {
@@ -177,7 +182,7 @@ const PRODUCTION_BOOTSTRAP_OPERATIONS: [ConformanceOperation; 2] = [
 /// surface. Kept separate from `PRODUCTION_BOOTSTRAP_OPERATIONS` because that
 /// array also drives the bootstrap-only SDK slice in
 /// `render_production_bootstrap_contract`, which must not grow to include them.
-const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 15] = [
+const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 20] = [
     ConformanceOperation {
         alias: "submitObservation",
         operation_id: "submit_observation",
@@ -343,6 +348,61 @@ const PRODUCTION_RUNTIME_OPERATIONS: [ConformanceOperation; 15] = [
         response: Some("NuvioCollectionsStateDto"),
         retry: "safe",
     },
+    ConformanceOperation {
+        alias: "listProviders",
+        operation_id: "list_providers",
+        method: "get",
+        path: "/api/v1/providers",
+        capability_id: "provider.list",
+        authenticated: true,
+        request: None,
+        response: Some("ListProvidersResponse"),
+        retry: "safe",
+    },
+    ConformanceOperation {
+        alias: "configureProviderCredential",
+        operation_id: "configure_provider_credential",
+        method: "put",
+        path: "/api/v1/providers/{provider_id}/credentials/{capability_id}",
+        capability_id: "provider.credential.configure",
+        authenticated: true,
+        request: Some("ConfigureProviderCredentialRequest"),
+        response: Some("ProviderCapabilityResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "removeProviderCredential",
+        operation_id: "remove_provider_credential",
+        method: "delete",
+        path: "/api/v1/providers/{provider_id}/credentials/{capability_id}",
+        capability_id: "provider.credential.configure",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderCapabilityResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "testProviderCredential",
+        operation_id: "test_provider_credential",
+        method: "post",
+        path: "/api/v1/providers/{provider_id}/credentials/{capability_id}/tests",
+        capability_id: "provider.credential.test",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderCapabilityResponse"),
+        retry: "never",
+    },
+    ConformanceOperation {
+        alias: "readProviderHealth",
+        operation_id: "read_provider_health",
+        method: "get",
+        path: "/api/v1/providers/{provider_id}/health",
+        capability_id: "provider.health.read",
+        authenticated: true,
+        request: None,
+        response: Some("ProviderHealthResponse"),
+        retry: "safe",
+    },
 ];
 
 pub(crate) fn generate_checked_in(workspace_root: &Path) -> anyhow::Result<Artifacts> {
@@ -426,6 +486,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     let capability_discovery_example = capability_discovery_example(&public_registry)?;
     let health_schema = draft_2020_12_schema::<HealthResponse>()?;
     let problem_schema = draft_2020_12_schema::<ProblemDetails>()?;
+    let provider_manifest_schema = integration::provider_manifest_schema()?;
     let portability_v2_schema = portability_v2_schema()?;
     let portability_v2_example = portability_v2_example(workspace_root)?;
     let asyncapi = load_yaml(workspace_root, ASYNCAPI_PATH)?;
@@ -456,7 +517,7 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
         &production_openapi,
         &conformance_openapi,
     )?;
-    validate_required_b1_bindings(
+    validate_required_bindings(
         workspace_root,
         &capability_keys,
         &production_openapi,
@@ -489,6 +550,11 @@ fn build(workspace_root: &Path) -> anyhow::Result<Artifacts> {
     )?;
     insert(&mut artifacts, HEALTH_SCHEMA_PATH, health_schema.clone())?;
     insert(&mut artifacts, PROBLEM_SCHEMA_PATH, problem_schema.clone())?;
+    insert(
+        &mut artifacts,
+        PROVIDER_MANIFEST_SCHEMA_PATH,
+        provider_manifest_schema,
+    )?;
     insert(
         &mut artifacts,
         PORTABILITY_V2_SCHEMA_PATH,
@@ -1175,7 +1241,12 @@ fn validate_production_operation_security(
         | "set_tracking_disposition"
         | "get_nuvio_collections"
         | "replace_nuvio_collections"
-        | "clear_nuvio_collections" => vec!["credential_bearer"],
+        | "clear_nuvio_collections"
+        | "list_providers"
+        | "configure_provider_credential"
+        | "remove_provider_credential"
+        | "test_provider_credential"
+        | "read_provider_health" => vec!["credential_bearer"],
         "nuvio_webhook" | "tautulli_webhook" | "jellyfin_webhook" | "emby_webhook"
         | "plex_webhook" => vec!["credential_bearer"],
         "enroll_first_client" | "health_check" | "integration_status" => Vec::new(),
@@ -1316,7 +1387,7 @@ fn enrich_production_integration_status_openapi(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_required_b1_bindings(
+fn validate_required_bindings(
     workspace_root: &Path,
     capability_keys: &BTreeMap<String, CapabilityKey>,
     production_openapi: &Value,
@@ -1326,7 +1397,7 @@ fn validate_required_b1_bindings(
     health_schema: &Value,
     sdk_source: &str,
 ) -> anyhow::Result<()> {
-    for required in registry::finalized_b1_required_bindings(workspace_root)? {
+    for required in registry::finalized_b1_m1_required_bindings(workspace_root)? {
         resolve_required_binding(
             workspace_root,
             required.surface,
@@ -1532,7 +1603,35 @@ fn resolve_required_binding(
                     "production bootstrap package smoke is absent"
                 );
             }
+            "package-smoke:production-providers" => {
+                let smoke = fs::read_to_string(workspace_root.join("scripts/smoke-native.sh"))?;
+                ensure!(
+                    smoke.contains("/api/v1/providers")
+                        && smoke.contains("len(provider_rows) != 12")
+                        && smoke.contains("active_providers = {\"tmdb\", \"google-books\"}")
+                        && smoke.contains("capability.get(\"credential_state\")")
+                        && smoke.contains("capability.get(\"writable\")")
+                        && smoke.contains("capability.get(\"testable\")"),
+                    "production provider smoke is absent"
+                );
+            }
             _ => anyhow::bail!("unknown package-smoke binding"),
+        },
+        "ui" => match binding {
+            "ui:provider-settings" => {
+                let view = fs::read_to_string(
+                    workspace_root.join("packages/ui/src/runtime-settings-view.svelte"),
+                )?;
+                ensure!(
+                    view.contains("providerCredentialStatus")
+                        && view.contains("saveProviderCredential")
+                        && view.contains("deleteProviderCredential")
+                        && view.contains("testProviderCredential")
+                        && view.contains("readProviderHealth"),
+                    "provider settings UI does not cover every M1 provider operation"
+                );
+            }
+            _ => anyhow::bail!("unknown UI binding"),
         },
         other => anyhow::bail!("unsupported required surface {other}"),
     }
@@ -1583,7 +1682,9 @@ fn validate_problem_responses(
         .get("responses")
         .and_then(Value::as_object)
         .context("conformance operation responses must be an object")?;
-    let mut represented_statuses = BTreeSet::new();
+    let operation_subset = expected.operation_id == "remove_provider_credential"
+        && expected.capability_id == "provider.credential.configure";
+    let mut governed_statuses = BTreeSet::new();
     for problem in problems {
         let raw_code = problem
             .as_str()
@@ -1605,20 +1706,23 @@ fn validate_problem_responses(
             );
         }
         let status = code.contract().status().to_string();
-        let response = responses.get(&status).with_context(|| {
-            format!(
+        governed_statuses.insert(status.clone());
+        if let Some(response) = responses.get(&status) {
+            ensure!(
+                string_at(response, "/content/application~1problem+json/schema/$ref")?
+                    == "#/components/schemas/ProblemDetails",
+                "{} {} cannot represent governed problem {raw_code} as ProblemDetails",
+                expected.method,
+                expected.path
+            );
+        } else {
+            ensure!(
+                operation_subset,
                 "{} {} cannot represent governed problem {raw_code}: response {status} is absent",
-                expected.method, expected.path
-            )
-        })?;
-        ensure!(
-            string_at(response, "/content/application~1problem+json/schema/$ref")?
-                == "#/components/schemas/ProblemDetails",
-            "{} {} cannot represent governed problem {raw_code} as ProblemDetails",
-            expected.method,
-            expected.path
-        );
-        represented_statuses.insert(status);
+                expected.method,
+                expected.path
+            );
+        }
     }
 
     let documented_problem_statuses: BTreeSet<_> = responses
@@ -1630,12 +1734,25 @@ fn validate_problem_responses(
                 .then_some(status.clone())
         })
         .collect();
-    ensure!(
-        documented_problem_statuses == represented_statuses,
-        "{} {} problem responses drift from registry claims: documented={documented_problem_statuses:?}, governed={represented_statuses:?}",
-        expected.method,
-        expected.path
-    );
+    if operation_subset {
+        let expected_subset = ["401", "403", "422", "500", "503"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        ensure!(
+            documented_problem_statuses == expected_subset,
+            "{} {} removal responses drift from its capability representation: documented={documented_problem_statuses:?}, expected={expected_subset:?}",
+            expected.method,
+            expected.path
+        );
+    } else {
+        ensure!(
+            documented_problem_statuses == governed_statuses,
+            "{} {} problem responses drift from registry claims: documented={documented_problem_statuses:?}, governed={governed_statuses:?}",
+            expected.method,
+            expected.path
+        );
+    }
     Ok(())
 }
 
@@ -2130,6 +2247,12 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "ObservationIngressKind",
         "TrackingDispositionDto",
         "TrackingDispositionUpdateDto",
+        "ProviderKindDto",
+        "CredentialRequirementDto",
+        "ProviderCredentialStateDto",
+        "ProviderCredentialSourceDto",
+        "ProviderCapabilityStateDto",
+        "ProviderCheckStateDto",
     ] {
         let schema = schemas
             .get(name)
@@ -2163,6 +2286,13 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
         "TrackingDispositionStateDto",
         "ListTrackingDispositionsResponse",
         "NuvioCollectionsStateDto",
+        "ProviderCheckDto",
+        "ProviderCapabilityDto",
+        "ProviderDescriptorDto",
+        "ListProvidersResponse",
+        "ConfigureProviderCredentialRequest",
+        "ProviderCapabilityResponse",
+        "ProviderHealthResponse",
     ] {
         let schema = schemas
             .get(name)
@@ -2307,6 +2437,16 @@ fn render_production_runtime_contract(openapi: &Value) -> anyhow::Result<String>
             "NuvioCollectionsDocumentDto",
         ),
         ("parseNuvioCollectionsStateDto", "NuvioCollectionsStateDto"),
+        (
+            "parseConfigureProviderCredentialRequest",
+            "ConfigureProviderCredentialRequest",
+        ),
+        ("parseListProvidersResponse", "ListProvidersResponse"),
+        (
+            "parseProviderCapabilityResponse",
+            "ProviderCapabilityResponse",
+        ),
+        ("parseProviderHealthResponse", "ProviderHealthResponse"),
     ] {
         writeln!(
             output,
@@ -3502,20 +3642,12 @@ fn write(output_root: &Path, artifacts: &Artifacts) -> anyhow::Result<()> {
 fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<()> {
     let mut actual = BTreeSet::new();
     for relative_directory in GENERATED_ONLY_DIRECTORIES.map(PathBuf::from) {
-        let directory = output_root.join(&relative_directory);
-        for entry in fs::read_dir(&directory)
-            .with_context(|| format!("failed to inspect {}", directory.display()))?
-        {
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            ensure!(
-                file_type.is_file(),
-                "generated artifact directory {} contains non-file {}",
-                relative_directory.display(),
-                entry.path().display()
-            );
-            actual.insert(relative_directory.join(entry.file_name()));
-        }
+        collect_generated_files(
+            output_root,
+            &relative_directory,
+            &output_root.join(&relative_directory),
+            &mut actual,
+        )?;
     }
     let generated_only_directories: BTreeSet<_> = GENERATED_ONLY_DIRECTORIES
         .into_iter()
@@ -3524,8 +3656,9 @@ fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<
     let expected_paths: BTreeSet<_> = expected
         .keys()
         .filter(|path| {
-            path.parent()
-                .is_some_and(|parent| generated_only_directories.contains(parent))
+            generated_only_directories
+                .iter()
+                .any(|directory| path.starts_with(directory))
         })
         .cloned()
         .collect();
@@ -3535,6 +3668,53 @@ fn verify_inventory(output_root: &Path, expected: &Artifacts) -> anyhow::Result<
         expected_paths.difference(&actual).collect::<Vec<_>>(),
         actual.difference(&expected_paths).collect::<Vec<_>>()
     );
+    Ok(())
+}
+
+fn collect_generated_files(
+    output_root: &Path,
+    generated_root: &Path,
+    directory: &Path,
+    files: &mut BTreeSet<PathBuf>,
+) -> anyhow::Result<()> {
+    let metadata = fs::symlink_metadata(directory)
+        .with_context(|| format!("failed to inspect {}", directory.display()))?;
+    ensure!(
+        !metadata.file_type().is_symlink() && metadata.is_dir(),
+        "generated artifact directory {} must be a real directory",
+        directory.display()
+    );
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("failed to inspect {}", directory.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        ensure!(
+            !file_type.is_symlink(),
+            "generated artifact directory {} contains symlink {}",
+            generated_root.display(),
+            entry.path().display()
+        );
+        if file_type.is_dir() {
+            collect_generated_files(output_root, generated_root, &entry.path(), files)?;
+        } else {
+            ensure!(
+                file_type.is_file(),
+                "generated artifact directory {} contains non-file {}",
+                generated_root.display(),
+                entry.path().display()
+            );
+            let path = entry.path();
+            let relative = path.strip_prefix(output_root).with_context(|| {
+                format!(
+                    "generated artifact {} escaped {}",
+                    path.display(),
+                    output_root.display()
+                )
+            })?;
+            files.insert(relative.to_path_buf());
+        }
+    }
     Ok(())
 }
 
@@ -3554,6 +3734,7 @@ mod tests {
             Path::new(CAPABILITY_DISCOVERY_EXAMPLE_PATH),
             Path::new(HEALTH_SCHEMA_PATH),
             Path::new(PROBLEM_SCHEMA_PATH),
+            Path::new(PROVIDER_MANIFEST_SCHEMA_PATH),
             Path::new(PORTABILITY_V2_SCHEMA_PATH),
             Path::new(PORTABILITY_V2_EXAMPLE_PATH),
             Path::new(SDK_GENERATED_PATH),
@@ -3570,6 +3751,22 @@ mod tests {
         let second = build(workspace_root()).expect("second generation succeeds");
         assert_eq!(first, second);
         assert!(first.values().all(|artifact| artifact.ends_with(b"\n")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generated_inventory_rejects_a_symlinked_root() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().expect("temporary root");
+        let real = root.path().join("real");
+        fs::create_dir(&real).expect("real directory");
+        let linked = root.path().join("linked");
+        symlink(&real, &linked).expect("symlink root");
+
+        let error = collect_generated_files(root.path(), &linked, &linked, &mut BTreeSet::new())
+            .expect_err("symlinked generated root must fail");
+        assert!(error.to_string().contains("must be a real directory"));
     }
 
     #[test]

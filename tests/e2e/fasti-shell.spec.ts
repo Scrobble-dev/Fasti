@@ -39,17 +39,17 @@ async function mockHealth(page: Page) {
 async function mockTrustedHost(
   page: Page,
   providerConfigured = false,
-  holdProviderSearch = false,
+  holdProviderTest = false,
   environmentManaged = false,
 ) {
   const mockOptions =
     (providerConfigured ? 1 : 0) |
-    (holdProviderSearch ? 2 : 0) |
+    (holdProviderTest ? 2 : 0) |
     (environmentManaged ? 4 : 0);
   await page.addInitScript((options) => {
     const managed = Boolean(options & 4);
     const configured = Boolean(options & 1) || managed;
-    const holdSearch = Boolean(options & 2);
+    const holdTest = Boolean(options & 2);
     const networkConfiguration = {
       connection: {
         service_url: {
@@ -74,14 +74,19 @@ async function mockTrustedHost(
     const providerStatus = () => [
       {
         provider: "google-books",
+        capability_id: "metadata.search",
         label: "Google Books",
-        configured: providerIsConfigured,
+        purpose: "Search book metadata",
+        credential_requirement: "optional_api_key",
+        credential_state: providerIsConfigured ? "valid" : "optional",
+        state: "available",
         source: managed
           ? "environment"
           : providerIsConfigured
             ? "credential_store"
             : "none",
         writable: !managed,
+        testable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
     ];
@@ -90,8 +95,8 @@ async function mockTrustedHost(
       __PROVIDER_SECRET_MATCH__?: boolean;
       __PROVIDER_SAVE_CALLS__?: number;
       __PROVIDER_STATUS_CALLS__?: number;
-      __PROVIDER_SEARCH_CALLS__?: number;
-      __RESOLVE_PROVIDER_SEARCH__?: () => void;
+      __PROVIDER_TEST_CALLS__?: number;
+      __RESOLVE_PROVIDER_TEST__?: () => void;
       __NUVIO_REPLACE_COUNT__?: number;
       __TAURI_INTERNALS__: {
         invoke: (command: string, arguments_: unknown) => Promise<unknown>;
@@ -147,16 +152,16 @@ async function mockTrustedHost(
             providerIsConfigured = true;
             return providerStatus();
           }
-          case "search_provider":
-            browserWindow.__PROVIDER_SEARCH_CALLS__ =
-              (browserWindow.__PROVIDER_SEARCH_CALLS__ ?? 0) + 1;
-            if (holdSearch) {
+          case "test_provider_credential":
+            browserWindow.__PROVIDER_TEST_CALLS__ =
+              (browserWindow.__PROVIDER_TEST_CALLS__ ?? 0) + 1;
+            if (holdTest) {
               await new Promise<void>((resolve) => {
-                browserWindow.__RESOLVE_PROVIDER_SEARCH__ = resolve;
+                browserWindow.__RESOLVE_PROVIDER_TEST__ = resolve;
               });
-              return [];
+              return providerStatus();
             }
-            if (managed) return [];
+            if (managed) return providerStatus();
             throw new Error("Trusted provider execution is unavailable.");
           default:
             throw new Error(`Unexpected trusted-host command: ${command}`);
@@ -323,146 +328,159 @@ test("record metadata can refresh or switch through a configured provider", asyn
               return [
                 {
                   provider: "tmdb",
+                  capability_id: "metadata.search",
                   label: "TMDB",
-                  configured: true,
+                  purpose: "Search film and television metadata",
+                  credential_requirement: "bearer_token",
+                  credential_state: "valid",
+                  state: "available",
                   source: "credential_store",
                   writable: true,
+                  testable: true,
                   docs_url: "https://developer.themoviedb.org/",
                 },
                 {
                   provider: "google-books",
+                  capability_id: "metadata.search",
                   label: "Google Books",
-                  configured: true,
+                  purpose: "Search book metadata",
+                  credential_requirement: "optional_api_key",
+                  credential_state: "valid",
+                  state: "available",
                   source: "credential_store",
                   writable: true,
+                  testable: true,
                   docs_url: "https://developers.google.com/books/",
                 },
               ];
             case "list_tracking_dispositions":
               return { states: [], truncated: false };
             case "list_records":
-              return [
-                {
-                  grain: "film",
-                  identifiers,
-                  latest_activity: null,
-                  original_title: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: title,
-                    source: "tmdb.movie",
-                  },
-                  overview: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: overview,
-                    source: "tmdb.movie",
-                  },
-                  poster: {
-                    is_stale: false,
-                    tier: "empty",
-                    value: null,
-                    source: null,
-                  },
-                  record_id: id,
-                  release_year: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: "2021",
-                    source: "tmdb.movie",
-                  },
-                  status: "active",
-                  title: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: title,
-                    source: "tmdb.movie",
-                  },
-                },
-                {
-                  grain: "series",
-                  identifiers: [
-                    { namespace: "tmdb.tv", grain: "series", value: "1396" },
-                  ],
-                  latest_activity: null,
-                  original_title: {
-                    is_stale: false,
-                    tier: "empty",
-                    value: null,
-                    source: null,
-                  },
-                  overview: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value:
-                      "A chemistry teacher becomes a methamphetamine producer.",
-                    source: "tmdb.tv",
-                  },
-                  poster: {
-                    is_stale: false,
-                    tier: "empty",
-                    value: null,
-                    source: null,
-                  },
-                  record_id: showId,
-                  release_year: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: "2008",
-                    source: "tmdb.tv",
-                  },
-                  status: "active",
-                  title: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: "Breaking Bad",
-                    source: "tmdb.tv",
-                  },
-                },
-                {
-                  grain: "edition",
-                  identifiers: [
-                    {
-                      namespace: "googlebooks.volume",
-                      grain: "edition",
-                      value: "dune-volume",
+              return {
+                records: [
+                  {
+                    grain: "film",
+                    identifiers,
+                    latest_activity: null,
+                    original_title: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: title,
+                      source: "tmdb.movie",
                     },
-                  ],
-                  latest_activity: null,
-                  original_title: {
-                    is_stale: false,
-                    tier: "empty",
-                    value: null,
-                    source: null,
+                    overview: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: overview,
+                      source: "tmdb.movie",
+                    },
+                    poster: {
+                      is_stale: false,
+                      tier: "empty",
+                      value: null,
+                      source: null,
+                    },
+                    record_id: id,
+                    release_year: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: "2021",
+                      source: "tmdb.movie",
+                    },
+                    status: "active",
+                    title: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: title,
+                      source: "tmdb.movie",
+                    },
                   },
-                  overview: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: "A science fiction novel.",
-                    source: "googlebooks.volume",
+                  {
+                    grain: "series",
+                    identifiers: [
+                      { namespace: "tmdb.tv", grain: "series", value: "1396" },
+                    ],
+                    latest_activity: null,
+                    original_title: {
+                      is_stale: false,
+                      tier: "empty",
+                      value: null,
+                      source: null,
+                    },
+                    overview: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value:
+                        "A chemistry teacher becomes a methamphetamine producer.",
+                      source: "tmdb.tv",
+                    },
+                    poster: {
+                      is_stale: false,
+                      tier: "empty",
+                      value: null,
+                      source: null,
+                    },
+                    record_id: showId,
+                    release_year: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: "2008",
+                      source: "tmdb.tv",
+                    },
+                    status: "active",
+                    title: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: "Breaking Bad",
+                      source: "tmdb.tv",
+                    },
                   },
-                  poster: {
-                    is_stale: false,
-                    tier: "empty",
-                    value: null,
-                    source: null,
+                  {
+                    grain: "edition",
+                    identifiers: [
+                      {
+                        namespace: "googlebooks.volume",
+                        grain: "edition",
+                        value: "dune-volume",
+                      },
+                    ],
+                    latest_activity: null,
+                    original_title: {
+                      is_stale: false,
+                      tier: "empty",
+                      value: null,
+                      source: null,
+                    },
+                    overview: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: "A science fiction novel.",
+                      source: "googlebooks.volume",
+                    },
+                    poster: {
+                      is_stale: false,
+                      tier: "empty",
+                      value: null,
+                      source: null,
+                    },
+                    record_id: bookId,
+                    release_year: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: "1965",
+                      source: "googlebooks.volume",
+                    },
+                    status: "active",
+                    title: {
+                      is_stale: false,
+                      tier: "fallback_provider_claim",
+                      value: "Dune edition",
+                      source: "googlebooks.volume",
+                    },
                   },
-                  record_id: bookId,
-                  release_year: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: "1965",
-                    source: "googlebooks.volume",
-                  },
-                  status: "active",
-                  title: {
-                    is_stale: false,
-                    tier: "fallback_provider_claim",
-                    value: "Dune edition",
-                    source: "googlebooks.volume",
-                  },
-                },
-              ];
+                ],
+                truncated: false,
+              };
             case "search_provider":
               return [
                 {
@@ -966,9 +984,11 @@ test("trusted-host provider settings retain a rejected secret for correction", a
   await page
     .getByLabel("Settings section", { exact: true })
     .selectOption("providers");
-  await expect(page.getByText("No credential is configured.")).toBeVisible();
+  await expect(page.getByText("optional", { exact: true })).toBeVisible();
 
-  const credential = page.getByLabel("Google Books API key");
+  const credential = page.getByLabel(
+    "Google Books API key for metadata.search",
+  );
   await expect(credential).toHaveAttribute("type", "password");
   await credential.fill("test-secret-for-correction");
   await page.getByRole("button", { name: "Show secret" }).click();
@@ -980,6 +1000,7 @@ test("trusted-host provider settings retain a rejected secret for correction", a
   );
   await expect(credential).toHaveValue("test-secret-for-correction");
   await expect(credential).toHaveAttribute("type", "password");
+  await expect(credential).toBeFocused();
   expect(
     await page.evaluate(
       () =>
@@ -1028,17 +1049,17 @@ test("trusted-host provider settings retain a rejected secret for correction", a
   });
 });
 
-test("provider search tests fail closed when trusted execution is unavailable", async ({
+test("provider credential tests fail closed when trusted execution is unavailable", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
   await mockTrustedHost(page, true);
   await page.goto("/settings/metadata");
 
-  await page.getByRole("button", { name: "Test search" }).click();
+  await page.getByRole("button", { name: "Test credential" }).click();
   const result = page.locator(".test-result-alert");
   await expect(result).toHaveText("Trusted provider execution is unavailable.");
-  await expect(result).not.toContainText("Search succeeded");
+  await expect(result).not.toContainText("Credential test passed");
 });
 
 test("environment-managed credentials remain testable and read-only", async ({
@@ -1048,21 +1069,19 @@ test("environment-managed credentials remain testable and read-only", async ({
   await page.goto("/settings/metadata");
 
   await expect(
-    page.getByText(
-      "This credential is managed by the process environment and is read-only in Settings.",
-    ),
+    page.getByText("Managed by the process environment."),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Test search" }).click();
+  await page.getByRole("button", { name: "Test credential" }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+    page.getByRole("status").filter({ hasText: "Credential test passed" }),
   ).toBeVisible();
   expect(
     await page.evaluate(
       () =>
-        (window as typeof window & { __PROVIDER_SEARCH_CALLS__?: number })
-          .__PROVIDER_SEARCH_CALLS__,
+        (window as typeof window & { __PROVIDER_TEST_CALLS__?: number })
+          .__PROVIDER_TEST_CALLS__,
     ),
   ).toBe(1);
 });
@@ -1073,9 +1092,11 @@ test("provider credential operations remain single-flight", async ({
   await mockTrustedHost(page, true, true);
   await page.goto("/settings/metadata");
 
-  const credential = page.getByLabel("Google Books API key");
+  const credential = page.getByLabel(
+    "Google Books API key for metadata.search",
+  );
   await credential.fill("queued-save");
-  await page.getByRole("button", { name: "Test search" }).click();
+  await page.getByRole("button", { name: "Test credential" }).click();
   await expect(page.getByRole("button", { name: "Testing…" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -1084,8 +1105,8 @@ test("provider credential operations remain single-flight", async ({
   expect(
     await page.evaluate(
       () =>
-        (window as typeof window & { __PROVIDER_SEARCH_CALLS__?: number })
-          .__PROVIDER_SEARCH_CALLS__,
+        (window as typeof window & { __PROVIDER_TEST_CALLS__?: number })
+          .__PROVIDER_TEST_CALLS__,
     ),
   ).toBe(1);
   expect(
@@ -1106,12 +1127,12 @@ test("provider credential operations remain single-flight", async ({
   await page.evaluate(() =>
     (
       window as typeof window & {
-        __RESOLVE_PROVIDER_SEARCH__?: () => void;
+        __RESOLVE_PROVIDER_TEST__?: () => void;
       }
-    ).__RESOLVE_PROVIDER_SEARCH__?.(),
+    ).__RESOLVE_PROVIDER_TEST__?.(),
   );
   await expect(
-    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+    page.getByRole("status").filter({ hasText: "Credential test passed" }),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
   await page.getByRole("button", { name: "Save" }).click();
@@ -1119,7 +1140,7 @@ test("provider credential operations remain single-flight", async ({
     page.getByRole("status").filter({ hasText: "Credential saved" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("status").filter({ hasText: "Search succeeded" }),
+    page.getByRole("status").filter({ hasText: "Credential test passed" }),
   ).toHaveCount(0);
   expect(
     await page.evaluate(

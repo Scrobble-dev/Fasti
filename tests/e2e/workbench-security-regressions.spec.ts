@@ -1,6 +1,9 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { expectNoHorizontalOverflow } from "./test-helpers";
+import {
+  expectNoHorizontalOverflow,
+  mockMissingTmdbProvider,
+} from "./test-helpers";
 
 const browserOrigin = "http://127.0.0.1:4173";
 
@@ -302,7 +305,7 @@ test("legacy saved navigation cannot revive unsupported destinations", async ({
   await expect(page.getByRole("link", { name: "Overview" })).toBeVisible();
 });
 
-test("Discover selects configured providers and refreshes explicit setup state", async ({
+test("Discover selects available providers and preserves an explicit choice", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 900 });
@@ -314,18 +317,28 @@ test("Discover selects configured providers and refreshes explicit setup state",
     const providerStatus = () => [
       {
         provider: "google-books",
+        capability_id: "metadata.search",
         label: "Google Books",
-        configured: googleConfigured,
+        purpose: "Search book metadata",
+        credential_requirement: "optional_api_key",
+        credential_state: googleConfigured ? "valid" : "optional",
+        state: "available",
         source: googleConfigured ? "credential_store" : "none",
         writable: true,
+        testable: true,
         docs_url: "https://developers.google.com/books/docs/v1/using",
       },
       {
         provider: "tmdb",
+        capability_id: "metadata.search",
         label: "TMDB",
-        configured: tmdbConfigured,
+        purpose: "Search film and television metadata",
+        credential_requirement: "bearer_token",
+        credential_state: tmdbConfigured ? "valid" : "missing",
+        state: tmdbConfigured ? "available" : "degraded",
         source: tmdbConfigured ? "environment" : "none",
         writable: !tmdbConfigured,
+        testable: true,
         docs_url: "https://developer.themoviedb.org/docs",
       },
     ];
@@ -458,6 +471,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
             };
           }
           case "list_records":
+            return { records: [], truncated: false };
           case "list_reviews":
             return [];
           default:
@@ -469,7 +483,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
 
   await page.goto("/discover");
   const provider = page.getByLabel("Metadata provider");
-  await expect(provider).toHaveValue("tmdb");
+  await expect(provider).toHaveValue("google-books");
   await expect
     .poll(() =>
       page.evaluate(
@@ -487,6 +501,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await expectNoHorizontalOverflow(page);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
+  await provider.selectOption("tmdb");
   await openWorkbenchSection(page, "Library");
   await openWorkbenchSection(page, "Discover");
   await expect
@@ -556,15 +571,20 @@ test("Discover selects configured providers and refreshes explicit setup state",
   await provider.selectOption("google-books");
   await expect(
     page.getByRole("heading", { name: /needs a credential$/ }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Breaking Bad" })).toHaveCount(
     0,
   );
-  await page.getByRole("button", { name: "Open provider settings" }).click();
+  await openWorkbenchSection(page, "Settings");
+  await page
+    .getByLabel("Settings section", { exact: true })
+    .selectOption("providers");
   await expect(
     page.getByLabel("Settings section", { exact: true }),
   ).toHaveValue("providers");
-  const googleCredential = page.getByLabel("Google Books API key");
+  const googleCredential = page.getByLabel(
+    "Google Books API key for metadata.search",
+  );
   await googleCredential.fill("rejected-credential");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
@@ -588,17 +608,6 @@ test("Discover selects configured providers and refreshes explicit setup state",
         inputs.map((input) => (input as HTMLInputElement).value),
       ),
   ).not.toContain("provider-secret");
-
-  await page
-    .getByRole("article")
-    .filter({ has: page.getByRole("heading", { name: "Google Books" }) })
-    .getByRole("button", { name: "Test search" })
-    .click();
-  await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: "Search succeeded. 1 candidate returned." }),
-  ).toBeVisible();
 
   await openWorkbenchSection(page, "Discover");
   await expect(page.getByLabel("Metadata provider")).toHaveValue(
@@ -632,6 +641,7 @@ test("Discover selects configured providers and refreshes explicit setup state",
 test("browser Discover fails closed when provider credentials are unavailable", async ({
   page,
 }) => {
+  await mockMissingTmdbProvider(page);
   await page.goto("/discover");
   await expect(
     page.getByRole("heading", { name: /needs a credential$/ }),

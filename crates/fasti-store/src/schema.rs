@@ -1,9 +1,12 @@
-use crate::{access::V8_NODE_OWNER_SCOPE_BACKFILL, kernel::scope_storage_key};
+use crate::{
+    access::{V11_NODE_OWNER_SCOPE_BACKFILL, V8_NODE_OWNER_SCOPE_BACKFILL},
+    kernel::scope_storage_key,
+};
 use fasti_domain::{Grain, MAX_EXTERNAL_IDENTIFIER_BYTES};
 use rusqlite::{Connection, Result, Transaction, TransactionBehavior};
 use std::fmt::Write as _;
 
-pub(crate) const SCHEMA_VERSION: i64 = 10;
+pub(crate) const SCHEMA_VERSION: i64 = 11;
 
 pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -54,6 +57,11 @@ pub(crate) fn migrate(connection: &Connection) -> Result<()> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version == 9 {
         migrate_v10(connection)?;
+    }
+
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version == 10 {
+        migrate_v11(connection)?;
     }
 
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -945,6 +953,136 @@ fn migrate_v10(connection: &Connection) -> Result<()> {
     transaction.commit()
 }
 
+fn migrate_v11(connection: &Connection) -> Result<()> {
+    let transaction = Transaction::new_unchecked(connection, TransactionBehavior::Immediate)?;
+    transaction.execute_batch(
+        r#"
+        CREATE TABLE provider_capability_states (
+            workspace_id TEXT NOT NULL REFERENCES workspaces(workspace_id),
+            provider_id TEXT NOT NULL
+                CHECK (
+                    length(provider_id) BETWEEN 1 AND 128
+                    AND provider_id NOT GLOB '*[^a-z0-9._:/-]*'
+                ),
+            capability_id TEXT NOT NULL
+                CHECK (
+                    length(capability_id) BETWEEN 1 AND 128
+                    AND capability_id NOT GLOB '*[^a-z0-9._:/-]*'
+                ),
+            capability_status TEXT NOT NULL
+                CHECK (capability_status IN (
+                    'available', 'degraded', 'unavailable', 'disabled'
+                )),
+            capability_version INTEGER NOT NULL CHECK (capability_version >= 1),
+            credential_requirement TEXT NOT NULL
+                CHECK (credential_requirement IN (
+                    'none', 'optional_api_key', 'api_key', 'bearer_token',
+                    'basic_auth', 'oauth2', 'user_agent_only', 'custom_header',
+                    'operator_secret_mount'
+                )),
+            credential_reference TEXT
+                CHECK (
+                    credential_reference IS NULL OR (
+                        length(credential_reference) BETWEEN 1 AND 253
+                        AND credential_reference NOT GLOB '*[^a-z0-9._:/-]*'
+                    )
+                ),
+            credential_status TEXT NOT NULL
+                CHECK (credential_status IN (
+                    'not_required', 'optional', 'missing', 'stored_unverified',
+                    'valid', 'invalid', 'expired', 'unavailable', 'revoked'
+                )),
+            configuration_digest TEXT NOT NULL
+                CHECK (
+                    length(configuration_digest) = 64
+                    AND configuration_digest NOT GLOB '*[^0-9a-f]*'
+                ),
+            health_status TEXT NOT NULL
+                CHECK (health_status IN ('never_run', 'passed', 'failed', 'unavailable')),
+            health_checked_at TEXT,
+            health_problem_code TEXT,
+            credential_test_status TEXT NOT NULL
+                CHECK (credential_test_status IN ('never_run', 'passed', 'failed', 'unavailable')),
+            credential_test_checked_at TEXT,
+            credential_test_problem_code TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (workspace_id, provider_id, capability_id),
+            CHECK (
+                (credential_requirement IN ('none', 'user_agent_only')
+                    AND credential_reference IS NULL
+                    AND credential_status = 'not_required')
+                OR
+                (credential_requirement = 'optional_api_key'
+                    AND credential_reference IS NULL
+                    AND credential_status = 'optional')
+                OR
+                (credential_requirement NOT IN ('none', 'user_agent_only', 'optional_api_key')
+                    AND credential_reference IS NULL
+                    AND credential_status = 'missing')
+                OR
+                (credential_requirement NOT IN ('none', 'user_agent_only')
+                    AND credential_reference IS NOT NULL
+                    AND credential_status IN (
+                        'stored_unverified', 'valid', 'invalid', 'expired',
+                        'unavailable', 'revoked'
+                    ))
+            ),
+            CHECK (
+                (health_status = 'never_run'
+                    AND health_checked_at IS NULL
+                    AND health_problem_code IS NULL)
+                OR
+                (health_status = 'passed'
+                    AND health_checked_at IS NOT NULL
+                    AND health_problem_code IS NULL)
+                OR
+                (health_status IN ('failed', 'unavailable')
+                    AND health_checked_at IS NOT NULL)
+            ),
+            CHECK (
+                (credential_test_status = 'never_run'
+                    AND credential_test_checked_at IS NULL
+                    AND credential_test_problem_code IS NULL)
+                OR
+                (credential_test_status = 'passed'
+                    AND credential_test_checked_at IS NOT NULL
+                    AND credential_test_problem_code IS NULL)
+                OR
+                (credential_test_status IN ('failed', 'unavailable')
+                    AND credential_test_checked_at IS NOT NULL)
+            )
+        ) STRICT, WITHOUT ROWID;
+        "#,
+    )?;
+    let mut revision_sql = String::new();
+    append_revision_triggers(
+        &mut revision_sql,
+        &RevisionSource {
+            table: "provider_capability_states",
+            new_workspace: "NEW.workspace_id",
+            old_workspace: "OLD.workspace_id",
+        },
+    );
+    transaction.execute_batch(&revision_sql)?;
+    for scope in V11_NODE_OWNER_SCOPE_BACKFILL {
+        transaction.execute(
+            r#"
+            INSERT OR IGNORE INTO grant_scopes(grant_id, scope_key)
+            SELECT pg.grant_id, ?1
+            FROM profile_grants pg
+            JOIN node_state ns
+              ON ns.singleton = 1
+             AND ns.client_id = pg.client_id
+             AND ns.profile_id = pg.profile_id
+            WHERE pg.status = 'active'
+            "#,
+            [scope_storage_key(*scope)],
+        )?;
+    }
+    transaction.pragma_update(None, "user_version", 11)?;
+    transaction.commit()
+}
+
 fn migration_conflict(message: &str) -> rusqlite::Error {
     rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CONSTRAINT),
@@ -1436,6 +1574,11 @@ mod tests {
         migrate_v9(connection).expect("version nine");
     }
 
+    fn migrate_to_version_ten(connection: &Connection) {
+        migrate_to_version_nine(connection);
+        migrate_v10(connection).expect("version ten");
+    }
+
     fn seed_version_nine_browser_state(connection: &Connection) {
         connection
             .execute_batch(
@@ -1639,13 +1782,90 @@ mod tests {
             .expect("count revision triggers");
         // +3 for namespace_definitions (migrate_v4), +6 for the two metadata
         // field tables (migrate_v6), +3 for profile tracking disposition
-        // (migrate_v7), and +3 for profile Nuvio Collections (migrate_v9),
+        // (migrate_v7), +3 for profile Nuvio Collections (migrate_v9), and
+        // +3 for provider capability state (migrate_v11),
         // none of which are in the
         // original REVISION_SOURCES list built for the v3 schema snapshot.
         assert_eq!(
             trigger_count,
-            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3) as i64
+            (REVISION_SOURCES.len() * 3 + 3 + 6 + 3 + 3 + 3) as i64
         );
+    }
+
+    #[test]
+    fn provider_state_migration_is_failure_atomic() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_ten(&connection);
+        connection
+            .execute_batch("CREATE TABLE provider_capability_states (incompatible TEXT) STRICT;")
+            .expect("install incompatible table");
+
+        migrate(&connection).expect_err("incompatible provider table must fail migration");
+
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("schema version");
+        assert_eq!(version, 10);
+        let columns: Vec<String> = connection
+            .prepare("PRAGMA table_info(provider_capability_states)")
+            .expect("table info")
+            .query_map([], |row| row.get(1))
+            .expect("column rows")
+            .collect::<Result<_>>()
+            .expect("columns");
+        assert_eq!(columns, ["incompatible"]);
+        let triggers: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'workspace_revision_provider_capability_states_%'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("provider trigger count");
+        assert_eq!(triggers, 0);
+    }
+
+    #[test]
+    fn provider_state_migration_backfills_node_owner_provider_scopes() {
+        let connection = Connection::open_in_memory().expect("in-memory SQLite");
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .expect("enable foreign keys");
+        migrate_to_version_ten(&connection);
+        seed_version_one_rows(&connection);
+        connection
+            .execute_batch(
+                r#"
+                INSERT INTO profile_grants(
+                    grant_id, workspace_id, profile_id, client_id, status, created_at
+                ) VALUES (
+                    'grt_seed', 'wsp_seed', 'prf_seed', 'cli_seed', 'active',
+                    '2026-08-24T00:00:05Z'
+                );
+                INSERT INTO node_state(
+                    singleton, initialized, workspace_id, profile_id, client_id, created_at
+                ) VALUES (
+                    1, 1, 'wsp_seed', 'prf_seed', 'cli_seed',
+                    '2026-08-24T00:00:06Z'
+                );
+                "#,
+            )
+            .expect("seed enrolled version-ten node");
+
+        migrate(&connection).expect("upgrade version-ten database");
+
+        for scope in V11_NODE_OWNER_SCOPE_BACKFILL {
+            let count: i64 = connection
+                .query_row(
+                    "SELECT COUNT(*) FROM grant_scopes WHERE grant_id = 'grt_seed' AND scope_key = ?1",
+                    [scope_storage_key(*scope)],
+                    |row| row.get(0),
+                )
+                .expect("query backfilled provider scope");
+            assert_eq!(count, 1);
+        }
     }
 
     #[test]
@@ -2318,7 +2538,7 @@ mod tests {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .expect("schema version");
-        assert_eq!(version, 10);
+        assert_eq!(version, SCHEMA_VERSION);
     }
 
     #[test]
@@ -2350,7 +2570,7 @@ mod tests {
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .expect("forward state");
-            assert_eq!(state, (10, 1, 0));
+            assert_eq!(state, (SCHEMA_VERSION, 1, 0));
         }
         {
             let connection = Connection::open(&version_nine).expect("restart database");
@@ -2358,7 +2578,7 @@ mod tests {
             let version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .expect("restart schema version");
-            assert_eq!(version, 10);
+            assert_eq!(version, SCHEMA_VERSION);
         }
 
         fs::copy(&backup, &rollback).expect("restore old-binary rollback copy");
@@ -2423,9 +2643,10 @@ mod tests {
             .expect("collect upgraded node-state columns");
         // Beyond v4, this connection also picks up migrate_v5's node_state
         // column, migrate_v6's two metadata tables, and migrate_v7's profile
-        // tracking table, migrate_v9's Nuvio Collections table, and v10's
-        // final dormant Access tables. V10 deliberately replaces the
-        // unsupported browser-user tables introduced by v8.
+        // tracking table, migrate_v9's Nuvio Collections table, v10's final
+        // dormant Access tables, and v11's provider capability state. V10
+        // deliberately replaces the unsupported browser-user tables
+        // introduced by v8.
         let expected_tables_after: Vec<String> = tables_before
             .iter()
             .cloned()
@@ -2438,6 +2659,7 @@ mod tests {
                 "auth_subjects".to_owned(),
                 "fasti_browser_session_grants".to_owned(),
                 "fasti_browser_sessions".to_owned(),
+                "provider_capability_states".to_owned(),
             ])
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
