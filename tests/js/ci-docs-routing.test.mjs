@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { parse as parseYaml } from "yaml";
-
 import { requiresRuntime } from "../../scripts/classify-ci-scope.mjs";
 
 const ignoredPortalPaths = [
@@ -57,16 +55,20 @@ test("independent runtime workflows ignore the same portal-only paths", async ()
     ".github/workflows/conformance.yml",
     ".github/workflows/security.yml",
   ]) {
-    const workflow = parseYaml(await readFile(path, "utf8"));
-    assert.deepEqual(
-      workflow.on.push["paths-ignore"],
-      ignoredPortalPaths,
-      path,
-    );
-    assert.deepEqual(
-      workflow.on.pull_request["paths-ignore"],
-      ignoredPortalPaths,
-      path,
-    );
+    const workflow = await readFile(path, "utf8");
+    for (const event of ["push", "pull_request"]) {
+      const start = workflow.indexOf(`  ${event}:`);
+      const next = workflow.slice(start + 1).search(/^  [a-z_]+:/mu);
+      const section = workflow.slice(
+        start,
+        next < 0 ? undefined : start + 1 + next,
+      );
+      for (const ignored of ignoredPortalPaths)
+        assert.equal(
+          section.includes(`      - "${ignored}"`),
+          true,
+          `${path}:${event}:${ignored}`,
+        );
+    }
   }
 });
