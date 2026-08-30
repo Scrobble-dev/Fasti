@@ -52,7 +52,7 @@ const config: Config = {
     },
     navbar: {
       title: "Fasti",
-      logo: { alt: "Fasti", src: "brand/logos/fasti-icon.svg" },
+      logo: { alt: "", src: "brand/logos/fasti-icon.svg" },
       items: [
         {
           to: "/start/choose-a-path/",
