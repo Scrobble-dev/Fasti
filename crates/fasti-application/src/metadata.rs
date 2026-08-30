@@ -344,7 +344,14 @@ fn route_priority(
             Grain::Release,
             IdentityRouteEvidenceKind::Direct,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
-        (ResolutionIntent::NuvioExport, "nuvio", _, _, IdentityRouteEvidenceKind::Direct) => {
+        (
+            ResolutionIntent::NuvioExport,
+            "nuvio",
+            _,
+            _,
+            evidence_kind @ (IdentityRouteEvidenceKind::Direct
+            | IdentityRouteEvidenceKind::AcceptedCrosswalk),
+        ) => {
             let release = |expected| namespace == expected && grain == Grain::Release;
             let priority = match anime_preference {
                 AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic => {
@@ -373,7 +380,13 @@ fn route_priority(
                     }
                 }
             };
-            Some((priority, IdentityRouteKind::ProviderNative))
+            let (evidence_priority, route_kind) = match evidence_kind {
+                IdentityRouteEvidenceKind::Direct => (0, IdentityRouteKind::ProviderNative),
+                IdentityRouteEvidenceKind::AcceptedCrosswalk => {
+                    (1, IdentityRouteKind::AcceptedCrosswalk)
+                }
+            };
+            Some((priority * 2 + evidence_priority, route_kind))
         }
         _ => None,
     }
@@ -1941,6 +1954,39 @@ mod tests {
             &[identity_claim("imdb.title", "tt28254942")],
         );
         assert!(metadata_plan.nuvio_content_id().is_none());
+    }
+
+    #[test]
+    fn accepted_crosswalk_can_satisfy_a_nuvio_preference_without_hiding_direct_evidence() {
+        let accepted_mal = IdentityRouteEvidence::new(
+            identity_claim("mal.anime", "49894"),
+            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+        );
+        let direct_kitsu = IdentityRouteEvidence::direct(identity_claim("kitsu.anime", "7442"));
+        let plan = plan_purpose_identity_route_with_evidence(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[direct_kitsu, accepted_mal.clone()],
+        );
+        let route = plan.selected_route().expect("accepted preferred route");
+        assert_eq!(route.identifier().namespace(), "mal.anime");
+        assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
+
+        let direct_mal = IdentityRouteEvidence::direct(identity_claim("mal.anime", "49894"));
+        let direct_plan = plan_purpose_identity_route_with_evidence(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[accepted_mal, direct_mal],
+        );
+        assert_eq!(
+            direct_plan
+                .selected_route()
+                .expect("direct preferred route")
+                .kind(),
+            IdentityRouteKind::ProviderNative
+        );
     }
 
     #[test]
