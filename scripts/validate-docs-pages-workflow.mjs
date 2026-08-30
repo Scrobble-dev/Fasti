@@ -42,6 +42,14 @@ assert.equal(
   false,
   "checkout must not retain repository credentials",
 );
+const rustToolchain = build.steps.find(({ uses }) =>
+  uses?.startsWith("dtolnay/rust-toolchain@"),
+);
+assert.equal(
+  rustToolchain?.with?.components,
+  "rustfmt, clippy",
+  "the documentation package needs rustfmt and clippy",
+);
 assert.ok(
   build.steps.some(({ run }) => run === "cargo xtask docs package --locked"),
   "build must use the governed package command",
