@@ -467,7 +467,8 @@ Minimum new domain owners:
 - stable TrailBase external anchor;
 - workspace membership with one current role;
 - `AuthCeremony`;
-- authentication provenance and recent-authentication expiry;
+- authentication provenance with a separate optional recent-authentication
+  expiry;
 - bounded Access audit evidence.
 
 Avoid a role catalogue, key registry, identity-provider factory, recent-auth
@@ -487,8 +488,11 @@ One forward migration adds only:
 - workspace memberships with lifecycle and current role;
 - durable authentication ceremonies;
 - bounded Access audit evidence;
-- authentication provenance and recent-authentication expiry on the existing
-  session owner where practical.
+- authentication provenance on the existing session owner and a nullable
+  recent-authentication expiry. Ordinary C1.2 password and social sign-in
+  persists provenance with no recent assertion. Authorization fails closed
+  when that assertion is absent. A future source-backed fresh-challenge owner
+  may set the expiry without replacing the provenance row.
 
 Archive v4 remains frozen at 29 workspace streams and does not export the
 node-local Access tables. When v14 becomes current, restore must continue to
