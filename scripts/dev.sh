@@ -409,6 +409,7 @@ _trailbase_start_native() {
     return 1
   fi
   if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
     echo "TrailBase is already running (PID: $pid)."
     return 0
   fi
@@ -416,6 +417,7 @@ _trailbase_start_native() {
     echo "TrailBase is not initialized. Run './scripts/dev.sh trailbase initialize' from the owning terminal." >&2
     return 1
   fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-runtime-lock "$TRAILBASE_ROOT" >/dev/null
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
   _trailbase_ports_are_free
   _configure_native_scope
@@ -456,11 +458,17 @@ _trailbase_start_container() {
   local user_args=()
   local pid=""
   local container_id=""
+  user_id="$(id -u)"
+  if [[ "$user_id" == 0 ]]; then
+    echo "Container mode refuses to run TrailBase as root" >&2
+    return 1
+  fi
   if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
     echo "Stop the running native TrailBase process before starting container mode (PID: $pid)." >&2
     return 1
   fi
   if existing_runtime="$(_trailbase_container_runtime 2>/dev/null)"; then
+    python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
     python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-oci-container \
       "$TRAILBASE_ROOT" --runtime "$existing_runtime" --name "$TRAILBASE_CONTAINER_NAME" >/dev/null
     echo "TrailBase container $TRAILBASE_CONTAINER_NAME is already running."
@@ -470,6 +478,7 @@ _trailbase_start_container() {
     echo "TrailBase is not initialized. Run './scripts/dev.sh trailbase initialize' first." >&2
     return 1
   fi
+  python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-runtime-lock "$TRAILBASE_ROOT" >/dev/null
   python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-root "$TRAILBASE_ROOT" >/dev/null
   reference="$(python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" prepare-oci "$TRAILBASE_ROOT" --runtime "$runtime" --offline)"
   local port_probe_result=0
@@ -481,12 +490,7 @@ _trailbase_start_container() {
     echo "TrailBase port 4000 is already in use" >&2
     return 1
   fi
-  user_id="$(id -u)"
   group_id="$(id -g)"
-  if [[ "$user_id" == 0 ]]; then
-    echo "Container mode refuses to run TrailBase as root" >&2
-    return 1
-  fi
   user_args=(--user "$user_id:$group_id")
   if [[ "$runtime" == podman ]]; then
     user_args=(--userns keep-id --user "$user_id:$group_id")
@@ -1239,6 +1243,7 @@ _self_test() {
   local exec_ready=""
   local leader_file=""
   local desktop_calls=""
+  local trailbase_calls=""
   local old_datadir="$DATADIR"
   local old_data_root_explicit="$FASTI_DATA_ROOT_EXPLICIT"
   RUNDIR="$(mktemp -d)"
@@ -1246,7 +1251,8 @@ _self_test() {
   exec_ready="$RUNDIR/exec-ready"
   exec_go="$RUNDIR/exec-go"
   desktop_calls="$RUNDIR/desktop-calls"
-  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go" "$RUNDIR/desktop-calls"; rmdir "$RUNDIR/desktop-data" 2>/dev/null || true; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
+  trailbase_calls="$RUNDIR/trailbase-calls"
+  trap '_stop_pidfile child; _stop_pidfile exec-child; rm -f "$RUNDIR/stale.pid" "$RUNDIR/leader" "$RUNDIR/exec-ready" "$RUNDIR/exec-go" "$RUNDIR/desktop-calls" "$RUNDIR/trailbase-calls"; rmdir "$RUNDIR/desktop-data" 2>/dev/null || true; rmdir "$RUNDIR" 2>/dev/null || true' EXIT
   # The values expand in the child shell.
   # shellcheck disable=SC2016
   setsid --fork --wait bash -c 'printf "%s\n" "$$" > "$1"; trap "" TERM; sleep 30 & wait' _ "$leader_file" 2>/dev/null &
@@ -1457,8 +1463,17 @@ PY
   [[ "$help_output" == *"--desktop"* ]]
   [[ "$help_output" != *$'\n  fasti '* ]]
   [[ "$(bash "$0" trailbase --help)" == *"Prepare first: ./scripts/dev.sh --prepare-offline"* ]]
+  id() { printf '1000\n'; }
+  _tracked_pid() { return 1; }
+  _trailbase_container_runtime() { printf 'podman\n'; }
+  python3() { printf '%s\n' "$*" >> "$trailbase_calls"; }
+  _trailbase_start_container podman >/dev/null
+  unset -f id _tracked_pid _trailbase_container_runtime python3
+  mapfile -t trailbase_invocations < "$trailbase_calls"
+  [[ "${trailbase_invocations[0]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-root $TRAILBASE_ROOT" ]]
+  [[ "${trailbase_invocations[1]}" == "-B $PROJECT_ROOT/scripts/trailbase_runtime.py verify-oci-container $TRAILBASE_ROOT --runtime podman --name $TRAILBASE_CONTAINER_NAME" ]]
   rmdir "$RUNDIR/desktop-data"
-  rm -f "$desktop_calls"
+  rm -f "$desktop_calls" "$trailbase_calls"
   rm -f "$leader_file" "$exec_ready" "$exec_go"
   rmdir "$RUNDIR"
   RUNDIR="$old_rundir"
