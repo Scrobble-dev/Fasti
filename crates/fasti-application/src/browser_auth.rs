@@ -102,9 +102,9 @@ impl BrowserRequestBoundaryPolicy {
 
 /// Governed browser-session timings.
 ///
-/// PR A deliberately has no `Default`: the approved plan does not provide
-/// source-backed values. The configuration owner must supply the approved
-/// values before C1 can issue a production session.
+/// There is deliberately no `Default`: C1 selects [`SessionPolicy::C1`]
+/// explicitly, and a later policy must be approved before it replaces these
+/// values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionPolicy {
     browser_idle_timeout: Duration,

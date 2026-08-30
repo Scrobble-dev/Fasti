@@ -24,12 +24,12 @@ C1 uses the approved direct backchannel trust profile:
    TrailBase origin.
 4. Fasti calls TrailBase status with both returned tokens to recheck the
    current subject, refresh session, and verified-email state.
-5. Fasti calls TrailBase logout to revoke that refresh session.
-6. Fasti discards every TrailBase token.
-7. Fasti resolves the confirmed TrailBase instance and subject to one stable
+5. Fasti resolves the confirmed TrailBase instance and subject to one stable
    `AuthSubject`.
-8. Fasti checks local subject state, workspace membership, role, profile grant,
+6. Fasti checks local subject state, workspace membership, role, profile grant,
    authentication epoch, authorization epoch, and activation generation.
+7. Fasti calls TrailBase logout to revoke that refresh session.
+8. Fasti discards every TrailBase token.
 9. Fasti creates one opaque Fasti browser session.
 
 Fasti never accepts a TrailBase token supplied by a browser as application

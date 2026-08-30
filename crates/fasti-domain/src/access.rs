@@ -1,5 +1,5 @@
 use crate::{AuthSubjectId, BrowserSessionId, ProfileGrantId, WorkspaceId};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -265,8 +265,11 @@ impl WorkspaceMembership {
     pub const fn updated_at(&self) -> DateTime<Utc> {
         self.updated_at
     }
-    pub const fn is_authorization_viable_administrator(&self) -> bool {
-        self.lifecycle.grants_access() && matches!(self.role, WorkspaceRole::Administrator)
+    pub fn is_authorization_viable_administrator(&self, subject: &AuthSubject) -> bool {
+        subject.id() == self.subject_id
+            && matches!(subject.lifecycle(), AuthSubjectLifecycle::Active)
+            && self.lifecycle.grants_access()
+            && matches!(self.role, WorkspaceRole::Administrator)
     }
 
     pub fn transition_lifecycle(
@@ -286,7 +289,12 @@ impl WorkspaceMembership {
         if !self.lifecycle.can_transition_to(lifecycle) {
             return Err(AccessInvariantError::InvalidMembershipTransition);
         }
-        self.ensure_administrator_continuity(lifecycle, self.role, viable_administrator_count)?;
+        self.ensure_administrator_continuity(
+            subject,
+            lifecycle,
+            self.role,
+            viable_administrator_count,
+        )?;
         subject.advance_authorization_epoch(at)?;
         self.lifecycle = lifecycle;
         self.updated_at = at;
@@ -307,7 +315,12 @@ impl WorkspaceMembership {
         if matches!(self.lifecycle, MembershipLifecycle::Removed) {
             return Err(AccessInvariantError::RemovedMembershipIsTerminal);
         }
-        self.ensure_administrator_continuity(self.lifecycle, role, viable_administrator_count)?;
+        self.ensure_administrator_continuity(
+            subject,
+            self.lifecycle,
+            role,
+            viable_administrator_count,
+        )?;
         subject.advance_authorization_epoch(at)?;
         self.role = role;
         self.updated_at = at;
@@ -330,15 +343,17 @@ impl WorkspaceMembership {
 
     fn ensure_administrator_continuity(
         &self,
+        subject: &AuthSubject,
         lifecycle: MembershipLifecycle,
         role: WorkspaceRole,
         viable_administrator_count: u64,
     ) -> Result<(), AccessInvariantError> {
-        let remains_viable =
-            lifecycle.grants_access() && matches!(role, WorkspaceRole::Administrator);
-        if self.is_authorization_viable_administrator()
+        let remains_viable = matches!(subject.lifecycle(), AuthSubjectLifecycle::Active)
+            && lifecycle.grants_access()
+            && matches!(role, WorkspaceRole::Administrator);
+        if self.is_authorization_viable_administrator(subject)
             && !remains_viable
-            && viable_administrator_count == 1
+            && viable_administrator_count <= 1
         {
             return Err(AccessInvariantError::FinalAdministratorRequired);
         }
@@ -517,8 +532,16 @@ impl RecentAuthentication {
         provenance: AuthenticationProvenance,
         auth_epoch: u64,
         expires_at: DateTime<Utc>,
+        maximum_window: TimeDelta,
     ) -> Result<Self, AccessInvariantError> {
-        if expires_at <= provenance.verified_at() {
+        let latest_expiry = provenance
+            .verified_at()
+            .checked_add_signed(maximum_window)
+            .ok_or(AccessInvariantError::InvalidAuthenticationProofExpiry)?;
+        if maximum_window <= TimeDelta::zero()
+            || expires_at <= provenance.verified_at()
+            || expires_at > latest_expiry
+        {
             return Err(AccessInvariantError::InvalidAuthenticationProofExpiry);
         }
         Ok(Self {
@@ -795,6 +818,7 @@ mod tests {
     fn membership_changes_advance_authorization_epoch() {
         let mut subject = active_subject();
         let mut membership = membership(&subject, WorkspaceRole::Member);
+        let session_before_promotion = session(&subject);
 
         assert!(!membership
             .change_role(&mut subject, WorkspaceRole::Member, 0, at(0))
@@ -808,13 +832,37 @@ mod tests {
             .change_role(&mut subject, WorkspaceRole::Administrator, 0, at(1))
             .expect("promote"));
         assert_eq!(subject.authorization_epoch(), 4);
-        assert!(membership.is_authorization_viable_administrator());
+        assert!(membership.is_authorization_viable_administrator(&subject));
+        assert_eq!(
+            session_before_promotion.state(&subject, at(2)),
+            BrowserSessionState::PolicyChanged
+        );
+
+        let session_before_suspension = FastiBrowserSession::try_new(
+            BrowserSessionId::new_v7(),
+            subject.id(),
+            WorkspaceId::new_v7(),
+            ProfileGrantId::new_v7(),
+            at(1),
+            at(1),
+            at(30),
+            at(120),
+            None,
+            subject.auth_epoch(),
+            subject.authorization_epoch(),
+            0,
+        )
+        .expect("session before suspension");
 
         assert!(membership
             .transition_lifecycle(&mut subject, MembershipLifecycle::Suspended, 2, at(2))
             .expect("suspend"));
         assert_eq!(subject.authorization_epoch(), 5);
-        assert!(!membership.is_authorization_viable_administrator());
+        assert!(!membership.is_authorization_viable_administrator(&subject));
+        assert_eq!(
+            session_before_suspension.state(&subject, at(3)),
+            BrowserSessionState::PolicyChanged
+        );
     }
 
     #[test]
@@ -880,6 +928,19 @@ mod tests {
         );
         assert_eq!(membership.role(), WorkspaceRole::Administrator);
         assert_eq!(subject.authorization_epoch(), 3);
+
+        assert_eq!(
+            membership.change_role(&mut subject, WorkspaceRole::Member, 0, at(1)),
+            Err(AccessInvariantError::FinalAdministratorRequired)
+        );
+
+        subject
+            .transition_lifecycle(AuthSubjectLifecycle::Disabled, at(2))
+            .expect("disable subject");
+        assert!(!membership.is_authorization_viable_administrator(&subject));
+        assert!(membership
+            .change_role(&mut subject, WorkspaceRole::Member, 0, at(3))
+            .expect("demote inactive subject"));
     }
 
     #[test]
@@ -970,14 +1031,31 @@ mod tests {
     fn recent_auth_requires_current_subject_generation_epoch_and_assurance() {
         let mut subject = active_subject();
         let social = AuthenticationProvenance::new(AuthenticationMethod::TrailBaseSocial, at(1), 7);
-        let recent =
-            RecentAuthentication::try_new(subject.id(), social, subject.auth_epoch(), at(11))
-                .expect("recent authentication");
+        let recent = RecentAuthentication::try_new(
+            subject.id(),
+            social,
+            subject.auth_epoch(),
+            at(11),
+            TimeDelta::seconds(10),
+        )
+        .expect("recent authentication");
 
-        assert!(
-            RecentAuthentication::try_new(subject.id(), social, subject.auth_epoch(), at(1),)
-                .is_err()
-        );
+        assert!(RecentAuthentication::try_new(
+            subject.id(),
+            social,
+            subject.auth_epoch(),
+            at(1),
+            TimeDelta::seconds(10),
+        )
+        .is_err());
+        assert!(RecentAuthentication::try_new(
+            subject.id(),
+            social,
+            subject.auth_epoch(),
+            at(12),
+            TimeDelta::seconds(10),
+        )
+        .is_err());
         assert!(recent.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(2),));
         assert!(!recent.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(0),));
         assert!(!recent.satisfies(&subject, 7, AuthenticationAssurance::MultiFactor, at(2),));
@@ -992,9 +1070,14 @@ mod tests {
             at(2),
         ));
 
-        let stale_epoch =
-            RecentAuthentication::try_new(subject.id(), social, subject.auth_epoch() - 1, at(11))
-                .expect("stale proof");
+        let stale_epoch = RecentAuthentication::try_new(
+            subject.id(),
+            social,
+            subject.auth_epoch() - 1,
+            at(11),
+            TimeDelta::seconds(10),
+        )
+        .expect("stale proof");
         assert!(!stale_epoch.satisfies(&subject, 7, AuthenticationAssurance::SingleFactor, at(2),));
 
         subject
