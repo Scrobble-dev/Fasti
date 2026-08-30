@@ -8,13 +8,13 @@ use crate::{ApplicationResult, RequestAccessContext};
 use crate::{ProviderCapabilityState, ProviderId};
 use fasti_domain::{
     AnimeGroupingPreference, EnrichmentPolicy, ExternalIdentifierClaim, ExternalIdentifierError,
-    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityRouteEvidenceKind, IdentityRouteKind,
-    MetadataAttribution, MetadataCacheEntry, MetadataCacheReadState, MetadataFieldGroup,
-    MetadataLocale, MetadataProjection, MetadataProjectionPolicy, MetadataProviderId,
-    MetadataRegion, NamespaceDefinition, NamespaceDefinitionError, NamespaceLicencePosture,
-    ProfileId, RatingClaim, RecordId, RequestCorrelationId, ResolutionIntent,
-    MAX_EXTERNAL_IDENTIFIER_BYTES, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY, POSTER_FIELD_KEY,
-    RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
+    FieldClaim, FieldClaimStatus, FieldKey, Grain, IdentityAssertionId, IdentityRouteEvidenceKind,
+    IdentityRouteKind, MetadataAttribution, MetadataCacheEntry, MetadataCacheReadState,
+    MetadataFieldGroup, MetadataLocale, MetadataProjection, MetadataProjectionPolicy,
+    MetadataProviderId, MetadataRegion, NamespaceDefinition, NamespaceDefinitionError,
+    NamespaceLicencePosture, ProfileId, RatingClaim, RecordId, RequestCorrelationId,
+    ResolutionIntent, MAX_EXTERNAL_IDENTIFIER_BYTES, ORIGINAL_TITLE_FIELD_KEY, OVERVIEW_FIELD_KEY,
+    POSTER_FIELD_KEY, RELEASE_YEAR_FIELD_KEY, TITLE_FIELD_KEY,
 };
 use std::{future::Future, pin::Pin};
 
@@ -152,21 +152,34 @@ pub fn provider_identity_mapping_for_grain(
 pub struct PurposeIdentityRoute {
     identifier: ExternalIdentifierClaim,
     kind: IdentityRouteKind,
+    accepted_assertion_id: Option<IdentityAssertionId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdentityRouteEvidence {
     identifier: ExternalIdentifierClaim,
     kind: IdentityRouteEvidenceKind,
+    accepted_assertion_id: Option<IdentityAssertionId>,
 }
 
 impl IdentityRouteEvidence {
-    pub const fn new(identifier: ExternalIdentifierClaim, kind: IdentityRouteEvidenceKind) -> Self {
-        Self { identifier, kind }
+    pub const fn direct(identifier: ExternalIdentifierClaim) -> Self {
+        Self {
+            identifier,
+            kind: IdentityRouteEvidenceKind::Direct,
+            accepted_assertion_id: None,
+        }
     }
 
-    pub const fn direct(identifier: ExternalIdentifierClaim) -> Self {
-        Self::new(identifier, IdentityRouteEvidenceKind::Direct)
+    pub const fn accepted_crosswalk(
+        identifier: ExternalIdentifierClaim,
+        assertion_id: IdentityAssertionId,
+    ) -> Self {
+        Self {
+            identifier,
+            kind: IdentityRouteEvidenceKind::AcceptedCrosswalk,
+            accepted_assertion_id: Some(assertion_id),
+        }
     }
 
     pub const fn identifier(&self) -> &ExternalIdentifierClaim {
@@ -175,6 +188,10 @@ impl IdentityRouteEvidence {
 
     pub const fn kind(&self) -> IdentityRouteEvidenceKind {
         self.kind
+    }
+
+    pub const fn accepted_assertion_id(&self) -> Option<IdentityAssertionId> {
+        self.accepted_assertion_id
     }
 }
 
@@ -185,6 +202,10 @@ impl PurposeIdentityRoute {
 
     pub const fn kind(&self) -> IdentityRouteKind {
         self.kind
+    }
+
+    pub const fn accepted_assertion_id(&self) -> Option<IdentityAssertionId> {
+        self.accepted_assertion_id
     }
 }
 
@@ -308,7 +329,16 @@ fn route_priority(
             | ResolutionIntent::MetadataEnrichment
             | ResolutionIntent::DisplayProjection,
             "tmdb",
-            "tvdb.movie" | "tvdb.series" | "wikidata",
+            "tvdb.series",
+            Grain::Series | Grain::Release,
+            IdentityRouteEvidenceKind::Direct,
+        )
+        | (
+            ResolutionIntent::MetadataLookup
+            | ResolutionIntent::MetadataEnrichment
+            | ResolutionIntent::DisplayProjection,
+            "tmdb",
+            "wikidata",
             Grain::Film | Grain::Series | Grain::Release,
             IdentityRouteEvidenceKind::Direct,
         ) => Some((2, IdentityRouteKind::VerifiedAlias)),
@@ -381,7 +411,7 @@ fn route_priority(
                 }
             };
             let (evidence_priority, route_kind) = match evidence_kind {
-                IdentityRouteEvidenceKind::Direct => (0, IdentityRouteKind::ProviderNative),
+                IdentityRouteEvidenceKind::Direct => (0, IdentityRouteKind::VerifiedAlias),
                 IdentityRouteEvidenceKind::AcceptedCrosswalk => {
                     (1, IdentityRouteKind::AcceptedCrosswalk)
                 }
@@ -439,6 +469,7 @@ pub fn plan_purpose_identity_route_with_evidence(
                         PurposeIdentityRoute {
                             identifier: evidence.identifier().clone(),
                             kind,
+                            accepted_assertion_id: evidence.accepted_assertion_id(),
                         },
                     )
                 },
@@ -1714,9 +1745,10 @@ mod tests {
         ));
         let wikidata =
             IdentityRouteEvidence::direct(identity_claim_at("wikidata", Grain::Series, "Q23572"));
-        let crosswalk = IdentityRouteEvidence::new(
+        let assertion_id = IdentityAssertionId::new_v7();
+        let crosswalk = IdentityRouteEvidence::accepted_crosswalk(
             identity_claim_at("tmdb.tv", Grain::Series, "1399"),
-            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+            assertion_id,
         );
 
         for (evidence, namespace, kind) in [
@@ -1750,6 +1782,28 @@ mod tests {
             let route = plan.selected_route().expect("selected TMDB route");
             assert_eq!(route.identifier().namespace(), namespace);
             assert_eq!(route.kind(), kind);
+            assert_eq!(
+                route.accepted_assertion_id(),
+                (kind == IdentityRouteKind::AcceptedCrosswalk).then_some(assertion_id)
+            );
+        }
+    }
+
+    #[test]
+    fn tmdb_find_routes_only_tvdb_series_grains() {
+        for identifier in [
+            identity_claim_at("tvdb.movie", Grain::Film, "123"),
+            identity_claim_at("tvdb.series", Grain::Film, "123"),
+        ] {
+            let plan = plan_purpose_identity_route(
+                ResolutionIntent::MetadataLookup,
+                ProviderId::try_new("tmdb").expect("TMDB provider"),
+                AnimeGroupingPreference::Automatic,
+                &[identifier],
+            );
+
+            assert_eq!(plan.status(), PurposeIdentityRouteStatus::Missing);
+            assert!(plan.selected_route().is_none());
         }
     }
 
@@ -1958,9 +2012,10 @@ mod tests {
 
     #[test]
     fn accepted_crosswalk_can_satisfy_a_nuvio_preference_without_hiding_direct_evidence() {
-        let accepted_mal = IdentityRouteEvidence::new(
+        let assertion_id = IdentityAssertionId::new_v7();
+        let accepted_mal = IdentityRouteEvidence::accepted_crosswalk(
             identity_claim("mal.anime", "49894"),
-            IdentityRouteEvidenceKind::AcceptedCrosswalk,
+            assertion_id,
         );
         let direct_kitsu = IdentityRouteEvidence::direct(identity_claim("kitsu.anime", "7442"));
         let plan = plan_purpose_identity_route_with_evidence(
@@ -1972,6 +2027,7 @@ mod tests {
         let route = plan.selected_route().expect("accepted preferred route");
         assert_eq!(route.identifier().namespace(), "mal.anime");
         assert_eq!(route.kind(), IdentityRouteKind::AcceptedCrosswalk);
+        assert_eq!(route.accepted_assertion_id(), Some(assertion_id));
 
         let direct_mal = IdentityRouteEvidence::direct(identity_claim("mal.anime", "49894"));
         let direct_plan = plan_purpose_identity_route_with_evidence(
@@ -1985,7 +2041,7 @@ mod tests {
                 .selected_route()
                 .expect("direct preferred route")
                 .kind(),
-            IdentityRouteKind::ProviderNative
+            IdentityRouteKind::VerifiedAlias
         );
     }
 

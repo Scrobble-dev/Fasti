@@ -31,7 +31,8 @@ TMDB metadata lookup and enrichment use this order:
 
 1. A compatible `tmdb.movie` or `tmdb.tv` identifier.
 2. A compatible `imdb.title` alias through TMDB Find.
-3. A compatible TVDB or Wikidata alias through TMDB Find.
+3. A compatible TVDB-series or Wikidata alias through TMDB Find. TMDB does
+   not advertise TheTVDB as a movie lookup source.
 4. A reviewed and accepted crosswalk assertion to TMDB.
 
 Title and year similarity is not an identity route. It can produce a review
@@ -57,7 +58,8 @@ Kitsu, then SIMKL. The MAL preference tries MAL, Kitsu, and AniDB before the
 standard order. The Kitsu preference tries Kitsu, MAL, and AniDB before the
 standard order.
 
-A reviewed crosswalk can satisfy the selected coordinate preference. Direct
+A reviewed crosswalk can satisfy the selected coordinate preference. The
+selected route retains the immutable assertion ID for inspection. Direct
 evidence for the same coordinate wins; an accepted preferred crosswalk can win
 over a less-preferred direct fallback. Candidate or disputed mappings cannot
 enter the route planner as accepted evidence.
