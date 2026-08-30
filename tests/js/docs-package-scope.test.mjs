@@ -21,5 +21,5 @@ test("the documentation package validates each published contract family", () =>
     "generate::generate_to",
     "generate::verify_checked_in",
   ])
-    assert.match(packageSource, new RegExp(validator.replace(".", "\\."), "u"));
+    assert.ok(packageSource.includes(validator), validator);
 });
