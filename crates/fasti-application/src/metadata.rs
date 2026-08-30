@@ -576,18 +576,37 @@ pub fn preview_anime_grouping_change_for_record(
     proposed_preference: AnimeGroupingPreference,
     identifiers: &[ExternalIdentifierClaim],
 ) -> AnimeGroupingRecordPreview {
+    let evidence = identifiers
+        .iter()
+        .cloned()
+        .map(IdentityRouteEvidence::direct)
+        .collect::<Vec<_>>();
+    preview_anime_grouping_change_for_record_with_evidence(
+        record_id,
+        previous_preference,
+        proposed_preference,
+        &evidence,
+    )
+}
+
+pub fn preview_anime_grouping_change_for_record_with_evidence(
+    record_id: RecordId,
+    previous_preference: AnimeGroupingPreference,
+    proposed_preference: AnimeGroupingPreference,
+    evidence: &[IdentityRouteEvidence],
+) -> AnimeGroupingRecordPreview {
     let nuvio = ProviderId::try_new("nuvio").expect("the fixed Nuvio provider ID is valid");
-    let previous = plan_purpose_identity_route(
+    let previous = plan_purpose_identity_route_with_evidence(
         ResolutionIntent::NuvioExport,
         nuvio.clone(),
         previous_preference,
-        identifiers,
+        evidence,
     );
-    let proposed = plan_purpose_identity_route(
+    let proposed = plan_purpose_identity_route_with_evidence(
         ResolutionIntent::NuvioExport,
         nuvio,
         proposed_preference,
-        identifiers,
+        evidence,
     );
     let route_changed =
         previous.status != proposed.status || previous.selected_route != proposed.selected_route;
@@ -2042,6 +2061,31 @@ mod tests {
                 .expect("direct preferred route")
                 .kind(),
             IdentityRouteKind::VerifiedAlias
+        );
+    }
+
+    #[test]
+    fn anime_grouping_preview_retains_accepted_crosswalk_provenance() {
+        let assertion_id = IdentityAssertionId::new_v7();
+        let preview = preview_anime_grouping_change_for_record_with_evidence(
+            RecordId::new_v7(),
+            AnimeGroupingPreference::GroupByTvWork,
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &[
+                IdentityRouteEvidence::direct(identity_claim("imdb.title", "tt28254942")),
+                IdentityRouteEvidence::accepted_crosswalk(
+                    identity_claim("mal.anime", "49894"),
+                    assertion_id,
+                ),
+            ],
+        );
+
+        assert_eq!(
+            preview
+                .proposed_route()
+                .expect("accepted MAL projection")
+                .accepted_assertion_id(),
+            Some(assertion_id)
         );
     }
 
