@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/docs-site-v1.json",
+  "title": "Fasti public documentation manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "canonical_url",
+    "content_license",
+    "sections",
+    "pages"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "canonical_url": { "const": "https://fasti.scrobble.dev" },
+    "content_license": { "type": "string", "minLength": 1 },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "order"],
+        "properties": {
+          "id": {
+            "enum": [
+              "start",
+              "use",
+              "operate",
+              "integrate",
+              "extend",
+              "contribute",
+              "reference"
+            ]
+          },
+          "label": { "type": "string", "minLength": 1 },
+          "order": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "source",
+          "route",
+          "section",
+          "order",
+          "audiences",
+          "status",
+          "ste_review",
+          "description"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_.]*$" },
+          "source": {
+            "type": "string",
+            "pattern": "^docs/[a-z0-9_./-]+\\.md$"
+          },
+          "route": { "type": "string", "pattern": "^/(?:[a-z0-9-]+/)+$" },
+          "section": {
+            "enum": [
+              "start",
+              "use",
+              "operate",
+              "integrate",
+              "extend",
+              "contribute",
+              "reference"
+            ]
+          },
+          "order": { "type": "integer", "minimum": 0 },
+          "audiences": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": ["use", "operate", "integrate", "extend", "contribute"]
+            }
+          },
+          "status": { "enum": ["published", "unavailable"] },
+          "ste_review": {
+            "enum": [
+              "draft",
+              "machine_checked",
+              "human_reviewed",
+              "needs_revision"
+            ]
+          },
+          "description": { "type": "string", "minLength": 20 },
+          "blocked_by": { "type": "string", "minLength": 1 },
+          "safe_alternative": { "type": "string", "minLength": 1 }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "status": { "const": "unavailable" } },
+              "required": ["status"]
+            },
+            "then": {
+              "properties": {
+                "blocked_by": true,
+                "safe_alternative": true
+              },
+              "required": ["blocked_by", "safe_alternative"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

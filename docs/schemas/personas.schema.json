@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fasti.scrobble.dev/schemas/docs-personas-v1.json",
+  "title": "Fasti documentation persona map",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "source", "tracks", "personas"],
+  "properties": {
+    "version": { "const": 1 },
+    "source": { "const": "tests/conformance/identity-uat-matrix.v1.csv" },
+    "tracks": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "outcome"],
+        "properties": {
+          "id": { "enum": ["use", "operate", "integrate", "extend", "contribute"] },
+          "label": { "type": "string", "minLength": 1 },
+          "outcome": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "personas": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "track", "outcome", "first_task", "recovery_task", "capability_ids", "uat_rows", "cross_cutting"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "track": { "enum": ["use", "operate", "integrate", "extend", "contribute"] },
+          "outcome": { "type": "string", "minLength": 20 },
+          "first_task": { "type": "string", "pattern": "^/(?:[a-z0-9-]+/)+$" },
+          "recovery_task": { "type": "string", "pattern": "^/(?:[a-z0-9-]+/)+$" },
+          "capability_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.]*$" }
+          },
+          "uat_rows": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^IDF-[0-9]{3}$" }
+          },
+          "cross_cutting": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

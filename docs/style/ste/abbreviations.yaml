@@ -1,0 +1,15 @@
+version: 1
+abbreviations:
+  - { short: API, expanded: application programming interface }
+  - { short: CLI, expanded: command-line interface }
+  - { short: DNS, expanded: Domain Name System }
+  - { short: HTTP, expanded: Hypertext Transfer Protocol }
+  - { short: HTTPS, expanded: Hypertext Transfer Protocol Secure }
+  - { short: JSON, expanded: JavaScript Object Notation }
+  - { short: JSON-LD, expanded: JavaScript Object Notation for Linked Data }
+  - { short: OKF, expanded: Open Knowledge Format }
+  - { short: SDK, expanded: software development kit }
+  - { short: STE, expanded: Simplified Technical English }
+  - { short: TLS, expanded: Transport Layer Security }
+  - { short: URL, expanded: uniform resource locator }
+  - { short: WCAG, expanded: Web Content Accessibility Guidelines }

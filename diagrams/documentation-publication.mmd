@@ -1,0 +1,12 @@
+graph LR
+  Docs["Allowlisted docs"] --> Generate["cargo xtask docs generate"]
+  Personas["Personas and STE rules"] --> Generate
+  Contracts["Versioned contracts"] --> Generate
+  Generate --> Projection["Generated Docusaurus workspace"]
+  Projection --> Build["Type-check and static build"]
+  Build --> Search["Local Pagefind index"]
+  Search --> Verify["Artifact and policy checks"]
+  Verify --> Artifact["One immutable Pages artifact"]
+  Artifact --> Pages["GitHub Pages"]
+  Pages --> DNS["Cloudflare DNS-only CNAME"]
+  DNS --> Site["fasti.scrobble.dev"]

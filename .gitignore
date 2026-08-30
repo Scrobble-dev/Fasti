@@ -19,6 +19,7 @@ apps/desktop/src-tauri/gen/*
 .next/
 .turbo/
 build/
+apps/docs/.docusaurus/
 *.tsbuildinfo
 
 # SQLite & local runtime data
@@ -54,6 +55,7 @@ Thumbs.db
 coverage/
 lcov.info
 playwright-report/
+.playwright-cli/
 test-results/
 *.profdata
 *.profraw

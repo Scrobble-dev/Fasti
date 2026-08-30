@@ -3,6 +3,7 @@ set -euo pipefail
 
 workflow_dir="${1:-.github/workflows}"
 script_dir="${2:-scripts}"
+policy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ ! -d "$workflow_dir" ]]; then
   echo "Workflow directory not found: $workflow_dir" >&2
@@ -13,6 +14,10 @@ forbidden='(^[[:space:]]*permissions:[[:space:]]*write-all([[:space:]]|$)|^[[:sp
 failed=0
 
 while IFS= read -r -d '' workflow; do
+  if [[ "$(basename "$workflow")" == "docs-pages.yml" ]]; then
+    node "$policy_dir/validate-docs-pages-workflow.mjs" "$workflow"
+    continue
+  fi
   matches="$(grep -En "$forbidden" "$workflow" || true)"
   if [[ -n "$matches" ]]; then
     echo "Public publishing is disabled before the B8 release gate: $workflow" >&2
