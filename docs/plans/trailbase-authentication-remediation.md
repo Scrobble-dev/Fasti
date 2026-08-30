@@ -158,18 +158,19 @@ Recorded: 2026-08-30
 | C1 base | `origin/dev` `4546459105c8c762886b32cdbd580be3e039736c`; tree `6ccfa5d96064b51f3dcd80dfb95f00cd60ce5a55` | `VERIFIED` |
 | Gate 10 artifacts | All six SHA-256 values in `approved.json` match the current A, C, board, HTML, CSS, and design-review artifacts | `VERIFIED` |
 | Package B | PR #114 merged to `dev`; exact merged tree equals the reviewed PR tree | `COMPLETE_WITH_EVIDENCE` |
-| C1 written gate | [`fasti-access-c1-trust-gate.md`](fasti-access-c1-trust-gate.md) | `BLOCKED_PRIMARY_SOURCE_CONFLICT` |
-| TrailBase verification keys | Exact `v0.33.5` public OpenAPI has no JSON Web Key Set or public verification-key route. The source-only key route is administrator and CSRF protected. No supported overlap, version, rotation, or retirement API exists. | `BLOCKED` |
-| TrailBase account state | The public status route can recheck only the current refresh-token subject and email-verification state. It has no arbitrary account lifecycle lookup or disabled/suspended state. | `BLOCKED` |
-| Browser callback | Exact source supports Proof Key for Code Exchange and a code-only redirect. TrailBase does not round-trip Fasti state. The approved separate browser-binding cookie still requires real-browser proof. | `PARTIAL`; cannot repair the trust blocker |
+| C1 written gate | [`fasti-access-c1-trust-gate.md`](fasti-access-c1-trust-gate.md) | `APPROVED_D3_C_PENDING_M2_HANDOFF` |
+| TrailBase direct trust | Exact `v0.33.5` source supports server-side code exchange, status recheck with the returned access and refresh tokens, and named refresh-session logout. Fasti accepts only that direct response from the exact supervised origin, discards every TrailBase token, and never performs offline TrailBase token validation. | `VERIFIED` for the D3-C backchannel profile |
+| TrailBase account state | Status with both returned tokens proves the current refresh session, current subject, and verified-email state. TrailBase has no disabled/suspended field; Fasti separately enforces `AuthSubject` and membership lifecycle. | `VERIFIED_WITH_DOCUMENTED_LIMIT` |
+| Browser callback | Exact source supports Proof Key for Code Exchange, password-plus-TOTP parameter continuity, and a code-only redirect. TrailBase does not round-trip Fasti state. The approved separate browser-binding cookie still requires real-browser proof. | `APPROVED`; runtime proof required |
 | Metadata M2 ownership | Active uncommitted M2 owns migration version 12 and overlaps C1 schema, registry, generator, API, SDK, host, and Workbench files. | `WAITING_FOR_HANDOFF_OR_MERGE` |
-| Safe state | No C1 production code, schema, contracts, routes, or runtime behavior changed. A documentation-only isolated gate worktree records the conflict. | `VERIFIED` |
+| Safe state | No C1 production code, schema, contracts, routes, or runtime behavior changed. The isolated C1 plan records D1-A, D2-A, and D3-C while shared files remain read-only. | `VERIFIED` |
 
-Stop result: C1 and every package that depends on C1 must remain fail closed.
-TrailBase remains the selected account platform. Do not replace it, read its
-depot or private keys, call undocumented endpoints, or weaken `C1-TB-TRUST`.
-Resume only when pinned official evidence supplies the approved public trust
-and account-state capability, then reconcile with the Metadata M2 owner.
+Decision result: the programme remains active. C1 uses the approved direct
+backchannel and opaque Fasti-session boundary. Do not replace TrailBase, read
+its depot or private keys, call undocumented endpoints, or accept a browser-
+supplied TrailBase token. Resume shared C1 writes after Metadata M2 merges and
+hands off migration version 13, the current `dev` head and tree, and its shared
+file owners.
 
 ### 2.4 Primary source registry
 
@@ -361,7 +362,7 @@ Durable identity:
 - `ExternalAuthLink` uses `issuer identity + subject` for additional sign-in methods.
 - Generic OIDC uses the exact validated issuer.
 - TrailBase v0.33.5 tokens have no `iss`. Fasti assigns the TrailBase installation one stable `TrailBaseInstanceId`. It is separate from the configured origin, depot location, signing keys, and restore generation. Do not claim JSON Web Token issuer validation.
-- Store TrailBase verification keys as versioned material with activation, overlap, retirement, source, and audit. A signing-key rotation does not create a new TrailBase installation or subject.
+- C1 stores no TrailBase verification key. The direct backchannel trust record binds the stable `TrailBaseInstanceId`, activation generation, exact supervised origin, exact pinned artifact, and status/logout evidence. A future offline-token consumer must pass a separate issuer, audience, key-discovery, rotation, overlap, retirement, and licence gate.
 - A declared restore preserves `TrailBaseInstanceId` and advances its activation generation. A cloned or restored copy starts authentication-disabled and cannot issue a Fasti session until an operator explicitly activates it and proves the former deployment is fenced.
 - Email, username, groups, display name, Authentik database ID, and TrailBase database ID are attributes, not durable identity.
 - A claim change must not create a second person or silently grant an administrator role.
@@ -443,7 +444,7 @@ validated_proof_state
 - Protect Proof Key for Code Exchange material as a short-lived secret. Consume the ceremony once in the same transaction that claims the validated proof.
 - A sign-in callback can establish a new Fasti session without the Strict Fasti session cookie only after it validates the browser binding, ceremony, provider, proof, account state, and membership.
 - An identity-link callback stages the validated external proof. It cannot commit the link. A same-site completion request must present the original active Fasti session, the expected subject, and recent authentication. A changed, missing, revoked, or expired session cancels the staged link.
-- Two tabs cannot consume one ceremony or attach one proof to different subjects. Callback retry returns the stored terminal outcome without repeating a remote exchange or link mutation.
+- Two tabs cannot consume one ceremony or attach one proof to different subjects. A retry never repeats a remote exchange or link mutation. If the exchange, cleanup, session delivery, or process outcome is uncertain, C1 issues no Fasti session, retains only non-secret needs-attention evidence, and requires a fresh sign-in. It does not promise a replayable terminal secret.
 - Test a real browser with the Strict Fasti cookie absent on callback, valid pre-auth cookie, copied callback in a clean browser, missing or mismatched binding, sibling-subdomain cookie injection, replay, two tabs, changed session, lost cookie, expired ceremony, hostile return target, wrong callback origin/path, and callback retry.
 
 ### 6.2 Authentication assurance
@@ -498,16 +499,39 @@ Context7 is a Commander/package research gate at a dependency-version decision, 
 
 ### 7.1 `C1-TB-TRUST` TrailBase trust gate
 
-TrailBase v0.33.5 tokens lack issuer, audience, key ID, and token ID claims. Current evidence does not establish a documented public JSON Web Key Set or verification-key API. Before C1 code, approve a source-backed root-of-trust record:
+The approved D3-C profile does not accept TrailBase tokens offline. Fasti trusts
+only the direct response from the exact pinned, supervised TrailBase process:
 
-- owner-authorized initial `TrailBaseInstanceId`, activation generation, exact public origin, exact pinned release/artifact, and initial verification-key fingerprint;
-- the documented public API or proof that supplies the verification key and account state. Trust on first network use is prohibited;
-- permitted signing algorithm, token type, subject, time, and proof validation despite the missing claims;
-- owner-authorized key rotation, overlap, retirement, rollback, unknown-key, and unavailable-source behavior;
-- the tuple `{TrailBaseInstanceId, activation_generation, proof_key_version, subject}` stored with each TrailBase anchor and authentication provenance and checked before a Fasti session or passkey session is created;
-- restore activation and a concrete former-deployment fencing receipt that rejects an older generation.
+1. create and atomically claim one Fasti-owned browser ceremony with a server-
+   held Proof Key for Code Exchange verifier;
+2. exchange the short-lived code with the exact fixed TrailBase origin;
+3. call status with both returned tokens and require a current subject,
+   refresh session, and verified email;
+4. resolve `{TrailBaseInstanceId, subject}` to the stable `AuthSubject` and
+   validate activation generation, subject lifecycle, membership, role, profile
+   grant, authentication epoch, and authorization epoch;
+5. call logout for the returned refresh session and require success;
+6. discard every TrailBase token before creating an opaque Fasti session.
 
-Do not read TrailBase depot tables, private key files, or undocumented internal endpoints. If no supported public method can establish and rotate this trust or check account lifecycle, C1 and Fasti passkey sign-in remain `BLOCKED` and return under the primary-source-conflict rule.
+TrailBase v0.33.5 lacks issuer, audience, key ID, token ID, not-before, public
+JSON Web Keys, key rotation, disabled-account state, refresh rotation, and
+atomic authorization-code consumption. These limits prohibit offline token
+acceptance and remain explicit upstream-hardening candidates. They do not
+block the direct response profile because no TrailBase token becomes a Fasti
+credential.
+
+Fasti atomically consumes its own ceremony before exchange. This prevents
+replay through Fasti but does not claim the upstream code is globally single
+use. An interrupted exchange or uncertain cleanup fails closed, issues no Fasti
+session, retains no vendor secret, records non-secret needs-attention evidence,
+and requires a fresh sign-in.
+
+Do not read TrailBase depot tables, private-key files, or undocumented internal
+endpoints. Do not add a JSON Web Key cache, offline verifier, generic identity-
+provider framework, or maintained TrailBase fork to C1. Atomic upstream code
+consumption, refresh rotation and reuse detection, account disablement, and
+standards metadata remain separate governed upstreamable packages. Any Fasti-
+maintained TrailBase patch requires a new written OSL-3.0 review before work.
 
 PR B publishes a route-exposure matrix for native, OCI, and any approved remote topology. The browser-facing proxy exposes only exact proven authentication routes. TrailBase admin and Record APIs remain private and are never generically proxied. First-start administrator credentials are delivered only to the owning local operator through the proven TrailBase mechanism and are redacted from supervisor, container, status, and support logs.
 
@@ -1273,7 +1297,7 @@ C1 replaces the A-only fixture journey with pinned TrailBase APIs and the real F
 
 TrailBase disable or deletion stops new sessions and moves the durable anchor to `disabled`, `deleted`, or `recovery_pending`. It does not silently detach, replace, or reuse the anchor. It never cascades into Chronicle deletion. Fasti privacy erasure is a separate explicit capability with its own authorization, preview, recovery limits, and audit.
 
-Gate: `C1-TB-TRUST`, data-root-authorized identity bootstrap and first-admin race, invitation/approval/acceptance/suspension/removal, unaffiliated denial, identity collision/race, anchor lifecycle, signing-key rotation, restore generation and clone fencing, no email auto-link, membership/role/admin continuity, `AccessInvalidationPolicy`, stale auth epoch, TrailBase and OpenID `AuthCeremony` browser-binding/callback/link completion, cleanup failure, outage, PAT/client/device lifecycle, scope/profile isolation, secret leakage, encrypted backup/restore, and transaction-bound authorization.
+Gate: `C1-TB-TRUST`, data-root-authorized identity bootstrap and first-admin race, invitation/approval/acceptance/suspension/removal, unaffiliated denial, identity collision/race, anchor lifecycle, direct token/status/logout proof, restore generation and clone fencing, no email auto-link, membership/role/admin continuity, `AccessInvalidationPolicy`, stale auth epoch, TrailBase and OpenID `AuthCeremony` browser-binding/callback/link completion, cleanup failure, outage, PAT/client/device lifecycle, scope/profile isolation, secret leakage, encrypted backup/restore, and transaction-bound authorization. TrailBase signing-key rotation is not a C1 gate because C1 accepts no TrailBase token offline.
 
 ### PR D — Passkeys and recovery
 
@@ -1706,7 +1730,7 @@ Do not return for another premise gate. Return only when:
 
 Controlled risks:
 
-- TrailBase v0.33.5 does not round-trip caller state, and current evidence does not prove a public verification-key or account-status API. C1 remains blocked until the browser-binding flow and `C1-TB-TRUST` pass exact public-source and real-browser proof; otherwise return under the primary-source-conflict rule.
+- TrailBase v0.33.5 does not round-trip caller state or atomically consume authorization codes. C1 contains callback replay through a Fasti-owned one-use browser ceremony, uses the direct token/status/logout profile, and fails closed on uncertain cleanup. Real-browser proof remains mandatory before activation.
 - `oauth-as 0.9.3` is only a candidate. PR E cannot start until E0 approves it or returns for a dependency decision.
 - Authentik 2026.8.0 is only a candidate until socket/resource and multi-architecture risks pass.
 - RAWG and ComicVine remain visible and unavailable until safe documented secret transport exists.
@@ -1720,7 +1744,7 @@ This section remains last. It records the completed sequential CEO, design, engi
 | -------------------- | ---: | --------------- | ------------: |
 | CEO                  |    2 | `CLEAR`         |  6 reconciled |
 | Design               |    3 | `CLEAR` — 10/10 | 12 reconciled |
-| Engineering          |    2 | `CLEAR` — 9/10  | 10 reconciled |
+| Engineering          |    3 | `CLEAR` — 9/10  | D1-A, D2-A, and D3-C reconciled; C1 failure, test, ownership, and delivery contracts complete |
 | Developer experience |    2 | `CLEAR` — 8/10  |  8 reconciled |
 | CSO                  |    2 | `CLEAR` — 9/10  |  7 reconciled |
 | Ponytail             |    2 | `CLEAR`         |  7 reconciled |
@@ -1729,4 +1753,4 @@ Branch-bound implementation ledgers: `tasks-ceo-review-20260829-183940.jsonl`, `
 
 VERDICT: `PLAN AND GATE 10 APPROVED`
 
-UNRESOLVED IMPLEMENTATION GATES: C1 remains fail closed until `C1-TB-TRUST` and protocol-specific browser binding pass exact public-source and real-browser proof. C3 requires `C3-CRYPTO`. E2 requires E0 and E-HOST. E3/E4 require the exact Authentik tuple, tag-bound generated API, and section 12 conformance. These are package evidence gates; they do not reopen TrailBase selection or the approved final plan.
+UNRESOLVED IMPLEMENTATION GATES: C1 waits only for the Metadata M2 shared-file handoff, implementation, and exact real-browser proof of the approved D3-C ceremony and direct backchannel. C3 requires `C3-CRYPTO`. E2 requires E0 and E-HOST. E3/E4 require the exact Authentik tuple, tag-bound generated API, and section 12 conformance. These are package evidence gates; they do not reopen TrailBase selection or the approved final plan.
