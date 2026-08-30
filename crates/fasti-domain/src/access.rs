@@ -796,6 +796,14 @@ mod tests {
         let mut subject = active_subject();
         let mut membership = membership(&subject, WorkspaceRole::Member);
 
+        assert!(!membership
+            .change_role(&mut subject, WorkspaceRole::Member, 0, at(0))
+            .expect("unchanged role"));
+        assert!(!membership
+            .transition_lifecycle(&mut subject, MembershipLifecycle::Active, 0, at(0))
+            .expect("unchanged lifecycle"));
+        assert_eq!(subject.authorization_epoch(), 3);
+
         assert!(membership
             .change_role(&mut subject, WorkspaceRole::Administrator, 0, at(1))
             .expect("promote"));
