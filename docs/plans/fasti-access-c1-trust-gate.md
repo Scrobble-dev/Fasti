@@ -23,7 +23,7 @@ C1 uses the approved direct backchannel trust profile:
 3. Fasti exchanges the returned code directly with the exact supervised
    TrailBase origin.
 4. Fasti calls TrailBase status with both returned tokens to recheck the
-   current subject, refresh session, and verified-email state.
+   current subject, refresh session, and locally accepted account-email state.
 5. Fasti resolves the confirmed TrailBase instance and subject to one stable
    `AuthSubject`.
 6. Fasti checks local subject state, workspace membership, role, profile grant,
@@ -55,19 +55,19 @@ Gate 10 remains:
 Authority: TrailBase `v0.33.5`, tag commit
 `b4c85d5152d4e5f472e0b5da5303f7c938e3a083`.
 
-| Surface                           | Exact tagged-source result                                                                                                                                                                      | C1 disposition                                                                                                                                                                                            |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Release identity                  | Fasti pins the version, tag commit, native digests, OCI digests, licence digest, and executable version.                                                                                        | Reuse the existing release lock and sole launcher.                                                                                                                                                        |
-| Authorization-code exchange       | `/api/auth/v1/token` requires the code and matching Proof Key for Code Exchange verifier, checks expiry, reloads the current user, and rejects unverified email.                                | Call only from the server-held ceremony. Never accept browser tokens.                                                                                                                                     |
-| Current status                    | `/api/auth/v1/status` with both the access token and `Refresh-Token` checks the access proof, refresh-session row, expiry, current user, and verified-email state, then returns current tokens. | Require all response fields. Treat a 200 response with null fields as failure.                                                                                                                            |
-| Refresh-session cleanup           | POST `/api/auth/v1/logout` deletes the named refresh session and returns 200 even when it is already absent.                                                                                    | Require 200 before Fasti session creation. A timeout, redirect, or other response fails closed.                                                                                                           |
-| Subject                           | The current subject is in the status-returned authentication token payload.                                                                                                                     | Decode only the bounded status-returned payload to read the current subject and authentication metadata. The trusted fact is the direct response from the pinned process, not an offline signature check. |
-| Password plus TOTP                | The password-to-MFA flow and built-in UI preserve redirect, response type, Proof Key for Code Exchange challenge, and method.                                                                   | Password plus TOTP remains supported subject to real browser proof. Remove the former false blocker.                                                                                                      |
-| Social sign-in with enrolled TOTP | Social callbacks do not prove a TrailBase TOTP challenge occurred.                                                                                                                              | Never describe social sign-in as TOTP-verified. Do not use enrollment as proof of recent multi-factor authentication.                                                                                     |
-| Authorization-code consumption    | TrailBase reads but does not delete the authorization code. The same code and verifier can mint more refresh sessions until expiry.                                                             | Fasti atomically consumes its own ceremony before exchange. This contains replay through Fasti but does not claim the upstream code is globally single use.                                               |
-| Account state                     | Status proves the current user still exists and has verified email. TrailBase has no disabled or suspended account field.                                                                       | Fasti enforces its own `AuthSubject` and membership lifecycle. Do not claim TrailBase account suspension support.                                                                                         |
-| Refresh rotation                  | TrailBase does not rotate refresh tokens.                                                                                                                                                       | C1 revokes and discards the refresh token during sign-in. Fasti never uses it as a durable application credential.                                                                                        |
-| Token claims and keys             | Tokens have no issuer, audience, key identifier, token identifier, or not-before claim. There is no supported key overlap or retirement API.                                                    | These facts block offline TrailBase token acceptance. C1 does not accept tokens offline, so they do not block the direct backchannel.                                                                     |
+| Surface                           | Exact tagged-source result                                                                                                                                                                                              | C1 disposition                                                                                                                                                                                            |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Release identity                  | Fasti pins the version, tag commit, native digests, OCI digests, licence digest, and executable version.                                                                                                                | Reuse the existing release lock and sole launcher.                                                                                                                                                        |
+| Authorization-code exchange       | `/api/auth/v1/token` requires the code and matching Proof Key for Code Exchange verifier, checks expiry, reloads the current user, and requires TrailBase-local accepted account-email state.                           | Call only from the server-held ceremony. Never accept browser tokens.                                                                                                                                     |
+| Current status                    | `/api/auth/v1/status` with both the access token and `Refresh-Token` checks the access proof, refresh-session row, expiry, current user, and TrailBase-local accepted account-email state, then returns current tokens. | Require all response fields. Treat a 200 response with null fields as failure. Do not describe this as independent mailbox-ownership proof.                                                               |
+| Refresh-session cleanup           | POST `/api/auth/v1/logout` deletes the named refresh session and returns 200 even when it is already absent.                                                                                                            | Require 200 before Fasti session creation. A timeout, redirect, or other response fails closed.                                                                                                           |
+| Subject                           | The current subject is in the status-returned authentication token payload.                                                                                                                                             | Decode only the bounded status-returned payload to read the current subject and authentication metadata. The trusted fact is the direct response from the pinned process, not an offline signature check. |
+| Password plus TOTP                | The password-to-MFA transition loses the original redirect, response type, Proof Key for Code Exchange challenge, and method in the exact pinned release.                                                               | Keep password-plus-TOTP authorization-code sign-in unavailable in C1 until an official source-backed TrailBase release preserves and verifies the complete ceremony.                                      |
+| Social sign-in with enrolled TOTP | Social callbacks do not prove a TrailBase TOTP challenge occurred.                                                                                                                                                      | Never describe social sign-in as TOTP-verified. Do not use enrollment as proof of recent multi-factor authentication.                                                                                     |
+| Authorization-code consumption    | TrailBase reads but does not delete the authorization code. The same code and verifier can mint more refresh sessions until expiry.                                                                                     | Fasti atomically consumes its own ceremony before exchange. This contains replay through Fasti but does not claim the upstream code is globally single use.                                               |
+| Account state                     | Status proves the current user still exists with a non-null email in TrailBase's locally accepted account state. TrailBase has no disabled or suspended account field.                                                  | Fasti enforces its own `AuthSubject` and membership lifecycle. Do not claim independent mailbox ownership or TrailBase account suspension support.                                                        |
+| Refresh rotation                  | TrailBase does not rotate refresh tokens.                                                                                                                                                                               | C1 revokes and discards the refresh token during sign-in. Fasti never uses it as a durable application credential.                                                                                        |
+| Token claims and keys             | Tokens have no issuer, audience, key identifier, token identifier, or not-before claim. There is no supported key overlap or retirement API.                                                                            | These facts block offline TrailBase token acceptance. C1 does not accept tokens offline, so they do not block the direct backchannel.                                                                     |
 
 Primary source:
 
@@ -91,8 +91,8 @@ Browser
   |
   | start sign-in
   v
-Fasti AuthCeremony transaction
-  |-- random server-held PKCE verifier
+Fasti AuthCeremony start
+  |-- random PKCE verifier in bounded zeroizing process memory
   |-- digest-only browser binding
   |-- exact TrailBaseInstanceId + activation generation
   |-- exact callback path + allowlisted return target
@@ -102,14 +102,14 @@ Fasti AuthCeremony transaction
   v
 Pinned, supervised TrailBase v0.33.5
   |
-  | password/social/TOTP where proven
+  | password or social proof; TOTP assurance unavailable
   | short-lived authorization code
   v
 Fasti callback
   |-- atomically claim the ceremony before network exchange
   |-- POST /token to the fixed numeric-loopback origin
   |-- GET /status with returned access + refresh tokens
-  |-- require a current verified subject
+  |-- require a current accepted non-anonymous subject
   |-- resolve (TrailBaseInstanceId, subject) -> AuthSubject
   |-- check activation, subject, membership, role, grant, and epochs
   |-- POST /logout with the refresh token
@@ -138,16 +138,22 @@ The ceremony is durable and one use. Store:
 - TrailBase instance identifier;
 - activation generation;
 - digest of the browser binding;
-- server-held Proof Key for Code Exchange verifier;
 - exact callback path;
 - allowlisted return target;
 - created and expiry times;
 - claim, terminal, and failure state;
 - non-secret correlation and audit data.
 
-Do not put the verifier, TrailBase token, subject, workspace, grant, or return URL
-in browser-controlled state. The browser receives only one host-only, Secure,
-HttpOnly, SameSite, narrow-path binding cookie.
+Keep the Proof Key for Code Exchange verifier only in bounded zeroizing process
+memory, keyed by the ceremony identifier. Allow at most 64 live entries per
+process. Capacity exhaustion returns the existing typed `capacity_exceeded`
+safe state before a row, cookie, or redirect exists. Never persist the verifier.
+Never put it, a TrailBase token, subject, workspace, grant, or return URL in
+browser-controlled state. Before callback traffic after process restart, pending rows become failed
+because their verifier is lost and claimed rows become cleanup-uncertain because
+exchange outcome is unknowable. Neither is retried. C resumes at its last
+confirmed step and requires fresh sign-in. The browser receives only one
+host-only, Secure, HttpOnly, SameSite, narrow-path binding cookie.
 
 The callback path has no query or fragment before TrailBase appends the code.
 The callback atomically claims the ceremony before the remote exchange. A
@@ -189,7 +195,7 @@ successful status response. Apply strict byte and JSON limits. Require:
 - authentication token type;
 - non-empty canonical subject;
 - sensible issue and expiry times;
-- current verified-email status from the status call.
+- a non-null account email in TrailBase's current locally accepted state.
 
 Ignore TrailBase administrator status for Fasti authorization. Treat the TOTP
 field as enrollment metadata, not proof that the current social sign-in used
@@ -216,22 +222,25 @@ normal expiry. C1 does not persist the secret merely to clean that row later.
 
 ## 6. Production failure modes
 
-| Failure                                                                                                     | Required behavior                                                                                                             | User-visible recovery                                                 | Verification                                            |
-| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------- |
-| Expired, missing, copied, or wrong browser binding                                                          | Reject before exchange and clear the narrow cookie.                                                                           | Start sign-in again.                                                  | Unit, SQLite integration, and browser negative control. |
-| Callback replay or two-tab race                                                                             | Exactly one claimant may call TrailBase. Every loser fails closed.                                                            | Continue the winning tab or start again.                              | Concurrent SQLite test and browser two-tab test.        |
-| TrailBase timeout or malformed response                                                                     | Create no Fasti session. Store no vendor secret.                                                                              | State that sign-in could not be confirmed and offer retry.            | Scripted adapter integration test.                      |
-| Status returns 200 with null fields                                                                         | Treat as authentication failure.                                                                                              | Start sign-in again.                                                  | Adapter negative test.                                  |
-| Wrong content type, oversized JSON, malformed token, wrong token type, missing subject, or implausible time | Fail closed with a typed redacted problem.                                                                                    | Start sign-in again; operator detail contains no secret.              | Adapter mutation tests.                                 |
-| Logout timeout, redirect, or non-200 response                                                               | Create no Fasti session. Mark cleanup uncertain.                                                                              | Start sign-in again.                                                  | Orchestration integration test.                         |
-| Process crash after exchange                                                                                | Keep no recoverable token. Create no Fasti session.                                                                           | Start sign-in again.                                                  | Crash-window state-machine test and restart test.       |
-| Fasti session insert succeeds but response is lost                                                          | Do not claim the digest-only secret can be replayed. The next attempt uses a new ceremony.                                    | Start sign-in again.                                                  | Response-loss integration test.                         |
-| TrailBase outage after a Fasti session exists                                                               | Existing Fasti sessions remain local until their own expiry or revocation. New sign-in and recent authentication fail closed. | Existing access continues; new proof states TrailBase is unavailable. | Restart/outage end-to-end test.                         |
-| TrailBase restore or activation changes                                                                     | Reject old ceremonies and proof tuples. Invalidate copied Fasti sessions and recent authentication.                           | Reauthenticate after explicit operator activation.                    | Restore, clone, and concurrent-activation tests.        |
-| Social sign-in for an account enrolled in TOTP                                                              | Never report TOTP as satisfied. Apply the frozen authentication-strength rule.                                                | Use the proven password-plus-TOTP path for sensitive proof.           | Real browser and provenance tests.                      |
+| Failure                                                                                                     | Required behavior                                                                                                                           | User-visible recovery                                                                | Verification                                            |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Expired, missing, copied, or wrong browser binding                                                          | Reject before exchange and clear the narrow cookie.                                                                                         | Start sign-in again.                                                                 | Unit, SQLite integration, and browser negative control. |
+| Callback replay or two-tab race                                                                             | Exactly one claimant may call TrailBase. Every loser fails closed.                                                                          | Continue the winning tab or start again.                                             | Concurrent SQLite test and browser two-tab test.        |
+| TrailBase timeout or malformed response                                                                     | Create no Fasti session. Store no vendor secret.                                                                                            | State that sign-in could not be confirmed and offer retry.                           | Scripted adapter integration test.                      |
+| Status returns 200 with null fields                                                                         | Treat as authentication failure.                                                                                                            | Start sign-in again.                                                                 | Adapter negative test.                                  |
+| Wrong content type, oversized JSON, malformed token, wrong token type, missing subject, or implausible time | Fail closed with a typed redacted problem.                                                                                                  | Start sign-in again; operator detail contains no secret.                             | Adapter mutation tests.                                 |
+| Logout timeout, redirect, or non-200 response                                                               | Create no Fasti session. Mark cleanup uncertain.                                                                                            | Start sign-in again.                                                                 | Orchestration integration test.                         |
+| Process crash after claim or exchange                                                                       | Keep no recoverable token. On restart mark the claimed ceremony cleanup-uncertain and create no Fasti session.                              | Start sign-in again.                                                                 | Crash-window state-machine test and restart test.       |
+| Process restart while ceremony is pending                                                                   | Lose the process-memory verifier, mark the pending attempt failed without a remote call, and keep confirmed first-run progress.             | Resume first run and start sign-in again.                                            | Restart and no-exchange negative control.               |
+| Fasti session insert succeeds but response is lost                                                          | Do not claim the digest-only secret can be replayed. The next attempt uses a new ceremony.                                                  | Start sign-in again.                                                                 | Response-loss integration test.                         |
+| TrailBase outage after a Fasti session exists                                                               | Existing Fasti sessions remain local until their own expiry or revocation. New sign-in and recent authentication fail closed.               | Existing access continues; new proof states TrailBase is unavailable.                | Restart/outage end-to-end test.                         |
+| TrailBase restore or activation changes                                                                     | Reject old ceremonies and proof tuples. Reject identity mismatches and every declared restore; C1 does not claim universal clone detection. | Keep Access unavailable until the C3 authenticated restore/source-fence flow exists. | File-copy, declared-restore, and clone-limit controls.  |
+| Sign-in for an account enrolled in TOTP                                                                     | Never report TOTP as satisfied from the v0.33.5 enrollment claim.                                                                           | Do not issue higher-assurance proof; state the exact unavailable reason.             | Real browser and provenance tests.                      |
 
-No failure in this table may be silent. Each has a typed problem, non-secret
-audit evidence, and an exact recovery action.
+No failure in this table may be silent. Each has a typed safe problem and exact
+recovery action. Durable Access audit evidence begins only after a valid
+server-created ceremony passes browser-binding lookup; invalid callback noise
+is not persisted.
 
 ## 7. Existing owners and minimum additions
 
@@ -265,7 +274,7 @@ requirement needs one.
 
 ## 8. Persistence and transaction contract
 
-Metadata M2 owns schema migration v12. C1 uses migration v13 only after M2
+Metadata M2 owns schema migration v13. C1 uses migration v14 only after M2
 merges and hands off the exact `dev` head and tree.
 
 One forward migration adds only:
@@ -289,7 +298,10 @@ The migration and application invariants require:
 - reject only a positive-to-zero viable-administrator transition;
 - role or membership access changes advance the authorization epoch;
 - subject credential/lifecycle changes advance the authentication epoch;
-- restore activation invalidates copied sessions, ceremonies, and recent proof;
+- C1 rejects detected physical-root identity mismatches and every declared
+  restore, invalidating affected sessions, ceremonies, and recent proof. It does
+  not claim universal image-clone detection; authenticated copied-root
+  activation and external source fencing belong to C3;
 - every mutation checks authorization in the same database transaction.
 
 First-administrator bootstrap atomically creates the anchor, `AuthSubject`,
@@ -323,7 +335,7 @@ successful reauthentication and session rotation.
 - Keep the C1 branch local until the false-blocker documents are corrected.
 - Wait for Metadata M2 to merge.
 - Fetch current `dev`; record exact commit and tree.
-- Confirm migration v13 and shared-file ownership handoff.
+- Confirm M2 schema v13, C1 migration v14, and shared-file ownership handoff.
 
 Gate: reviewed plan, clean plan commit, exact M2 handoff, no shared-file overlap.
 
@@ -445,7 +457,7 @@ CODE PATHS                                      USER FLOWS
 
 [GAP] Membership + role lifecycle               [GAP] Sign in with TrailBase
   |-- invite/approve/accept                        |-- start ceremony
-  |-- suspend/remove/role change                   |-- password/social/TOTP proof
+  |-- suspend/remove/role change                   |-- password/social proof; TOTP unavailable
   |-- cross-workspace denial                       |-- callback without Fasti cookie
   `-- final viable administrator                   |-- status + cleanup + Fasti session
                                                    `-- fresh-login recovery on failure
@@ -456,10 +468,10 @@ CODE PATHS                                      USER FLOWS
   `-- terminal failure/restart                      |-- B opens shared evidence detail
                                                    `-- operator-only actions authorized
 [GAP] Direct TrailBase orchestration
-  |-- token -> status -> local authorization     [GAP] Restore/clone activation
-  |-- logout -> discard -> Fasti session           |-- copied access stays disabled
-  |-- malformed/timeout/cleanup failure            |-- explicit fenced activation
-  `-- crash and response-loss recovery              `-- old proof/session rejected
+  |-- token -> status -> local authorization     [GAP] Restore/clone boundary
+  |-- logout -> discard -> Fasti session           |-- declared restore stays disabled
+  |-- malformed/timeout/cleanup failure            |-- identity mismatch fails closed
+  `-- crash and response-loss recovery              `-- full source fence belongs to C3
 ```
 
 Required tests:
@@ -602,7 +614,7 @@ C1 reuses these owners. It does not rebuild them.
   - Verify: document source links, exact hashes, review report, and clean diff.
 - [ ] **T2 (P1, human: ~3 days / Codex: ~1 day)** — Access domain and store — Implement activation, anchors, memberships/roles, ceremonies, provenance, recent proof, audit, first-admin bootstrap, and continuity.
   - Surfaced by: code-quality and test review; the current viable-administrator count is a placeholder and no membership aggregate exists.
-  - Files: Access domain/application/store modules and migration v13 after M2.
+  - Files: Access domain/application/store modules and migration v14 after M2.
   - Verify: focused unit and SQLite integration tests, restart, migration, rollback, restore, and race proof.
 - [ ] **T3 (P1, human: ~3 days / Codex: ~1 day)** — TrailBase adapter — Implement the fixed-origin exchange, status recheck, cleanup, token discard, and D2 recovery policy.
   - Surfaced by: architecture and security review; no production callback orchestration exists.
@@ -625,8 +637,8 @@ C1 reuses these owners. It does not rebuild them.
 
 1. Commit this plan correction alone.
 2. Keep C1 read-only on M2-owned files.
-3. Receive the exact merged M2 `dev` head, tree, migration v13 allocation, and
-   shared-file handoff.
+3. Receive the exact merged M2 `dev` head and tree, confirm schema v13, release
+   migration v14 to C1, and hand off shared files.
 4. Rebase the isolated C1 worktree on that exact `dev`.
 5. Start C1.1 domain and persistence work with disjoint writers.
 6. Do not request another premise gate.
