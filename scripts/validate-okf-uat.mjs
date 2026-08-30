@@ -623,7 +623,7 @@ async function validateUat(registry) {
   assert.equal(
     sourceRows.length,
     LEGACY_UAT_ROW_COUNT + NUVIO_METADATA_UAT_ROW_COUNT,
-    "source UAT matrix must contain 80 legacy and 60 Nuvio metadata programme rows",
+    `source UAT matrix must contain ${LEGACY_UAT_ROW_COUNT} legacy and ${NUVIO_METADATA_UAT_ROW_COUNT} Nuvio metadata programme rows`,
   );
   assert.ok(
     sourceRows.every((row) => row.length === rows[0].length),
@@ -640,7 +640,7 @@ async function validateUat(registry) {
   assert.deepEqual(
     sourceRows.map(([id]) => id),
     [...legacyExpectedIds, ...programmeExpectedIds],
-    "source UAT IDs must be ordered ID-001 through ID-080 then MDN-001 through MDN-060",
+    `source UAT IDs must be ordered ${legacyExpectedIds[0]} through ${legacyExpectedIds.at(-1)} then ${programmeExpectedIds[0]} through ${programmeExpectedIds.at(-1)}`,
   );
 
   const preview = parseYaml(await readFile(nuvioMetadataPreviewPath, "utf8"));
@@ -701,7 +701,7 @@ async function validateUat(registry) {
   assert.equal(
     ownership.cases.length,
     LEGACY_UAT_ROW_COUNT,
-    "runtime UAT ownership must retain the 80 implemented/allocated legacy cases until programme slices promote MDN cases",
+    `runtime UAT ownership must retain the ${LEGACY_UAT_ROW_COUNT} implemented/allocated legacy cases until programme slices promote MDN cases`,
   );
   assert.deepEqual(
     ownership.cases.map(({ id }) => id),
