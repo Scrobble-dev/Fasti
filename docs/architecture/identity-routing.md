@@ -57,6 +57,10 @@ Kitsu, then SIMKL. The MAL preference tries MAL, Kitsu, and AniDB before the
 standard order. The Kitsu preference tries Kitsu, MAL, and AniDB before the
 standard order.
 
+The shared encoder keeps IMDb values bare and prefixes the other coordinate
+spaces: `tmdb:`, `tvdb:`, `mal:`, `anidb:`, `anilist:`, `kitsu:`, or `simkl:`.
+Adapters consume this encoder instead of maintaining their own prefix tables.
+
 The preference can change outward catalog identifiers, grouping, deep links,
 and safe provider routes. It cannot change:
 
