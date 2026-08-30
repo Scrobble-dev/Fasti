@@ -6,11 +6,12 @@ scope="${FASTI_DEV_SCOPE:-$(basename "$repo_root")}"
 scope="${scope//[^A-Za-z0-9_.-]/-}"
 container="trailbase-dev-$scope"
 inspect_file="$(mktemp -p "$repo_root/target" fasti-trailbase-oci-inspect.XXXXXX)"
-owns_container=false
+owned_container_id=""
 
 cleanup() {
-  if [[ "$owns_container" == true ]]; then
-    podman stop "$container" >/dev/null 2>&1 || true
+  if [[ -n "$owned_container_id" ]] &&
+    [[ "$(podman inspect "$container" --format '{{.Id}}' 2>/dev/null || true)" == "$owned_container_id" ]]; then
+    podman stop "$owned_container_id" >/dev/null 2>&1 || true
   fi
   rm -f -- "$inspect_file"
 }
@@ -22,8 +23,18 @@ if podman inspect "$container" --format '{{.State.Running}}' 2>/dev/null | grep 
   exit 1
 fi
 
-owns_container=true
-"$repo_root/scripts/dev.sh" trailbase start --podman
+start_output="$("$repo_root/scripts/dev.sh" trailbase start --podman)"
+if grep -q 'is already running' <<<"$start_output"; then
+  echo "The OCI conformance gate did not create its TrailBase container." >&2
+  exit 1
+fi
+printf '%s\n' "$start_output"
+owned_container_id="$(sed -n 's/^Container ID: //p' <<<"$start_output")"
+if [[ ! "$owned_container_id" =~ ^[0-9a-f]{64}$ ]] ||
+  [[ "$(podman inspect "$container" --format '{{.Id}}')" != "$owned_container_id" ]]; then
+  echo "The OCI launcher did not return the exact container it created." >&2
+  exit 1
+fi
 status="$("$repo_root/scripts/dev.sh" trailbase status)"
 grep -q 'Process: RUNNING (podman container:' <<<"$status"
 grep -q 'Evidence: exact OCI identity; liveness healthy; admin not published; no Record API configured' <<<"$status"
@@ -78,26 +89,25 @@ PY
   exit 1
 }
 
-"$repo_root/scripts/dev.sh" trailbase stop >/dev/null
-owns_container=false
+podman stop "$owned_container_id" >/dev/null
+owned_container_id=""
 if podman inspect "$container" >/dev/null 2>&1; then
   echo "Stopped OCI container was not removed." >&2
   exit 1
 fi
 reference="$(python3 -B "$repo_root/scripts/trailbase_runtime.py" prepare-oci \
   "$repo_root/.dev-trailbase" --runtime podman --offline)"
-owns_container=true
-podman run -d --name "$container" --rm --pull never \
+owned_container_id="$(podman run -d --name "$container" --rm --pull never \
   --userns keep-id --user "$(id -u):$(id -g)" \
   --volume "$repo_root/.dev-trailbase:/app/trailroot:Z" \
   "$reference" \
   /app/trail --depot /app/trailroot/depot --public-url http://127.0.0.1:4000 \
   run --address 0.0.0.0:4000 --admin-address 127.0.0.1:4001 \
-  --cors-allowed-origins http://127.0.0.1:4000 --runtime-threads 1 >/dev/null
+  --cors-allowed-origins http://127.0.0.1:4000 --runtime-threads 1)"
 if "$repo_root/scripts/dev.sh" trailbase start --podman >/dev/null 2>&1; then
   echo "Launcher accepted a scoped container with a drifted isolation policy." >&2
   exit 1
 fi
-podman stop "$container" >/dev/null
-owns_container=false
+podman stop "$owned_container_id" >/dev/null
+owned_container_id=""
 echo "PASS: exact TrailBase OCI lifecycle, isolation, and active-backup guard"

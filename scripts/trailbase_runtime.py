@@ -1198,20 +1198,42 @@ def backup_depot(
             temporary_path.unlink(missing_ok=True)
 
 
+def _validate_restore_parent(parent: Path) -> os.stat_result:
+    immediate: os.stat_result | None = None
+    for index, ancestor in enumerate((parent, *parent.parents)):
+        try:
+            metadata = ancestor.lstat()
+        except OSError as error:
+            raise ReleaseError(f"cannot inspect restore parent boundary: {ancestor}") from error
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise ReleaseError(f"restore parent boundary is not a directory: {ancestor}")
+        if index == 0:
+            if metadata.st_uid != os.geteuid() or metadata.st_mode & 0o077:
+                raise ReleaseError(
+                    "isolated restore parent must be owned by this user and owner-only"
+                )
+            immediate = metadata
+        else:
+            if metadata.st_uid not in {0, os.geteuid()}:
+                raise ReleaseError(f"restore parent ancestor has an untrusted owner: {ancestor}")
+            if metadata.st_mode & 0o022 and not metadata.st_mode & stat.S_ISVTX:
+                raise ReleaseError(f"restore parent ancestor is writable by another user: {ancestor}")
+    if immediate is None:
+        raise ReleaseError("isolated restore parent boundary is empty")
+    return immediate
+
+
 def restore_depot(
     archive_path: Path,
     target: Path,
     release_version: str | None = None,
 ) -> None:
     release_version = release_version or load_release()["version"]
+    target = Path(os.path.abspath(target))
     if target.exists() or target.is_symlink():
         raise ReleaseError("isolated restore target already exists")
     parent = target.parent
-    if not parent.is_dir() or parent.is_symlink():
-        raise ReleaseError("isolated restore parent must be an existing directory")
-    parent_metadata = parent.lstat()
-    if parent_metadata.st_uid != os.geteuid() or parent_metadata.st_mode & 0o077:
-        raise ReleaseError("isolated restore parent must be owned by this user and owner-only")
+    parent_metadata = _validate_restore_parent(parent)
     metadata = archive_path.lstat()
     if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
         raise ReleaseError("depot backup is not a regular file")
@@ -1324,6 +1346,12 @@ def restore_depot(
                 if size != entry["bytes"] or digest.hexdigest() != entry["sha256"]:
                     raise ReleaseError(f"depot backup content mismatch: {name}")
         verify_private_root(temporary, release_version)
+        current_parent = _validate_restore_parent(parent)
+        if (current_parent.st_dev, current_parent.st_ino) != (
+            parent_metadata.st_dev,
+            parent_metadata.st_ino,
+        ):
+            raise ReleaseError("isolated restore parent changed before publication")
         temporary.rename(target)
     finally:
         if temporary.exists():
@@ -1404,6 +1432,19 @@ def _backup_restore_self_test() -> None:
             pass
         else:
             raise ReleaseError("non-private restore parent self-test did not fail")
+
+        unsafe_ancestor = base / "unsafe-ancestor"
+        unsafe_ancestor.mkdir(mode=0o777)
+        os.chmod(unsafe_ancestor, 0o777)
+        private_child = unsafe_ancestor / "private"
+        private_child.mkdir(mode=0o700)
+        try:
+            restore_depot(backup, private_child / "restored")
+        except ReleaseError:
+            pass
+        else:
+            raise ReleaseError("writable restore ancestor self-test did not fail")
+
 
 def self_test() -> None:
     release = load_release()

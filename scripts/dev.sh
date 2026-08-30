@@ -455,6 +455,7 @@ _trailbase_start_container() {
   local group_id=""
   local user_args=()
   local pid=""
+  local container_id=""
   if pid="$(_tracked_pid trailbase 2>/dev/null)"; then
     echo "Stop the running native TrailBase process before starting container mode (PID: $pid)." >&2
     return 1
@@ -490,7 +491,7 @@ _trailbase_start_container() {
   if [[ "$runtime" == podman ]]; then
     user_args=(--userns keep-id --user "$user_id:$group_id")
   fi
-  "$runtime" run -d --name "$TRAILBASE_CONTAINER_NAME" --rm --pull never \
+  container_id="$("$runtime" run -d --name "$TRAILBASE_CONTAINER_NAME" --rm --pull never \
     --log-driver none \
     "${user_args[@]}" \
     --memory 192m --memory-swap 192m --cpus 1 --pids-limit 128 \
@@ -508,29 +509,30 @@ _trailbase_start_container() {
     --admin-address 127.0.0.1:4001 \
     --cors-allowed-origins "$TRAILBASE_PUBLIC_URL" \
     --runtime-threads 1 \
-    --stderr-logging >/dev/null
+    --stderr-logging)"
   for _ in {1..50}; do
     [[ "$("$runtime" inspect "$TRAILBASE_CONTAINER_NAME" --format '{{.State.Running}}' 2>/dev/null || true)" == true ]] || break
     _trailbase_health && break
     sleep 0.1
   done
   if ! _trailbase_health || ! _trailbase_route_boundary oci; then
-    "$runtime" stop "$TRAILBASE_CONTAINER_NAME" >/dev/null 2>&1 || true
+    "$runtime" stop "$container_id" >/dev/null 2>&1 || true
     echo "TrailBase $runtime container failed its liveness or public-route boundary." >&2
     return 1
   fi
   if ! python3 -B "$PROJECT_ROOT/scripts/trailbase_runtime.py" verify-oci-container \
-    "$TRAILBASE_ROOT" --runtime "$runtime" --name "$TRAILBASE_CONTAINER_NAME" >/dev/null; then
-    "$runtime" stop "$TRAILBASE_CONTAINER_NAME" >/dev/null 2>&1 || true
+    "$TRAILBASE_ROOT" --runtime "$runtime" --name "$container_id" >/dev/null; then
+    "$runtime" stop "$container_id" >/dev/null 2>&1 || true
     echo "TrailBase $runtime container identity differs from the release lock." >&2
     return 1
   fi
-  if [[ "$("$runtime" exec "$TRAILBASE_CONTAINER_NAME" /app/trail --version | head -1)" != "trail v0.33.5-0-gb4c85d51 (2026-08-27)" ]]; then
-    "$runtime" stop "$TRAILBASE_CONTAINER_NAME" >/dev/null 2>&1 || true
+  if [[ "$("$runtime" exec "$container_id" /app/trail --version | head -1)" != "trail v0.33.5-0-gb4c85d51 (2026-08-27)" ]]; then
+    "$runtime" stop "$container_id" >/dev/null 2>&1 || true
     echo "TrailBase $runtime container executable version differs from the release lock." >&2
     return 1
   fi
   echo "TrailBase v0.33.5 is running from the exact $runtime OCI digest on $TRAILBASE_PUBLIC_URL."
+  echo "Container ID: $container_id"
   echo "The admin listener remains inside the container and is not host-published."
   echo "Fasti session exchange remains unavailable until Package C1."
 }
