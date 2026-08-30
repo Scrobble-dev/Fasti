@@ -273,7 +273,7 @@ fn route_priority(
             | ResolutionIntent::MetadataEnrichment
             | ResolutionIntent::DisplayProjection,
             "tmdb",
-            "tvdb.movie" | "tvdb.series" | "wikidata.item",
+            "tvdb.movie" | "tvdb.series" | "wikidata",
             Grain::Film | Grain::Series | Grain::Release,
             IdentityRouteEvidenceKind::Direct,
         ) => Some((2, IdentityRouteKind::VerifiedAlias)),
@@ -1678,6 +1678,8 @@ mod tests {
             Grain::Series,
             "121361",
         ));
+        let wikidata =
+            IdentityRouteEvidence::direct(identity_claim_at("wikidata", Grain::Series, "Q23572"));
         let crosswalk = IdentityRouteEvidence::new(
             identity_claim_at("tmdb.tv", Grain::Series, "1399"),
             IdentityRouteEvidenceKind::AcceptedCrosswalk,
@@ -1692,6 +1694,11 @@ mod tests {
             (
                 vec![tvdb.clone(), crosswalk.clone()],
                 "tvdb.series",
+                IdentityRouteKind::VerifiedAlias,
+            ),
+            (
+                vec![wikidata.clone(), crosswalk.clone()],
+                "wikidata",
                 IdentityRouteKind::VerifiedAlias,
             ),
             (
