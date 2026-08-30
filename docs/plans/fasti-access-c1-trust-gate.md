@@ -1,6 +1,6 @@
 # Fasti Access C1 implementation gate
 
-Status: `C1_0_COMPLETE_C1_1_IN_PROGRESS`
+Status: `C1_1_COMPLETE_C1_2_APPROVED_FOR_IMPLEMENTATION`
 
 Recorded: 2026-08-30
 
@@ -127,6 +127,111 @@ or route work:
   claimed ceremonies cannot be cancelled because exchange outcome may already
   be uncertain. Cancellation is never represented as expiry, failure, or row
   deletion.
+
+### 2.2 Frozen C1.2 implementation decisions
+
+C1.2 is a private exchange and orchestration slice. It does not publish the
+browser routes or generated contracts owned by C1.3.
+
+- Add one private `fasti-api` module, `trailbase`, containing the concrete
+  TrailBase client, wire DTOs, bounded Proof Key for Code Exchange verifier
+  vault, and callback orchestration. Do not add a provider trait, factory,
+  identity runtime crate, or second launcher. Reuse only
+  `fasti_provider_runtime::pinned_client` and `bounded_body`.
+- The production TrailBase backchannel origin is the existing supervised
+  `http://127.0.0.1:4000`. Code owns the three paths
+  `/api/auth/v1/token`, `/api/auth/v1/status`, and
+  `/api/auth/v1/logout`. Only a test-only constructor may inject another
+  numeric-loopback address. Browser input cannot select any origin, address,
+  scheme, path, or header.
+- The Fasti callback path is
+  `/api/access/v1/trailbase/callback`. The trusted host derives its absolute
+  callback URI from the effective Fasti origin and provisions that exact URI
+  in TrailBase `auth.redirect_uri_allowlist`. Local HTTP is permitted only on
+  numeric loopback. Remote use requires the already governed absolute HTTPS
+  `FASTI_PUBLIC_URL`. Authentication readiness rejects an unprovisioned URI or
+  a port fallback that changes it; non-authentication health behavior keeps
+  its existing fallback semantics.
+- Keep at most 64 `OperationId -> Zeroizing<verifier>` entries behind one
+  process-local mutex. Reserve capacity before generating a verifier, durable
+  row, cookie, or redirect. Insert memory before the durable row and remove it
+  on durable failure. A callback claims the durable row before it takes the
+  verifier. Cancellation commits first and removes memory second. Restart
+  recovery never makes a remote call.
+- Extend the unpublished v14 ceremony with only the non-secret associations
+  required to finish its purpose: optional bound browser session, workspace,
+  selected profile grant, and remembered-browser choice. Database and domain
+  checks require:
+  - sign-in: workspace and selected grant, no bound session;
+  - recent authentication: one bound session and its existing workspace and
+    selected grant;
+  - first-administrator bootstrap: workspace and an existing active selected
+    grant chosen by the trusted operator path, no bound session, and
+    `remembered = false`.
+  The browser may request a selection, but the durable ceremony stores the
+  server-normalized identifiers and the final transaction proves the subject
+  owns the grant. TrailBase proof never selects or grants a profile.
+- First-administrator start proves the existing owner-only `bootstrap.secret`,
+  descriptor root, permissions, and exclusive data-root lock before the
+  ceremony becomes usable. After successful TrailBase cleanup, one final
+  transaction creates the subject, permanent anchor, active administrator
+  membership, explicit subject-to-existing-grant assignment, provenance,
+  browser session, audit evidence, and completed ceremony. Nothing is created
+  before cleanup. A losing race has no side effects.
+- Ordinary sign-in resolves only `(TrailBaseInstanceId, TrailBaseSubject)` and
+  loads every currently active grant for that subject and ceremony workspace.
+  It requires the ceremony-selected grant among them. It never links by email
+  and never selects the first or only row implicitly. Recent authentication
+  updates only its bound live session and creates no second session.
+- Do not hold a SQLite transaction across network input/output. After status,
+  perform a non-mutating local preauthorization. Attempt TrailBase logout
+  exactly once after every successful exchange, including status or local
+  authorization failure. After exact logout success and token destruction,
+  repeat every mutable check in one `BEGIN IMMEDIATE` final transaction.
+- The private wire contract is exact for TrailBase `v0.33.5`: token exchange
+  accepts a 48-character authorization code and server-held verifier; status
+  uses `Authorization: Bearer` plus `Refresh-Token`; logout receives only the
+  refresh token. Token and status JSON must contain exactly the documented
+  fields. Status rejects null fields, refresh mismatch, or CSRF mismatch.
+  Logout requires status 200. Redirects are disabled.
+- Decode only the bounded status-returned token payload. Require authentication
+  `type = 1`, a URL-safe Base64 subject of exactly 16 bytes, a non-empty email,
+  provider `0` for `trailbase_password` or one of `1`, `2`, `9` through `17`
+  for `trailbase_social`, and sensible current `iat`/`exp`. Ignore `admin`.
+  Treat `mfa` only as enrollment metadata and never raise assurance from it.
+- Transport limits are fixed: four concurrent exchanges; two-second connect
+  timeout; five-second total timeout per request; 8 KiB request JSON; 16 KiB
+  response body; 8 KiB compact token; 4 KiB decoded payload; 60 seconds future
+  clock skew; and at most a two-hour status-token lifetime. These are Access
+  limits, not inherited provider policy.
+- Vendor authorization code, verifier, access token, refresh token, and CSRF
+  values implement no `Debug`, `Clone`, or serialization, are zeroized or
+  dropped at the narrowest boundary, and never enter SQLite, browser state,
+  contracts, logs, audit records, problems, or receipts. Only the confirmed
+  non-secret subject, method, instance, generation, and verification time cross
+  into application/store commands.
+
+C1.2 fails closed with the existing exact ceremony failures:
+
+| Boundary | Durable result |
+| --- | --- |
+| Binding, code, claim, replay, or missing verifier before exchange | No remote call; the applicable one-use or validation denial remains authoritative. |
+| Definite exchange rejection before a successful token response | `failed/exchange_failed`. |
+| Exchange timeout, response loss, or malformed successful response with uncertain token creation | `cleanup_uncertain/exchange_outcome_uncertain`. |
+| Status or local authorization fails and logout succeeds | `failed/status_rejected` or `failed/local_authorization_denied`. |
+| Logout is not an exact 200 after tokens exist | `cleanup_uncertain/logout_uncertain`. |
+| Logout succeeds but the final local recheck fails | No session; `failed/local_authorization_denied`. |
+| Pending or claimed ceremony is recovered after restart | `failed/verifier_lost_on_restart` or `cleanup_uncertain/exchange_outcome_uncertain`; never retry. |
+| A committed session response is lost | Do not reproduce its digest-only secret; start a fresh ceremony. |
+
+C1.2 exits only when a private scripted loopback fixture proves the exact
+methods, paths, headers, bodies, content types, bounds, redirect refusal,
+timeout behavior, token parsing, provider classification, cleanup-on-failure,
+and exactly-once logout; and domain/store tests prove capacity compensation,
+claim/cancel and two-tab races, activation-generation rechecks, anchor and
+membership/grant/client denials, stale epochs, recent-auth binding,
+post-cleanup bootstrap, final-transaction atomicity, restart windows, response
+loss, and existing-session behavior during a later TrailBase outage.
 
 ## 3. Exact TrailBase evidence
 
@@ -739,12 +844,14 @@ C1 reuses these owners. It does not rebuild them.
 
 1. Preserve published migration v12, final migration v13, archive v3, and
    archive v4.
-2. Complete the frozen C1.1 domain transitions and focused tests.
-3. Implement and test the single append-only v14 Access migration, including
-   archive-v4/schema-v13 compatibility.
-4. Complete C1.1 persistence work before mounting C1 routes.
+2. Keep C1.1 frozen at commit `ba442c894a4189a12c9dccd7b1b24c44b3c3941c`
+   and tree `33a0e31f6b6a794115218d4e064ff82e27962641`.
+3. Implement the frozen C1.2 private adapter, ceremony associations, and
+   post-cleanup transactional finalization without mounting public routes.
+4. Run one independent C1.2 diff/test review. AGY may add another outside
+   challenge only when available; it never replaces that review or any gate.
 5. Keep one writer for shared schema, registry, generator, host, and Workbench
-   files.
+   files while later-slice agents remain read-only.
 6. Do not request another premise gate.
 
 ## GSTACK REVIEW REPORT
@@ -752,13 +859,18 @@ C1 reuses these owners. It does not rebuild them.
 | Review        | Trigger               | Why                             | Runs | Status          | Findings                                                                                                                                              |
 | ------------- | --------------------- | ------------------------------- | ---- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | CEO Review    | `/plan-ceo-review`    | Scope & strategy                | 0    | —               | Gate 10 and canonical programme approvals are existing source decisions, not a new run.                                                               |
-| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —               | Nested Codex review was not run. Two read-only subagents and optional AGY independently challenged D3-C.                                              |
+| Codex Review  | `/codex review`       | Independent 2nd opinion         | 0    | —               | Nested Codex review was not run. Read-only subagents challenged D3-C and the C1 slices. Optional AGY required host login and supplied no review evidence. |
 | Eng Review    | `/plan-eng-review`    | Architecture & tests (required) | 2    | CLEAR           | C1 trust profile plus activation, membership, ceremony, audit-retention, archive-compatibility, and TOTP decisions are frozen.                       |
 | Design Review | `/plan-design-review` | UI/UX gaps                      | 0    | —               | Existing approved Gate 10 A+C review and artifact hashes remain binding. Runtime design evidence stays in C1.4.                                       |
 | DX Review     | `/plan-devex-review`  | Developer experience gaps       | 0    | PENDING RUNTIME | The live review runs after C1 has an executable path.                                                                                                 |
 
-**CROSS-MODEL:** Two read-only subagents and AGY agree that direct backchannel C1 plus separate upstream hardening is the correct bounded-context design. The strongest shared objection is the upstream authorization-code and crash window, covered by one-use Fasti ceremonies and D2 fail-closed recovery.
+**OUTSIDE REVIEW:** Read-only subagents support direct backchannel C1 plus
+separate upstream hardening and identified the callback, association,
+selection, and finalization gaps frozen above. Optional AGY was unavailable
+because its host session required login. It did not replace or satisfy any
+review gate.
 
-**VERDICT:** C1.0 COMPLETE — exact M2 handoff verified; implement C1.1 on v14.
+**VERDICT:** C1.1 COMPLETE — implement the frozen C1.2 private exchange and
+session-issuance slice on unpublished v14.
 
 NO UNRESOLVED DECISIONS
