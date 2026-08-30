@@ -29,21 +29,6 @@ engines:
       - "target/**"
       - "dist/**"
       - "node_modules/**"
-      # Codacy's hosted ESLint engine runs its own bundled config and does
-      # not honor this repo's local eslint-disable comments, so it re-flags
-      # the semver.org-vetted, linear-time regex in generate-release-notes.mjs
-      # as "Unsafe Regular Expression" on every scan (already reviewed and
-      # suppressed for the project's own ESLint run -- see the
-      # eslint-disable-next-line comment at that line). Confirmed working on
-      # a direct PR into dev (this exclusion alone cleared the finding
-      # there); if it resurfaces on a PR whose head fast-forwarded in from a
-      # separate merge rather than a direct push, that's a stale Codacy
-      # check-run cache on their side, not a config regression here -- a new
-      # commit is needed to force a fresh check-run. Two prior in-file
-      # suppression attempts (a rule-ID-scoped nosemgrep, then a bare
-      # nosemgrep) both failed to reach whatever engine actually produces
-      # this finding, confirming it isn't Semgrep-backed either.
-      - "scripts/generate-release-notes.mjs"
   shellcheck:
     enabled: true
   markdownlint:
@@ -93,3 +78,18 @@ exclude_paths:
   # .github/workflows/security.yml's `cargo audit --ignore RUSTSEC-2024-0429` step.
   # Re-evaluate together when Tauri 2 bumps its glib dependency to >=0.20.
   - "apps/desktop/src-tauri/Cargo.lock"
+  # Codacy's hosted scanner runs its own bundled ruleset and does not honor
+  # this repo's local eslint-disable comments, so it re-flags the
+  # semver.org-vetted, linear-time regex in generate-release-notes.mjs as
+  # "Unsafe Regular Expression" on every scan of a base branch that has
+  # never seen this file before (already reviewed and suppressed for the
+  # project's own ESLint run -- see the eslint-disable-next-line comment at
+  # that line). Three prior attempts to suppress this narrowly all failed on
+  # exactly that scenario: a rule-ID-scoped nosemgrep, a bare nosemgrep, and
+  # an engines.eslint-scoped exclude_paths entry (which did clear the
+  # finding on direct pushes to dev, but not on a PR comparing against the
+  # long-diverged release branch, where this file has no history at all).
+  # Only this top-level exclude -- the same mechanism already proven to work
+  # for apps/desktop/src-tauri/Cargo.lock in the identical circumstance --
+  # reliably suppresses it regardless of comparison base.
+  - "scripts/generate-release-notes.mjs"
