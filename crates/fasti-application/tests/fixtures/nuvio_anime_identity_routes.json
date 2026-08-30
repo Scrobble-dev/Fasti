@@ -1,0 +1,20 @@
+[
+  {
+    "name": "mal_primary_with_imdb_alias",
+    "source": "https://github.com/NuvioMedia/NuvioTV/issues/2742",
+    "primary_namespace": "mal.anime",
+    "primary_value": "49894",
+    "imdb_value": "tt28254942",
+    "expected_tmdb_namespace": "imdb.title",
+    "expected_tmdb_value": "tt28254942"
+  },
+  {
+    "name": "kitsu_primary_with_imdb_alias",
+    "source": "NuvioDesktop@ab498c9378aebf1a81cff104b3069eb6ac7701dc:SimklAnimeWatchedResolutionTest",
+    "primary_namespace": "kitsu.anime",
+    "primary_value": "12268",
+    "imdb_value": "tt5311514",
+    "expected_tmdb_namespace": "imdb.title",
+    "expected_tmdb_value": "tt5311514"
+  }
+]
