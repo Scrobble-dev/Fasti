@@ -114,6 +114,13 @@ pub struct SessionPolicy {
 }
 
 impl SessionPolicy {
+    pub const C1: Self = Self {
+        browser_idle_timeout: Duration::from_secs(30 * 60),
+        browser_absolute_lifetime: Duration::from_secs(8 * 60 * 60),
+        remembered_browser_lifetime: Duration::from_secs(30 * 24 * 60 * 60),
+        last_seen_write_interval: Duration::from_secs(60),
+    };
+
     pub fn try_new(
         browser_idle_timeout: Duration,
         browser_absolute_lifetime: Duration,
@@ -163,6 +170,8 @@ impl SessionPolicy {
         }
     }
 }
+
+pub const C1_RECENT_AUTHENTICATION_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 pub struct CreateAuthSubjectCommand {
     correlation_id: RequestCorrelationId,
@@ -504,6 +513,30 @@ mod tests {
         )
         .is_err());
         assert_eq!(policy().browser_idle_timeout(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn c1_policy_uses_the_approved_fixed_lifetimes() {
+        assert_eq!(
+            SessionPolicy::C1.browser_idle_timeout(),
+            Duration::from_secs(30 * 60)
+        );
+        assert_eq!(
+            SessionPolicy::C1.browser_absolute_lifetime(),
+            Duration::from_secs(8 * 60 * 60)
+        );
+        assert_eq!(
+            SessionPolicy::C1.remembered_browser_lifetime(),
+            Duration::from_secs(30 * 24 * 60 * 60)
+        );
+        assert_eq!(
+            SessionPolicy::C1.last_seen_write_interval(),
+            Duration::from_secs(60)
+        );
+        assert_eq!(
+            C1_RECENT_AUTHENTICATION_WINDOW,
+            Duration::from_secs(10 * 60)
+        );
     }
 
     #[test]
