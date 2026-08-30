@@ -310,20 +310,21 @@ fn route_priority(
             IdentityRouteEvidenceKind::Direct,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
         (ResolutionIntent::NuvioExport, "nuvio", _, _, IdentityRouteEvidenceKind::Direct) => {
-            let tv_work = matches!(
-                (namespace, grain),
-                ("imdb.title", Grain::Film | Grain::Series | Grain::Release)
-                    | ("tmdb.tv" | "tvdb.series", Grain::Series | Grain::Release)
-            );
+            let tv_work_priority = match (namespace, grain) {
+                ("imdb.title", Grain::Film | Grain::Series | Grain::Release) => Some(0),
+                ("tmdb.tv", Grain::Series | Grain::Release) => Some(1),
+                ("tvdb.series", Grain::Series | Grain::Release) => Some(2),
+                _ => None,
+            };
             let release = |expected| namespace == expected && grain == Grain::Release;
             let priority = match anime_preference {
                 AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic => {
-                    if tv_work {
-                        0
+                    if let Some(priority) = tv_work_priority {
+                        priority
                     } else if release("mal.anime") {
-                        1
+                        3
                     } else if release("kitsu.anime") {
-                        2
+                        4
                     } else {
                         return None;
                     }
@@ -333,8 +334,8 @@ fn route_priority(
                         0
                     } else if release("kitsu.anime") {
                         1
-                    } else if tv_work {
-                        2
+                    } else if let Some(priority) = tv_work_priority {
+                        priority + 2
                     } else {
                         return None;
                     }
@@ -344,8 +345,8 @@ fn route_priority(
                         0
                     } else if release("mal.anime") {
                         1
-                    } else if tv_work {
-                        2
+                    } else if let Some(priority) = tv_work_priority {
+                        priority + 2
                     } else {
                         return None;
                     }
@@ -1818,6 +1819,29 @@ mod tests {
         let route = plan.selected_route().expect("series grouping route");
         assert_eq!(route.identifier().namespace(), "tmdb.tv");
         assert_eq!(route.identifier().grain(), Grain::Series);
+    }
+
+    #[test]
+    fn nuvio_tv_work_grouping_uses_its_pinned_imdb_first_order() {
+        let plan = plan_purpose_identity_route(
+            ResolutionIntent::NuvioExport,
+            ProviderId::try_new("nuvio").expect("Nuvio provider"),
+            AnimeGroupingPreference::Automatic,
+            &[
+                identity_claim_at("tvdb.series", Grain::Series, "121361"),
+                identity_claim_at("tmdb.tv", Grain::Series, "1399"),
+                identity_claim("imdb.title", "tt0944947"),
+            ],
+        );
+
+        assert_eq!(plan.status(), PurposeIdentityRouteStatus::Selected);
+        assert_eq!(
+            plan.selected_route()
+                .expect("Nuvio-compatible TV work route")
+                .identifier()
+                .namespace(),
+            "imdb.title"
+        );
     }
 
     #[test]
