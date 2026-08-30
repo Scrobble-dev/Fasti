@@ -79,7 +79,14 @@ pub(crate) fn package(root: &Path, locked: bool) -> anyhow::Result<()> {
     if locked {
         run(root, "pnpm", &["install", "--frozen-lockfile"])?;
     }
-    crate::verify_contracts(root, locked)?;
+    run(root, "node", &["scripts/validate-authored-contracts.mjs"])?;
+    run(root, "node", &["scripts/validate-generated-contracts.mjs"])?;
+    run(
+        root,
+        "node",
+        &["scripts/validate-integration-contracts.mjs"],
+    )?;
+    run(root, "node", &["scripts/validate-okf-uat.mjs"])?;
     verify(root, false)?;
     generate(root)?;
     run(root, "pnpm", &["--filter", "@fasti/tokens", "build"])?;
