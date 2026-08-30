@@ -231,6 +231,22 @@ impl PurposeIdentityRoutePlan {
     }
 }
 
+fn nuvio_standard_route_priority(namespace: &str, grain: Grain) -> Option<u8> {
+    match (namespace, grain) {
+        ("imdb.title", Grain::Film | Grain::Series | Grain::Release) => Some(0),
+        ("tmdb.movie", Grain::Film | Grain::Release)
+        | ("tmdb.tv", Grain::Series | Grain::Release) => Some(1),
+        ("tvdb.movie", Grain::Film | Grain::Release)
+        | ("tvdb.series", Grain::Series | Grain::Release) => Some(2),
+        ("mal.anime", Grain::Release) => Some(3),
+        ("anidb.anime", Grain::Release) => Some(4),
+        ("anilist.anime", Grain::Release) => Some(5),
+        ("kitsu.anime", Grain::Release) => Some(6),
+        ("simkl.anime", Grain::Release) => Some(7),
+        _ => None,
+    }
+}
+
 fn route_priority(
     intent: ResolutionIntent,
     target_provider: &str,
@@ -310,34 +326,20 @@ fn route_priority(
             IdentityRouteEvidenceKind::Direct,
         ) => Some((0, IdentityRouteKind::ProviderNative)),
         (ResolutionIntent::NuvioExport, "nuvio", _, _, IdentityRouteEvidenceKind::Direct) => {
-            let tv_work_priority = match (namespace, grain) {
-                ("imdb.title", Grain::Film | Grain::Series | Grain::Release) => Some(0),
-                ("tmdb.tv", Grain::Series | Grain::Release) => Some(1),
-                ("tvdb.series", Grain::Series | Grain::Release) => Some(2),
-                _ => None,
-            };
             let release = |expected| namespace == expected && grain == Grain::Release;
             let priority = match anime_preference {
                 AnimeGroupingPreference::GroupByTvWork | AnimeGroupingPreference::Automatic => {
-                    if let Some(priority) = tv_work_priority {
-                        priority
-                    } else if release("mal.anime") {
-                        3
-                    } else if release("kitsu.anime") {
-                        4
-                    } else {
-                        return None;
-                    }
+                    nuvio_standard_route_priority(namespace, grain)?
                 }
                 AnimeGroupingPreference::KeepMalReleasesSeparate => {
                     if release("mal.anime") {
                         0
                     } else if release("kitsu.anime") {
                         1
-                    } else if let Some(priority) = tv_work_priority {
-                        priority + 2
+                    } else if release("anidb.anime") {
+                        2
                     } else {
-                        return None;
+                        nuvio_standard_route_priority(namespace, grain)? + 3
                     }
                 }
                 AnimeGroupingPreference::KeepKitsuReleasesSeparate => {
@@ -345,10 +347,10 @@ fn route_priority(
                         0
                     } else if release("mal.anime") {
                         1
-                    } else if let Some(priority) = tv_work_priority {
-                        priority + 2
+                    } else if release("anidb.anime") {
+                        2
                     } else {
-                        return None;
+                        nuvio_standard_route_priority(namespace, grain)? + 3
                     }
                 }
             };
@@ -1852,6 +1854,47 @@ mod tests {
     }
 
     #[test]
+    fn nuvio_release_grouping_keeps_its_pinned_anime_fallback_order() {
+        let identifiers = [
+            identity_claim("imdb.title", "tt5311514"),
+            identity_claim("anidb.anime", "15159"),
+            identity_claim("anilist.anime", "32281"),
+            identity_claim("kitsu.anime", "12268"),
+            identity_claim("simkl.anime", "60001"),
+        ];
+        let nuvio = ProviderId::try_new("nuvio").expect("Nuvio provider");
+
+        let mal = plan_purpose_identity_route(
+            ResolutionIntent::NuvioExport,
+            nuvio.clone(),
+            AnimeGroupingPreference::KeepMalReleasesSeparate,
+            &identifiers,
+        );
+        assert_eq!(
+            mal.selected_route()
+                .expect("MAL-compatible fallback")
+                .identifier()
+                .namespace(),
+            "kitsu.anime"
+        );
+
+        let kitsu = plan_purpose_identity_route(
+            ResolutionIntent::NuvioExport,
+            nuvio,
+            AnimeGroupingPreference::KeepKitsuReleasesSeparate,
+            &identifiers[0..3],
+        );
+        assert_eq!(
+            kitsu
+                .selected_route()
+                .expect("Kitsu-compatible fallback")
+                .identifier()
+                .namespace(),
+            "anidb.anime"
+        );
+    }
+
+    #[test]
     fn anime_grouping_preview_reports_change_and_possible_regrouping() {
         let preview = preview_anime_grouping_change_for_record(
             RecordId::new_v7(),
@@ -1891,7 +1934,7 @@ mod tests {
             record_id,
             AnimeGroupingPreference::GroupByTvWork,
             AnimeGroupingPreference::KeepKitsuReleasesSeparate,
-            &[identity_claim("anidb.anime", "17723")],
+            &[identity_claim("local.unmapped", "17723")],
         );
 
         assert_eq!(preview.record_id(), record_id);
