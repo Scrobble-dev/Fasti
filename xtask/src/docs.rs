@@ -87,6 +87,9 @@ pub(crate) fn package(root: &Path, locked: bool) -> anyhow::Result<()> {
         &["scripts/validate-integration-contracts.mjs"],
     )?;
     run(root, "node", &["scripts/validate-okf-uat.mjs"])?;
+    let generated_directory = tempfile::tempdir().context("generate contract artifacts")?;
+    let generated = crate::generate::generate_to(root, generated_directory.path())?;
+    crate::generate::verify_checked_in(root, &generated)?;
     verify(root, false)?;
     generate(root)?;
     run(root, "pnpm", &["--filter", "@fasti/tokens", "build"])?;

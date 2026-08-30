@@ -2,12 +2,19 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const css = await readFile("apps/docs/src/css/custom.css", "utf8");
+const css = await readFile(
+  new URL("../../apps/docs/src/css/custom.css", import.meta.url),
+  "utf8",
+);
 
 test("Docusaurus controls when the mobile navigation toggle is displayed", () => {
-  const toggleRules = [
-    ...css.matchAll(/([^{}]*\.navbar__toggle[^{}]*)\{([^}]*)\}/gu),
-  ];
+  const toggleRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].filter(
+    ([, selectors]) =>
+      selectors
+        .split(",")
+        .map((selector) => selector.trim())
+        .includes(".navbar__toggle"),
+  );
 
   assert.ok(
     toggleRules.length > 0,
@@ -15,7 +22,8 @@ test("Docusaurus controls when the mobile navigation toggle is displayed", () =>
   );
   assert.ok(
     toggleRules.some(
-      ([, , declarations]) =>
+      ([, selectors, declarations]) =>
+        selectors.trim() === ".navbar__toggle" &&
         /min-width:\s*var\(--fasti-touch-target-min\)/u.test(declarations) &&
         /min-height:\s*var\(--fasti-touch-target-min\)/u.test(declarations),
     ),
@@ -57,7 +65,9 @@ test(
         .getByRole("button", { name: "Close navigation bar" })
         .waitFor({ state: "visible" });
 
-      await page.getByRole("button", { name: "Close navigation bar" }).click();
+      const close = page.getByRole("button", { name: "Close navigation bar" });
+      await close.click();
+      await close.waitFor({ state: "hidden" });
       await page.setViewportSize({ width: 320, height: 695 });
       await toggle.focus();
       await toggle.press("Enter");

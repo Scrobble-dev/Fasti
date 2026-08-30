@@ -18,6 +18,8 @@ test("the documentation package validates each published contract family", () =>
     "validate-generated-contracts.mjs",
     "validate-integration-contracts.mjs",
     "validate-okf-uat.mjs",
+    "generate::generate_to",
+    "generate::verify_checked_in",
   ])
     assert.match(packageSource, new RegExp(validator.replace(".", "\\."), "u"));
 });

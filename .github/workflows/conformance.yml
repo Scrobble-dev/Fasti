@@ -4,31 +4,31 @@ on:
   push:
     branches: ["dev", "release"]
     paths-ignore:
-      - ".github/workflows/ci.yml"
       - ".github/workflows/docs-pages.yml"
       - "apps/docs/**"
-      - "brand/logos/**"
       - "diagrams/documentation-publication.svg"
       - "docs/**"
+      - "*.md"
+      - "**/*.md"
       - "packages/deploy-plan/**"
-      - "scripts/classify-ci-scope.mjs"
-      - "scripts/validate-docs*.mjs"
-      - "tests/js/ci-docs-routing.test.mjs"
+      - "scripts/validate-docs.mjs"
+      - "scripts/validate-docs-build.mjs"
+      - "tests/js/deploy-plan.test.mjs"
       - "tests/js/docs-*.test.mjs"
       - "xtask/src/docs.rs"
   pull_request:
     branches: ["dev", "release"]
     paths-ignore:
-      - ".github/workflows/ci.yml"
       - ".github/workflows/docs-pages.yml"
       - "apps/docs/**"
-      - "brand/logos/**"
       - "diagrams/documentation-publication.svg"
       - "docs/**"
+      - "*.md"
+      - "**/*.md"
       - "packages/deploy-plan/**"
-      - "scripts/classify-ci-scope.mjs"
-      - "scripts/validate-docs*.mjs"
-      - "tests/js/ci-docs-routing.test.mjs"
+      - "scripts/validate-docs.mjs"
+      - "scripts/validate-docs-build.mjs"
+      - "tests/js/deploy-plan.test.mjs"
       - "tests/js/docs-*.test.mjs"
       - "xtask/src/docs.rs"
 
